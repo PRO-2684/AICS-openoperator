@@ -1,9 +1,12 @@
-# openoperator-start-kit
+# AICS-OpenOperator
 
-赛事官网->https://openoperator.cn
+## 🔗 相关链接
 
-此仓库是openoperator赛事举办方提供的模板仓库。选手可以直接Fork此仓库作为自己队伍的仓库。
-
+- [OpenOperator](https://openoperator.cn)
+- [Start Kit](https://github.com/kernel-competition-bot/openoperator-start-kit)
+- [南京智能计算中心算力平台](https://paas.extrotec.com:30443/)
+- [BangC 算子教程集合](https://gitservice.cstcloud.cn/kcxain/BangcTutorial/)
+ 
 ## Quick Start
 
 1. Fork此仓库
