@@ -2,33 +2,12 @@
 
 ## 🔗 相关链接
 
-- [OpenOperator](https://openoperator.cn)
-- [Start Kit](https://github.com/kernel-competition-bot/openoperator-start-kit)
-- [南京智能计算中心算力平台](https://paas.extrotec.com:30443/)
+- [OpenOperator](https://openoperator.cn) | [监控](http://152.136.18.42:13000)
 - [BangC 算子教程集合](https://gitservice.cstcloud.cn/kcxain/BangcTutorial/)
- 
-## Quick Start
-
-1. Fork此仓库
-2. 点击`settings`->`webhooks`->`Add webhook`，配置webhook
-   1. `Payload URL`填写`http://152.136.18.42:8000/webhook`
-   2. `Content type`选择`application/json`
-   3. `Secret`填写分配到的密钥（参赛信息收集完成后会分发随机的`webhook secret`）
-   4. `SSL verification`选择`Disable`
-   5. `Which events...`选择`Just the push event`
-   6. 勾选`Active`
-   7. 点击`Add webhook`
-3. Clone仓库，随便在README.md中写点什么
-4. 使用`git push`将修改推送到`github`，恭喜你完成了第一次代码提交！
-5. 点开`xx Commits`提交记录页面，边刷新边等待一会，如果系统此时不太忙碌，大约1～3分钟后你就可以在该次提交的评论处看到系统反馈的结果和运行日志。
+- [南京智能计算中心算力平台](https://paas.extrotec.com:30443/)
+- [Start Kit](https://github.com/kernel-competition-bot/openoperator-start-kit)
 
 ## 提交说明
-
-### 流程说明
-
-配置好webhook后，当仓库发生push操作，github会向远程服务器发送提交信息。远程仓库检查webhook secret有效性后，拉取仓库更新，执行评估脚本。无论结果如何，执行结束后该次commit评论区会收到日志。如果该次提交的某道题目跑分优于你在该道题目上的历史最好成绩，排行榜的该道题目成绩会更新（排行榜检查是否有新的最好成绩的间隔为5分钟）。
-
-### 仓库结构
 
 提交时仓库根目录需要包含`config`文件和题目的`mlu`代码文件。文件组织结构如下
 
