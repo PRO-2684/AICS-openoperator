@@ -1,11 +1,17 @@
 # AICS-OpenOperator
 
-## 🔗 相关链接
+## 🔗 Related Links
 
-- [OpenOperator](https://openoperator.cn) | [监控](http://152.136.18.42:13000)
-- [BangC 算子教程集合](https://gitservice.cstcloud.cn/kcxain/BangcTutorial/)
+- [OpenOperator](https://openoperator.cn) | [Monitor](http://152.136.18.42:13000)
+- [BangC Tutorial](https://gitservice.cstcloud.cn/kcxain/BangcTutorial/)
 - [南京智能计算中心算力平台](https://paas.extrotec.com:30443/)
 - [Start Kit](https://github.com/kernel-competition-bot/openoperator-start-kit)
+
+## 🚀 Quick Start
+
+1. Clone this repo
+2. Navigate to the root directory of the repo and run `setup.sh` to:
+    - Set up git hooks: This will automatically update `config` file to the list of changed files in each commit
 
 ## 提交说明
 
