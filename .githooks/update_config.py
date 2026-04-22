@@ -48,7 +48,7 @@ def main():
 
     with open("config", "w") as fp:
         for index in indices:
-            fp.write(str(index) + "\n")
+            fp.write(f"{index:>03}\n")
 
     subprocess.check_call(["git", "add", "config"])
 
