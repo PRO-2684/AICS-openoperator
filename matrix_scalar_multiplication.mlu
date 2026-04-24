@@ -22,18 +22,16 @@ __mlu_entry__ void matrix_scalar_mul_float_kernel(const float* __restrict__ A,
 
     __nram__ float nram_buf[8192];
 
-    uint32_t processed = 0;
-    while (processed < count) {
-        uint32_t cur = (count - processed > 8192) ? 8192 : (count - processed);
+    for (uint32_t i = 0; i < count; i += 8192) {
+        uint32_t cur = (count - i > 8192) ? 8192 : (count - i);
         uint32_t aligned = (cur + 63) & ~63;
 
-        __memcpy(nram_buf, A + start + processed, cur * sizeof(float), GDRAM2NRAM);
+        __memcpy(nram_buf, A + start + i, cur * sizeof(float), GDRAM2NRAM);
         if (aligned > cur) {
             __bang_write_value(nram_buf + cur, aligned - cur, 0.0f);
         }
         __bang_mul_scalar(nram_buf, nram_buf, scalar, aligned);
-        __memcpy(C + start + processed, nram_buf, cur * sizeof(float), NRAM2GDRAM);
-        processed += cur;
+        __memcpy(C + start + i, nram_buf, cur * sizeof(float), NRAM2GDRAM);
     }
 }
 
@@ -52,18 +50,16 @@ __mlu_entry__ void matrix_scalar_mul_half_kernel(const half* __restrict__ A,
 
     __nram__ half nram_buf[16384];
 
-    uint32_t processed = 0;
-    while (processed < count) {
-        uint32_t cur = (count - processed > 16384) ? 16384 : (count - processed);
+    for (uint32_t i = 0; i < count; i += 16384) {
+        uint32_t cur = (count - i > 16384) ? 16384 : (count - i);
         uint32_t aligned = (cur + 63) & ~63;
 
-        __memcpy(nram_buf, A + start + processed, cur * sizeof(half), GDRAM2NRAM);
+        __memcpy(nram_buf, A + start + i, cur * sizeof(half), GDRAM2NRAM);
         if (aligned > cur) {
             __bang_write_value(nram_buf + cur, aligned - cur, (half)0.0f);
         }
         __bang_mul_scalar(nram_buf, nram_buf, scalar, aligned);
-        __memcpy(C + start + processed, nram_buf, cur * sizeof(half), NRAM2GDRAM);
-        processed += cur;
+        __memcpy(C + start + i, nram_buf, cur * sizeof(half), NRAM2GDRAM);
     }
 }
 
