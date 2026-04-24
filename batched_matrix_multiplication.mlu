@@ -3,7 +3,6 @@
 #include <torch/extension.h>
 #include <framework/core/MLUStream.h>
 
-#define CHUNK_SIZE 4096
 #define TASK_COUNT 32
 
 __mlu_entry__ void batched_matmul_kernel(const half* __restrict__ A,
@@ -22,31 +21,24 @@ __mlu_entry__ void batched_matmul_kernel(const half* __restrict__ A,
     uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
     uint32_t count = per_task + (task_id < remainder ? 1 : 0);
 
-    __nram__ half nram_A[CHUNK_SIZE];
-    __nram__ half nram_B[CHUNK_SIZE];
-    __nram__ half nram_C[CHUNK_SIZE];
-    __nram__ float nram_sum[1];
+    __nram__ half nram_A[4096];
+    __nram__ half nram_B[4096];
+    __nram__ float nram_C[4096];
 
     for (uint32_t b = start; b < start + count; ++b) {
+        const half* A_batch = A + b * m * k;
+        const half* B_batch = B + b * k * n;
+        half* C_batch = C + b * m * n;
+
         for (int32_t m_idx = 0; m_idx < m; ++m_idx) {
             for (int32_t n_idx = 0; n_idx < n; ++n_idx) {
                 float sum_val = 0.0f;
 
-                for (int32_t k_idx = 0; k_idx < k; k_idx += CHUNK_SIZE) {
-                    int32_t k_cur = (k - k_idx > CHUNK_SIZE) ? CHUNK_SIZE : (k - k_idx);
-
-                    for (int32_t ki = 0; ki < k_cur; ++ki) {
-                        nram_A[ki] = A[(b * m + m_idx) * k + k_idx + ki];
-                    }
-                    for (int32_t ki = 0; ki < k_cur; ++ki) {
-                        nram_B[ki] = B[(b * k + k_idx + ki) * n + n_idx];
-                    }
-
-                    __bang_mul(nram_C, nram_A, nram_B, k_cur);
-                    __bang_sum(nram_sum, nram_C, k_cur);
-                    sum_val += nram_sum[0];
+                for (int32_t k_idx = 0; k_idx < k; ++k_idx) {
+                    sum_val += (float)A_batch[m_idx * k + k_idx] * (float)B_batch[k_idx * n + n_idx];
                 }
-                C[(b * m + m_idx) * n + n_idx] = (half)sum_val;
+
+                C_batch[m_idx * n + n_idx] = (half)sum_val;
             }
         }
     }
