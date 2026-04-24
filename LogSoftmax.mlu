@@ -1,11 +1,13 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <torch/extension.h>
+#include <framework/core/MLUStream.h>
 #include <cstdint>
 #include <stdlib.h>
 #include <stdio.h>
 #include <float.h>
 
+#define CHUNK_SIZE 4096
 #define TASK_COUNT 32
 
 __mlu_entry__ void logsoftmax_kernel(const float* __restrict__ x,
@@ -21,17 +23,17 @@ __mlu_entry__ void logsoftmax_kernel(const float* __restrict__ x,
     uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
     uint32_t count = per_task + (task_id < remainder ? 1 : 0);
 
-    __nram__ float nram_tile[8192];
-    __nram__ float nram_max_val[2];
+    __nram__ float nram_tile[CHUNK_SIZE];
+    __nram__ float nram_max_val[1];
+    __nram__ float nram_sum_val[1];
 
     for (uint32_t b = start; b < start + count; ++b) {
         uint32_t row_start = b * dim_size;
         uint32_t row_len = dim_size;
 
         float row_max = -FLT_MAX;
-        uint32_t offset = 0;
-        while (offset < row_len) {
-            uint32_t cur = (row_len - offset > 8192) ? 8192 : (row_len - offset);
+        for (uint32_t offset = 0; offset < row_len; offset += CHUNK_SIZE) {
+            uint32_t cur = (row_len - offset > CHUNK_SIZE) ? CHUNK_SIZE : (row_len - offset);
             uint32_t aligned = (cur + 63) & ~63;
 
             __memcpy(nram_tile, x + row_start + offset, cur * sizeof(float), GDRAM2NRAM);
@@ -42,13 +44,11 @@ __mlu_entry__ void logsoftmax_kernel(const float* __restrict__ x,
             if (nram_max_val[0] > row_max) {
                 row_max = nram_max_val[0];
             }
-            offset += cur;
         }
 
         float sum_exp = 0.0f;
-        offset = 0;
-        while (offset < row_len) {
-            uint32_t cur = (row_len - offset > 8192) ? 8192 : (row_len - offset);
+        for (uint32_t offset = 0; offset < row_len; offset += CHUNK_SIZE) {
+            uint32_t cur = (row_len - offset > CHUNK_SIZE) ? CHUNK_SIZE : (row_len - offset);
             uint32_t aligned = (cur + 63) & ~63;
 
             __memcpy(nram_tile, x + row_start + offset, cur * sizeof(float), GDRAM2NRAM);
@@ -57,17 +57,15 @@ __mlu_entry__ void logsoftmax_kernel(const float* __restrict__ x,
             }
             __bang_sub_scalar(nram_tile, nram_tile, row_max, aligned);
             __bang_active_exp(nram_tile, nram_tile, aligned);
-            float tile_sum = __bang_sum(nram_tile, aligned);
-            sum_exp += tile_sum;
-            offset += cur;
+            __bang_sum(nram_sum_val, nram_tile, aligned);
+            sum_exp += nram_sum_val[0];
         }
 
         float log_sum_exp = logf(sum_exp);
         float log_sum_exp_plus_max = log_sum_exp + row_max;
 
-        offset = 0;
-        while (offset < row_len) {
-            uint32_t cur = (row_len - offset > 8192) ? 8192 : (row_len - offset);
+        for (uint32_t offset = 0; offset < row_len; offset += CHUNK_SIZE) {
+            uint32_t cur = (row_len - offset > CHUNK_SIZE) ? CHUNK_SIZE : (row_len - offset);
             uint32_t aligned = (cur + 63) & ~63;
 
             __memcpy(nram_tile, x + row_start + offset, cur * sizeof(float), GDRAM2NRAM);
@@ -76,12 +74,14 @@ __mlu_entry__ void logsoftmax_kernel(const float* __restrict__ x,
             }
             __bang_sub_scalar(nram_tile, nram_tile, log_sum_exp_plus_max, aligned);
             __memcpy(output + row_start + offset, nram_tile, cur * sizeof(float), NRAM2GDRAM);
-            offset += cur;
         }
     }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
+    TORCH_CHECK(x.is_contiguous(), "input must be contiguous");
+    TORCH_CHECK(x.scalar_type() == at::kFloat, "input must be float32");
+
     auto output = torch::empty_like(x);
     int batch_size = x.size(0);
     int dim_size = x.size(1);
@@ -90,10 +90,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
         return output;
     }
 
-    cnrtQueue_t queue;
-    CNRT_CHECK(cnrtSetDevice(0));
-    CNRT_CHECK(cnrtQueueCreate(&queue));
-
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
     cnrtDim3_t dim_config = {TASK_COUNT, 1, 1};
     cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
 
@@ -103,9 +100,6 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
         batch_size,
         dim_size
     );
-
-    CNRT_CHECK(cnrtQueueSync(queue));
-    CNRT_CHECK(cnrtQueueDestroy(queue));
 
     return output;
 }
