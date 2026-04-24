@@ -3,60 +3,59 @@
 #include <torch/extension.h>
 #include <framework/core/MLUStream.h>
 
-#define M_TILE 64
-#define K_TILE 128
-#define N_TILE 64
-#define TASK_COUNT 128
+#define BLOCK_M 32
+#define BLOCK_K 128
+#define BLOCK_N 32
 
 __mlu_entry__ void batched_matmul_kernel(const half* __restrict__ A,
                                          const half* __restrict__ B,
                                          half* __restrict__ C,
                                          int32_t batch_size,
-                                         int32_t m,
-                                         int32_t k,
-                                         int32_t n) {
+                                         int32_t M,
+                                         int32_t K,
+                                         int32_t N) {
     if (__is_mpu()) return;
 
     uint32_t task_id = taskId;
-    uint32_t task_num = taskDim;
 
     if (task_id >= batch_size) return;
 
-    const half* A_batch = A + task_id * m * k;
-    const half* B_batch = B + task_id * k * n;
-    half* C_batch = C + task_id * m * n;
+    const half* A_batch = A + task_id * M * K;
+    const half* B_batch = B + task_id * K * N;
+    half* C_batch = C + task_id * M * N;
 
-    __nram__ float nram_A[M_TILE * K_TILE];
-    __nram__ float nram_B[K_TILE * N_TILE];
-    __nram__ float nram_C[M_TILE * N_TILE];
-    __wram__ float wram_B[K_TILE * N_TILE];
+    __nram__ float nram_A[BLOCK_M * BLOCK_K];
+    __nram__ float nram_C[BLOCK_M * BLOCK_N];
+    __wram__ float wram_B[BLOCK_K * BLOCK_N];
 
-    for (int32_t m_off = 0; m_off < m; m_off += M_TILE) {
-        int32_t m_cur = (m - m_off > M_TILE) ? M_TILE : (m - m_off);
-        for (int32_t n_off = 0; n_off < n; n_off += N_TILE) {
-            int32_t n_cur = (n - n_off > N_TILE) ? N_TILE : (n - n_off);
+    for (int m = 0; m < M; m += BLOCK_M) {
+        int m_len = (m + BLOCK_M < M) ? BLOCK_M : (M - m);
 
-            for (int32_t k_off = 0; k_off < k; k_off += K_TILE) {
-                int32_t k_cur = (k - k_off > K_TILE) ? K_TILE : (k - k_off);
+        for (int n = 0; n < N; n += BLOCK_N) {
+            int n_len = (n + BLOCK_N < N) ? BLOCK_N : (N - n);
 
-                for (int32_t mi = 0; mi < m_cur; ++mi) {
-                    for (int32_t ki = 0; ki < k_cur; ++ki) {
-                        nram_A[mi * k_cur + ki] = (float)A_batch[(m_off + mi) * k + k_off + ki];
+            for (int k = 0; k < K; k += BLOCK_K) {
+                int k_len = (k + BLOCK_K < K) ? BLOCK_K : (K - k);
+
+                for (int mi = 0; mi < m_len; ++mi) {
+                    for (int ki = 0; ki < k_len; ++ki) {
+                        nram_A[mi * k_len + ki] = (float)A_batch[(m + mi) * K + k + ki];
                     }
                 }
 
-                for (int32_t ki = 0; ki < k_cur; ++ki) {
-                    for (int32_t ni = 0; ni < n_cur; ++ni) {
-                        wram_B[ki * n_cur + ni] = (float)B_batch[(k_off + ki) * n + n_off + ni];
+                for (int ki = 0; ki < k_len; ++ki) {
+                    for (int ni = 0; ni < n_len; ++ni) {
+                        wram_B[ki * n_len + ni] = (float)B_batch[(k + ki) * N + n + ni];
                     }
                 }
 
                 __bang_conv(nram_C, nram_A, wram_B,
-                           k_cur, m_cur, 1, 1, 1, 1, 1, n_cur);
+                           k_len, m_len, 1,
+                           1, 1, 1, 1, n_len);
 
-                for (int32_t mi = 0; mi < m_cur; ++mi) {
-                    for (int32_t ni = 0; ni < n_cur; ++ni) {
-                        C_batch[(m_off + mi) * n + n_off + ni] = (half)nram_C[mi * n_cur + ni];
+                for (int mi = 0; mi < m_len; ++mi) {
+                    for (int ni = 0; ni < n_len; ++ni) {
+                        C_batch[(m + mi) * N + n + ni] = (half)nram_C[mi * n_len + ni];
                     }
                 }
             }
@@ -71,28 +70,28 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
     TORCH_CHECK(B.scalar_type() == at::kHalf, "B must be float16");
 
     int batch_size = A.size(0);
-    int m = A.size(1);
-    int k = A.size(2);
-    int n = B.size(2);
+    int M = A.size(1);
+    int K = A.size(2);
+    int N = B.size(2);
 
     TORCH_CHECK(B.size(0) == batch_size, "Batch size mismatch");
-    TORCH_CHECK(B.size(1) == k, "K dimension mismatch");
+    TORCH_CHECK(B.size(1) == K, "K dimension mismatch");
 
-    auto C = torch::empty({batch_size, m, n}, A.options());
+    auto C = torch::empty({batch_size, M, N}, A.options());
 
-    if (batch_size == 0 || m == 0 || k == 0 || n == 0) {
+    if (batch_size == 0 || M == 0 || K == 0 || N == 0) {
         return C;
     }
 
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t dim = {TASK_COUNT, 1, 1};
+    cnrtDim3_t dim = {batch_size, 1, 1};
     cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
 
     batched_matmul_kernel<<<dim, ktype, queue>>>(
         reinterpret_cast<half*>(A.data_ptr<at::Half>()),
         reinterpret_cast<half*>(B.data_ptr<at::Half>()),
         reinterpret_cast<half*>(C.data_ptr<at::Half>()),
-        batch_size, m, k, n);
+        batch_size, M, K, N);
 
     return C;
 }
