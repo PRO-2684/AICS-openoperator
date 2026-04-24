@@ -8,10 +8,10 @@
 #define CHUNK_SIZE 4096
 #define TASK_COUNT 32
 
-__mlu_entry__ void logsoftmax_kernel(const float* __restrict__ x,
-                                      float* __restrict__ output,
-                                      int32_t batch_size,
-                                      int32_t dim_size) {
+__mlu_entry__ void logsoftmax_float_kernel(const float* __restrict__ x,
+                                          float* __restrict__ output,
+                                          int32_t batch_size,
+                                          int32_t dim_size) {
     if (__is_mpu()) return;
 
     uint32_t task_id = taskId;
@@ -79,9 +79,87 @@ __mlu_entry__ void logsoftmax_kernel(const float* __restrict__ x,
     }
 }
 
+__mlu_entry__ void logsoftmax_half_kernel(const half* __restrict__ x,
+                                          half* __restrict__ output,
+                                          int32_t batch_size,
+                                          int32_t dim_size) {
+    if (__is_mpu()) return;
+
+    uint32_t task_id = taskId;
+    uint32_t task_num = taskDim;
+    uint32_t per_task = batch_size / task_num;
+    uint32_t remainder = batch_size % task_num;
+    uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
+    uint32_t count = per_task + (task_id < remainder ? 1 : 0);
+
+    __nram__ float nram_tile[CHUNK_SIZE];
+    __nram__ float nram_max_val[1];
+
+    for (uint32_t b = start; b < start + count; ++b) {
+        uint32_t row_start = b * dim_size;
+        uint32_t row_len = dim_size;
+
+        float row_max = -FLT_MAX;
+        for (uint32_t offset = 0; offset < row_len; offset += CHUNK_SIZE) {
+            uint32_t cur = (row_len - offset > CHUNK_SIZE) ? CHUNK_SIZE : (row_len - offset);
+            uint32_t aligned = (cur + 63) & ~63;
+
+            for (uint32_t i = 0; i < cur; ++i) {
+                nram_tile[i] = (float)x[row_start + offset + i];
+            }
+            if (aligned > cur) {
+                __bang_write_value(nram_tile + cur, aligned - cur, 0.0f);
+            }
+            __bang_argmax(nram_max_val, nram_tile, aligned);
+            if (nram_max_val[0] > row_max) {
+                row_max = nram_max_val[0];
+            }
+        }
+
+        float sum_exp = 0.0f;
+        for (uint32_t offset = 0; offset < row_len; offset += CHUNK_SIZE) {
+            uint32_t cur = (row_len - offset > CHUNK_SIZE) ? CHUNK_SIZE : (row_len - offset);
+            uint32_t aligned = (cur + 63) & ~63;
+
+            for (uint32_t i = 0; i < cur; ++i) {
+                nram_tile[i] = (float)x[row_start + offset + i];
+            }
+            if (aligned > cur) {
+                __bang_write_value(nram_tile + cur, aligned - cur, 0.0f);
+            }
+            __bang_sub_scalar(nram_tile, nram_tile, row_max, aligned);
+            __bang_active_exp(nram_tile, nram_tile, aligned);
+
+            float tile_sum = 0.0f;
+            for (uint32_t i = 0; i < aligned; ++i) {
+                tile_sum += nram_tile[i];
+            }
+            sum_exp += tile_sum;
+        }
+
+        float log_sum_exp = logf(sum_exp);
+        float log_sum_exp_plus_max = log_sum_exp + row_max;
+
+        for (uint32_t offset = 0; offset < row_len; offset += CHUNK_SIZE) {
+            uint32_t cur = (row_len - offset > CHUNK_SIZE) ? CHUNK_SIZE : (row_len - offset);
+            uint32_t aligned = (cur + 63) & ~63;
+
+            for (uint32_t i = 0; i < cur; ++i) {
+                nram_tile[i] = (float)x[row_start + offset + i];
+            }
+            if (aligned > cur) {
+                __bang_write_value(nram_tile + cur, aligned - cur, 0.0f);
+            }
+            __bang_sub_scalar(nram_tile, nram_tile, log_sum_exp_plus_max, aligned);
+            for (uint32_t i = 0; i < cur; ++i) {
+                output[row_start + offset + i] = (half)nram_tile[i];
+            }
+        }
+    }
+}
+
 torch::Tensor bang_func(torch::Tensor x, int dim) {
     TORCH_CHECK(x.is_contiguous(), "input must be contiguous");
-    TORCH_CHECK(x.scalar_type() == at::kFloat, "input must be float32");
 
     auto output = torch::empty_like(x);
     int batch_size = x.size(0);
@@ -95,12 +173,21 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
     cnrtDim3_t dim_config = {TASK_COUNT, 1, 1};
     cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
 
-    logsoftmax_kernel<<<dim_config, ktype, queue>>>(
-        x.data_ptr<float>(),
-        output.data_ptr<float>(),
-        batch_size,
-        dim_size
-    );
+    if (x.scalar_type() == at::kFloat) {
+        logsoftmax_float_kernel<<<dim_config, ktype, queue>>>(
+            x.data_ptr<float>(),
+            output.data_ptr<float>(),
+            batch_size,
+            dim_size
+        );
+    } else {
+        logsoftmax_half_kernel<<<dim_config, ktype, queue>>>(
+            reinterpret_cast<half*>(x.data_ptr<at::Half>()),
+            reinterpret_cast<half*>(output.data_ptr<at::Half>()),
+            batch_size,
+            dim_size
+        );
+    }
 
     return output;
 }
