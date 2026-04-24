@@ -17,6 +17,8 @@ DTYPE_MAP = {
     "bfloat16": torch.bfloat16,
 }
 
+MAX_LOCAL_NUMEL = 1 << 24
+
 
 def load_module_from_file(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
@@ -46,6 +48,48 @@ def max_numel(items):
         if isinstance(item, torch.Tensor):
             total = max(total, item.numel())
     return total
+
+
+def shrink_tensor(tensor):
+    shape = list(tensor.shape)
+    if tensor.numel() <= MAX_LOCAL_NUMEL:
+        return tensor
+
+    if tensor.dim() == 1:
+        limits = [4096]
+    elif tensor.dim() == 2:
+        limits = [512, 512]
+    elif tensor.dim() == 3:
+        limits = [8, 256, 256]
+    elif tensor.dim() == 4:
+        limits = [4, 64, 128, 128]
+    else:
+        limits = [32] * tensor.dim()
+
+    slices = tuple(slice(0, min(size, limits[i])) for i, size in enumerate(shape))
+    shrunk = tensor[slices].contiguous()
+
+    while shrunk.numel() > MAX_LOCAL_NUMEL:
+        largest_dim = max(range(shrunk.dim()), key=lambda i: shrunk.shape[i])
+        new_size = max(1, shrunk.shape[largest_dim] // 2)
+        resize_slices = [slice(None)] * shrunk.dim()
+        resize_slices[largest_dim] = slice(0, new_size)
+        shrunk = shrunk[tuple(resize_slices)].contiguous()
+
+    return shrunk
+
+
+def shrink_inputs(items):
+    shrunk = []
+    changed = False
+    for item in items:
+        if isinstance(item, torch.Tensor):
+            new_item = shrink_tensor(item)
+            changed = changed or tuple(new_item.shape) != tuple(item.shape)
+            shrunk.append(new_item)
+        else:
+            shrunk.append(item)
+    return shrunk, changed
 
 
 def build_binding_source(task, module_name):
@@ -137,6 +181,7 @@ def main():
 
     init_inputs = list(ref_mod.get_init_inputs())
     raw_inputs = list(ref_mod.get_inputs())
+    raw_inputs, shrunk = shrink_inputs(raw_inputs)
     dtype = DTYPE_MAP.get(first_dtype(task))
 
     model = ref_mod.Model(*init_inputs)
@@ -152,6 +197,12 @@ def main():
             f"stateful model with {param_count} parameters and {buffer_count} buffers"
         )
         return
+
+    if shrunk:
+        print(
+            f"[info] downscaled oversized reference inputs for {task['base_name']} "
+            f"to fit local MLU limits"
+        )
 
     cpu_inputs = cast_tree(raw_inputs, dtype=dtype, device=None)
     mlu_inputs = cast_tree(raw_inputs, dtype=dtype, device="mlu")

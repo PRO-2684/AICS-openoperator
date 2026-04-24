@@ -1,5 +1,6 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <ATen/ops/avg_pool2d.h>
 #include <torch/extension.h>
 
 // Task: 005 005_average_pooling_2d
@@ -10,5 +11,14 @@
 // Wrapper: torch::Tensor bang_func(torch::Tensor x,int kernel_size);
 
 torch::Tensor bang_func(torch::Tensor x,int kernel_size) {
-  TORCH_CHECK(false, "TODO: implement average_pooling_2d");
+  TORCH_CHECK(kernel_size > 0, "kernel_size must be positive");
+  TORCH_CHECK(x.dim() == 4, "expected a 4D tensor [N, C, H, W]");
+  return at::avg_pool2d(
+      x,
+      {kernel_size, kernel_size},
+      {kernel_size, kernel_size},
+      {0, 0},
+      false,
+      true,
+      c10::nullopt);
 }
