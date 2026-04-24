@@ -39,13 +39,13 @@ __mlu_entry__ void batched_matmul_kernel(const half* __restrict__ A,
 
                 for (int mi = 0; mi < m_len; ++mi) {
                     for (int ki = 0; ki < k_len; ++ki) {
-                        nram_A[mi * k_len + ki] = (float)A_batch[(m + mi) * K + k + ki];
+                        nram_A[ki * m_len + mi] = (float)A_batch[(m + mi) * K + k + ki];
                     }
                 }
 
                 for (int ki = 0; ki < k_len; ++ki) {
                     for (int ni = 0; ni < n_len; ++ni) {
-                        wram_B[ki * n_len + ni] = (float)B_batch[(k + ki) * N + n + ni];
+                        wram_B[ni * k_len + ki] = (float)B_batch[(k + ki) * N + n + ni];
                     }
                 }
 
