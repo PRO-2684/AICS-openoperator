@@ -95,7 +95,10 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
         return output;
     }
 
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+    cnrtQueue_t queue;
+    CNRT_CHECK(cnrtSetDevice(0));
+    CNRT_CHECK(cnrtQueueCreate(&queue));
+
     cnrtDim3_t dim_config = {TASK_COUNT, 1, 1};
     cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
 
@@ -105,6 +108,9 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
         batch_size,
         dim_size
     );
+
+    CNRT_CHECK(cnrtQueueSync(queue));
+    CNRT_CHECK(cnrtQueueDestroy(queue));
 
     return output;
 }
