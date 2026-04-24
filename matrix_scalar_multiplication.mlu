@@ -1,69 +1,66 @@
 #include <bang.h>
-#include <torch/extension.h>
 #include <cnrt.h>
+#include <torch/extension.h>
 #include <cstdint>
 #include <stdlib.h>
 #include <stdio.h>
 
-#define NRAM_SIZE_BYTES (384 * 1024)
-#define TILE_SIZE (NRAM_SIZE_BYTES / sizeof(float) / 8)
+#define TILE_SIZE 16384
+#define TASK_COUNT 32
 
-#define CNRT_CHECK(cmd) do { cnrtRet_t __ret = (cmd); (void)__ret; } while(0)
-
-__mlu_global__ void matrix_scalar_mul_kernel(const float* __restrict__ A,
+__mlu_entry__ void matrix_scalar_mul_kernel(const float* __restrict__ A,
                                             float* __restrict__ C,
                                             float scalar,
-                                            int32_t m, int32_t n) {
+                                            int32_t total) {
     if (__is_mpu()) return;
 
-    int32_t total = m * n;
-    int32_t core_num = taskDimX * taskDimY * taskDimZ;
-    int32_t core_id = taskIdX + taskDimX * (taskIdY + taskDimY * taskIdZ);
-    int32_t data_per_core = total / core_num;
-    int32_t data_last_core = data_per_core + total % core_num;
-    int32_t start_idx = core_id * data_per_core;
-    int32_t work_elems = (core_id == core_num - 1) ? data_last_core : data_per_core;
+    uint32_t task_id = taskId;
+    uint32_t task_num = taskDim;
+    uint32_t per_task = total / task_num;
+    uint32_t remainder = total % task_num;
+    uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
+    uint32_t count = per_task + (task_id < remainder ? 1 : 0);
 
     __nram__ float nram_A[TILE_SIZE];
     __nram__ float nram_C[TILE_SIZE];
 
-    int32_t processed = 0;
-    while (processed < work_elems) {
-        int32_t remain = work_elems - processed;
-        int32_t cur = remain > TILE_SIZE ? TILE_SIZE : remain;
+    for (uint32_t offset = 0; offset < count; offset += TILE_SIZE) {
+        uint32_t len = (offset + TILE_SIZE <= count) ? TILE_SIZE : (count - offset);
+        uint32_t aligned_len = (len + 63) & ~63;
 
-        __memcpy(nram_A, A + start_idx + processed, cur * sizeof(float), GDRAM2NRAM);
-        __bang_mul_scalar(nram_C, nram_A, scalar, cur);
-        __memcpy(C + start_idx + processed, nram_C, cur * sizeof(float), NRAM2GDRAM);
+        __memcpy(nram_A, A + start + offset, len * sizeof(float), GDRAM2NRAM);
 
-        processed += cur;
+        if (aligned_len > len) {
+            __bang_write_value(nram_A + len, aligned_len - len, 0.0f);
+        }
+
+        __bang_mul_scalar(nram_C, nram_A, scalar, aligned_len);
+
+        __memcpy(C + start + offset, nram_C, len * sizeof(float), NRAM2GDRAM);
     }
-
-    __sync_all();
 }
 
 torch::Tensor bang_func(torch::Tensor input, float scalar) {
-    auto out = torch::empty_like(input);
-    int32_t m = static_cast<int32_t>(input.size(0));
-    int32_t n = static_cast<int32_t>(input.size(1));
-    int32_t numel = m * n;
+    TORCH_CHECK(input.is_contiguous(), "input must be contiguous");
+    TORCH_CHECK(input.scalar_type() == at::kFloat, "input must be float32");
 
-    cnrtQueue_t queue;
-    CNRT_CHECK(cnrtSetDevice(0));
-    CNRT_CHECK(cnrtQueueCreate(&queue));
+    auto output = torch::empty_like(input);
+    int32_t total = static_cast<int32_t>(input.numel());
 
-    cnrtDim3_t dim = {4, 1, 1};
-    cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
+    if (total == 0) {
+        return output;
+    }
+
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+    cnrtDim3_t dim = {TASK_COUNT, 1, 1};
+    cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
 
     matrix_scalar_mul_kernel<<<dim, ktype, queue>>>(
         input.data_ptr<float>(),
-        out.data_ptr<float>(),
+        output.data_ptr<float>(),
         scalar,
-        m, n
+        total
     );
 
-    cnrtQueueSync(queue);
-    CNRT_CHECK(cnrtQueueDestroy(queue));
-
-    return out;
+    return output;
 }

@@ -6,81 +6,98 @@
 #include <stdio.h>
 #include <float.h>
 
-#define NRAM_SIZE_BYTES (384 * 1024)
-#define TILE_SIZE (NRAM_SIZE_BYTES / sizeof(float) / 8)
+#define TILE_SIZE 16384
+#define TASK_COUNT 32
 
-#define CNRT_CHECK(cmd) do { cnrtRet_t __ret = (cmd); (void)__ret; } while(0)
-
-__mlu_global__ void logsoftmax_kernel(const float* __restrict__ x,
+__mlu_entry__ void logsoftmax_kernel(const float* __restrict__ x,
                                       float* __restrict__ output,
-                                      int batch_size,
-                                      int dim_size) {
+                                      int32_t batch_size,
+                                      int32_t dim_size) {
     if (__is_mpu()) return;
 
-    int32_t total = batch_size * dim_size;
-    int32_t core_num = taskDimX * taskDimY * taskDimZ;
-    int32_t core_id = taskIdX + taskDimX * (taskIdY + taskDimY * taskIdZ);
-    int32_t data_per_core = total / core_num;
-    int32_t data_last_core = data_per_core + total % core_num;
-    int32_t start_idx = core_id * data_per_core;
-    int32_t work_elems = (core_id == core_num - 1) ? data_last_core : data_per_core;
-
-    int32_t row_start = start_idx / dim_size;
-    int32_t row_end = (start_idx + work_elems + dim_size - 1) / dim_size;
+    uint32_t task_id = taskId;
+    uint32_t task_num = taskDim;
+    uint32_t per_task = batch_size / task_num;
+    uint32_t remainder = batch_size % task_num;
+    uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
+    uint32_t count = per_task + (task_id < remainder ? 1 : 0);
 
     __nram__ float nram_tile[TILE_SIZE];
     __nram__ float nram_max_val[1];
     __nram__ float nram_sum_val[1];
 
-    for (int32_t r = row_start; r < row_end; ++r) {
-        int32_t row_start_elem = r * dim_size;
-        int32_t row_len = dim_size;
+    for (uint32_t b = start; b < start + count; ++b) {
+        uint32_t row_start_elem = b * dim_size;
+        uint32_t row_len = dim_size;
 
         float row_max = -FLT_MAX;
-        for (int32_t offset = 0; offset < row_len; offset += TILE_SIZE) {
-            int32_t cur = (offset + TILE_SIZE < row_len) ? TILE_SIZE : (row_len - offset);
+        for (uint32_t offset = 0; offset < row_len; offset += TILE_SIZE) {
+            uint32_t cur = (offset + TILE_SIZE < row_len) ? TILE_SIZE : (row_len - offset);
+            uint32_t aligned_cur = (cur + 63) & ~63;
+
             __memcpy(nram_tile, x + row_start_elem + offset, cur * sizeof(float), GDRAM2NRAM);
-            __bang_argmax(nram_max_val, nram_tile, cur);
+
+            if (aligned_cur > cur) {
+                __bang_write_value(nram_tile + cur, aligned_cur - cur, 0.0f);
+            }
+
+            __bang_argmax(nram_max_val, nram_tile, aligned_cur);
             if (nram_max_val[0] > row_max) {
                 row_max = nram_max_val[0];
             }
         }
 
         float sum_exp = 0.0f;
-        for (int32_t offset = 0; offset < row_len; offset += TILE_SIZE) {
-            int32_t cur = (offset + TILE_SIZE < row_len) ? TILE_SIZE : (row_len - offset);
+        for (uint32_t offset = 0; offset < row_len; offset += TILE_SIZE) {
+            uint32_t cur = (offset + TILE_SIZE < row_len) ? TILE_SIZE : (row_len - offset);
+            uint32_t aligned_cur = (cur + 63) & ~63;
+
             __memcpy(nram_tile, x + row_start_elem + offset, cur * sizeof(float), GDRAM2NRAM);
-            __bang_sub_scalar(nram_tile, nram_tile, row_max, cur);
-            __bang_active_exp(nram_tile, nram_tile, cur);
-            float tile_sum = __bang_sum(nram_tile, cur);
+
+            if (aligned_cur > cur) {
+                __bang_write_value(nram_tile + cur, aligned_cur - cur, 0.0f);
+            }
+
+            __bang_sub_scalar(nram_tile, nram_tile, row_max, aligned_cur);
+            __bang_active_exp(nram_tile, nram_tile, aligned_cur);
+            float tile_sum = __bang_sum(nram_tile, aligned_cur);
             sum_exp += tile_sum;
         }
 
         float log_sum_exp = logf(sum_exp);
         float log_sum_exp_plus_max = log_sum_exp + row_max;
 
-        for (int32_t offset = 0; offset < row_len; offset += TILE_SIZE) {
-            int32_t cur = (offset + TILE_SIZE < row_len) ? TILE_SIZE : (row_len - offset);
+        for (uint32_t offset = 0; offset < row_len; offset += TILE_SIZE) {
+            uint32_t cur = (offset + TILE_SIZE < row_len) ? TILE_SIZE : (row_len - offset);
+            uint32_t aligned_cur = (cur + 63) & ~63;
+
             __memcpy(nram_tile, x + row_start_elem + offset, cur * sizeof(float), GDRAM2NRAM);
-            __bang_sub_scalar(nram_tile, nram_tile, log_sum_exp_plus_max, cur);
+
+            if (aligned_cur > cur) {
+                __bang_write_value(nram_tile + cur, aligned_cur - cur, 0.0f);
+            }
+
+            __bang_sub_scalar(nram_tile, nram_tile, log_sum_exp_plus_max, aligned_cur);
             __memcpy(output + row_start_elem + offset, nram_tile, cur * sizeof(float), NRAM2GDRAM);
         }
     }
-
-    __sync_all();
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
+    TORCH_CHECK(x.is_contiguous(), "input must be contiguous");
+    TORCH_CHECK(x.scalar_type() == at::kFloat, "input must be float32");
+
     auto output = torch::empty_like(x);
     int batch_size = x.size(0);
     int dim_size = x.size(1);
 
-    cnrtQueue_t queue;
-    CNRT_CHECK(cnrtSetDevice(0));
-    CNRT_CHECK(cnrtQueueCreate(&queue));
+    if (batch_size == 0 || dim_size == 0) {
+        return output;
+    }
 
-    cnrtDim3_t dim_config = {4, 1, 1};
-    cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+    cnrtDim3_t dim_config = {TASK_COUNT, 1, 1};
+    cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
 
     logsoftmax_kernel<<<dim_config, ktype, queue>>>(
         x.data_ptr<float>(),
@@ -88,9 +105,6 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
         batch_size,
         dim_size
     );
-
-    cnrtQueueSync(queue);
-    CNRT_CHECK(cnrtQueueDestroy(queue));
 
     return output;
 }
