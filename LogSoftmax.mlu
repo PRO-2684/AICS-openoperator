@@ -1,14 +1,96 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <torch/extension.h>
+#include <cstdint>
+#include <stdlib.h>
+#include <stdio.h>
+#include <float.h>
 
-// Task: 003 003_LogSoftmax
-// Category: softmax
-// Difficulty: basic
-// DType: float16
-// Description: 实现一个 BangC 算子，对输入张量在指定维度上执行 LogSoftmax 激活计算。输入包括形状为 `[batch_size, dim]` 的张量 `x` 以及用于指定计算维度的整数参数 `dim`；输出张量的形状与 `x` 保持一致。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x, int dim);
+#define NRAM_SIZE_BYTES (384 * 1024)
+#define TILE_SIZE (NRAM_SIZE_BYTES / sizeof(float) / 8)
+
+#define CNRT_CHECK(cmd) do { cnrtRet_t __ret = (cmd); (void)__ret; } while(0)
+
+__mlu_global__ void logsoftmax_kernel(const float* __restrict__ x,
+                                      float* __restrict__ output,
+                                      int batch_size,
+                                      int dim_size) {
+    if (__is_mpu()) return;
+
+    int32_t total = batch_size * dim_size;
+    int32_t core_num = taskDimX * taskDimY * taskDimZ;
+    int32_t core_id = taskIdX + taskDimX * (taskIdY + taskDimY * taskIdZ);
+    int32_t data_per_core = total / core_num;
+    int32_t data_last_core = data_per_core + total % core_num;
+    int32_t start_idx = core_id * data_per_core;
+    int32_t work_elems = (core_id == core_num - 1) ? data_last_core : data_per_core;
+
+    int32_t row_start = start_idx / dim_size;
+    int32_t row_end = (start_idx + work_elems + dim_size - 1) / dim_size;
+
+    __nram__ float nram_tile[TILE_SIZE];
+    __nram__ float nram_max_val[1];
+    __nram__ float nram_sum_val[1];
+
+    for (int32_t r = row_start; r < row_end; ++r) {
+        int32_t row_start_elem = r * dim_size;
+        int32_t row_len = dim_size;
+
+        float row_max = -FLT_MAX;
+        for (int32_t offset = 0; offset < row_len; offset += TILE_SIZE) {
+            int32_t cur = (offset + TILE_SIZE < row_len) ? TILE_SIZE : (row_len - offset);
+            __memcpy(nram_tile, x + row_start_elem + offset, cur * sizeof(float), GDRAM2NRAM);
+            __bang_argmax(nram_max_val, nram_tile, cur);
+            if (nram_max_val[0] > row_max) {
+                row_max = nram_max_val[0];
+            }
+        }
+
+        float sum_exp = 0.0f;
+        for (int32_t offset = 0; offset < row_len; offset += TILE_SIZE) {
+            int32_t cur = (offset + TILE_SIZE < row_len) ? TILE_SIZE : (row_len - offset);
+            __memcpy(nram_tile, x + row_start_elem + offset, cur * sizeof(float), GDRAM2NRAM);
+            __bang_sub_scalar(nram_tile, nram_tile, row_max, cur);
+            __bang_active_exp(nram_tile, nram_tile, cur);
+            float tile_sum = __bang_sum(nram_tile, cur);
+            sum_exp += tile_sum;
+        }
+
+        float log_sum_exp = logf(sum_exp);
+        float log_sum_exp_plus_max = log_sum_exp + row_max;
+
+        for (int32_t offset = 0; offset < row_len; offset += TILE_SIZE) {
+            int32_t cur = (offset + TILE_SIZE < row_len) ? TILE_SIZE : (row_len - offset);
+            __memcpy(nram_tile, x + row_start_elem + offset, cur * sizeof(float), GDRAM2NRAM);
+            __bang_sub_scalar(nram_tile, nram_tile, log_sum_exp_plus_max, cur);
+            __memcpy(output + row_start_elem + offset, nram_tile, cur * sizeof(float), NRAM2GDRAM);
+        }
+    }
+
+    __sync_all();
+}
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
-  TORCH_CHECK(false, "TODO: implement LogSoftmax");
+    auto output = torch::empty_like(x);
+    int batch_size = x.size(0);
+    int dim_size = x.size(1);
+
+    cnrtQueue_t queue;
+    CNRT_CHECK(cnrtSetDevice(0));
+    CNRT_CHECK(cnrtQueueCreate(&queue));
+
+    cnrtDim3_t dim_config = {4, 1, 1};
+    cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
+
+    logsoftmax_kernel<<<dim_config, ktype, queue>>>(
+        x.data_ptr<float>(),
+        output.data_ptr<float>(),
+        batch_size,
+        dim_size
+    );
+
+    cnrtQueueSync(queue);
+    CNRT_CHECK(cnrtQueueDestroy(queue));
+
+    return output;
 }
