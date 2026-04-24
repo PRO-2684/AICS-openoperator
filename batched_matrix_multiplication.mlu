@@ -25,6 +25,7 @@ __mlu_entry__ void batched_matmul_kernel(const half* __restrict__ A,
     __nram__ half nram_A[CHUNK_SIZE];
     __nram__ half nram_B[CHUNK_SIZE];
     __nram__ half nram_C[CHUNK_SIZE];
+    __nram__ float nram_sum[1];
 
     for (uint32_t b = start; b < start + count; ++b) {
         for (int32_t m_idx = 0; m_idx < m; ++m_idx) {
@@ -41,15 +42,9 @@ __mlu_entry__ void batched_matmul_kernel(const half* __restrict__ A,
                         nram_B[ki] = B[(b * k + k_idx + ki) * n + n_idx];
                     }
 
-                    for (int32_t ki = 0; ki < k_cur; ++ki) {
-                        nram_C[ki] = nram_A[ki] * nram_B[ki];
-                    }
-
-                    float tile_sum = 0.0f;
-                    for (int32_t ki = 0; ki < k_cur; ++ki) {
-                        tile_sum += (float)nram_C[ki];
-                    }
-                    sum_val += tile_sum;
+                    __bang_mul(nram_C, nram_A, nram_B, k_cur);
+                    __bang_sum(nram_sum, nram_C, k_cur);
+                    sum_val += nram_sum[0];
                 }
                 C[(b * m + m_idx) * n + n_idx] = (half)sum_val;
             }
