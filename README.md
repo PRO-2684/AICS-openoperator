@@ -30,18 +30,10 @@
         - Link it in the "AC" column with 🟡
     - Otherwise, continue debugging and resubmit
 
-### Testing
+### Quick reference
 
-```shell
-./check.sh <Path-to.mlu>
-```
-
-### Submission
-
-```shell
-# `config` file will be automatically updated to include indices for changed files when you commit
-git add . && git commit -m "feat: Add LeakyReLU implementation"
-```
+- Check your solution: `./check.sh <Path-to.mlu>`
+- Submit: `git add . && python scripts/update_config.py && git commit -m "feat: Add LeakyReLU implementation"`
 
 ## ❓ Problems
 
