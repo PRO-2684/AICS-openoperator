@@ -1,67 +1,14 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <torch/extension.h>
-#include <framework/core/MLUStream.h>
 
-#define TASK_COUNT 128
-
-__mlu_entry__ void batched_matmul_kernel(const half* __restrict__ A,
-                                         const half* __restrict__ B,
-                                         half* __restrict__ C,
-                                         int32_t batch_size,
-                                         int32_t M,
-                                         int32_t K,
-                                         int32_t N) {
-    if (__is_mpu()) return;
-
-    uint32_t task_id = taskId;
-
-    if (task_id >= batch_size) return;
-
-    const half* A_batch = A + task_id * M * K;
-    const half* B_batch = B + task_id * K * N;
-    half* C_batch = C + task_id * M * N;
-
-    for (int m = 0; m < M; ++m) {
-        for (int n = 0; n < N; ++n) {
-            float sum = 0.0f;
-            for (int k = 0; k < K; ++k) {
-                sum += (float)A_batch[m * K + k] * (float)B_batch[k * N + n];
-            }
-            C_batch[m * N + n] = (half)sum;
-        }
-    }
-}
+// Task: 004 004_batched_matrix_multiplication
+// Category: matrix
+// Difficulty: basic
+// DType: float16
+// Description: 实现一个 BangC 算子，执行两个三维张量的批量矩阵乘法（Batch Matrix Multiplication）。输入包括形状为 `[batch_size, m, k]` 的张量 `A` 和形状为 `[batch_size, k, n]` 的张量 `B`；输出张量的形状为 `[batch_size, m, n]`。
+// Wrapper: torch::Tensor bang_func(torch::Tensor A, torch::Tensor B);
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-    TORCH_CHECK(A.is_contiguous(), "A must be contiguous");
-    TORCH_CHECK(B.is_contiguous(), "B must be contiguous");
-    TORCH_CHECK(A.scalar_type() == at::kHalf, "A must be float16");
-    TORCH_CHECK(B.scalar_type() == at::kHalf, "B must be float16");
-
-    int batch_size = A.size(0);
-    int M = A.size(1);
-    int K = A.size(2);
-    int N = B.size(2);
-
-    TORCH_CHECK(B.size(0) == batch_size, "Batch size mismatch");
-    TORCH_CHECK(B.size(1) == K, "K dimension mismatch");
-
-    auto C = torch::empty({batch_size, M, N}, A.options());
-
-    if (batch_size == 0 || M == 0 || K == 0 || N == 0) {
-        return C;
-    }
-
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t dim = {(uint32_t)batch_size, 1, 1};
-    cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
-
-    batched_matmul_kernel<<<dim, ktype, queue>>>(
-        reinterpret_cast<half*>(A.data_ptr<at::Half>()),
-        reinterpret_cast<half*>(B.data_ptr<at::Half>()),
-        reinterpret_cast<half*>(C.data_ptr<at::Half>()),
-        batch_size, M, K, N);
-
-    return C;
+  TORCH_CHECK(false, "TODO: implement batched_matrix_multiplication");
 }
