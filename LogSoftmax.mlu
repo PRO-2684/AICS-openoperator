@@ -6,8 +6,9 @@
 #include <stdio.h>
 #include <float.h>
 
-#define TILE_SIZE 16384
+#define TILE_SIZE 4096
 #define TASK_COUNT 32
+#define CNRT_CHECK(cmd) do { cnrtRet_t __ret = (cmd); (void)__ret; } while(0)
 
 __mlu_entry__ void logsoftmax_kernel(const float* __restrict__ x,
                                       float* __restrict__ output,
@@ -23,7 +24,7 @@ __mlu_entry__ void logsoftmax_kernel(const float* __restrict__ x,
     uint32_t count = per_task + (task_id < remainder ? 1 : 0);
 
     __nram__ float nram_tile[TILE_SIZE];
-    __nram__ float nram_max_val[1];
+    __nram__ float nram_max_val[2];
 
     for (uint32_t b = start; b < start + count; ++b) {
         uint32_t row_start_elem = b * dim_size;
