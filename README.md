@@ -31,145 +31,147 @@ git add . && git commit -m "feat: Add LeakyReLU implementation"
 
 ## ❓ Problems
 
-- [x] [001_LeakyReLU](LeakyReLU.mlu)
-- [ ] [002_matrix_scalar_multiplication](matrix_scalar_multiplication.mlu)
-- [ ] [003_LogSoftmax](LogSoftmax.mlu)
-- [ ] [004_batched_matrix_multiplication](batched_matrix_multiplication.mlu)
-- [x] [005_average_pooling_2d](average_pooling_2d.mlu)
-- [ ] [006_conv_depthwise_2D_square_input_square_kernel](conv_depthwise_2D_square_input_square_kernel.mlu)
-- [ ] [007_conv_depthwise_separable_2D](conv_depthwise_separable_2D.mlu)
-- [ ] [008_conv_pointwise_2D](conv_pointwise_2D.mlu)
-- [ ] [009_conv_standard_1D](conv_standard_1D.mlu)
-- [ ] [010_conv_standard_2D__square_input__square_kernel](conv_standard_2D__square_input__square_kernel.mlu)
-- [011_conv_transposed_1D](conv_transposed_1D.mlu)
-- [012_conv_transposed_2D__asymmetric_input__square_kernel](conv_transposed_2D__asymmetric_input__square_kernel.mlu)
-- [013_3D_tensor_matrix_multiplication](3D_tensor_matrix_multiplication.mlu)
-- [014_4D_tensor_matrix_multiplication](4D_tensor_matrix_multiplication.mlu)
-- [015_Matmul_for_lower_triangular_matrices](Matmul_for_lower_triangular_matrices.mlu)
-- [016_Matmul_for_symmetric_matrices](Matmul_for_symmetric_matrices.mlu)
-- [017_Matmul_for_upper_triangular_matrices](Matmul_for_upper_triangular_matrices.mlu)
-- [018_Matmul_with_diagonal_matrices_](Matmul_with_diagonal_matrices_.mlu)
-- [019_Matmul_with_irregular_shapes_](Matmul_with_irregular_shapes_.mlu)
-- [020_Matmul_with_large_K_dimension_](Matmul_with_large_K_dimension_.mlu)
-- [021_Matmul_with_small_K_dimension_](Matmul_with_small_K_dimension_.mlu)
-- [022_Matmul_with_transposed_both](Matmul_with_transposed_both.mlu)
-- [023_Matrix_vector_multiplication_](Matrix_vector_multiplication_.mlu)
-- [024_Square_matrix_multiplication_](Square_matrix_multiplication_.mlu)
-- [025_fused_matmul_fwd](fused_matmul_fwd.mlu)
-- [026_ELU](ELU.mlu)
-- [027_GELU](GELU.mlu)
-- [028_HardSigmoid](HardSigmoid.mlu)
-- [029_HardTanh](HardTanh.mlu)
-- [030_MinGPTNewGelu](MinGPTNewGelu.mlu)
-- [031_Softplus](Softplus.mlu)
-- [032_Softsign](Softsign.mlu)
-- [033_Swish](Swish.mlu)
-- [034_Argmax_over_a_dimension](Argmax_over_a_dimension.mlu)
-- [035_L1Norm_](L1Norm_.mlu)
-- [036_L2Norm_](L2Norm_.mlu)
-- [037_Max_reduction_over_a_dimension](Max_reduction_over_a_dimension.mlu)
-- [038_Product_reduction_over_a_dimension](Product_reduction_over_a_dimension.mlu)
-- [039_BatchNorm](BatchNorm.mlu)
-- [040_CosineSimilarityLoss](CosineSimilarityLoss.mlu)
-- [041_CrossEntropyLoss](CrossEntropyLoss.mlu)
-- [042_FrobeniusNorm_](FrobeniusNorm_.mlu)
-- [043_GroupNorm_](GroupNorm_.mlu)
-- [044_HingeLoss](HingeLoss.mlu)
-- [045_HuberLoss](HuberLoss.mlu)
-- [046_InstanceNorm](InstanceNorm.mlu)
-- [047_Max_Pooling_1D](Max_Pooling_1D.mlu)
-- [048_Max_Pooling_2D](Max_Pooling_2D.mlu)
-- [049_Max_Pooling_3D](Max_Pooling_3D.mlu)
-- [050_cumprod](cumprod.mlu)
-- [051_cumsum](cumsum.mlu)
-- [052_cumsum_exclusive](cumsum_exclusive.mlu)
-- [053_cumsum_reverse](cumsum_reverse.mlu)
-- [054_binned_gather](binned_gather.mlu)
-- [055_binned_scatter](binned_scatter.mlu)
-- [056_gather](gather.mlu)
-- [057_rotary_pos_emb_fusion](rotary_pos_emb_fusion.mlu)
-- [058_Softmax](Softmax.mlu)
-- [059_hstu_mask_var_len_fwd](hstu_mask_var_len_fwd.mlu)
-- [060_cross_entropy](cross_entropy.mlu)
-- [061_adaptiveaveragepool](adaptiveaveragepool.mlu)
-- [062_compute_agg](compute_agg.mlu)
-- [063_calc_block_sums](calc_block_sums.mlu)
-- [064_adaptive_average_pool_nhwc](adaptive_average_pool_nhwc.mlu)
-- [065_lpmax_cleanup](lpmax_cleanup.mlu)
-- [066_transform_vals](transform_vals.mlu)
-- [067_renormRowsL1](renormRowsL1.mlu)
-- [068_upsample_bilinear2d_out_frame](upsample_bilinear2d_out_frame.mlu)
-- [069_lstm_cell_forward](lstm_cell_forward.mlu)
-- [070_Sqrt](Sqrt.mlu)
-- [071_Cos](Cos.mlu)
-- [072_ElementwiseAdd](ElementwiseAdd.mlu)
-- [073_Power](Power.mlu)
-- [074_Std_reduction_over_dim](Std_reduction_over_dim.mlu)
-- [075_TopK](TopK.mlu)
-- [076_Sort](Sort.mlu)
-- [077_LogSumExp_over_dim](LogSumExp_over_dim.mlu)
-- [078_CumMin](CumMin.mlu)
-- [079_Global_sum](Global_sum.mlu)
-- [080_All_over_dim](All_over_dim.mlu)
-- [081_Sum_2D_reduction](Sum_2D_reduction.mlu)
-- [082_Scaled_Dot_Product_Attention](Scaled_Dot_Product_Attention.mlu)
-- [083_Causal_Self_Attention](Causal_Self_Attention.mlu)
-- [084_Cross_Attention](Cross_Attention.mlu)
-- [085_Linear](Linear.mlu)
-- [086_Batch_outer_product](Batch_outer_product.mlu)
-- [087_Hadamard_product](Hadamard_product.mlu)
-- [088_Matrix_trace](Matrix_trace.mlu)
-- [089_Diagonal_extraction](Diagonal_extraction.mlu)
-- [090_Einsum_4D_contract](Einsum_4D_contract.mlu)
-- [091_Matrix_inverse](Matrix_inverse.mlu)
-- [092_SVD_decomposition](SVD_decomposition.mlu)
-- [093_Batch_triangular_solve](Batch_triangular_solve.mlu)
-- [094_LayerNorm](LayerNorm.mlu)
-- [095_Add_RMSNorm](Add_RMSNorm.mlu)
-- [096_LocalResponseNorm](LocalResponseNorm.mlu)
-- [097_PixelShuffle](PixelShuffle.mlu)
-- [098_Attention_with_temperature](Attention_with_temperature.mlu)
-- [099_DropPath](DropPath.mlu)
-- [100_Adaptive_Max_Pool_2D](Adaptive_Max_Pool_2D.mlu)
-- [101_Max_Pool_2D_with_indices](Max_Pool_2D_with_indices.mlu)
-- [102_Adaptive_Average_Pool_3D](Adaptive_Average_Pool_3D.mlu)
-- [103_MSE_Loss](MSE_Loss.mlu)
-- [104_KL_Divergence_Loss](KL_Divergence_Loss.mlu)
-- [105_Embedding_lookup](Embedding_lookup.mlu)
-- [106_Embedding_bag_mean](Embedding_bag_mean.mlu)
-- [107_Sinusoidal_positional_encoding](Sinusoidal_positional_encoding.mlu)
-- [108_ALiBi_attention_bias](ALiBi_attention_bias.mlu)
-- [109_Scatter_add](Scatter_add.mlu)
-- [110_Gather_rows](Gather_rows.mlu)
-- [111_Masked_select](Masked_select.mlu)
-- [112_Index_put](Index_put.mlu)
-- [113_Upsample_nearest](Upsample_nearest.mlu)
-- [114_Pad_constant](Pad_constant.mlu)
-- [115_Unfold](Unfold.mlu)
-- [116_Grid_sample](Grid_sample.mlu)
-- [117_Masked_fill](Masked_fill.mlu)
-- [118_Where_conditional](Where_conditional.mlu)
-- [119_One_hot_encoding](One_hot_encoding.mlu)
-- [120_Masked_softmax](Masked_softmax.mlu)
-- [121_Scaled_masked_softmax](Scaled_masked_softmax.mlu)
-- [122_Prefix_sum_2D](Prefix_sum_2D.mlu)
-- [123_Masked_cumsum](Masked_cumsum.mlu)
-- [124_Weight_standardization](Weight_standardization.mlu)
-- [125_Conditional_LayerNorm](Conditional_LayerNorm.mlu)
-- [126_QR_decomposition](QR_decomposition.mlu)
-- [127_Cholesky_decomposition](Cholesky_decomposition.mlu)
-- [128_Batch_norm_1D](Batch_norm_1D.mlu)
-- [129_Attention_score_with_bias](Attention_score_with_bias.mlu)
-- [130_Attention_kv_cache](Attention_kv_cache.mlu)
-- [131_Relative_position_encoding](Relative_position_encoding.mlu)
-- [132_Sparse_embedding](Sparse_embedding.mlu)
-- [133_Triplet_loss](Triplet_loss.mlu)
-- [134_Depthwise_conv_2D](Depthwise_conv_2D.mlu)
-- [135_Dilated_conv_2D](Dilated_conv_2D.mlu)
-- [136_Grouped_conv_2D](Grouped_conv_2D.mlu)
-- [137_LSTM_forward](LSTM_forward.mlu)
-- [138_GRU_forward](GRU_forward.mlu)
-- [139_Sparse_attention_mask](Sparse_attention_mask.mlu)
+| Index | Problem | Author | AC |
+| ----- | ------- | ------ | -- |
+| 001 | [LeakyReLU](LeakyReLU.mlu) | @PRO-2684 | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/8397b30d21d27e99b5352e35e11a1d38e165bb33) |
+| 002 | [matrix_scalar_multiplication](matrix_scalar_multiplication.mlu) | N/A | 🔴 |
+| 003 | [LogSoftmax](LogSoftmax.mlu) | N/A | 🔴 |
+| 004 | [batched_matrix_multiplication](batched_matrix_multiplication.mlu) | N/A | 🔴 |
+| 005 | [average_pooling_2d](average_pooling_2d.mlu) | @PRO-2684 | [🟡](https://github.com/PRO-2684/AICS-openoperator/commit/185e723b2234759dc39b2f49c36d5b0c4edf4f55) |
+| 006 | [conv_depthwise_2D_square_input_square_kernel](conv_depthwise_2D_square_input_square_kernel.mlu) | N/A | 🔴 |
+| 007 | [conv_depthwise_separable_2D](conv_depthwise_separable_2D.mlu) | N/A | 🔴 |
+| 008 | [conv_pointwise_2D](conv_pointwise_2D.mlu) | N/A | 🔴 |
+| 009 | [conv_standard_1D](conv_standard_1D.mlu) | N/A | 🔴 |
+| 010 | [conv_standard_2D__square_input__square_kernel](conv_standard_2D__square_input__square_kernel.mlu) | N/A | 🔴 |
+| 011 | [conv_transposed_1D](conv_transposed_1D.mlu) | N/A | 🔴 |
+| 012 | [conv_transposed_2D__asymmetric_input__square_kernel](conv_transposed_2D__asymmetric_input__square_kernel.mlu) | N/A | 🔴 |
+| 013 | [3D_tensor_matrix_multiplication](3D_tensor_matrix_multiplication.mlu) | N/A | 🔴 |
+| 014 | [4D_tensor_matrix_multiplication](4D_tensor_matrix_multiplication.mlu) | N/A | 🔴 |
+| 015 | [Matmul_for_lower_triangular_matrices](Matmul_for_lower_triangular_matrices.mlu) | N/A | 🔴 |
+| 016 | [Matmul_for_symmetric_matrices](Matmul_for_symmetric_matrices.mlu) | N/A | 🔴 |
+| 017 | [Matmul_for_upper_triangular_matrices](Matmul_for_upper_triangular_matrices.mlu) | N/A | 🔴 |
+| 018 | [Matmul_with_diagonal_matrices_](Matmul_with_diagonal_matrices_.mlu) | N/A | 🔴 |
+| 019 | [Matmul_with_irregular_shapes_](Matmul_with_irregular_shapes_.mlu) | N/A | 🔴 |
+| 020 | [Matmul_with_large_K_dimension_](Matmul_with_large_K_dimension_.mlu) | N/A | 🔴 |
+| 021 | [Matmul_with_small_K_dimension_](Matmul_with_small_K_dimension_.mlu) | N/A | 🔴 |
+| 022 | [Matmul_with_transposed_both](Matmul_with_transposed_both.mlu) | N/A | 🔴 |
+| 023 | [Matrix_vector_multiplication_](Matrix_vector_multiplication_.mlu) | N/A | 🔴 |
+| 024 | [Square_matrix_multiplication_](Square_matrix_multiplication_.mlu) | N/A | 🔴 |
+| 025 | [fused_matmul_fwd](fused_matmul_fwd.mlu) | N/A | 🔴 |
+| 026 | [ELU](ELU.mlu) | N/A | 🔴 |
+| 027 | [GELU](GELU.mlu) | N/A | 🔴 |
+| 028 | [HardSigmoid](HardSigmoid.mlu) | N/A | 🔴 |
+| 029 | [HardTanh](HardTanh.mlu) | N/A | 🔴 |
+| 030 | [MinGPTNewGelu](MinGPTNewGelu.mlu) | N/A | 🔴 |
+| 031 | [Softplus](Softplus.mlu) | N/A | 🔴 |
+| 032 | [Softsign](Softsign.mlu) | N/A | 🔴 |
+| 033 | [Swish](Swish.mlu) | N/A | 🔴 |
+| 034 | [Argmax_over_a_dimension](Argmax_over_a_dimension.mlu) | N/A | 🔴 |
+| 035 | [L1Norm_](L1Norm_.mlu) | N/A | 🔴 |
+| 036 | [L2Norm_](L2Norm_.mlu) | N/A | 🔴 |
+| 037 | [Max_reduction_over_a_dimension](Max_reduction_over_a_dimension.mlu) | N/A | 🔴 |
+| 038 | [Product_reduction_over_a_dimension](Product_reduction_over_a_dimension.mlu) | N/A | 🔴 |
+| 039 | [BatchNorm](BatchNorm.mlu) | N/A | 🔴 |
+| 040 | [CosineSimilarityLoss](CosineSimilarityLoss.mlu) | N/A | 🔴 |
+| 041 | [CrossEntropyLoss](CrossEntropyLoss.mlu) | N/A | 🔴 |
+| 042 | [FrobeniusNorm_](FrobeniusNorm_.mlu) | N/A | 🔴 |
+| 043 | [GroupNorm_](GroupNorm_.mlu) | N/A | 🔴 |
+| 044 | [HingeLoss](HingeLoss.mlu) | N/A | 🔴 |
+| 045 | [HuberLoss](HuberLoss.mlu) | N/A | 🔴 |
+| 046 | [InstanceNorm](InstanceNorm.mlu) | N/A | 🔴 |
+| 047 | [Max_Pooling_1D](Max_Pooling_1D.mlu) | N/A | 🔴 |
+| 048 | [Max_Pooling_2D](Max_Pooling_2D.mlu) | N/A | 🔴 |
+| 049 | [Max_Pooling_3D](Max_Pooling_3D.mlu) | N/A | 🔴 |
+| 050 | [cumprod](cumprod.mlu) | N/A | 🔴 |
+| 051 | [cumsum](cumsum.mlu) | N/A | 🔴 |
+| 052 | [cumsum_exclusive](cumsum_exclusive.mlu) | N/A | 🔴 |
+| 053 | [cumsum_reverse](cumsum_reverse.mlu) | N/A | 🔴 |
+| 054 | [binned_gather](binned_gather.mlu) | N/A | 🔴 |
+| 055 | [binned_scatter](binned_scatter.mlu) | N/A | 🔴 |
+| 056 | [gather](gather.mlu) | N/A | 🔴 |
+| 057 | [rotary_pos_emb_fusion](rotary_pos_emb_fusion.mlu) | N/A | 🔴 |
+| 058 | [Softmax](Softmax.mlu) | N/A | 🔴 |
+| 059 | [hstu_mask_var_len_fwd](hstu_mask_var_len_fwd.mlu) | N/A | 🔴 |
+| 060 | [cross_entropy](cross_entropy.mlu) | N/A | 🔴 |
+| 061 | [adaptiveaveragepool](adaptiveaveragepool.mlu) | N/A | 🔴 |
+| 062 | [compute_agg](compute_agg.mlu) | N/A | 🔴 |
+| 063 | [calc_block_sums](calc_block_sums.mlu) | N/A | 🔴 |
+| 064 | [adaptive_average_pool_nhwc](adaptive_average_pool_nhwc.mlu) | N/A | 🔴 |
+| 065 | [lpmax_cleanup](lpmax_cleanup.mlu) | N/A | 🔴 |
+| 066 | [transform_vals](transform_vals.mlu) | N/A | 🔴 |
+| 067 | [renormRowsL1](renormRowsL1.mlu) | N/A | 🔴 |
+| 068 | [upsample_bilinear2d_out_frame](upsample_bilinear2d_out_frame.mlu) | N/A | 🔴 |
+| 069 | [lstm_cell_forward](lstm_cell_forward.mlu) | N/A | 🔴 |
+| 070 | [Sqrt](Sqrt.mlu) | N/A | 🔴 |
+| 071 | [Cos](Cos.mlu) | N/A | 🔴 |
+| 072 | [ElementwiseAdd](ElementwiseAdd.mlu) | N/A | 🔴 |
+| 073 | [Power](Power.mlu) | N/A | 🔴 |
+| 074 | [Std_reduction_over_dim](Std_reduction_over_dim.mlu) | N/A | 🔴 |
+| 075 | [TopK](TopK.mlu) | N/A | 🔴 |
+| 076 | [Sort](Sort.mlu) | N/A | 🔴 |
+| 077 | [LogSumExp_over_dim](LogSumExp_over_dim.mlu) | N/A | 🔴 |
+| 078 | [CumMin](CumMin.mlu) | N/A | 🔴 |
+| 079 | [Global_sum](Global_sum.mlu) | N/A | 🔴 |
+| 080 | [All_over_dim](All_over_dim.mlu) | N/A | 🔴 |
+| 081 | [Sum_2D_reduction](Sum_2D_reduction.mlu) | N/A | 🔴 |
+| 082 | [Scaled_Dot_Product_Attention](Scaled_Dot_Product_Attention.mlu) | N/A | 🔴 |
+| 083 | [Causal_Self_Attention](Causal_Self_Attention.mlu) | N/A | 🔴 |
+| 084 | [Cross_Attention](Cross_Attention.mlu) | N/A | 🔴 |
+| 085 | [Linear](Linear.mlu) | N/A | 🔴 |
+| 086 | [Batch_outer_product](Batch_outer_product.mlu) | N/A | 🔴 |
+| 087 | [Hadamard_product](Hadamard_product.mlu) | N/A | 🔴 |
+| 088 | [Matrix_trace](Matrix_trace.mlu) | N/A | 🔴 |
+| 089 | [Diagonal_extraction](Diagonal_extraction.mlu) | N/A | 🔴 |
+| 090 | [Einsum_4D_contract](Einsum_4D_contract.mlu) | N/A | 🔴 |
+| 091 | [Matrix_inverse](Matrix_inverse.mlu) | N/A | 🔴 |
+| 092 | [SVD_decomposition](SVD_decomposition.mlu) | N/A | 🔴 |
+| 093 | [Batch_triangular_solve](Batch_triangular_solve.mlu) | N/A | 🔴 |
+| 094 | [LayerNorm](LayerNorm.mlu) | N/A | 🔴 |
+| 095 | [Add_RMSNorm](Add_RMSNorm.mlu) | N/A | 🔴 |
+| 096 | [LocalResponseNorm](LocalResponseNorm.mlu) | N/A | 🔴 |
+| 097 | [PixelShuffle](PixelShuffle.mlu) | N/A | 🔴 |
+| 098 | [Attention_with_temperature](Attention_with_temperature.mlu) | N/A | 🔴 |
+| 099 | [DropPath](DropPath.mlu) | N/A | 🔴 |
+| 100 | [Adaptive_Max_Pool_2D](Adaptive_Max_Pool_2D.mlu) | N/A | 🔴 |
+| 101 | [Max_Pool_2D_with_indices](Max_Pool_2D_with_indices.mlu) | N/A | 🔴 |
+| 102 | [Adaptive_Average_Pool_3D](Adaptive_Average_Pool_3D.mlu) | N/A | 🔴 |
+| 103 | [MSE_Loss](MSE_Loss.mlu) | N/A | 🔴 |
+| 104 | [KL_Divergence_Loss](KL_Divergence_Loss.mlu) | N/A | 🔴 |
+| 105 | [Embedding_lookup](Embedding_lookup.mlu) | N/A | 🔴 |
+| 106 | [Embedding_bag_mean](Embedding_bag_mean.mlu) | N/A | 🔴 |
+| 107 | [Sinusoidal_positional_encoding](Sinusoidal_positional_encoding.mlu) | N/A | 🔴 |
+| 108 | [ALiBi_attention_bias](ALiBi_attention_bias.mlu) | N/A | 🔴 |
+| 109 | [Scatter_add](Scatter_add.mlu) | N/A | 🔴 |
+| 110 | [Gather_rows](Gather_rows.mlu) | N/A | 🔴 |
+| 111 | [Masked_select](Masked_select.mlu) | N/A | 🔴 |
+| 112 | [Index_put](Index_put.mlu) | N/A | 🔴 |
+| 113 | [Upsample_nearest](Upsample_nearest.mlu) | N/A | 🔴 |
+| 114 | [Pad_constant](Pad_constant.mlu) | N/A | 🔴 |
+| 115 | [Unfold](Unfold.mlu) | N/A | 🔴 |
+| 116 | [Grid_sample](Grid_sample.mlu) | N/A | 🔴 |
+| 117 | [Masked_fill](Masked_fill.mlu) | N/A | 🔴 |
+| 118 | [Where_conditional](Where_conditional.mlu) | N/A | 🔴 |
+| 119 | [One_hot_encoding](One_hot_encoding.mlu) | N/A | 🔴 |
+| 120 | [Masked_softmax](Masked_softmax.mlu) | N/A | 🔴 |
+| 121 | [Scaled_masked_softmax](Scaled_masked_softmax.mlu) | N/A | 🔴 |
+| 122 | [Prefix_sum_2D](Prefix_sum_2D.mlu) | N/A | 🔴 |
+| 123 | [Masked_cumsum](Masked_cumsum.mlu) | N/A | 🔴 |
+| 124 | [Weight_standardization](Weight_standardization.mlu) | N/A | 🔴 |
+| 125 | [Conditional_LayerNorm](Conditional_LayerNorm.mlu) | N/A | 🔴 |
+| 126 | [QR_decomposition](QR_decomposition.mlu) | N/A | 🔴 |
+| 127 | [Cholesky_decomposition](Cholesky_decomposition.mlu) | N/A | 🔴 |
+| 128 | [Batch_norm_1D](Batch_norm_1D.mlu) | N/A | 🔴 |
+| 129 | [Attention_score_with_bias](Attention_score_with_bias.mlu) | N/A | 🔴 |
+| 130 | [Attention_kv_cache](Attention_kv_cache.mlu) | N/A | 🔴 |
+| 131 | [Relative_position_encoding](Relative_position_encoding.mlu) | N/A | 🔴 |
+| 132 | [Sparse_embedding](Sparse_embedding.mlu) | N/A | 🔴 |
+| 133 | [Triplet_loss](Triplet_loss.mlu) | N/A | 🔴 |
+| 134 | [Depthwise_conv_2D](Depthwise_conv_2D.mlu) | N/A | 🔴 |
+| 135 | [Dilated_conv_2D](Dilated_conv_2D.mlu) | N/A | 🔴 |
+| 136 | [Grouped_conv_2D](Grouped_conv_2D.mlu) | N/A | 🔴 |
+| 137 | [LSTM_forward](LSTM_forward.mlu) | N/A | 🔴 |
+| 138 | [GRU_forward](GRU_forward.mlu) | N/A | 🔴 |
+| 139 | [Sparse_attention_mask](Sparse_attention_mask.mlu) | N/A | 🔴 |
 
 ## 提交说明
 
