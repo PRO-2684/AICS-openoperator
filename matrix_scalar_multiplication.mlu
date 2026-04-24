@@ -41,9 +41,6 @@ __mlu_entry__ void matrix_scalar_mul_kernel(const float* __restrict__ A,
 }
 
 torch::Tensor bang_func(torch::Tensor input, double scalar) {
-    TORCH_CHECK(input.is_contiguous(), "input must be contiguous");
-    TORCH_CHECK(input.scalar_type() == at::kFloat, "input must be float32");
-
     auto output = torch::empty_like(input);
     int32_t total = static_cast<int32_t>(input.numel());
     float scalar_f = static_cast<float>(scalar);
@@ -52,7 +49,10 @@ torch::Tensor bang_func(torch::Tensor input, double scalar) {
         return output;
     }
 
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+    cnrtQueue_t queue;
+    CNRT_CHECK(cnrtSetDevice(0));
+    CNRT_CHECK(cnrtQueueCreate(&queue));
+
     cnrtDim3_t dim = {TASK_COUNT, 1, 1};
     cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
 
@@ -62,6 +62,9 @@ torch::Tensor bang_func(torch::Tensor input, double scalar) {
         scalar_f,
         total
     );
+
+    CNRT_CHECK(cnrtQueueSync(queue));
+    CNRT_CHECK(cnrtQueueDestroy(queue));
 
     return output;
 }

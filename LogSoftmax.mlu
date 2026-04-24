@@ -24,7 +24,6 @@ __mlu_entry__ void logsoftmax_kernel(const float* __restrict__ x,
 
     __nram__ float nram_tile[TILE_SIZE];
     __nram__ float nram_max_val[1];
-    __nram__ float nram_sum_val[1];
 
     for (uint32_t b = start; b < start + count; ++b) {
         uint32_t row_start_elem = b * dim_size;
@@ -84,9 +83,6 @@ __mlu_entry__ void logsoftmax_kernel(const float* __restrict__ x,
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
-    TORCH_CHECK(x.is_contiguous(), "input must be contiguous");
-    TORCH_CHECK(x.scalar_type() == at::kFloat, "input must be float32");
-
     auto output = torch::empty_like(x);
     int batch_size = x.size(0);
     int dim_size = x.size(1);
