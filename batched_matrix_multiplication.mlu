@@ -3,7 +3,10 @@
 #include <torch/extension.h>
 #include <framework/core/MLUStream.h>
 
-#define TASK_COUNT 32
+#define M_TILE 64
+#define K_TILE 256
+#define N_TILE 64
+#define TASK_COUNT 128
 
 __mlu_entry__ void batched_matmul_kernel(const half* __restrict__ A,
                                          const half* __restrict__ B,
@@ -16,29 +19,43 @@ __mlu_entry__ void batched_matmul_kernel(const half* __restrict__ A,
 
     uint32_t task_id = taskId;
     uint32_t task_num = taskDim;
-    uint32_t per_task = batch_size / task_num;
-    uint32_t remainder = batch_size % task_num;
-    uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
-    uint32_t count = per_task + (task_id < remainder ? 1 : 0);
 
-    __nram__ half nram_A[4096];
-    __nram__ half nram_B[4096];
-    __nram__ float nram_C[4096];
+    if (task_id >= batch_size) return;
 
-    for (uint32_t b = start; b < start + count; ++b) {
-        const half* A_batch = A + b * m * k;
-        const half* B_batch = B + b * k * n;
-        half* C_batch = C + b * m * n;
+    const half* A_batch = A + task_id * m * k;
+    const half* B_batch = B + task_id * k * n;
+    half* C_batch = C + task_id * m * n;
 
-        for (int32_t m_idx = 0; m_idx < m; ++m_idx) {
-            for (int32_t n_idx = 0; n_idx < n; ++n_idx) {
-                float sum_val = 0.0f;
+    __nram__ half nram_A[M_TILE * K_TILE];
+    __nram__ half nram_B_col[K_TILE * N_TILE];
+    __nram__ float nram_C[M_TILE * N_TILE];
+    __wram__ half wram_B[K_TILE * N_TILE];
 
-                for (int32_t k_idx = 0; k_idx < k; ++k_idx) {
-                    sum_val += (float)A_batch[m_idx * k + k_idx] * (float)B_batch[k_idx * n + n_idx];
+    for (int32_t m_off = 0; m_off < m; m_off += M_TILE) {
+        int32_t m_cur = (m - m_off > M_TILE) ? M_TILE : (m - m_off);
+        for (int32_t n_off = 0; n_off < n; n_off += N_TILE) {
+            int32_t n_cur = (n - n_off > N_TILE) ? N_TILE : (n - n_off);
+
+            for (int32_t k_off = 0; k_off < k; k_off += K_TILE) {
+                int32_t k_cur = (k - k_off > K_TILE) ? K_TILE : (k - k_off);
+
+                __memcpy(nram_A, A_batch + m_off * k + k_off, m_cur * k_cur * sizeof(half), GDRAM2NRAM);
+
+                for (int32_t ki = 0; ki < k_cur; ++ki) {
+                    for (int32_t ni = 0; ni < n_cur; ++ni) {
+                        nram_B_col[ni * k_cur + ki] = B_batch[(k_off + ki) * n + n_off + ni];
+                    }
                 }
 
-                C_batch[m_idx * n + n_idx] = (half)sum_val;
+                __memcpy(wram_B, nram_B_col, k_cur * n_cur * sizeof(half), NRAM2WRAM);
+
+                __bang_matmul(nram_C, nram_A, wram_B, m_cur, k_cur, n_cur, 0);
+
+                for (int32_t mi = 0; mi < m_cur; ++mi) {
+                    for (int32_t ni = 0; ni < n_cur; ++ni) {
+                        C_batch[(m_off + mi) * n + n_off + ni] = (half)nram_C[mi * n_cur + ni];
+                    }
+                }
             }
         }
     }
