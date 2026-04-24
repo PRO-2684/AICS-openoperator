@@ -19,7 +19,7 @@
 
 ```shell
 # Not working yet
-./run.sh LeakyReLU.mlu
+./check.sh LeakyReLU.mlu
 ```
 
 ### Submission
