@@ -33,11 +33,11 @@ git add . && git commit -m "feat: Add LeakyReLU implementation"
 
 | Index | Problem | Author | AC |
 | ----- | ------- | ------ | -- |
-| 001 | [LeakyReLU](LeakyReLU.mlu) | @PRO-2684 | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/8397b30d21d27e99b5352e35e11a1d38e165bb33) |
+| 001 | [LeakyReLU](LeakyReLU.mlu) | [@PRO-2684](https://github.com/PRO-2684/) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/8397b30d21d27e99b5352e35e11a1d38e165bb33) |
 | 002 | [matrix_scalar_multiplication](matrix_scalar_multiplication.mlu) | N/A | 🔴 |
 | 003 | [LogSoftmax](LogSoftmax.mlu) | N/A | 🔴 |
 | 004 | [batched_matrix_multiplication](batched_matrix_multiplication.mlu) | N/A | 🔴 |
-| 005 | [average_pooling_2d](average_pooling_2d.mlu) | @PRO-2684 | [🟡](https://github.com/PRO-2684/AICS-openoperator/commit/185e723b2234759dc39b2f49c36d5b0c4edf4f55) |
+| 005 | [average_pooling_2d](average_pooling_2d.mlu) | [@PRO-2684](https://github.com/PRO-2684/) | [🟡](doc/average_pooling_2d.md) |
 | 006 | [conv_depthwise_2D_square_input_square_kernel](conv_depthwise_2D_square_input_square_kernel.mlu) | N/A | 🔴 |
 | 007 | [conv_depthwise_separable_2D](conv_depthwise_separable_2D.mlu) | N/A | 🔴 |
 | 008 | [conv_pointwise_2D](conv_pointwise_2D.mlu) | N/A | 🔴 |
