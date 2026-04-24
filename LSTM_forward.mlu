@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 137 137_LSTM_forward
+// Category: fused
+// Difficulty: hard
+// DType: float16
+// Description: 实现一个 BangC 算子，计算多层长短期记忆网络（LSTM）的前向传播并输出所有时间步的隐藏状态序列。输入包括形状为 `[batch, seq, input_size]` 的张量 `x`，以及定义网络结构的标量参数输入维度 `input_size`、隐藏层维度 `hidden_size` 和循环层数 `num_layers`；输出张量的形状为 `[batch, seq, hidden_size]`。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int input_size, int hidden_size, int num_layers);
+
+torch::Tensor bang_func(torch::Tensor x, int input_size, int hidden_size, int num_layers) {
+  TORCH_CHECK(false, "TODO: implement LSTM_forward");
+}

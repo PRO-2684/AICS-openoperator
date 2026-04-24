@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 118 118_Where_conditional
+// Category: other
+// Difficulty: easy
+// DType: float16
+// Description: 实现一个 BangC 算子，根据布尔条件张量逐元素从两个输入张量中选择数值。输入包括形状均为 `[M, N]` 的条件张量 `condition` 以及数据张量 `x` 和 `y`；输出结果张量的形状与输入一致。
+// Wrapper: torch::Tensor bang_func(torch::Tensor condition, torch::Tensor x, torch::Tensor y);
+
+torch::Tensor bang_func(torch::Tensor condition, torch::Tensor x, torch::Tensor y) {
+  TORCH_CHECK(false, "TODO: implement Where_conditional");
+}

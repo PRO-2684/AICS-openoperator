@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 117 117_Masked_fill
+// Category: other
+// Difficulty: easy
+// DType: float16
+// Description: 实现一个 BangC 算子，根据掩码张量对输入张量中对应位置的元素进行数值填充。输入包括形状为 `[batch, seq, d]` 的待填充张量 `x`、形状相同的布尔掩码张量 `mask` 以及一个用于填充的浮点标量 `fill_value`；输出结果张量的形状与 `x` 相同。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value);
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
+  TORCH_CHECK(false, "TODO: implement Masked_fill");
+}

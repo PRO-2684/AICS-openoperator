@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 110 110_Gather_rows
+// Category: io
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，在输入张量的第二个维度上根据提供的索引提取元素。输入包括形状为 `[batch, N]` 的数据张量 `input` 和形状为 `[batch, K]` 的索引张量 `index`；输出张量与 `index` 形状相同，即 `[batch, K]`。
+// Wrapper: torch::Tensor bang_func(torch::Tensor input, torch::Tensor index);
+
+torch::Tensor bang_func(torch::Tensor input, torch::Tensor index) {
+  TORCH_CHECK(false, "TODO: implement Gather_rows");
+}

@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 055 055_binned_scatter
+// Category: io
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，执行混合专家模型（MoE）中的反向 Scatter-Reduce 操作，将按专家分桶存储的特征映射回原始 Token 并进行加权求和。输入包括形状为 `[num_experts, expert_capacity, hidden_size]` 的专家特征张量 `x`、形状为 `[tokens * top_k]` 的路由索引张量 `indices`、形状相同的可选权重张量 `weights`、形状为 `[num_experts]` 的专家分桶边界前缀和张量 `bins` 以及表示每个 Token 选取专家数量的标量 `top_k`。算子最终输出形状为 `[tokens, hidden_size]` 的还原后张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices, torch::Tensor weights, torch::Tensor bins, int top_k);
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices, torch::Tensor weights, torch::Tensor bins, int top_k) {
+  TORCH_CHECK(false, "TODO: implement binned_scatter");
+}

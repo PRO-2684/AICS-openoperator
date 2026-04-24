@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 016 016_Matmul_for_symmetric_matrices
+// Category: matrix
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，计算两个对称矩阵的矩阵乘法。输入包括两个形状均为 `[N, N]` 的对称矩阵 `A` 和 `B`；输出结果为形状是 `[N, N]` 的张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor A, torch::Tensor B);
+
+torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
+  TORCH_CHECK(false, "TODO: implement Matmul_for_symmetric_matrices");
+}

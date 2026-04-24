@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 114 114_Pad_constant
+// Category: other
+// Difficulty: easy
+// DType: float16
+// Description: 实现一个 BangC 算子，对输入张量进行常数边界填充。输入包括形状为 `[N, C, H, W]` 的张量 `x`，规定各维度填充长度的序列 `pad`，以及填充使用的常数标量 `value`；输出为填充后的张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, std::vector<int64_t> pad, double value);
+
+torch::Tensor bang_func(torch::Tensor x, std::vector<int64_t> pad, double value) {
+  TORCH_CHECK(false, "TODO: implement Pad_constant");
+}

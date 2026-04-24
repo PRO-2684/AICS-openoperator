@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 129 129_Attention_score_with_bias
+// Category: attention
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，执行带偏置项的缩放点积注意力（Scaled Dot-Product Attention）计算。输入包含形状均为 `[batch, heads, seq, dim]` 的查询张量 `q`、键张量 `k` 和值张量 `v`，以及形状为 `[1, heads, seq, seq]` 的偏置张量 `bias`；算子输出为注意力加权后的结果，形状与 `q` 保持一致。
+// Wrapper: torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor bias);
+
+torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor bias) {
+  TORCH_CHECK(false, "TODO: implement Attention_score_with_bias");
+}

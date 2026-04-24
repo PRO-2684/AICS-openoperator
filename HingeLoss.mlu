@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 044 044_HingeLoss
+// Category: fused
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，计算二分类任务中的 Hinge Loss 损失函数。输入包括形状均为 `[batch_size, dim]` 的预测得分张量 `predictions` 和目标标签张量 `targets`；输出为对所有样本损失项 `max(0, 1 - predictions * targets)` 求取算术平均值后的标量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets);
+
+torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
+  TORCH_CHECK(false, "TODO: implement HingeLoss");
+}

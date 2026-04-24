@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 122 122_Prefix_sum_2D
+// Category: cum
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对三维张量在高度和宽度维度上依次执行累加求和操作，即实现 2D 累加和（2D Cumsum）。输入为形状为 `[batch, H, W]` 的张量 `x`；输出为相同形状的张量，表示输入在 `H` 和 `W` 两个维度上双重累加后的结果。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x);
+
+torch::Tensor bang_func(torch::Tensor x) {
+  TORCH_CHECK(false, "TODO: implement Prefix_sum_2D");
+}

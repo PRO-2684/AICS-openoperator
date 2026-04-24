@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 115 115_Unfold
+// Category: other
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对输入的四维张量执行滑窗采样操作，将局部区域展开为连续的列向量。输入包括形状为 `[N, C, H, W]` 的张量 `input`，以及用于控制采样逻辑的标量参数窗口大小 `kernel_size`、步长 `stride` 和填充宽度 `padding`；输出为展开后的张量，其形状由输入尺寸与滑动窗口参数共同决定。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride, int padding);
+
+torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride, int padding) {
+  TORCH_CHECK(false, "TODO: implement Unfold");
+}

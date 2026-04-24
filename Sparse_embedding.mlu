@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 132 132_Sparse_embedding
+// Category: io
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，根据索引张量从权重矩阵中查找并提取对应的嵌入向量。输入包括形状为 `[batch, seq_len]` 的索引张量 `x` 和形状为 `[vocab_size, emb_dim]` 的权重矩阵 `weight`；输出为形状是 `[batch, seq_len, emb_dim]` 的特征张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int vocab_size, int emb_dim);
+
+torch::Tensor bang_func(torch::Tensor x, int vocab_size, int emb_dim) {
+  TORCH_CHECK(false, "TODO: implement Sparse_embedding");
+}

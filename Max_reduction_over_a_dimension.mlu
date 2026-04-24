@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 037 037_Max_reduction_over_a_dimension
+// Category: reduce
+// Difficulty: easy
+// DType: float16
+// Description: 实现一个 BangC 算子，对输入张量在指定维度上进行最大值归约（Max Reduction）计算。输入包括形状为 `[d_0, d_1, ..., d_{n-1}]` 的张量 `x` 以及指示归约轴的整数标量 `dim`；输出为在该维度提取最大值后形成的张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int dim);
+
+torch::Tensor bang_func(torch::Tensor x, int dim) {
+  TORCH_CHECK(false, "TODO: implement Max_reduction_over_a_dimension");
+}

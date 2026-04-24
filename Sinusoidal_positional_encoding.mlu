@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 107 107_Sinusoidal_positional_encoding
+// Category: embedding
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对输入张量执行正弦位置编码（Sinusoidal Positional Encoding）的加法操作。输入包括形状为 `[batch, seq, d_model]` 的数据张量 `x` 以及预计算的形状为 `[max_len, d_model]` 的位置编码张量 `pe`；输出结果为 `x` 与 `pe` 截取对应序列长度并广播后相加的张量，形状为 `[batch, seq, d_model]`。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len);
+
+torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len) {
+  TORCH_CHECK(false, "TODO: implement Sinusoidal_positional_encoding");
+}

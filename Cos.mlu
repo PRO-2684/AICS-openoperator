@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 071 071_Cos
+// Category: pointwise
+// Difficulty: easy
+// DType: float16
+// Description: 实现一个 BangC 算子，计算输入张量中各元素的余弦值。输入包括形状为 `[batch_size, dim]` 的张量 `x`；输出张量与输入形状相同。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x);
+
+torch::Tensor bang_func(torch::Tensor x) {
+  TORCH_CHECK(false, "TODO: implement Cos");
+}

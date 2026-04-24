@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 121 121_Scaled_masked_softmax
+// Category: attention
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对注意力权重张量进行缩放、掩码填充并执行 Softmax 归一化。输入包括形状为 `[batch, heads, seq_len, seq_len]` 的权重张量 `attn_weight`、形状为 `[batch, heads, seq_len, seq_len]` 的布尔掩码 `mask` 以及 float 类型的缩放因子 `scale`；算子对输入进行缩放处理和掩码填充后，在最后一个维度计算 Softmax 结果。
+// Wrapper: torch::Tensor bang_func(torch::Tensor attn_weight, torch::Tensor mask, double scale);
+
+torch::Tensor bang_func(torch::Tensor attn_weight, torch::Tensor mask, double scale) {
+  TORCH_CHECK(false, "TODO: implement Scaled_masked_softmax");
+}

@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 045 045_HuberLoss
+// Category: fused
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，计算预测张量与目标张量之间的 Smooth L1 Loss（即 Huber Loss）。输入包括形状均为 `[batch, dim]` 的预测张量 `predictions` 和目标张量 `targets`；输出为按照 Smooth L1 公式计算得到的损失结果。
+// Wrapper: torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets);
+
+torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
+  TORCH_CHECK(false, "TODO: implement HuberLoss");
+}

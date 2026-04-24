@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 034 034_Argmax_over_a_dimension
+// Category: reduce
+// Difficulty: easy
+// DType: float16
+// Description: 实现一个 BangC 算子，沿指定维度计算输入张量的最大值索引（Argmax）。输入包括形状为 `[D_0, D_1, ..., D_{n-1}]` 的张量 `x` 以及一个用于指定规约维度的整数参数 `dim`；输出为移除该维度后的索引张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int dim);
+
+torch::Tensor bang_func(torch::Tensor x, int dim) {
+  TORCH_CHECK(false, "TODO: implement Argmax_over_a_dimension");
+}

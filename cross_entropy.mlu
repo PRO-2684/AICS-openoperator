@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 060 060_cross_entropy
+// Category: loss
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，支持标签平滑（Label Smoothing）和忽略特定索引值的交叉熵损失计算。输入包括形状为 `[batch, seq_len, vocab]` 的预测对数概率 `_input`、形状为 `[batch * seq_len]` 的目标标签 `target`，以及 `label_smoothing`、`reduce_loss` 和 `ignore_idx` 等控制参数。该算子根据归约标志返回标量形式或形状为 `[batch, seq_len]` 的逐元素损失张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target, torch::Tensor label_smoothing, torch::Tensor reduce_loss, torch::Tensor dist_process_group, torch::Tensor ignore_idx);
+
+torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target, torch::Tensor label_smoothing, torch::Tensor reduce_loss, torch::Tensor dist_process_group, torch::Tensor ignore_idx) {
+  TORCH_CHECK(false, "TODO: implement cross_entropy");
+}

@@ -1,3 +1,4 @@
 .ssh/
 target/
 ref/
+**/__pycache__

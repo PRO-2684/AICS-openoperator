@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 093 093_Batch_triangular_solve
+// Category: matrix
+// Difficulty: hard
+// DType: float16
+// Description: 实现一个 BangC 算子，用于求解上三角线性方程组。输入包括形状为 `[batch, N, N]` 的上三角系数矩阵 `A` 以及形状为 `[batch, N, K]` 的右端项张量 `b`；输出为形状与 `b` 相同的线性方程组的解。
+// Wrapper: torch::Tensor bang_func(torch::Tensor A, torch::Tensor b);
+
+torch::Tensor bang_func(torch::Tensor A, torch::Tensor b) {
+  TORCH_CHECK(false, "TODO: implement Batch_triangular_solve");
+}

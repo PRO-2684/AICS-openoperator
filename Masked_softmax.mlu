@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 120 120_Masked_softmax
+// Category: other
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对输入张量执行带掩码的 Softmax 归一化处理。输入包括形状为 `[batch, heads, seq, seq]` 的得分张量 `x` 和形状为 `[batch, 1, seq, seq]` 的布尔掩码张量 `mask`；该算子先根据 `mask` 将 `x` 的无效位置填充为负无穷大，随后在最后一个维度进行 Softmax 计算。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask);
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask) {
+  TORCH_CHECK(false, "TODO: implement Masked_softmax");
+}

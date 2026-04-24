@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 088 088_Matrix_trace
+// Category: matrix
+// Difficulty: easy
+// DType: float16
+// Description: 实现一个 BangC 算子，计算输入张量最后两个维度组成的各矩阵的迹，即对角线元素之和。输入为张量 `A`，其形状为 `[batch, N, N]`；输出为求和后的结果，其形状为 `[batch]`。
+// Wrapper: torch::Tensor bang_func(torch::Tensor A);
+
+torch::Tensor bang_func(torch::Tensor A) {
+  TORCH_CHECK(false, "TODO: implement Matrix_trace");
+}

@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 013 013_3D_tensor_matrix_multiplication
+// Category: matrix
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，计算三维张量与二维矩阵的乘法。输入包括形状为 `[N, M, K]` 的三维张量 `A` 以及形状为 `[K, L]` 的二维矩阵 `B`；输出为形状为 `[N, M, L]` 的张量，其结果由 `A` 的最后两维构成的矩阵与 `B` 相乘得到。
+// Wrapper: torch::Tensor bang_func(torch::Tensor A, torch::Tensor B);
+
+torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
+  TORCH_CHECK(false, "TODO: implement 3D_tensor_matrix_multiplication");
+}

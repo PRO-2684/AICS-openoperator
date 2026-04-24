@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 069 069_lstm_cell_forward
+// Category: fuse
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，执行 LSTM 单元的前向门控计算与细胞状态更新，生成当前时刻的隐藏状态。输入包括门控输入张量 `input` 与 `hidden`（形状均为 `[batch, 4, hsz]`）、偏置项 `bias1` 与 `bias2`（形状均为 `[4, hsz]`）以及当前细胞状态 `cx`（形状为 `[batch, hsz]`）；同时需传入标量参数隐藏层维度 `hsz` 及总元素个数 `totalElements`。算子对各门控信号应用 Sigmoid 和 Tanh 激活并完成状态融合，最终输出形状为 `[totalElements]` 的更新后隐藏状态。
+// Wrapper: torch::Tensor bang_func(torch::Tensor input, torch::Tensor hidden, torch::Tensor bias1, torch::Tensor bias2, torch::Tensor cx, int hsz, int totalElements);
+
+torch::Tensor bang_func(torch::Tensor input, torch::Tensor hidden, torch::Tensor bias1, torch::Tensor bias2, torch::Tensor cx, int hsz, int totalElements) {
+  TORCH_CHECK(false, "TODO: implement lstm_cell_forward");
+}

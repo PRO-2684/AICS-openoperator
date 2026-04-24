@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 095 095_Add_RMSNorm
+// Category: fused
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，执行张量逐元素加法与均方根归一化（RMSNorm）的融合计算。输入包括形状均为 `[batch, seq, d_model]` 的张量 `x` 与 `residual`、形状为 `[d_model]` 的权重张量 `weight` 以及用于数值稳定的浮点数标量 `eps`；输出为加法结果经归一化并缩放后的张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, torch::Tensor residual, torch::Tensor weight, int dim, double eps);
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor residual, torch::Tensor weight, int dim, double eps) {
+  TORCH_CHECK(false, "TODO: implement Add_RMSNorm");
+}

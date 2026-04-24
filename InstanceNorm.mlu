@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 046 046_InstanceNorm
+// Category: fused
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对四维输入张量执行实例归一化（Instance Normalization）处理。输入为形状为 `[batch_size, num_features, height, width]` 的张量 `x`，该算子在每个样本的每个通道内独立计算均值和方差进行归一化；输出张量的形状与输入 `x` 相同。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int num_features);
+
+torch::Tensor bang_func(torch::Tensor x, int num_features) {
+  TORCH_CHECK(false, "TODO: implement InstanceNorm");
+}

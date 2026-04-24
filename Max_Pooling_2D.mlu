@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 048 048_Max_Pooling_2D
+// Category: pool
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对输入张量执行二维最大池化（Max Pooling 2D）操作。输入包括形状为 `[batch_size, channels, height, width]` 的张量 `x`，以及用于定义池化窗口性质的标量参数 `kernel_size`、`stride`、`padding` 和 `dilation`；输出为经过最大池化处理后的四维张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride, int padding, int dilation);
+
+torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride, int padding, int dilation) {
+  TORCH_CHECK(false, "TODO: implement Max_Pooling_2D");
+}

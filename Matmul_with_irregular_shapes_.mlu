@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 019 019_Matmul_with_irregular_shapes_
+// Category: matrix
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，完成两个二维矩阵的乘法运算。输入包括形状为 `[M, K]` 的矩阵 `A` 以及形状为 `[K, N]` 的矩阵 `B`；输出结果矩阵的形状为 `[M, N]`。
+// Wrapper: torch::Tensor bang_func(torch::Tensor A, torch::Tensor B);
+
+torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
+  TORCH_CHECK(false, "TODO: implement Matmul_with_irregular_shapes_");
+}

@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 119 119_One_hot_encoding
+// Category: other
+// Difficulty: easy
+// DType: float16
+// Description: 实现一个 BangC 算子，将输入的类别索引张量转换为 float 类型的 one-hot 编码表示。输入包括形状为 `[batch]` 的索引张量 `x` 以及表示类别总数的整数 `num_classes`；输出为形状为 `[batch, num_classes]` 的浮点型张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int num_classes);
+
+torch::Tensor bang_func(torch::Tensor x, int num_classes) {
+  TORCH_CHECK(false, "TODO: implement One_hot_encoding");
+}

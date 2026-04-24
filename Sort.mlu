@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 076 076_Sort
+// Category: reduce
+// Difficulty: easy
+// DType: float16
+// Description: 实现一个 BangC 算子，对输入张量在指定维度上执行排序操作并输出排序后的数值结果。输入包括形状为 `[D0, D1, ..., DN]` 的张量 `x`，以及用于指定排序轴的整数 `dim` 和控制排序顺序（升序或降序）的布尔值 `descending`；输出张量与 `x` 形状相同。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int dim, bool descending);
+
+torch::Tensor bang_func(torch::Tensor x, int dim, bool descending) {
+  TORCH_CHECK(false, "TODO: implement Sort");
+}

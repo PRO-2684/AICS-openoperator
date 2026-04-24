@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 139 139_Sparse_attention_mask
+// Category: attention
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，执行带滑动窗口掩码的局部缩放点积注意力计算。输入包括形状均为 `[batch, heads, seq, dim]` 的张量 `q`、`k`、`v` 以及定义窗口半径的整数参数 `window_size`；该算子仅计算距离在 `window_size` 以内的 token 间的注意力权重，输出张量形状与 `q` 保持一致。
+// Wrapper: torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v, int window_size);
+
+torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v, int window_size) {
+  TORCH_CHECK(false, "TODO: implement Sparse_attention_mask");
+}

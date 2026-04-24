@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 049 049_Max_Pooling_3D
+// Category: pool
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对五维输入张量执行三维最大池化（Max Pooling 3D）操作。输入包括形状为 `[batch_size, channels, dim1, dim2, dim3]` 的张量 `x`；同时需参考池化核尺寸 `kernel_size`、步长 `stride`、填充 `padding`、空洞率 `dilation` 及 `ceil_mode` 等参数来确定滑动窗口的行为与输出形状。该算子输出在空间维度完成特征提取后的张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride, int padding, int dilation, bool return_indices, bool ceil_mode);
+
+torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride, int padding, int dilation, bool return_indices, bool ceil_mode) {
+  TORCH_CHECK(false, "TODO: implement Max_Pooling_3D");
+}

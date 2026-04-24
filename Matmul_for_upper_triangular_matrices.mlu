@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 017 017_Matmul_for_upper_triangular_matrices
+// Category: matrix
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，计算两个上三角矩阵的乘积并保留其上三角部分。输入包括形状均为 `[N, N]` 的张量 `A` 和 `B`；输出为形状相同的上三角矩阵。
+// Wrapper: torch::Tensor bang_func(torch::Tensor A, torch::Tensor B);
+
+torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
+  TORCH_CHECK(false, "TODO: implement Matmul_for_upper_triangular_matrices");
+}

@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 101 101_Max_Pool_2D_with_indices
+// Category: pool
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对四维张量执行二维最大池化（Max Pooling 2D）运算，并同步返回池化结果及其对应的最大值索引。输入包括形状为 `[batch, channel, height, width]` 的张量 `x`，以及用于定义窗口大小和滑动步长的标量 `kernel_size` 与 `stride`；输出为池化后的张量及其对应的索引张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride);
+
+torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride) {
+  TORCH_CHECK(false, "TODO: implement Max_Pool_2D_with_indices");
+}

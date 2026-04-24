@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 018 018_Matmul_with_diagonal_matrices_
+// Category: matrix
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，计算对角矩阵与常规矩阵的乘积，实现对输入矩阵每一行的按元素缩放。输入包括表示对角线元素的向量 `A`，其形状为 `[N]`，以及待相乘的二维矩阵 `B`，其形状为 `[N, M]`；输出张量的形状与 `B` 一致。
+// Wrapper: torch::Tensor bang_func(torch::Tensor A, torch::Tensor B);
+
+torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
+  TORCH_CHECK(false, "TODO: implement Matmul_with_diagonal_matrices_");
+}

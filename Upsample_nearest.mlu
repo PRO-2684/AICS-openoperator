@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 113 113_Upsample_nearest
+// Category: other
+// Difficulty: easy
+// DType: float16
+// Description: 实现一个 BangC 算子，采用最近邻插值算法对四维输入张量进行空间维度的上采样。输入包括形状为 `[batch, C, H, W]` 的张量 `x` 以及表示宽高缩放倍数的整数 `scale_factor`；输出张量的形状为 `[batch, C, H * scale_factor, W * scale_factor]`。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int scale_factor);
+
+torch::Tensor bang_func(torch::Tensor x, int scale_factor) {
+  TORCH_CHECK(false, "TODO: implement Upsample_nearest");
+}

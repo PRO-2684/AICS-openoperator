@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 040 040_CosineSimilarityLoss
+// Category: fused
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，计算预测张量与目标张量之间的平均余弦相似度损失。输入包括形状均为 `[batch_size, dim]` 的张量 `predictions` 和 `targets`；该算子在特征维度上计算两组向量的余弦相似度，并返回 $1$ 减去该相似度后的算术平均值。
+// Wrapper: torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets);
+
+torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
+  TORCH_CHECK(false, "TODO: implement CosineSimilarityLoss");
+}

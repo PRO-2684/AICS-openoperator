@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 050 050_cumprod
+// Category: cum
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，沿着指定维度对输入张量进行累乘运算。输入包括一个形状为 `[batch_size, *input_shape]` 的张量 `x` 以及用于指定累乘轴的整数参数 `dim`；输出张量的形状与 `x` 保持一致。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int dim);
+
+torch::Tensor bang_func(torch::Tensor x, int dim) {
+  TORCH_CHECK(false, "TODO: implement cumprod");
+}

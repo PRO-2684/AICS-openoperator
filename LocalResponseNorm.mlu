@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 096 096_LocalResponseNorm
+// Category: fused
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对四维输入张量执行局部响应归一化（Local Response Norm）操作。输入包括形状为 `[N, C, H, W]` 的张量 `x`，以及用于计算的归一化窗口大小 `size`、缩放因子 `alpha`、指数项 `beta` 和偏移常数 `k`；输出张量形状与输入一致。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int size, double alpha, double beta, double k);
+
+torch::Tensor bang_func(torch::Tensor x, int size, double alpha, double beta, double k) {
+  TORCH_CHECK(false, "TODO: implement LocalResponseNorm");
+}

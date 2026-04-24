@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 080 080_All_over_dim
+// Category: reduce
+// Difficulty: easy
+// DType: float16
+// Description: 实现一个 BangC 算子，用于判断输入张量在指定维度上的元素是否全部大于零。输入包括形状为 `[batch, dim1, dim2]` 的张量 `x` 和一个表示规约维度的整数标量 `dim`；输出为沿 `dim` 维度对比较结果进行逻辑与（All）运算后的张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int dim);
+
+torch::Tensor bang_func(torch::Tensor x, int dim) {
+  TORCH_CHECK(false, "TODO: implement All_over_dim");
+}

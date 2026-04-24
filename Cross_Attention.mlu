@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 084 084_Cross_Attention
+// Category: attention
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，完成多头注意力（Multi-head Attention）的前向计算。输入包括形状为 `[batch, q_seq, d_model]` 的查询张量 `query`、形状为 `[batch, kv_seq, d_model]` 的键值对张量 `key_value`，以及注意力头数 `num_heads`；该算子通过计算注意力得分并加权聚合，输出形状为 `[batch, q_seq, d_model]` 的结果张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor query, torch::Tensor key_value, int d_model, int num_heads);
+
+torch::Tensor bang_func(torch::Tensor query, torch::Tensor key_value, int d_model, int num_heads) {
+  TORCH_CHECK(false, "TODO: implement Cross_Attention");
+}

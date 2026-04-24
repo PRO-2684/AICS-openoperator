@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 030 030_MinGPTNewGelu
+// Category: pointwise
+// Difficulty: easy
+// DType: float16
+// Description: 实现一个 BangC 算子，计算输入张量的高斯误差线性单元（GELU）近似激活值。输入为形状为 `[batch, dim]` 的张量 `x`；输出结果的形状与输入一致。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x);
+
+torch::Tensor bang_func(torch::Tensor x) {
+  TORCH_CHECK(false, "TODO: implement MinGPTNewGelu");
+}

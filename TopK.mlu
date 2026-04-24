@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 075 075_TopK
+// Category: reduce
+// Difficulty: easy
+// DType: float16
+// Description: 实现一个 BangC 算子，用于在输入张量的指定维度上提取前 $k$ 个最大的数值及其对应的索引。输入包括形状为 `[batch, dim]` 的张量 `x`，以及整型标量参数 `k` 和 `dim`，分别表示需要提取的元素数量和操作的维度；输出为包含最大值及其索引的两个张量。
+// Wrapper: std::vector<torch::Tensor> bang_func(torch::Tensor x, int k, int dim);
+
+std::vector<torch::Tensor> bang_func(torch::Tensor x, int k, int dim) {
+  TORCH_CHECK(false, "TODO: implement TopK");
+}

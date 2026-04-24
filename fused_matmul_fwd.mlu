@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 025 025_fused_matmul_fwd
+// Category: matrix
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，执行矩阵乘法并可选地叠加偏置项。输入包括形状为 `[M, K]` 的输入矩阵 `x`、形状为 `[K, N]` 的权重矩阵 `w` 以及形状为 `[N]` 的可选偏置向量 `b`；输出为形状为 `[M, N]` 的结果张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, torch::Tensor b);
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, torch::Tensor b) {
+  TORCH_CHECK(false, "TODO: implement fused_matmul_fwd");
+}

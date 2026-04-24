@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 108 108_ALiBi_attention_bias
+// Category: embedding
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，用于计算 Transformer 架构中的 ALiBi 线性位置偏置矩阵。该算子接收表示注意力头数的标量 `num_heads` 和序列长度的标量 `seq_len` 作为输入，计算序列内各位置的绝对距离并结合不同头的衰减斜率生成偏置权重；输出张量的形状为 `[num_heads, seq_len, seq_len]`。
+// Wrapper: torch::Tensor bang_func(int seq_len, int num_heads);
+
+torch::Tensor bang_func(int seq_len, int num_heads) {
+  TORCH_CHECK(false, "TODO: implement ALiBi_attention_bias");
+}

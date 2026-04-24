@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 005 005_average_pooling_2d
+// Category: pool
+// Difficulty: basic
+// DType: float16
+// Description: 实现一个 BangC 算子，对输入张量执行二维平均池化（2D Average Pooling）计算。输入包括形状为 `[batch_size, channels, height, width]` 的张量 `x`，以及用于指定窗口大小、步幅和填充的标量参数 `kernel_size`、`stride` 与 `padding`；输出为池化处理后的张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x,int kernel_size);
+
+torch::Tensor bang_func(torch::Tensor x,int kernel_size) {
+  TORCH_CHECK(false, "TODO: implement average_pooling_2d");
+}

@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 067 067_renormRowsL1
+// Category: reduce
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对输入张量执行按行求和归一化操作。输入为形状为 `[M, N]` 的张量 `input_tensor`，该算子计算每一行的元素之和，并在行和大于零的情况下将该行元素除以行和以实现归一化；输出张量的形状与 `input_tensor` 相同。
+// Wrapper: torch::Tensor bang_func(torch::Tensor input_tensor);
+
+torch::Tensor bang_func(torch::Tensor input_tensor) {
+  TORCH_CHECK(false, "TODO: implement renormRowsL1");
+}

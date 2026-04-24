@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 083 083_Causal_Self_Attention
+// Category: attention
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，计算带有因果掩码（Causal Mask）的缩放点积注意力（Scaled Dot-Product Attention）。输入包括形状均为 `[batch, heads, seq, dim]` 的张量 `q`、`k` 和 `v`；算子通过对 `q` 和 `k` 的点积结果进行缩放、因果掩码遮蔽及 Softmax 归一化后，再与 `v` 进行矩阵乘法，得到形状为 `[batch, heads, seq, dim]` 的输出张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v);
+
+torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v) {
+  TORCH_CHECK(false, "TODO: implement Causal_Self_Attention");
+}

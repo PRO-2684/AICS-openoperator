@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 054 054_binned_gather
+// Category: io
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，执行专家分桶收集操作，将路由后的 Token 数据根据索引映射到各专家的固定容量槽位并应用权重。输入包括形状为 `[tokens, hidden_size]` 的特征张量 `x`、形状为 `[tokens * top_k]` 的路由索引 `indices` 与可选权重张量 `weights`、形状为 `[num_experts]` 的专家累计计数张量 `bins`，以及表示专家容量的 `expert_capacity` 和副本因子的 `top_k` 标量；输出张量形状为 `[num_experts, expert_capacity, hidden_size]`。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices, torch::Tensor weights, torch::Tensor bins, int expert_capacity, int top_k);
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices, torch::Tensor weights, torch::Tensor bins, int expert_capacity, int top_k) {
+  TORCH_CHECK(false, "TODO: implement binned_gather");
+}

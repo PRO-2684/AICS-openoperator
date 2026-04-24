@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 086 086_Batch_outer_product
+// Category: matrix
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对两个输入张量进行批处理外积（Batch Outer Product）运算。输入包含形状为 `[batch, M]` 的张量 `a` 和形状为 `[batch, N]` 的张量 `b`；输出张量形状为 `[batch, M, N]`，表示每个批次中两个向量的外积矩阵。
+// Wrapper: torch::Tensor bang_func(torch::Tensor a, torch::Tensor b);
+
+torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
+  TORCH_CHECK(false, "TODO: implement Batch_outer_product");
+}

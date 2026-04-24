@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 085 085_Linear
+// Category: matrix
+// Difficulty: easy
+// DType: float16
+// Description: 实现一个 BangC 算子，执行对输入张量的线性变换操作，计算矩阵乘法并累加偏置。输入包括形状为 `[batch, seq, in_features]` 的张量 `x`、形状为 `[out_features, in_features]` 的权重矩阵 `weight` 以及形状为 `[out_features]` 的偏置向量 `bias`；输出张量的形状为 `[batch, seq, out_features]`。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features, bool bias);
+
+torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features, bool bias) {
+  TORCH_CHECK(false, "TODO: implement Linear");
+}

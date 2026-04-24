@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 059 059_hstu_mask_var_len_fwd
+// Category: attention
+// Difficulty: hard
+// DType: float16
+// Description: 实现一个 BangC 算子，计算变长序列下的 HSTU 注意力机制，并根据上下文、历史及实时信息应用复杂的自定义遮罩逻辑。输入包含张量 `q` [total_len, q_head, qk_dim]、`k` [total_len, kv_head, qk_dim]、`v` [total_len, kv_head, v_dim]，变长前缀和 `seq_offsets` [batch + 1]，以及用于样本级遮罩控制的 `context_size`、`history_size`、`realtime_size`、`history_causal`、`context_expand` 与 `label_lens`（形状均为 [batch]）。此外还需输入标量参数 `alpha`、`max_seq_len` 和执行偏好 `preference`；输出张量的形状为 [total_len, q_head, v_dim]。
+// Wrapper: torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v, double alpha, torch::Tensor seq_offsets, int max_seq_len, torch::Tensor context_size, torch::Tensor history_size, torch::Tensor realtime_size, torch::Tensor history_causal, torch::Tensor context_expand, torch::Tensor label_lens, int preference);
+
+torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v, double alpha, torch::Tensor seq_offsets, int max_seq_len, torch::Tensor context_size, torch::Tensor history_size, torch::Tensor realtime_size, torch::Tensor history_causal, torch::Tensor context_expand, torch::Tensor label_lens, int preference) {
+  TORCH_CHECK(false, "TODO: implement hstu_mask_var_len_fwd");
+}

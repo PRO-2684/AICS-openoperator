@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 024 024_Square_matrix_multiplication_
+// Category: matrix
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，执行两个方阵的矩阵乘法运算。输入包括两个形状均为 `[N, N]` 的张量 `A` 和 `B`；输出为两矩阵相乘的结果，其形状同样为 `[N, N]`。
+// Wrapper: torch::Tensor bang_func(torch::Tensor A, torch::Tensor B);
+
+torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
+  TORCH_CHECK(false, "TODO: implement Square_matrix_multiplication_");
+}

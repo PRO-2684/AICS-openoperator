@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 098 098_Attention_with_temperature
+// Category: attention
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，执行缩放点积注意力计算（Scaled Dot Product Attention）。输入包括形状均为 `[batch, heads, seq, dim]` 的张量 `q`、`k`、`v`，以及一个用于调整注意力分布平滑度的标量 `temperature`；输出为注意力加权后的结果，其形状与输入张量一致。
+// Wrapper: torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v, double temperature);
+
+torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v, double temperature) {
+  TORCH_CHECK(false, "TODO: implement Attention_with_temperature");
+}

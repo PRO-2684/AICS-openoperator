@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 002 002_matrix_scalar_multiplication
+// Category: pointwise
+// Difficulty: basic
+// DType: float16
+// Description: 实现一个 BangC 算子，实现矩阵与标量的逐元素乘法运算。输入包括形状为 `[M, N]` 的张量 `A` 以及浮点数标量 `s`；输出为与 `A` 形状相同的张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor A, double s);
+
+torch::Tensor bang_func(torch::Tensor A, double s) {
+  TORCH_CHECK(false, "TODO: implement matrix_scalar_multiplication");
+}

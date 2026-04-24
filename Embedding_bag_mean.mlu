@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 106 106_Embedding_bag_mean
+// Category: embedding
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，根据偏移量对索引序列在词表中进行查找，并对每个 bag 内的嵌入向量计算均值。输入包括一维索引张量 `indices`（形状为 `[total_indices]`）、表示各 bag 起始位置的张量 `offsets`（形状为 `[num_bags]`）以及词表权重矩阵 `weight`（形状为 `[num_embeddings, embedding_dim]`）；输出张量的形状为 `[num_bags, embedding_dim]`。
+// Wrapper: torch::Tensor bang_func(torch::Tensor indices, torch::Tensor offsets, int num_embeddings, int embedding_dim);
+
+torch::Tensor bang_func(torch::Tensor indices, torch::Tensor offsets, int num_embeddings, int embedding_dim) {
+  TORCH_CHECK(false, "TODO: implement Embedding_bag_mean");
+}

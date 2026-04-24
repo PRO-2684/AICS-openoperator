@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 015 015_Matmul_for_lower_triangular_matrices
+// Category: matrix
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，计算两个下三角矩阵 A 和 B 的乘积，并对结果进行下三角化处理。输入为两个形状均为 `[N, N]` 的下三角矩阵张量 `A` 和 `B`；输出为形状相同的下三角矩阵。
+// Wrapper: torch::Tensor bang_func(torch::Tensor A, torch::Tensor B);
+
+torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
+  TORCH_CHECK(false, "TODO: implement Matmul_for_lower_triangular_matrices");
+}

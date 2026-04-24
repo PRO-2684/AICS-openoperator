@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 039 039_BatchNorm
+// Category: fused
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对四维张量执行二维批归一化（Batch Normalization）计算。输入包括形状为 `[batch, channel, H, W]` 的数据张量 `x` 以及表示特征通道数的整数 `num_features`；输出张量与 `x` 形状相同。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int num_features);
+
+torch::Tensor bang_func(torch::Tensor x, int num_features) {
+  TORCH_CHECK(false, "TODO: implement BatchNorm");
+}

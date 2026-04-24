@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 047 047_Max_Pooling_1D
+// Category: pool
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对三维张量执行一维最大池化（Max Pooling 1D）操作。输入包括形状为 `[batch_size, num_features, sequence_length]` 的张量 `x`，以及 `kernel_size`、`stride`、`padding`、`dilation` 和 `return_indices` 等控制池化窗口行为和索引返回的参数；输出张量的形状为 `[batch_size, num_features, output_sequence_length]`。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride, int padding, int dilation, bool return_indices);
+
+torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride, int padding, int dilation, bool return_indices) {
+  TORCH_CHECK(false, "TODO: implement Max_Pooling_1D");
+}

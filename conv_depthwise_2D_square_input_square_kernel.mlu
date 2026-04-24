@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 006 006_conv_depthwise_2D_square_input_square_kernel
+// Category: conv
+// Difficulty: hard
+// DType: float16
+// Description: 实现一个 BangC 算子，对输入张量执行二维逐通道卷积（Depthwise 2D Convolution）运算。输入包括形状为 `[batch, in_channels, H, W]` 的特征图 `x`、形状为 `[in_channels, 1, K, K]` 的权重 `weight` 以及可选的偏置 `bias`；计算过程涉及步长 `stride` 和填充 `padding` 等标量参数。该算子最终输出形状为 `[batch, in_channels, H_out, W_out]` 的卷积结果。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x,int in_channels,int kernel_size,int stride,int padding);
+
+torch::Tensor bang_func(torch::Tensor x,int in_channels,int kernel_size,int stride,int padding) {
+  TORCH_CHECK(false, "TODO: implement conv_depthwise_2D_square_input_square_kernel");
+}

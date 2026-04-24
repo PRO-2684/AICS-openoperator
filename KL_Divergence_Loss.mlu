@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 104 104_KL_Divergence_Loss
+// Category: loss
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，计算预测对数概率与目标概率之间的 KL 散度，并按照 batch 维度进行平均规约。输入包括形状均为 `[batch, N]` 的张量 `input_log_prob` 和 `target_prob`，分别对应预测的对数概率分布和目标概率分布；输出为按 `batchmean` 模式计算得到的标量结果。
+// Wrapper: torch::Tensor bang_func(torch::Tensor input_log_prob, torch::Tensor target_prob);
+
+torch::Tensor bang_func(torch::Tensor input_log_prob, torch::Tensor target_prob) {
+  TORCH_CHECK(false, "TODO: implement KL_Divergence_Loss");
+}

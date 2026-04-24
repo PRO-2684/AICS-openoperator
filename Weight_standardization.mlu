@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 124 124_Weight_standardization
+// Category: fused
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对输入特征图执行经过权重标准化（Weight Standardization）处理的二维卷积运算。输入包括形状为 `[batch, in_channels, H, W]` 的张量 `x` 以及形状为 `[out_channels, in_channels, kernel_size, kernel_size]` 的卷积权重 `weight`；算子先对 `weight` 在输出通道之外的维度上进行归一化处理，随后与 `x` 进行 padding 为 1 的卷积操作。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, int in_channels, int out_channels, int kernel_size);
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, int in_channels, int out_channels, int kernel_size) {
+  TORCH_CHECK(false, "TODO: implement Weight_standardization");
+}

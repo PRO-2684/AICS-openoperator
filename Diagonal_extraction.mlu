@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 089 089_Diagonal_extraction
+// Category: matrix
+// Difficulty: easy
+// DType: float16
+// Description: 实现一个 BangC 算子，提取三维张量最后两个维度上指定偏移量的对角线元素。输入包括形状为 `[batch, M, N]` 的三维张量 `A` 以及一个表示对角线相对于主对角线偏移位置的整数参数 `offset`；输出为包含提取出的对角线元素的张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor A, int offset);
+
+torch::Tensor bang_func(torch::Tensor A, int offset) {
+  TORCH_CHECK(false, "TODO: implement Diagonal_extraction");
+}

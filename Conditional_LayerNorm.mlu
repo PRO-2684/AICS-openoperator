@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 125 125_Conditional_LayerNorm
+// Category: fused
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，实现基于条件向量线性投影的自适应层归一化（AdaLN）。输入包括形状为 `[batch, seq, dim]` 的数据张量 `x`、形状为 `[batch, cond_dim]` 的条件张量 `cond`，以及用于生成投影系数的权重 `w_gamma/w_beta`（形状为 `[dim, cond_dim]`）和偏置 `b_gamma/b_beta`（形状为 `[dim]`）；该算子先对 `x` 进行层归一化（LayerNorm），随后将其与由 `cond` 投影生成的动态缩放因子和偏移量进行仿射变换。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, torch::Tensor cond, torch::Tensor gamma_weight, torch::Tensor gamma_bias, torch::Tensor beta_weight, torch::Tensor beta_bias, int dim, int cond_dim);
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor cond, torch::Tensor gamma_weight, torch::Tensor gamma_bias, torch::Tensor beta_weight, torch::Tensor beta_bias, int dim, int cond_dim) {
+  TORCH_CHECK(false, "TODO: implement Conditional_LayerNorm");
+}

@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 099 099_DropPath
+// Category: fused
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，实现 DropPath（随机深度）功能，在训练模式下按样本维度随机丢弃部分输入数据并对剩余部分进行缩放。输入包括形状为 `[batch, ...]` 的张量 `x` 以及表示丢弃概率的浮点数标量 `drop_prob`；输出结果与 `x` 形状一致。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, double drop_prob);
+
+torch::Tensor bang_func(torch::Tensor x, double drop_prob) {
+  TORCH_CHECK(false, "TODO: implement DropPath");
+}

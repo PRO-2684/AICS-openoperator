@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 131 131_Relative_position_encoding
+// Category: embedding
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，根据序列长度计算两两位置间的相对距离索引，并从查找表中检索对应的嵌入向量。输入包括标量 `seq_len`、形状为 `[2 * max_seq - 1, d_model]` 的位置嵌入权重张量 `rel_emb` 以及用于计算偏移量的标量 `max_seq`；输出为形状为 `[seq_len, seq_len, d_model]` 的相对位置嵌入张量。
+// Wrapper: torch::Tensor bang_func(int seq_len, int max_seq, int d_model);
+
+torch::Tensor bang_func(int seq_len, int max_seq, int d_model) {
+  TORCH_CHECK(false, "TODO: implement Relative_position_encoding");
+}

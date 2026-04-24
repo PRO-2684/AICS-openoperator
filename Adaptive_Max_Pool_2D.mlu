@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 100 100_Adaptive_Max_Pool_2D
+// Category: pool
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对输入张量进行二维自适应最大池化处理，将其采样至指定的输出尺寸。输入包括形状为 `[batch, channels, H, W]` 的张量 `x` 以及目标输出高度 `out_h` 与宽度 `out_w`；输出为形状是 `[batch, channels, out_h, out_w]` 的张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, std::vector<int64_t> output_size);
+
+torch::Tensor bang_func(torch::Tensor x, std::vector<int64_t> output_size) {
+  TORCH_CHECK(false, "TODO: implement Adaptive_Max_Pool_2D");
+}

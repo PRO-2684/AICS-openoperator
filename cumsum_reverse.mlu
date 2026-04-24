@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 053 053_cumsum_reverse
+// Category: cum
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，沿指定维度对输入张量执行反向累加和（Reverse Cumulative Sum）操作。输入包括形状为 `[d0, d1, ..., dn]` 的张量 `x` 以及一个表示目标维度的整数标量 `dim`；输出结果与输入 `x` 的形状保持一致。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int dim);
+
+torch::Tensor bang_func(torch::Tensor x, int dim) {
+  TORCH_CHECK(false, "TODO: implement cumsum_reverse");
+}

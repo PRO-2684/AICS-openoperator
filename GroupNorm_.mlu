@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 043 043_GroupNorm_
+// Category: fused
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对输入张量执行组归一化（Group Normalization）处理。输入包括形状为 `[batch, num_features, H, W]` 的张量 `x`，以及标量参数分组数 `num_groups` 和通道数 `num_features`；输出张量形状与 `x` 相同。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int num_groups, int num_features);
+
+torch::Tensor bang_func(torch::Tensor x, int num_groups, int num_features) {
+  TORCH_CHECK(false, "TODO: implement GroupNorm_");
+}

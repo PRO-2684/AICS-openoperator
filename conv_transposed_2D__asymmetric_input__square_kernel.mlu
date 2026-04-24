@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 012 012_conv_transposed_2D__asymmetric_input__square_kernel
+// Category: conv
+// Difficulty: hard
+// DType: float16
+// Description: 实现一个 BangC 算子，执行二维转置卷积运算。输入包括形状为 `[batch, in_channels, h_in, w_in]` 的数据张量 `x`、形状为 `[in_channels, out_channels // groups, kernel_size, kernel_size]` 的卷积核张量以及可选的偏置张量；算子通过 `stride`、`padding`、`output_padding` 和 `groups` 等参数控制输出特征图的形状与计算逻辑。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int in_channels, int out_channels, int kernel_size, int stride, int padding, int output_padding, int groups, bool bias);
+
+torch::Tensor bang_func(torch::Tensor x, int in_channels, int out_channels, int kernel_size, int stride, int padding, int output_padding, int groups, bool bias) {
+  TORCH_CHECK(false, "TODO: implement conv_transposed_2D__asymmetric_input__square_kernel");
+}

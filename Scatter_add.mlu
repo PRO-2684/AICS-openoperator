@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 109 109_Scatter_add
+// Category: io
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，根据索引张量将源张量的数据累加到目标张量的对应位置。输入包括形状为 `[N, D]` 的源张量 `src`、形状为 `[N]` 的索引张量 `index` 以及指定输出首维长度的整数 `dim_size`；输出张量的形状为 `[dim_size, D]`。
+// Wrapper: torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size);
+
+torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
+  TORCH_CHECK(false, "TODO: implement Scatter_add");
+}

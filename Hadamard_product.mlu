@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 087 087_Hadamard_product
+// Category: matrix
+// Difficulty: easy
+// DType: float16
+// Description: 实现一个 BangC 算子，对两个张量进行逐元素乘法。输入包括形状均为 `[M, N]` 的张量 `A` 和 `B`；输出结果张量的形状与输入相同。
+// Wrapper: torch::Tensor bang_func(torch::Tensor A, torch::Tensor B);
+
+torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
+  TORCH_CHECK(false, "TODO: implement Hadamard_product");
+}

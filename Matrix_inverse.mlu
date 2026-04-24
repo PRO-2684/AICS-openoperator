@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 091 091_Matrix_inverse
+// Category: matrix
+// Difficulty: hard
+// DType: float16
+// Description: 实现一个 BangC 算子，计算输入张量中每一组方阵的逆矩阵。输入为形状是 `[batch, N, N]` 的三维张量 `A`；输出与输入形状相同，包含每个矩阵对应的逆矩阵。
+// Wrapper: torch::Tensor bang_func(torch::Tensor A);
+
+torch::Tensor bang_func(torch::Tensor A) {
+  TORCH_CHECK(false, "TODO: implement Matrix_inverse");
+}

@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 070 070_Sqrt
+// Category: pointwise
+// Difficulty: easy
+// DType: float16
+// Description: 实现一个 BangC 算子，对输入张量执行逐元素的绝对值计算并求其平方根。输入为形状为 `[batch_size, dim]` 的张量 `x`；输出张量与 `x` 的形状一致。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x);
+
+torch::Tensor bang_func(torch::Tensor x) {
+  TORCH_CHECK(false, "TODO: implement Sqrt");
+}

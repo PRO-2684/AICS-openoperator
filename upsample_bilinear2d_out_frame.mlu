@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 068 068_upsample_bilinear2d_out_frame
+// Category: fuse
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对四维张量执行二维双线性插值上采样。输入包括形状为 `[N, C, H, W]` 的张量 `input`，目标输出高度 `out_h` 和宽度 `out_w`，以及布尔标量 `align_corners` 用于控制插值时的坐标对齐方式；输出张量的形状为 `[N, C, out_h, out_w]`。
+// Wrapper: torch::Tensor bang_func(torch::Tensor input, int out_h, int out_w, bool align_corners);
+
+torch::Tensor bang_func(torch::Tensor input, int out_h, int out_w, bool align_corners) {
+  TORCH_CHECK(false, "TODO: implement upsample_bilinear2d_out_frame");
+}

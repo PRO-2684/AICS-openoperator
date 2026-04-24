@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 123 123_Masked_cumsum
+// Category: cum
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对输入张量应用掩码过滤后沿指定维度计算累加前缀和。输入包括形状为 `[batch, length]` 的张量 `x`、形状相同的掩码张量 `mask` 以及指定累积维度的整数标量 `dim`；输出张量形状与 `x` 保持一致。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, int dim);
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, int dim) {
+  TORCH_CHECK(false, "TODO: implement Masked_cumsum");
+}

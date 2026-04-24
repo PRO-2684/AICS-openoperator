@@ -1,0 +1,14 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <torch/extension.h>
+
+// Task: 081 081_Sum_2D_reduction
+// Category: reduce
+// Difficulty: easy
+// DType: float16
+// Description: 实现一个 BangC 算子，对三维张量在最后两个维度上进行求和归约。输入包括形状为 `[batch, H, W]` 的张量 `x`；输出为经过求和降维后形状为 `[batch]` 的张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x);
+
+torch::Tensor bang_func(torch::Tensor x) {
+  TORCH_CHECK(false, "TODO: implement Sum_2D_reduction");
+}
