@@ -8,10 +8,10 @@
 #define TILE_SIZE 16384
 #define TASK_COUNT 32
 
-__mlu_entry__ void matrix_scalar_mul_kernel(const float* __restrict__ A,
-                                            float* __restrict__ C,
-                                            float scalar,
-                                            int32_t total) {
+__mlu_entry__ void matrix_scalar_mul_float_kernel(const float* __restrict__ A,
+                                                 float* __restrict__ C,
+                                                 float scalar,
+                                                 int32_t total) {
     if (__is_mpu()) return;
 
     uint32_t task_id = taskId;
@@ -40,6 +40,38 @@ __mlu_entry__ void matrix_scalar_mul_kernel(const float* __restrict__ A,
     }
 }
 
+__mlu_entry__ void matrix_scalar_mul_half_kernel(const half* __restrict__ A,
+                                                half* __restrict__ C,
+                                                float scalar,
+                                                int32_t total) {
+    if (__is_mpu()) return;
+
+    uint32_t task_id = taskId;
+    uint32_t task_num = taskDim;
+    uint32_t per_task = total / task_num;
+    uint32_t remainder = total % task_num;
+    uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
+    uint32_t count = per_task + (task_id < remainder ? 1 : 0);
+
+    __nram__ half nram_A[TILE_SIZE];
+    __nram__ half nram_C[TILE_SIZE];
+
+    for (uint32_t offset = 0; offset < count; offset += TILE_SIZE) {
+        uint32_t len = (offset + TILE_SIZE <= count) ? TILE_SIZE : (count - offset);
+        uint32_t aligned_len = (len + 63) & ~63;
+
+        __memcpy(nram_A, A + start + offset, len * sizeof(half), GDRAM2NRAM);
+
+        if (aligned_len > len) {
+            __bang_write_value(nram_A + len, aligned_len - len, (half)0.0f);
+        }
+
+        __bang_mul_scalar(nram_C, nram_A, scalar, aligned_len);
+
+        __memcpy(C + start + offset, nram_C, len * sizeof(half), NRAM2GDRAM);
+    }
+}
+
 torch::Tensor bang_func(torch::Tensor input, double scalar) {
     auto output = torch::empty_like(input);
     int32_t total = static_cast<int32_t>(input.numel());
@@ -56,12 +88,21 @@ torch::Tensor bang_func(torch::Tensor input, double scalar) {
     cnrtDim3_t dim = {TASK_COUNT, 1, 1};
     cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
 
-    matrix_scalar_mul_kernel<<<dim, ktype, queue>>>(
-        input.data_ptr<float>(),
-        output.data_ptr<float>(),
-        scalar_f,
-        total
-    );
+    if (input.scalar_type() == at::kFloat) {
+        matrix_scalar_mul_float_kernel<<<dim, ktype, queue>>>(
+            input.data_ptr<float>(),
+            output.data_ptr<float>(),
+            scalar_f,
+            total
+        );
+    } else {
+        matrix_scalar_mul_half_kernel<<<dim, ktype, queue>>>(
+            reinterpret_cast<half*>(input.data_ptr<at::Half>()),
+            reinterpret_cast<half*>(output.data_ptr<at::Half>()),
+            scalar_f,
+            total
+        );
+    }
 
     CNRT_CHECK(cnrtQueueSync(queue));
     CNRT_CHECK(cnrtQueueDestroy(queue));
