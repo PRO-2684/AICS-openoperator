@@ -14,11 +14,12 @@
 1. Clone this repo
 2. Navigate to the root directory of the repo and run `setup.sh` to:
     - Set up git hooks: This will automatically update `config` file to the list of changed files in each commit
+3. Test by running `./check.sh LeakyReLU.mlu`
 
 ### Testing
 
 ```shell
-./check.sh LeakyReLU.mlu
+./check.sh <Path-to.mlu>
 ```
 
 ### Submission
@@ -30,16 +31,16 @@ git add . && git commit -m "feat: Add LeakyReLU implementation"
 
 ## ❓ Problems
 
-- [001_LeakyReLU](LeakyReLU.mlu)
-- [002_matrix_scalar_multiplication](matrix_scalar_multiplication.mlu)
-- [003_LogSoftmax](LogSoftmax.mlu)
-- [004_batched_matrix_multiplication](batched_matrix_multiplication.mlu)
-- [005_average_pooling_2d](average_pooling_2d.mlu)
-- [006_conv_depthwise_2D_square_input_square_kernel](conv_depthwise_2D_square_input_square_kernel.mlu)
-- [007_conv_depthwise_separable_2D](conv_depthwise_separable_2D.mlu)
-- [008_conv_pointwise_2D](conv_pointwise_2D.mlu)
-- [009_conv_standard_1D](conv_standard_1D.mlu)
-- [010_conv_standard_2D__square_input__square_kernel](conv_standard_2D__square_input__square_kernel.mlu)
+- [x] [001_LeakyReLU](LeakyReLU.mlu)
+- [ ] [002_matrix_scalar_multiplication](matrix_scalar_multiplication.mlu)
+- [ ] [003_LogSoftmax](LogSoftmax.mlu)
+- [ ] [004_batched_matrix_multiplication](batched_matrix_multiplication.mlu)
+- [x] [005_average_pooling_2d](average_pooling_2d.mlu)
+- [ ] [006_conv_depthwise_2D_square_input_square_kernel](conv_depthwise_2D_square_input_square_kernel.mlu)
+- [ ] [007_conv_depthwise_separable_2D](conv_depthwise_separable_2D.mlu)
+- [ ] [008_conv_pointwise_2D](conv_pointwise_2D.mlu)
+- [ ] [009_conv_standard_1D](conv_standard_1D.mlu)
+- [ ] [010_conv_standard_2D__square_input__square_kernel](conv_standard_2D__square_input__square_kernel.mlu)
 - [011_conv_transposed_1D](conv_transposed_1D.mlu)
 - [012_conv_transposed_2D__asymmetric_input__square_kernel](conv_transposed_2D__asymmetric_input__square_kernel.mlu)
 - [013_3D_tensor_matrix_multiplication](3D_tensor_matrix_multiplication.mlu)
