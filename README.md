@@ -18,7 +18,6 @@
 ### Testing
 
 ```shell
-# Not working yet
 ./check.sh LeakyReLU.mlu
 ```
 

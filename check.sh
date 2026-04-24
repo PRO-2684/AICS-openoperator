@@ -10,28 +10,20 @@ export TORCH_DEVICE_BACKEND_AUTOLOAD=0
 usage() {
   cat <<'EOF'
 Usage:
-  ./check.sh <code.mlu> [--smoke]
+  ./check.sh <code.mlu>
 
-Modes:
-  default   compile the .mlu file with flags close to the remote evaluator
-  --smoke   compile/load it as a torch extension and compare against the task reference when possible
+Behavior:
+  compile the .mlu file with flags close to the remote evaluator
+  then build/load a task-specific extension wrapper and compare against the task reference
 EOF
 }
 
-if [ $# -lt 1 ] || [ $# -gt 2 ]; then
+if [ $# -ne 1 ]; then
   usage
   exit 1
 fi
 
 MLU_SOURCE="$1"
-SMOKE_TEST=0
-if [ $# -eq 2 ]; then
-  if [ "$2" != "--smoke" ]; then
-    usage
-    exit 1
-  fi
-  SMOKE_TEST=1
-fi
 
 if [ ! -f "$MLU_SOURCE" ]; then
   echo "File not found: $MLU_SOURCE" >&2
@@ -69,11 +61,7 @@ echo "[compile] $MLU_SOURCE -> $OBJ_PATH"
 cncc -c "$MLU_SOURCE" -o "$OBJ_PATH" "${COMMON_FLAGS[@]}"
 echo "[ok] compile succeeded"
 
-if [ "$SMOKE_TEST" -eq 0 ]; then
-  exit 0
-fi
-
-echo "[smoke] building torch extension and checking against task reference"
+echo "[check] building torch extension and checking against task reference"
 source /torch/venv3/pytorch/bin/activate
 WRAPPER_SO="$BUILD_DIR/${TARGET}_smoke.so"
 python scripts/run_reference_check.py \

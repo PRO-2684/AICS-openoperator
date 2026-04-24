@@ -3,7 +3,8 @@ import re
 from pathlib import Path
 
 
-PROBLEMS_JSON = "./problems.json"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+PROBLEMS_JSON = REPO_ROOT / "reference-impl" / "problems.json"
 
 
 def load_problems():
