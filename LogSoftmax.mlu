@@ -3,8 +3,6 @@
 #include <torch/extension.h>
 #include <framework/core/MLUStream.h>
 #include <cstdint>
-#include <stdlib.h>
-#include <stdio.h>
 #include <float.h>
 
 #define CHUNK_SIZE 4096
@@ -25,7 +23,6 @@ __mlu_entry__ void logsoftmax_kernel(const float* __restrict__ x,
 
     __nram__ float nram_tile[CHUNK_SIZE];
     __nram__ float nram_max_val[1];
-    __nram__ float nram_sum_val[1];
 
     for (uint32_t b = start; b < start + count; ++b) {
         uint32_t row_start = b * dim_size;
@@ -57,8 +54,12 @@ __mlu_entry__ void logsoftmax_kernel(const float* __restrict__ x,
             }
             __bang_sub_scalar(nram_tile, nram_tile, row_max, aligned);
             __bang_active_exp(nram_tile, nram_tile, aligned);
-            __bang_sum(nram_sum_val, nram_tile, aligned);
-            sum_exp += nram_sum_val[0];
+
+            float tile_sum = 0.0f;
+            for (uint32_t i = 0; i < aligned; ++i) {
+                tile_sum += nram_tile[i];
+            }
+            sum_exp += tile_sum;
         }
 
         float log_sum_exp = logf(sum_exp);
