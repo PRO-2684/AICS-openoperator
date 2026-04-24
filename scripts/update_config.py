@@ -5,7 +5,7 @@ from typing import Optional
 
 
 def get_tasks() -> list[str]:
-    with open(".githooks/tasks.json") as fp:
+    with open("scripts/tasks.json") as fp:
         return load(fp)
 
 
@@ -42,9 +42,6 @@ def main():
         index = to_index(f)
         if index is not None:
             indices.append(index)
-
-    if len(indices) == 0:
-        return
 
     with open("config", "w") as fp:
         for index in indices:

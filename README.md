@@ -12,9 +12,23 @@
 ### Setup
 
 1. Clone this repo
-2. Navigate to the root directory of the repo and run `setup.sh` to:
-    - Set up git hooks: This will automatically update `config` file to the list of changed files in each commit
-3. Test by running `./check.sh LeakyReLU.mlu`
+2. Update README.md for the problems you want to solve
+    - Change "Author" to your GitHub username
+    - Modify "AC" column in the table to "🟡"
+    - Each one MUST select at least 2 "basic" problems
+3. Add your solutions to existing `mlu` files
+4. Test by running `./check.sh <Path-to.mlu>`
+5. Update `config` file to include the indices of the problems you want to evaluate
+    - Helper script `update_config.py` is available for updating the config file
+    - You can run `python scripts/update_config.py`
+    - It will check for staged solution files (`*.mlu`), update and stage the `config` file for you
+6. Commit and push to `main` branch
+7. When you received the bot's comment:
+    - If your solution is accepted, update the "AC" column in the table to "🟢" and add a link to the commit
+    - If you think it's not your problem, or there's something special:
+        - Create a document under `doc/<problem_name>.md` to explain the situation
+        - Link it in the "AC" column with 🟡
+    - Otherwise, continue debugging and resubmit
 
 ### Testing
 
