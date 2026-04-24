@@ -5,7 +5,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#define TILE_SIZE 4096
 #define TASK_COUNT 32
 
 __mlu_entry__ void matrix_scalar_mul_float_kernel(const float* __restrict__ A,
@@ -21,22 +20,20 @@ __mlu_entry__ void matrix_scalar_mul_float_kernel(const float* __restrict__ A,
     uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
     uint32_t count = per_task + (task_id < remainder ? 1 : 0);
 
-    __nram__ float nram_A[TILE_SIZE];
-    __nram__ float nram_C[TILE_SIZE];
+    __nram__ float nram_buf[8192];
 
-    for (uint32_t offset = 0; offset < count; offset += TILE_SIZE) {
-        uint32_t len = (offset + TILE_SIZE <= count) ? TILE_SIZE : (count - offset);
-        uint32_t aligned_len = (len + 63) & ~63;
+    uint32_t processed = 0;
+    while (processed < count) {
+        uint32_t cur = (count - processed > 8192) ? 8192 : (count - processed);
+        uint32_t aligned = (cur + 63) & ~63;
 
-        __memcpy(nram_A, A + start + offset, len * sizeof(float), GDRAM2NRAM);
-
-        if (aligned_len > len) {
-            __bang_write_value(nram_A + len, aligned_len - len, 0.0f);
+        __memcpy(nram_buf, A + start + processed, cur * sizeof(float), GDRAM2NRAM);
+        if (aligned > cur) {
+            __bang_write_value(nram_buf + cur, aligned - cur, 0.0f);
         }
-
-        __bang_mul_scalar(nram_C, nram_A, scalar, aligned_len);
-
-        __memcpy(C + start + offset, nram_C, len * sizeof(float), NRAM2GDRAM);
+        __bang_mul_scalar(nram_buf, nram_buf, scalar, aligned);
+        __memcpy(C + start + processed, nram_buf, cur * sizeof(float), NRAM2GDRAM);
+        processed += cur;
     }
 }
 
@@ -53,22 +50,20 @@ __mlu_entry__ void matrix_scalar_mul_half_kernel(const half* __restrict__ A,
     uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
     uint32_t count = per_task + (task_id < remainder ? 1 : 0);
 
-    __nram__ half nram_A[TILE_SIZE * 2];
-    __nram__ half nram_C[TILE_SIZE * 2];
+    __nram__ half nram_buf[16384];
 
-    for (uint32_t offset = 0; offset < count; offset += TILE_SIZE) {
-        uint32_t len = (offset + TILE_SIZE <= count) ? TILE_SIZE : (count - offset);
-        uint32_t aligned_len = (len + 63) & ~63;
+    uint32_t processed = 0;
+    while (processed < count) {
+        uint32_t cur = (count - processed > 16384) ? 16384 : (count - processed);
+        uint32_t aligned = (cur + 63) & ~63;
 
-        __memcpy(nram_A, A + start + offset, len * sizeof(half), GDRAM2NRAM);
-
-        if (aligned_len > len) {
-            __bang_write_value(nram_A + len, aligned_len - len, (half)0.0f);
+        __memcpy(nram_buf, A + start + processed, cur * sizeof(half), GDRAM2NRAM);
+        if (aligned > cur) {
+            __bang_write_value(nram_buf + cur, aligned - cur, (half)0.0f);
         }
-
-        __bang_mul_scalar(nram_C, nram_A, scalar, aligned_len);
-
-        __memcpy(C + start + offset, nram_C, len * sizeof(half), NRAM2GDRAM);
+        __bang_mul_scalar(nram_buf, nram_buf, scalar, aligned);
+        __memcpy(C + start + processed, nram_buf, cur * sizeof(half), NRAM2GDRAM);
+        processed += cur;
     }
 }
 
