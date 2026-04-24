@@ -3,9 +3,7 @@
 #include <torch/extension.h>
 #include <framework/core/MLUStream.h>
 
-#define BLOCK_M 32
-#define BLOCK_K 128
-#define BLOCK_N 32
+#define TASK_COUNT 128
 
 __mlu_entry__ void batched_matmul_kernel(const half* __restrict__ A,
                                          const half* __restrict__ B,
@@ -24,41 +22,13 @@ __mlu_entry__ void batched_matmul_kernel(const half* __restrict__ A,
     const half* B_batch = B + task_id * K * N;
     half* C_batch = C + task_id * M * N;
 
-    __nram__ float nram_A[BLOCK_M * BLOCK_K];
-    __nram__ float nram_C[BLOCK_M * BLOCK_N];
-    __wram__ float wram_B[BLOCK_K * BLOCK_N];
-
-    for (int m = 0; m < M; m += BLOCK_M) {
-        int m_len = (m + BLOCK_M < M) ? BLOCK_M : (M - m);
-
-        for (int n = 0; n < N; n += BLOCK_N) {
-            int n_len = (n + BLOCK_N < N) ? BLOCK_N : (N - n);
-
-            for (int k = 0; k < K; k += BLOCK_K) {
-                int k_len = (k + BLOCK_K < K) ? BLOCK_K : (K - k);
-
-                for (int mi = 0; mi < m_len; ++mi) {
-                    for (int ki = 0; ki < k_len; ++ki) {
-                        nram_A[ki * m_len + mi] = (float)A_batch[(m + mi) * K + k + ki];
-                    }
-                }
-
-                for (int ki = 0; ki < k_len; ++ki) {
-                    for (int ni = 0; ni < n_len; ++ni) {
-                        wram_B[ni * k_len + ki] = (float)B_batch[(k + ki) * N + n + ni];
-                    }
-                }
-
-                __bang_conv(nram_C, nram_A, wram_B,
-                           k_len, m_len, 1,
-                           1, 1, 1, 1, n_len);
-
-                for (int mi = 0; mi < m_len; ++mi) {
-                    for (int ni = 0; ni < n_len; ++ni) {
-                        C_batch[(m + mi) * N + n + ni] = (half)nram_C[mi * n_len + ni];
-                    }
-                }
+    for (int m = 0; m < M; ++m) {
+        for (int n = 0; n < N; ++n) {
+            float sum = 0.0f;
+            for (int k = 0; k < K; ++k) {
+                sum += (float)A_batch[m * K + k] * (float)B_batch[k * N + n];
             }
+            C_batch[m * N + n] = (half)sum;
         }
     }
 }
