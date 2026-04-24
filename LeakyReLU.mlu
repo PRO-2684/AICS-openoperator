@@ -1,68 +1,105 @@
 #include <bang.h>
-#include <torch/extension.h>
 #include <cnrt.h>
+#include <torch/extension.h>
+#include <framework/core/MLUStream.h>
 
 #define CHUNK_SIZE 4096
+#define TASK_COUNT 32
 
-__mlu_entry__ void leakyrelu_kernel(float *input, float *output, int total, float negative_slope) {
-    // 多核拆分参数
-    uint32_t core_id = taskId;
-    uint32_t core_num = taskDim;
-    uint32_t per_core = total / core_num;
-    uint32_t remainder = total % core_num;
-    uint32_t start = core_id * per_core + (core_id < remainder ? core_id : remainder);
-    uint32_t count = per_core + (core_id < remainder ? 1 : 0);
+__mlu_entry__ void leakyrelu_float_kernel(const float *input, float *output,
+                                          uint32_t total,
+                                          float negative_slope) {
+  if (__is_mpu()) return;
 
-    // NRAM 空间分配
-    __nram__ float nram_input[CHUNK_SIZE];
-    __nram__ float nram_relu[CHUNK_SIZE];
-    __nram__ float nram_temp[CHUNK_SIZE];
+  uint32_t task_id = taskId;
+  uint32_t task_num = taskDim;
+  uint32_t per_task = total / task_num;
+  uint32_t remainder = total % task_num;
+  uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
+  uint32_t count = per_task + (task_id < remainder ? 1 : 0);
 
-    for (uint32_t offset = 0; offset < count; offset += CHUNK_SIZE) {
-        uint32_t len = (offset + CHUNK_SIZE <= count) ? CHUNK_SIZE : (count - offset);
-        // Bang C 向量指令要求长度对齐到 64 个 float (256 字节)
-        uint32_t aligned_len = (len + 63) & ~63;
+  __nram__ float nram_input[CHUNK_SIZE];
+  __nram__ float nram_scale[CHUNK_SIZE];
 
-        // 从 GDRAM 加载数据到 NRAM
-        __memcpy(nram_input, input + start + offset, len * sizeof(float), GDRAM2NRAM);
+  for (uint32_t offset = 0; offset < count; offset += CHUNK_SIZE) {
+    uint32_t len = (offset + CHUNK_SIZE <= count) ? CHUNK_SIZE : (count - offset);
+    uint32_t aligned_len = (len + 63) & ~63;
 
-        // 1. 计算 relu(x) = max(0, x)
-        __bang_active_relu(nram_relu, nram_input, aligned_len);
-
-        // 2. 计算 min(0, x) = x - relu(x)
-        __bang_sub(nram_temp, nram_input, nram_relu, aligned_len);
-
-        // 3. 计算 negative_slope * min(0, x)
-        __bang_mul_scalar(nram_temp, nram_temp, negative_slope, aligned_len);
-
-        // 4. 计算 leaky_relu(x) = relu(x) + negative_slope * min(0, x)
-        __bang_add(nram_temp, nram_relu, nram_temp, aligned_len);
-
-        // 写回 GDRAM（只写有效长度）
-        __memcpy(output + start + offset, nram_temp, len * sizeof(float), NRAM2GDRAM);
+    __memcpy(nram_input, input + start + offset, len * sizeof(float), GDRAM2NRAM);
+    if (aligned_len > len) {
+      __bang_write_value(nram_input + len, aligned_len - len, 0.0f);
     }
+
+    __bang_ge_scalar(nram_scale, nram_input, 0.0f, aligned_len);
+    __bang_mul_scalar(nram_scale, nram_scale, 1.0f - negative_slope, aligned_len);
+    __bang_add_scalar(nram_scale, nram_scale, negative_slope, aligned_len);
+    __bang_mul(nram_input, nram_input, nram_scale, len);
+
+    __memcpy(output + start + offset, nram_input, len * sizeof(float), NRAM2GDRAM);
+  }
+}
+
+__mlu_entry__ void leakyrelu_half_kernel(const half *input, half *output,
+                                         uint32_t total,
+                                         float negative_slope) {
+  if (__is_mpu()) return;
+
+  uint32_t task_id = taskId;
+  uint32_t task_num = taskDim;
+  uint32_t per_task = total / task_num;
+  uint32_t remainder = total % task_num;
+  uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
+  uint32_t count = per_task + (task_id < remainder ? 1 : 0);
+
+  __nram__ half nram_half[CHUNK_SIZE];
+  __nram__ float nram_float[CHUNK_SIZE];
+  __nram__ float nram_scale[CHUNK_SIZE];
+
+  for (uint32_t offset = 0; offset < count; offset += CHUNK_SIZE) {
+    uint32_t len = (offset + CHUNK_SIZE <= count) ? CHUNK_SIZE : (count - offset);
+    uint32_t aligned_len = (len + 63) & ~63;
+
+    __memcpy(nram_half, input + start + offset, len * sizeof(half), GDRAM2NRAM);
+    if (aligned_len > len) {
+      __bang_write_value(nram_half + len, aligned_len - len, (half)0.0f);
+    }
+
+    __bang_half2float(nram_float, nram_half, aligned_len);
+    __bang_ge_scalar(nram_scale, nram_float, 0.0f, aligned_len);
+    __bang_mul_scalar(nram_scale, nram_scale, 1.0f - negative_slope, aligned_len);
+    __bang_add_scalar(nram_scale, nram_scale, negative_slope, aligned_len);
+    __bang_mul(nram_float, nram_float, nram_scale, len);
+    __bang_float2half_rn(nram_half, nram_float, len);
+
+    __memcpy(output + start + offset, nram_half, len * sizeof(half), NRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor input, double negative_slope) {
-    TORCH_CHECK(input.is_contiguous(), "Input must be contiguous");
+  TORCH_CHECK(input.is_contiguous(), "input must be contiguous");
+  TORCH_CHECK(input.scalar_type() == at::kFloat || input.scalar_type() == at::kHalf,
+              "input must be float32 or float16");
 
-    auto output = torch::empty_like(input);
-    int total = input.numel();
+  auto output = torch::empty_like(input);
+  uint32_t total = static_cast<uint32_t>(input.numel());
 
-    // 获取 MLU 队列
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-
-    // 配置任务维度（使用 4 个 core）
-    cnrtDim3_t dim = {4, 1, 1};
-    cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
-
-    // 启动 kernel
-    leakyrelu_kernel<<<dim, ktype, queue>>>(
-        input.data_ptr<float>(),
-        output.data_ptr<float>(),
-        total,
-        negative_slope
-    );
-
+  if (total == 0) {
     return output;
+  }
+
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {TASK_COUNT, 1, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
+  float slope = static_cast<float>(negative_slope);
+
+  if (input.scalar_type() == at::kFloat) {
+    leakyrelu_float_kernel<<<dim, ktype, queue>>>(
+        input.data_ptr<float>(), output.data_ptr<float>(), total, slope);
+  } else {
+    leakyrelu_half_kernel<<<dim, ktype, queue>>>(
+        reinterpret_cast<half *>(input.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(output.data_ptr<at::Half>()), total, slope);
+  }
+
+  return output;
 }
