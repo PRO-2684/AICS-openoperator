@@ -2,11 +2,60 @@
 #include <cnrt.h>
 #include <torch/extension.h>
 #include <framework/core/MLUStream.h>
-#include <cnnl.h>
 #include <cstdint>
 #include <float.h>
 
 #define TASK_COUNT 128
+#define CHUNK_SIZE 8192
+
+__mlu_entry__ void logsoftmax_kernel(half* output, const half* input,
+                                      int32_t batch, int32_t dim) {
+    if (__is_mpu()) return;
+
+    uint32_t task_id = taskId;
+    uint32_t task_num = taskDim;
+    uint32_t per_task = batch / task_num;
+    uint32_t remainder = batch % task_num;
+    uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
+    uint32_t count = per_task + (task_id < remainder ? 1 : 0);
+
+    __nram__ float buf[CHUNK_SIZE];
+    __nram__ float mx_buf[1];
+
+    for (uint32_t b = start; b < start + count; ++b) {
+        uint32_t off = b * dim;
+
+        float mx = -FLT_MAX;
+        for (uint32_t i = 0; i < dim; i += CHUNK_SIZE) {
+            uint32_t cur = (dim - i > CHUNK_SIZE) ? CHUNK_SIZE : (dim - i);
+            for (uint32_t j = 0; j < cur; ++j) buf[j] = (float)input[off + i + j];
+            __bang_argmax(mx_buf, buf, cur);
+            if (mx_buf[0] > mx) mx = mx_buf[0];
+        }
+
+        float se = 0.0f;
+        for (uint32_t i = 0; i < dim; i += CHUNK_SIZE) {
+            uint32_t cur = (dim - i > CHUNK_SIZE) ? CHUNK_SIZE : (dim - i);
+            uint32_t alen = (cur + 63) & ~63;
+            for (uint32_t j = 0; j < cur; ++j) buf[j] = (float)input[off + i + j];
+            if (alen > cur) __bang_write_value(buf + cur, alen - cur, 0.0f);
+            __bang_sub_scalar(buf, buf, mx, alen);
+            __bang_active_exp(buf, buf, alen);
+            float s = 0.0f;
+            for (uint32_t j = 0; j < alen; ++j) s += buf[j];
+            se += s;
+        }
+
+        float lse = logf(se) + mx;
+
+        for (uint32_t i = 0; i < dim; i += CHUNK_SIZE) {
+            uint32_t cur = (dim - i > CHUNK_SIZE) ? CHUNK_SIZE : (dim - i);
+            for (uint32_t j = 0; j < cur; ++j) buf[j] = (float)input[off + i + j];
+            __bang_sub_scalar(buf, buf, lse, cur);
+            for (uint32_t j = 0; j < cur; ++j) output[off + i + j] = (half)buf[j];
+        }
+    }
+}
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
     TORCH_CHECK(x.is_contiguous(), "input must be contiguous");
@@ -14,26 +63,16 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
     auto output = torch::empty_like(x);
     if (x.numel() == 0) return output;
 
-    cnnlHandle_t handle;
-    CNNL_CHECK(cnnlCreate(&handle));
+    int batch = (int)x.size(0);
+    int d = (int)x.size(1);
 
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    CNNL_CHECK(cnnlSetQueue(handle, queue));
+    cnrtDim3_t dim_config = {TASK_COUNT, 1, 1};
+    cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
 
-    cnnlTensorDescriptor_t input_desc, output_desc;
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&input_desc));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&output_desc));
-
-    std::vector<int> dims = {x.size(0), x.size(1)};
-    CNNL_CHECK(cnnlSetTensorDescriptor(input_desc, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, dims.size(), dims.data()));
-    CNNL_CHECK(cnnlSetTensorDescriptor(output_desc, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, dims.size(), dims.data()));
-
-    CNNL_CHECK(cnnlLogSoftmaxForward(handle, input_desc, x.data_ptr<at::Half>(),
-                                     output_desc, output.data_ptr<at::Half>()));
-
-    CNNL_CHECK(cnnlDestroyTensorDescriptor(input_desc));
-    CNNL_CHECK(cnnlDestroyTensorDescriptor(output_desc));
-    CNNL_CHECK(cnnlDestroy(handle));
+    logsoftmax_kernel<<<dim_config, ktype, queue>>>(
+        reinterpret_cast<half*>(output.data_ptr<at::Half>()),
+        reinterpret_cast<half*>(x.data_ptr<at::Half>()), batch, d);
 
     return output;
 }
