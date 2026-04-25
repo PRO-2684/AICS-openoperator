@@ -5,8 +5,8 @@
 #include <cstdint>
 #include <float.h>
 
-#define TASK_COUNT 128
-#define CHUNK_SIZE 8192
+#define TASK_COUNT 256
+#define CHUNK_SIZE 16384
 
 __mlu_entry__ void logsoftmax_kernel(half* output, const half* input,
                                       int32_t batch, int32_t dim) {
