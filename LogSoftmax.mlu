@@ -7,10 +7,8 @@
 
 #define TASK_COUNT 32
 
-__mlu_entry__ void logsoftmax_kernel(float* output,
-                                     const float* input,
-                                     int32_t batch_size,
-                                     int32_t dim_size) {
+__mlu_entry__ void logsoftmax_float_kernel(float* output, const float* input,
+                                           int32_t batch_size, int32_t dim_size) {
     if (__is_mpu()) return;
 
     uint32_t task_id = taskId;
@@ -20,8 +18,8 @@ __mlu_entry__ void logsoftmax_kernel(float* output,
     uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
     uint32_t count = per_task + (task_id < remainder ? 1 : 0);
 
-    __nram__ float nram_buf[8192];
-    __nram__ float nram_max[1];
+    __nram__ float buf[8192];
+    __nram__ float mx_val[1];
 
     for (uint32_t b = start; b < start + count; ++b) {
         uint32_t row_off = b * dim_size;
@@ -29,21 +27,21 @@ __mlu_entry__ void logsoftmax_kernel(float* output,
         float mx = -FLT_MAX;
         for (uint32_t i = 0; i < dim_size; i += 8192) {
             uint32_t cur = (dim_size - i > 8192) ? 8192 : (dim_size - i);
-            __memcpy(nram_buf, input + row_off + i, cur * sizeof(float), GDRAM2NRAM);
-            __bang_argmax(nram_max, nram_buf, cur);
-            if (nram_max[0] > mx) mx = nram_max[0];
+            __memcpy(buf, input + row_off + i, cur * sizeof(float), GDRAM2NRAM);
+            __bang_argmax(mx_val, buf, cur);
+            if (mx_val[0] > mx) mx = mx_val[0];
         }
 
         float se = 0.0f;
         for (uint32_t i = 0; i < dim_size; i += 8192) {
             uint32_t cur = (dim_size - i > 8192) ? 8192 : (dim_size - i);
             uint32_t alen = (cur + 63) & ~63;
-            __memcpy(nram_buf, input + row_off + i, cur * sizeof(float), GDRAM2NRAM);
-            if (alen > cur) __bang_write_value(nram_buf + cur, alen - cur, 0.0f);
-            __bang_sub_scalar(nram_buf, nram_buf, mx, alen);
-            __bang_active_exp(nram_buf, nram_buf, alen);
+            __memcpy(buf, input + row_off + i, cur * sizeof(float), GDRAM2NRAM);
+            if (alen > cur) __bang_write_value(buf + cur, alen - cur, 0.0f);
+            __bang_sub_scalar(buf, buf, mx, alen);
+            __bang_active_exp(buf, buf, alen);
             float s = 0.0f;
-            for (uint32_t j = 0; j < alen; ++j) s += nram_buf[j];
+            for (uint32_t j = 0; j < alen; ++j) s += buf[j];
             se += s;
         }
 
@@ -52,17 +50,69 @@ __mlu_entry__ void logsoftmax_kernel(float* output,
         for (uint32_t i = 0; i < dim_size; i += 8192) {
             uint32_t cur = (dim_size - i > 8192) ? 8192 : (dim_size - i);
             uint32_t alen = (cur + 63) & ~63;
-            __memcpy(nram_buf, input + row_off + i, cur * sizeof(float), GDRAM2NRAM);
-            if (alen > cur) __bang_write_value(nram_buf + cur, alen - cur, 0.0f);
-            __bang_sub_scalar(nram_buf, nram_buf, lse, alen);
-            __memcpy(output + row_off + i, nram_buf, cur * sizeof(float), NRAM2GDRAM);
+            __memcpy(buf, input + row_off + i, cur * sizeof(float), GDRAM2NRAM);
+            if (alen > cur) __bang_write_value(buf + cur, alen - cur, 0.0f);
+            __bang_sub_scalar(buf, buf, lse, alen);
+            __memcpy(output + row_off + i, buf, cur * sizeof(float), NRAM2GDRAM);
+        }
+    }
+}
+
+__mlu_entry__ void logsoftmax_half_kernel(half* output, const half* input,
+                                           int32_t batch_size, int32_t dim_size) {
+    if (__is_mpu()) return;
+
+    uint32_t task_id = taskId;
+    uint32_t task_num = taskDim;
+    uint32_t per_task = batch_size / task_num;
+    uint32_t remainder = batch_size % task_num;
+    uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
+    uint32_t count = per_task + (task_id < remainder ? 1 : 0);
+
+    __nram__ float buf[8192];
+    __nram__ float mx_val[1];
+
+    for (uint32_t b = start; b < start + count; ++b) {
+        uint32_t row_off = b * dim_size;
+
+        float mx = -FLT_MAX;
+        for (uint32_t i = 0; i < dim_size; i += 8192) {
+            uint32_t cur = (dim_size - i > 8192) ? 8192 : (dim_size - i);
+            uint32_t alen = (cur + 63) & ~63;
+            for (uint32_t j = 0; j < cur; ++j) buf[j] = (float)input[row_off + i + j];
+            if (alen > cur) __bang_write_value(buf + cur, alen - cur, 0.0f);
+            __bang_argmax(mx_val, buf, alen);
+            if (mx_val[0] > mx) mx = mx_val[0];
+        }
+
+        float se = 0.0f;
+        for (uint32_t i = 0; i < dim_size; i += 8192) {
+            uint32_t cur = (dim_size - i > 8192) ? 8192 : (dim_size - i);
+            uint32_t alen = (cur + 63) & ~63;
+            for (uint32_t j = 0; j < cur; ++j) buf[j] = (float)input[row_off + i + j];
+            if (alen > cur) __bang_write_value(buf + cur, alen - cur, 0.0f);
+            __bang_sub_scalar(buf, buf, mx, alen);
+            __bang_active_exp(buf, buf, alen);
+            float s = 0.0f;
+            for (uint32_t j = 0; j < alen; ++j) s += buf[j];
+            se += s;
+        }
+
+        float lse = logf(se) + mx;
+
+        for (uint32_t i = 0; i < dim_size; i += 8192) {
+            uint32_t cur = (dim_size - i > 8192) ? 8192 : (dim_size - i);
+            uint32_t alen = (cur + 63) & ~63;
+            for (uint32_t j = 0; j < cur; ++j) buf[j] = (float)input[row_off + i + j];
+            if (alen > cur) __bang_write_value(buf + cur, alen - cur, 0.0f);
+            __bang_sub_scalar(buf, buf, lse, alen);
+            for (uint32_t j = 0; j < cur; ++j) output[row_off + i + j] = (half)buf[j];
         }
     }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
     TORCH_CHECK(x.is_contiguous(), "input must be contiguous");
-    TORCH_CHECK(x.scalar_type() == at::kFloat, "input must be float32");
 
     auto output = torch::empty_like(x);
     if (x.numel() == 0) return output;
@@ -71,8 +121,14 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
     cnrtDim3_t dim_config = {TASK_COUNT, 1, 1};
     cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
 
-    logsoftmax_kernel<<<dim_config, ktype, queue>>>(
-        output.data_ptr<float>(), x.data_ptr<float>(), x.size(0), x.size(1));
+    if (x.scalar_type() == at::kFloat) {
+        logsoftmax_float_kernel<<<dim_config, ktype, queue>>>(
+            output.data_ptr<float>(), x.data_ptr<float>(), x.size(0), x.size(1));
+    } else {
+        logsoftmax_half_kernel<<<dim_config, ktype, queue>>>(
+            reinterpret_cast<half*>(output.data_ptr<at::Half>()),
+            reinterpret_cast<half*>(x.data_ptr<at::Half>()), x.size(0), x.size(1));
+    }
 
     return output;
 }
