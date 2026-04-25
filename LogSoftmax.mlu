@@ -5,8 +5,8 @@
 #include <cstdint>
 #include <float.h>
 
-#define CHUNK_SIZE 4096
-#define TASK_COUNT 32
+#define TASK_COUNT 128
+#define CHUNK_SIZE 16384
 
 __mlu_entry__ void logsoftmax_float_kernel(const float* __restrict__ x,
                                           float* __restrict__ output,
@@ -31,13 +31,8 @@ __mlu_entry__ void logsoftmax_float_kernel(const float* __restrict__ x,
         float row_max = -FLT_MAX;
         for (uint32_t offset = 0; offset < row_len; offset += CHUNK_SIZE) {
             uint32_t cur = (row_len - offset > CHUNK_SIZE) ? CHUNK_SIZE : (row_len - offset);
-            uint32_t aligned = (cur + 63) & ~63;
-
             __memcpy(nram_tile, x + row_start + offset, cur * sizeof(float), GDRAM2NRAM);
-            if (aligned > cur) {
-                __bang_write_value(nram_tile + cur, aligned - cur, 0.0f);
-            }
-            __bang_argmax(nram_max_val, nram_tile, aligned);
+            __bang_argmax(nram_max_val, nram_tile, cur);
             if (nram_max_val[0] > row_max) {
                 row_max = nram_max_val[0];
             }
@@ -63,7 +58,7 @@ __mlu_entry__ void logsoftmax_float_kernel(const float* __restrict__ x,
         }
 
         float log_sum_exp = logf(sum_exp);
-        float log_sum_exp_plus_max = log_sum_exp + row_max;
+        float subtract_val = log_sum_exp + row_max;
 
         for (uint32_t offset = 0; offset < row_len; offset += CHUNK_SIZE) {
             uint32_t cur = (row_len - offset > CHUNK_SIZE) ? CHUNK_SIZE : (row_len - offset);
@@ -73,7 +68,7 @@ __mlu_entry__ void logsoftmax_float_kernel(const float* __restrict__ x,
             if (aligned > cur) {
                 __bang_write_value(nram_tile + cur, aligned - cur, 0.0f);
             }
-            __bang_sub_scalar(nram_tile, nram_tile, log_sum_exp_plus_max, aligned);
+            __bang_sub_scalar(nram_tile, nram_tile, subtract_val, aligned);
             __memcpy(output + row_start + offset, nram_tile, cur * sizeof(float), NRAM2GDRAM);
         }
     }
@@ -138,7 +133,7 @@ __mlu_entry__ void logsoftmax_half_kernel(const half* __restrict__ x,
         }
 
         float log_sum_exp = logf(sum_exp);
-        float log_sum_exp_plus_max = log_sum_exp + row_max;
+        float subtract_val = log_sum_exp + row_max;
 
         for (uint32_t offset = 0; offset < row_len; offset += CHUNK_SIZE) {
             uint32_t cur = (row_len - offset > CHUNK_SIZE) ? CHUNK_SIZE : (row_len - offset);
@@ -150,7 +145,7 @@ __mlu_entry__ void logsoftmax_half_kernel(const half* __restrict__ x,
             if (aligned > cur) {
                 __bang_write_value(nram_tile + cur, aligned - cur, 0.0f);
             }
-            __bang_sub_scalar(nram_tile, nram_tile, log_sum_exp_plus_max, aligned);
+            __bang_sub_scalar(nram_tile, nram_tile, subtract_val, aligned);
             for (uint32_t i = 0; i < cur; ++i) {
                 output[row_start + offset + i] = (half)nram_tile[i];
             }
