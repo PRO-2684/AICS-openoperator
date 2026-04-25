@@ -7,8 +7,8 @@
 
 #define TASK_COUNT 32
 
-__mlu_entry__ void logsoftmax_half_kernel(half* output, const half* input,
-                                           int32_t batch_size, int32_t dim_size) {
+__mlu_entry__ void logsoftmax_kernel(half* output, const half* input,
+                                      int32_t batch_size, int32_t dim_size) {
     if (__is_mpu()) return;
 
     uint32_t task_id = taskId;
@@ -60,7 +60,7 @@ __mlu_entry__ void logsoftmax_half_kernel(half* output, const half* input,
     }
 }
 
-torch::Tensor bang_func(torch::Tensor x, int dim) {
+torch::Tensor bang_func(torch::Tensor x, int dim = 1) {
     TORCH_CHECK(x.is_contiguous(), "input must be contiguous");
 
     auto output = torch::empty_like(x);
@@ -70,7 +70,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
     cnrtDim3_t dim_config = {TASK_COUNT, 1, 1};
     cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
 
-    logsoftmax_half_kernel<<<dim_config, ktype, queue>>>(
+    logsoftmax_kernel<<<dim_config, ktype, queue>>>(
         reinterpret_cast<half*>(output.data_ptr<at::Half>()),
         reinterpret_cast<half*>(x.data_ptr<at::Half>()), x.size(0), x.size(1));
 
