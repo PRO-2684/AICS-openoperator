@@ -18,44 +18,44 @@ __mlu_entry__ void logsoftmax_half_kernel(half* output, const half* input,
     uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
     uint32_t count = per_task + (task_id < remainder ? 1 : 0);
 
-    __nram__ half buf[8192];
-    __nram__ half mx_val[1];
+    __nram__ float buf_f[8192];
+    __nram__ float mx_val[1];
 
     for (uint32_t b = start; b < start + count; ++b) {
         uint32_t row_off = b * dim_size;
 
-        half mx = (half)(-FLT_MAX);
+        float mx = -FLT_MAX;
         for (uint32_t i = 0; i < dim_size; i += 8192) {
             uint32_t cur = (dim_size - i > 8192) ? 8192 : (dim_size - i);
             uint32_t alen = (cur + 63) & ~63;
-            __memcpy(buf, input + row_off + i, cur * sizeof(half), GDRAM2NRAM);
-            if (alen > cur) __bang_write_value(buf + cur, alen - cur, (half)0.0f);
-            __bang_argmax(mx_val, buf, alen);
-            if (__builtin_convert_to_float(mx_val[0]) > __builtin_convert_to_float(mx)) mx = mx_val[0];
+            for (uint32_t j = 0; j < cur; ++j) buf_f[j] = (float)input[row_off + i + j];
+            if (alen > cur) __bang_write_value(buf_f + cur, alen - cur, 0.0f);
+            __bang_argmax(mx_val, buf_f, alen);
+            if (mx_val[0] > mx) mx = mx_val[0];
         }
 
-        half se = (half)0.0f;
+        float se = 0.0f;
         for (uint32_t i = 0; i < dim_size; i += 8192) {
             uint32_t cur = (dim_size - i > 8192) ? 8192 : (dim_size - i);
             uint32_t alen = (cur + 63) & ~63;
-            __memcpy(buf, input + row_off + i, cur * sizeof(half), GDRAM2NRAM);
-            if (alen > cur) __bang_write_value(buf + cur, alen - cur, (half)0.0f);
-            __bang_sub_scalar(buf, buf, mx, alen);
-            __bang_active_exp(buf, buf, alen);
-            half s = (half)0.0f;
-            for (uint32_t j = 0; j < alen; ++j) s = s + buf[j];
-            se = se + s;
+            for (uint32_t j = 0; j < cur; ++j) buf_f[j] = (float)input[row_off + i + j];
+            if (alen > cur) __bang_write_value(buf_f + cur, alen - cur, 0.0f);
+            __bang_sub_scalar(buf_f, buf_f, mx, alen);
+            __bang_active_exp(buf_f, buf_f, alen);
+            float s = 0.0f;
+            for (uint32_t j = 0; j < alen; ++j) s += buf_f[j];
+            se += s;
         }
 
-        float lse = logf(__builtin_convert_to_float(se)) + __builtin_convert_to_float(mx);
+        float lse = logf(se) + mx;
 
         for (uint32_t i = 0; i < dim_size; i += 8192) {
             uint32_t cur = (dim_size - i > 8192) ? 8192 : (dim_size - i);
             uint32_t alen = (cur + 63) & ~63;
-            __memcpy(buf, input + row_off + i, cur * sizeof(half), GDRAM2NRAM);
-            if (alen > cur) __bang_write_value(buf + cur, alen - cur, (half)0.0f);
-            __bang_sub_scalar(buf, buf, (half)lse, alen);
-            __memcpy(output + row_off + i, buf, cur * sizeof(half), NRAM2GDRAM);
+            for (uint32_t j = 0; j < cur; ++j) buf_f[j] = (float)input[row_off + i + j];
+            if (alen > cur) __bang_write_value(buf_f + cur, alen - cur, 0.0f);
+            __bang_sub_scalar(buf_f, buf_f, lse, alen);
+            for (uint32_t j = 0; j < cur; ++j) output[row_off + i + j] = (half)buf_f[j];
         }
     }
 }
