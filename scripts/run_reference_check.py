@@ -120,8 +120,8 @@ def main():
     task = task_for_source(source.name)
 
     ref_path = REPO_ROOT / "reference-impl" / f"{task['base_name']}.py"
-    if not ref_path.exists():
-        raise SystemExit(f"missing extracted reference: {ref_path}")
+    ref_path.parent.mkdir(parents=True, exist_ok=True)
+    ref_path.write_text(task["reference_implementation"].rstrip() + "\n")
 
     module_name = wrapper_so.stem
     binding_cpp = obj_path.parent / f"{module_name}_binding.cpp"

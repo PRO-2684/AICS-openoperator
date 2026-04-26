@@ -4,7 +4,7 @@
 
 // Task: 056 056_gather
 // Category: io
-// Difficulty: medium
+// Difficulty: basic
 // DType: float16
 // Description: 实现一个 BangC 算子，根据索引和分桶规则将输入张量的行数据收集并加权排列到目标缓冲区。输入包括形状为 `[tokens, hidden_size]` 的张量 `x`、形状均为 `[num_elements]` 的索引 `indices` 和分桶 ID `bin_ids`、形状为 `[num_elements]` 的可选权重张量 `weights`、分桶边界张量 `bins` 以及标量 `top_k`；输出张量的形状为 `[tokens * top_k, hidden_size]`。
 // Wrapper: torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices, torch::Tensor bin_ids, torch::Tensor weights, torch::Tensor bins, int top_k);

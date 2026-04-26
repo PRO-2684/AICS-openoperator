@@ -4,7 +4,7 @@
 
 // Task: 009 009_conv_standard_1D
 // Category: conv
-// Difficulty: hard
+// Difficulty: basic
 // DType: float16
 // Description: 实现一个 BangC 算子，执行标准的一维卷积运算。输入包括形状为 `[batch, in_channels, length]` 的数据张量 `x`、形状为 `[out_channels, in_channels/groups, kernel_size]` 的权重张量 `weight` 以及形状为 `[out_channels]` 的可选偏置张量 `bias`。算子还需支持通过 `stride`、`padding`、`dilation` 和 `groups` 等参数配置卷积行为，并输出形状为 `[batch, out_channels, length_out]` 的张量。
 // Wrapper: torch::Tensor bang_func(torch::Tensor x,int in_channels,int out_channels,int kernel_size,int stride,int padding,int dilation, int groups,int bias);

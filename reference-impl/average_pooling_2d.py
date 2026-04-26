@@ -29,10 +29,10 @@ class Model(nn.Module):
         """
         return self.avg_pool(x)
 
-batch_size = 16
-channels = 64
-height = 2048
-width = 2048
+batch_size = 4
+channels = 32
+height = 1024
+width = 1024
 kernel_size = 11
 
 def get_inputs():

@@ -4,7 +4,7 @@
 
 // Task: 138 138_GRU_forward
 // Category: fused
-// Difficulty: hard
+// Difficulty: basic
 // DType: float16
 // Description: 实现一个 BangC 算子，实现多层门控循环单元（GRU）的前向计算过程。输入为形状为 `[batch, seq_len, input_size]` 的张量 `x`，并根据给定的隐藏层维度 `hidden_size` 和层数 `num_layers` 对序列数据进行处理；算子最终输出形状为 `[batch, seq_len, hidden_size]` 的隐藏状态序列。
 // Wrapper: torch::Tensor bang_func(torch::Tensor x, int input_size, int hidden_size, int num_layers);

@@ -1,14 +1,16 @@
 import json
 import re
 from pathlib import Path
+from urllib.request import urlopen
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PROBLEMS_JSON = REPO_ROOT / "reference-impl" / "problems.json"
+PROBLEMS_URL = "https://openoperator.cn/problems.json"
 
 
 def load_problems():
-    data = json.loads(PROBLEMS_JSON.read_text())
+    with urlopen(PROBLEMS_URL, timeout=30) as response:
+        data = json.load(response)
     tasks = []
     by_base = {}
     for raw_task in data["tasks"]:
@@ -57,3 +59,12 @@ def build_template(task):
   TORCH_CHECK(false, "TODO: implement {task["base_name"]}");
 }}
 """
+
+
+def is_generated_template(path, task):
+    if not path.exists():
+        return True
+    text = path.read_text(errors="ignore")
+    if not text.strip():
+        return True
+    return f'TORCH_CHECK(false, "TODO: implement {task["base_name"]}");' in text

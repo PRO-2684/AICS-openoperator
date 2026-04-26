@@ -4,7 +4,7 @@
 
 // Task: 103 103_MSE_Loss
 // Category: loss
-// Difficulty: easy
+// Difficulty: basic
 // DType: float16
 // Description: 实现一个 BangC 算子，计算预测张量与目标张量之间的均方误差（MSE Loss）。输入包括形状均为 `[batch, dim]` 的预测张量 `predictions` 和目标张量 `targets`；输出为计算所得的标量损失值。
 // Wrapper: torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets);

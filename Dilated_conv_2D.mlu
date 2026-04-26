@@ -4,7 +4,7 @@
 
 // Task: 135 135_Dilated_conv_2D
 // Category: conv
-// Difficulty: hard
+// Difficulty: basic
 // DType: float16
 // Description: 实现一个 BangC 算子，对四维输入张量执行带有填充和空洞特性的二维卷积运算。输入为形状为 `[batch, in_channels, H, W]` 的张量 `x`，其运算受卷积核大小 `kernel_size`、膨胀系数 `dilation` 以及填充宽度 `padding` 等参数控制；输出为卷积计算后的特征图张量。
 // Wrapper: torch::Tensor bang_func(torch::Tensor x, int in_channels, int out_channels, int kernel_size, int dilation, int padding);

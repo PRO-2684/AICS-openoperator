@@ -4,7 +4,7 @@
 
 // Task: 051 051_cumsum
 // Category: cum
-// Difficulty: medium
+// Difficulty: basic
 // DType: float16
 // Description: 实现一个 BangC 算子，对输入张量沿指定维度计算累加前缀和（Cumulative Sum）。输入包括形状为 `[d0, d1, ..., dn]` 的张量 `x` 以及表示操作维度的整数 `dim`；输出张量的形状与 `x` 保持一致。
 // Wrapper: torch::Tensor bang_func(torch::Tensor x, int dim);

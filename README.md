@@ -30,6 +30,16 @@
         - Link it in the "AC" column with 🟡
     - Otherwise, continue debugging and resubmit
 
+<details><summary>For repo owner</summary>
+
+To update templates and reference implementations from data source ([`problems.json`](https://openoperator.cn/problems.json)), run:
+
+```bash
+python scripts/update_problems.py
+```
+
+</details>
+
 ### Quick reference
 
 - Check your solution: `./check.sh <Path-to.mlu>`
