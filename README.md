@@ -53,7 +53,7 @@ python scripts/update_problems.py
 | 002 | [matrix_scalar_multiplication](matrix_scalar_multiplication.mlu) | [@sunweihao28](https://github.com/sunweihao28/) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/506d6a712d856aba0d3a0cfc0a668a9a7c76503b) |
 | 003 | [LogSoftmax](LogSoftmax.mlu) | [@sunweihao28](https://github.com/sunweihao28/) |[🟢](https://github.com/PRO-2684/AICS-openoperator/commit/d8fee0275d66b9bd8778d2c11f7812fe2d84cf01)|
 | 004 | [batched_matrix_multiplication](batched_matrix_multiplication.mlu) | N/A | 🔴 |
-| 005 | [average_pooling_2d](average_pooling_2d.mlu) | [@PRO-2684](https://github.com/PRO-2684/) | [🟡](doc/average_pooling_2d.md) |
+| 005 | [average_pooling_2d](average_pooling_2d.mlu) | [@PRO-2684](https://github.com/PRO-2684/) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/f5e4a6a722015393099a5708b6edecd91f0b56ef) |
 | 006 | [conv_depthwise_2D_square_input_square_kernel](conv_depthwise_2D_square_input_square_kernel.mlu) | N/A | 🔴 |
 | 007 | [conv_depthwise_separable_2D](conv_depthwise_separable_2D.mlu) | N/A | 🔴 |
 | 008 | [conv_pointwise_2D](conv_pointwise_2D.mlu) | N/A | 🔴 |
