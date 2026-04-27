@@ -1,16 +1,18 @@
 import json
 import re
 from pathlib import Path
-from urllib.request import urlopen
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PROBLEMS_URL = "https://openoperator.cn/problems.json"
+PROBLEMS_PATH = REPO_ROOT / "reference-impl" / "problems.json"
 
 
 def load_problems():
-    with urlopen(PROBLEMS_URL, timeout=30) as response:
-        data = json.load(response)
+    if not PROBLEMS_PATH.exists():
+        raise FileNotFoundError(
+            f"{PROBLEMS_PATH} is missing; download https://openoperator.cn/problems.json there"
+        )
+    data = json.loads(PROBLEMS_PATH.read_text())
     tasks = []
     by_base = {}
     for raw_task in data["tasks"]:
@@ -35,9 +37,17 @@ def task_for_source(source_name):
     return by_base[key]
 
 
-def first_dtype(task):
-    dtypes = task.get("description", {}).get("dtype", [])
-    return dtypes[0] if dtypes else None
+def task_names():
+    _, tasks, _ = load_problems()
+    return [task["base_name"] for task in tasks]
+
+
+def task_index_by_base():
+    return {name: index + 1 for index, name in enumerate(task_names())}
+
+
+def task_dtypes(task):
+    return task.get("description", {}).get("dtype", []) or [None]
 
 
 def build_template(task):

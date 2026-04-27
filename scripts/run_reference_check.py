@@ -9,13 +9,14 @@ import time
 import torch
 import torch_mlu  # noqa: F401
 
-from problem_utils import REPO_ROOT, first_dtype, task_for_source
+from problem_utils import REPO_ROOT, task_dtypes, task_for_source
 
 
 DTYPE_MAP = {
     "float16": torch.float16,
     "float32": torch.float32,
     "bfloat16": torch.bfloat16,
+    "int32": torch.int32,
 }
 
 WARMUP_ITERS = 3
@@ -31,7 +32,7 @@ def load_module_from_file(name, path):
 def cast_tree(obj, dtype, device=None):
     if isinstance(obj, torch.Tensor):
         out = obj
-        if obj.is_floating_point() and dtype is not None:
+        if should_cast_tensor(obj, dtype):
             out = out.to(dtype)
         if device is not None:
             out = out.to(device)
@@ -81,6 +82,32 @@ def benchmark(label, fn):
 
     print(f"[time] {label}: {elapsed_ms:.3f} ms avg over {BENCH_ITERS} runs")
     return result, elapsed_ms
+
+
+def dtype_from_name(dtype_name):
+    if dtype_name is None:
+        return None
+    if dtype_name not in DTYPE_MAP:
+        raise SystemExit(f"unsupported dtype in problems.json: {dtype_name}")
+    return DTYPE_MAP[dtype_name]
+
+
+def is_floating_dtype(dtype):
+    return dtype is not None and torch.is_floating_point(torch.empty((), dtype=dtype))
+
+
+def should_cast_tensor(tensor, dtype):
+    if dtype is None:
+        return False
+    return tensor.is_floating_point() or not is_floating_dtype(dtype)
+
+
+def tolerances(dtype):
+    if dtype == torch.float16:
+        return 1e-2, 1e-2
+    if dtype == torch.bfloat16:
+        return 2e-2, 2e-2
+    return 1e-4, 1e-4
 
 
 def main():
@@ -158,50 +185,59 @@ def main():
     ref_mod = load_module_from_file(f"{task['base_name']}_reference", ref_path)
     ext_mod = load_module_from_file(module_name, wrapper_so)
 
-    init_inputs = list(ref_mod.get_init_inputs())
-    raw_inputs = list(ref_mod.get_inputs())
-    dtype = DTYPE_MAP.get(first_dtype(task))
+    for dtype_name in task_dtypes(task):
+        dtype = dtype_from_name(dtype_name)
+        dtype_label = dtype_name or "default"
+        print(f"[check] dtype={dtype_label}")
 
-    model = ref_mod.Model(*init_inputs)
-    model.eval()
-    if dtype is not None:
-        model = model.to(dtype=dtype)
+        init_inputs = list(ref_mod.get_init_inputs())
+        raw_inputs = list(ref_mod.get_inputs())
 
-    param_count = sum(p.numel() for p in model.parameters())
-    buffer_count = sum(b.numel() for b in model.buffers())
-    if param_count or buffer_count:
+        model = ref_mod.Model(*init_inputs)
+        model.eval()
+        if is_floating_dtype(dtype):
+            model = model.to(dtype=dtype)
+
+        param_count = sum(p.numel() for p in model.parameters())
+        buffer_count = sum(b.numel() for b in model.buffers())
+        if param_count or buffer_count:
+            print(
+                f"[skip] reference check skipped for {task['base_name']}: "
+                f"stateful model with {param_count} parameters and {buffer_count} buffers"
+            )
+            return
+
+        mlu_inputs = cast_tree(raw_inputs, dtype=dtype, device="mlu")
+        model = model.to("mlu")
+
+        expected, reference_ms = benchmark(
+            f"reference[{dtype_label}]", lambda: model(*mlu_inputs)
+        )
+        actual, bang_ms = benchmark(
+            f"bang_func[{dtype_label}]",
+            lambda: ext_mod.bang_func(*mlu_inputs, *init_inputs),
+        )
+
+        if not isinstance(expected, torch.Tensor) or not isinstance(actual, torch.Tensor):
+            raise SystemExit("reference checker currently supports tensor outputs only")
+
+        compare_expected = expected.float().cpu()
+        compare_actual = actual.float().cpu()
+
+        atol, rtol = tolerances(dtype)
+        if not torch.allclose(compare_actual, compare_expected, atol=atol, rtol=rtol):
+            diff = (compare_actual - compare_expected).abs().max().item()
+            raise SystemExit(
+                f"reference check failed for {task['base_name']} dtype={dtype_label}, "
+                f"max abs diff={diff}"
+            )
+
         print(
-            f"[skip] reference check skipped for {task['base_name']}: "
-            f"stateful model with {param_count} parameters and {buffer_count} buffers"
+            f"[ok] reference check passed for {task['base_name']} dtype={dtype_label} "
+            f"(max_elements={max_numel(raw_inputs)}, atol={atol}, rtol={rtol})"
         )
-        return
-
-    mlu_inputs = cast_tree(raw_inputs, dtype=dtype, device="mlu")
-    model = model.to("mlu")
-
-    expected, reference_ms = benchmark("reference", lambda: model(*mlu_inputs))
-    actual, bang_ms = benchmark("bang_func", lambda: ext_mod.bang_func(*mlu_inputs, *init_inputs))
-
-    if not isinstance(expected, torch.Tensor) or not isinstance(actual, torch.Tensor):
-        raise SystemExit("reference checker currently supports tensor outputs only")
-
-    compare_expected = expected.float().cpu()
-    compare_actual = actual.float().cpu()
-
-    atol = 1e-2 if dtype == torch.float16 else 1e-4
-    rtol = atol
-    if not torch.allclose(compare_actual, compare_expected, atol=atol, rtol=rtol):
-        diff = (compare_actual - compare_expected).abs().max().item()
-        raise SystemExit(
-            f"reference check failed for {task['base_name']}, max abs diff={diff}"
-        )
-
-    print(
-        f"[ok] reference check passed for {task['base_name']} "
-        f"(max_elements={max_numel(raw_inputs)}, atol={atol}, rtol={rtol})"
-    )
-    if bang_ms > 0:
-        print(f"[time] speedup: {reference_ms / bang_ms:.3f}x")
+        if bang_ms > 0:
+            print(f"[time] speedup[{dtype_label}]: {reference_ms / bang_ms:.3f}x")
 
 
 if __name__ == "__main__":

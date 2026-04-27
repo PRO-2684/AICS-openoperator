@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 import subprocess
-from json import load
 from typing import Optional
 
-
-def get_tasks() -> list[str]:
-    with open("scripts/tasks.json") as fp:
-        return load(fp)
+from problem_utils import task_index_by_base
 
 
-TASKS = get_tasks()
+TASK_INDICES = task_index_by_base()
 
 
 def run(*args):
@@ -31,7 +27,7 @@ def has_real_change(f: str) -> bool:
 
 def to_index(f: str) -> Optional[int]:
     task = f.removesuffix(".mlu")
-    return TASKS.index(task) + 1 if task in TASKS else None
+    return TASK_INDICES.get(task)
 
 
 def main():
