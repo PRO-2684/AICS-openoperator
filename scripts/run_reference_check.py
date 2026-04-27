@@ -4,6 +4,7 @@ import argparse
 import importlib.util
 from pathlib import Path
 import subprocess
+import time
 
 import torch
 import torch_mlu  # noqa: F401
@@ -16,6 +17,9 @@ DTYPE_MAP = {
     "float32": torch.float32,
     "bfloat16": torch.bfloat16,
 }
+
+WARMUP_ITERS = 3
+BENCH_ITERS = 10
 
 def load_module_from_file(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
@@ -57,6 +61,26 @@ PYBIND11_MODULE({module_name}, m) {{
   m.def("bang_func", &bang_func, "{task["base_name"]} bang_func");
 }}
 """
+
+
+def synchronize_mlu():
+    torch.mlu.synchronize()
+
+
+def benchmark(label, fn):
+    with torch.no_grad():
+        for _ in range(WARMUP_ITERS):
+            fn()
+        synchronize_mlu()
+
+        start = time.perf_counter()
+        for _ in range(BENCH_ITERS):
+            result = fn()
+        synchronize_mlu()
+        elapsed_ms = (time.perf_counter() - start) * 1000.0 / BENCH_ITERS
+
+    print(f"[time] {label}: {elapsed_ms:.3f} ms avg over {BENCH_ITERS} runs")
+    return result, elapsed_ms
 
 
 def main():
@@ -152,12 +176,11 @@ def main():
         )
         return
 
-    cpu_inputs = cast_tree(raw_inputs, dtype=dtype, device=None)
     mlu_inputs = cast_tree(raw_inputs, dtype=dtype, device="mlu")
+    model = model.to("mlu")
 
-    with torch.no_grad():
-        expected = model(*cpu_inputs)
-        actual = ext_mod.bang_func(*mlu_inputs, *init_inputs)
+    expected, reference_ms = benchmark("reference", lambda: model(*mlu_inputs))
+    actual, bang_ms = benchmark("bang_func", lambda: ext_mod.bang_func(*mlu_inputs, *init_inputs))
 
     if not isinstance(expected, torch.Tensor) or not isinstance(actual, torch.Tensor):
         raise SystemExit("reference checker currently supports tensor outputs only")
@@ -177,6 +200,8 @@ def main():
         f"[ok] reference check passed for {task['base_name']} "
         f"(max_elements={max_numel(raw_inputs)}, atol={atol}, rtol={rtol})"
     )
+    if bang_ms > 0:
+        print(f"[time] speedup: {reference_ms / bang_ms:.3f}x")
 
 
 if __name__ == "__main__":

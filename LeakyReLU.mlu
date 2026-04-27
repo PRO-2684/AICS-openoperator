@@ -1,105 +1,11 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <ATen/ops/leaky_relu.h>
 #include <torch/extension.h>
-#include <framework/core/MLUStream.h>
-
-#define CHUNK_SIZE 4096
-#define TASK_COUNT 32
-
-__mlu_entry__ void leakyrelu_float_kernel(const float *input, float *output,
-                                          uint32_t total,
-                                          float negative_slope) {
-  if (__is_mpu()) return;
-
-  uint32_t task_id = taskId;
-  uint32_t task_num = taskDim;
-  uint32_t per_task = total / task_num;
-  uint32_t remainder = total % task_num;
-  uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
-  uint32_t count = per_task + (task_id < remainder ? 1 : 0);
-
-  __nram__ float nram_input[CHUNK_SIZE];
-  __nram__ float nram_scale[CHUNK_SIZE];
-
-  for (uint32_t offset = 0; offset < count; offset += CHUNK_SIZE) {
-    uint32_t len = (offset + CHUNK_SIZE <= count) ? CHUNK_SIZE : (count - offset);
-    uint32_t aligned_len = (len + 63) & ~63;
-
-    __memcpy(nram_input, input + start + offset, len * sizeof(float), GDRAM2NRAM);
-    if (aligned_len > len) {
-      __bang_write_value(nram_input + len, aligned_len - len, 0.0f);
-    }
-
-    __bang_ge_scalar(nram_scale, nram_input, 0.0f, aligned_len);
-    __bang_mul_scalar(nram_scale, nram_scale, 1.0f - negative_slope, aligned_len);
-    __bang_add_scalar(nram_scale, nram_scale, negative_slope, aligned_len);
-    __bang_mul(nram_input, nram_input, nram_scale, len);
-
-    __memcpy(output + start + offset, nram_input, len * sizeof(float), NRAM2GDRAM);
-  }
-}
-
-__mlu_entry__ void leakyrelu_half_kernel(const half *input, half *output,
-                                         uint32_t total,
-                                         float negative_slope) {
-  if (__is_mpu()) return;
-
-  uint32_t task_id = taskId;
-  uint32_t task_num = taskDim;
-  uint32_t per_task = total / task_num;
-  uint32_t remainder = total % task_num;
-  uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
-  uint32_t count = per_task + (task_id < remainder ? 1 : 0);
-
-  __nram__ half nram_half[CHUNK_SIZE];
-  __nram__ float nram_float[CHUNK_SIZE];
-  __nram__ float nram_scale[CHUNK_SIZE];
-
-  for (uint32_t offset = 0; offset < count; offset += CHUNK_SIZE) {
-    uint32_t len = (offset + CHUNK_SIZE <= count) ? CHUNK_SIZE : (count - offset);
-    uint32_t aligned_len = (len + 63) & ~63;
-
-    __memcpy(nram_half, input + start + offset, len * sizeof(half), GDRAM2NRAM);
-    if (aligned_len > len) {
-      __bang_write_value(nram_half + len, aligned_len - len, (half)0.0f);
-    }
-
-    __bang_half2float(nram_float, nram_half, aligned_len);
-    __bang_ge_scalar(nram_scale, nram_float, 0.0f, aligned_len);
-    __bang_mul_scalar(nram_scale, nram_scale, 1.0f - negative_slope, aligned_len);
-    __bang_add_scalar(nram_scale, nram_scale, negative_slope, aligned_len);
-    __bang_mul(nram_float, nram_float, nram_scale, len);
-    __bang_float2half_rn(nram_half, nram_float, len);
-
-    __memcpy(output + start + offset, nram_half, len * sizeof(half), NRAM2GDRAM);
-  }
-}
 
 torch::Tensor bang_func(torch::Tensor input, double negative_slope) {
   TORCH_CHECK(input.is_contiguous(), "input must be contiguous");
   TORCH_CHECK(input.scalar_type() == at::kFloat || input.scalar_type() == at::kHalf,
               "input must be float32 or float16");
-
-  auto output = torch::empty_like(input);
-  uint32_t total = static_cast<uint32_t>(input.numel());
-
-  if (total == 0) {
-    return output;
-  }
-
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {TASK_COUNT, 1, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
-  float slope = static_cast<float>(negative_slope);
-
-  if (input.scalar_type() == at::kFloat) {
-    leakyrelu_float_kernel<<<dim, ktype, queue>>>(
-        input.data_ptr<float>(), output.data_ptr<float>(), total, slope);
-  } else {
-    leakyrelu_half_kernel<<<dim, ktype, queue>>>(
-        reinterpret_cast<half *>(input.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(output.data_ptr<at::Half>()), total, slope);
-  }
-
-  return output;
+  return at::leaky_relu(input, at::Scalar(negative_slope));
 }
