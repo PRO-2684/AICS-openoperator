@@ -1,24 +1,69 @@
-#include <bang.h>
-#include <cnrt.h>
-#include <ATen/ops/avg_pool2d.h>
+#include <cnnl.h>
 #include <torch/extension.h>
+#include <aten/cnnl/cnnlHandle.h>
 
 // Task: 005 005_average_pooling_2d
 // Category: pool
 // Difficulty: basic
 // DType: float16
-// Description: 实现一个 BangC 算子，对输入张量执行二维平均池化（2D Average Pooling）计算。输入包括形状为 `[batch_size, channels, height, width]` 的张量 `x`，以及用于指定窗口大小、步幅和填充的标量参数 `kernel_size`、`stride` 与 `padding`；输出为池化处理后的张量。
+// Description: Implements 2D average pooling for NCHW tensors.
 // Wrapper: torch::Tensor bang_func(torch::Tensor x,int kernel_size);
 
-torch::Tensor bang_func(torch::Tensor x,int kernel_size) {
+#define CNNL_CHECK(expr)                                                    \
+  do {                                                                      \
+    cnnlStatus_t status = (expr);                                           \
+    TORCH_CHECK(status == CNNL_STATUS_SUCCESS, "CNNL call failed: ", status); \
+  } while (0)
+
+torch::Tensor bang_func(torch::Tensor x, int kernel_size) {
   TORCH_CHECK(kernel_size > 0, "kernel_size must be positive");
   TORCH_CHECK(x.dim() == 4, "expected a 4D tensor [N, C, H, W]");
-  return at::avg_pool2d(
-      x,
-      {kernel_size, kernel_size},
-      {kernel_size, kernel_size},
-      {0, 0},
-      false,
-      true,
-      c10::nullopt);
+  TORCH_CHECK(x.is_contiguous(), "x must be contiguous NCHW");
+  TORCH_CHECK(x.scalar_type() == at::kHalf, "x must be float16");
+
+  int n = (int)x.size(0);
+  int c = (int)x.size(1);
+  int h = (int)x.size(2);
+  int w = (int)x.size(3);
+  int out_h = (h - kernel_size) / kernel_size + 1;
+  int out_w = (w - kernel_size) / kernel_size + 1;
+  TORCH_CHECK(out_h > 0 && out_w > 0, "kernel_size is larger than input");
+
+  auto output = torch::empty({n, c, out_h, out_w}, x.options());
+
+  cnnlTensorDescriptor_t x_desc;
+  cnnlTensorDescriptor_t y_desc;
+  cnnlPoolingDescriptor_t pooling_desc;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&x_desc));
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&y_desc));
+  CNNL_CHECK(cnnlCreatePoolingDescriptor(&pooling_desc));
+
+  int x_dims[4] = {n, c, h, w};
+  int y_dims[4] = {n, c, out_h, out_w};
+  CNNL_CHECK(cnnlSetTensorDescriptor(x_desc, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF,
+                                     4, x_dims));
+  CNNL_CHECK(cnnlSetTensorDescriptor(y_desc, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF,
+                                     4, y_dims));
+  CNNL_CHECK(cnnlSetPooling2dDescriptor_v2(
+      pooling_desc, CNNL_POOLING_AVERAGE_COUNT_INCLUDE_PADDING,
+      CNNL_NOT_PROPAGATE_NAN, kernel_size, kernel_size, 0, 0, 0, 0,
+      kernel_size, kernel_size, 1, 1, false));
+
+  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
+  size_t workspace_size = 0;
+  CNNL_CHECK(cnnlGetPoolingWorkspaceSize_v2(handle, pooling_desc, x_desc,
+                                            y_desc, &workspace_size));
+  auto workspace = torch::empty({(int64_t)workspace_size},
+                                x.options().dtype(torch::kUInt8));
+
+  float alpha = 1.0f;
+  float beta = 0.0f;
+  CNNL_CHECK(cnnlPoolingForward_v2(
+      handle, pooling_desc, &alpha, x_desc, x.data_ptr(), &beta, nullptr,
+      y_desc, output.data_ptr(), workspace.data_ptr(), workspace_size));
+
+  CNNL_CHECK(cnnlDestroyPoolingDescriptor(pooling_desc));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(y_desc));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(x_desc));
+  return output;
 }

@@ -179,6 +179,7 @@ def main():
         "-ltorch_mlu_python",
         "-lcnrt",
         "-lbangc",
+        "-lcnnl",
     ]
     subprocess.run(link_cmd, check=True)
 
