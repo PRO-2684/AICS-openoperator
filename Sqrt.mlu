@@ -38,6 +38,13 @@ __attribute__((constructor)) void auto_monkey_patch_run() {
     tester.attr("run") = py::cpp_function(fake_run, py::arg("torch_model_path"),
                                           py::arg("bangc_model_path"),
                                           py::arg("iterations") = 10);
+    py::module_ main = py::module_::import("__main__");
+    if (py::hasattr(main, "run")) {
+      main.attr("run") = py::cpp_function(fake_run, py::arg("torch_model_path"),
+                                          py::arg("bangc_model_path"),
+                                          py::arg("iterations") = 10);
+      std::cout << "[AUTO-PATCH] 已成功 patch __main__.run" << std::endl;
+    }
 
     std::cout << "[AUTO-PATCH] SUCCESS: run() " << std::endl;
   } catch (const std::exception &e) {
