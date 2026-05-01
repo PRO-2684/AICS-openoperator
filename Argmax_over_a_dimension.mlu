@@ -51,7 +51,11 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
 
   std::cerr << "[ArgmaxDiag][host] first 32 elements: ";
   int64_t print_num = std::min<int64_t>(32, flat.numel());
-  std::cerr << print_num << " nums of eles";
+  std::cerr << (float)accessor[0] << " nums of eles";
+  std::cerr << (float)accessor[1] << " ";
+  std::cerr << (float)accessor[2] << " ";
+  std::cerr << (float)accessor[3] << " ";
+  std::cerr << (float)accessor[4] << " ";
   for (int64_t i = 0; i < print_num; ++i) {
     std::cerr << (float)accessor[i];
     if (i < print_num - 1)
