@@ -67,11 +67,11 @@ __mlu_entry__ void sqrt_abs_half_kernel(const half *input, half *output,
     // __bang_abs(nram_buf, nram_buf, aligned_len);
 #if SQRT_USE_FAST_SQRT
     __bang_active_sqrt(nram_buf, nram_buf, aligned_len);
-#if SQRT_FAST_CORRECT_SMALL
-    __bang_lt_scalar(nram_mask, nram_buf, (half)0.08f, aligned_len);
-    __bang_mul_scalar(nram_mask, nram_mask, (half)0.006f, aligned_len);
-    __bang_sub(nram_buf, nram_buf, nram_mask, aligned_len);
-#endif
+// #if SQRT_FAST_CORRECT_SMALL
+//     __bang_lt_scalar(nram_mask, nram_buf, (half)0.08f, aligned_len);
+//     __bang_mul_scalar(nram_mask, nram_mask, (half)0.006f, aligned_len);
+//     __bang_sub(nram_buf, nram_buf, nram_mask, aligned_len);
+// #endif
 #else
     __bang_active_sqrthp(nram_buf, nram_buf, aligned_len);
 #endif
