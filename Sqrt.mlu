@@ -1,6 +1,7 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <torch/extension.h>
+#include <framework/core/MLUStream.h>
 
 // Task: 070 070_Sqrt
 // Category: pointwise
@@ -9,6 +10,61 @@
 // Description: 实现一个 BangC 算子，对输入张量执行逐元素的绝对值计算并求其平方根。输入为形状为 `[batch_size, dim]` 的张量 `x`；输出张量与 `x` 的形状一致。
 // Wrapper: torch::Tensor bang_func(torch::Tensor x);
 
+#define HALF_CHUNK_SIZE 65536
+#define TASK_COUNT 4
+
+__mlu_entry__ void sqrt_abs_half_kernel(const half *input, half *output,
+                                        uint32_t total) {
+  if (__is_mpu()) return;
+
+  uint32_t task_id = taskId;
+  uint32_t task_num = taskDim;
+  uint32_t per_task = total / task_num;
+  uint32_t remainder = total % task_num;
+  uint32_t start =
+      task_id * per_task + (task_id < remainder ? task_id : remainder);
+  uint32_t count = per_task + (task_id < remainder ? 1 : 0);
+
+  __nram__ half nram_buf[HALF_CHUNK_SIZE];
+  __nram__ float nram_float[HALF_CHUNK_SIZE];
+
+  for (uint32_t offset = 0; offset < count; offset += HALF_CHUNK_SIZE) {
+    uint32_t len = (offset + HALF_CHUNK_SIZE <= count)
+                       ? HALF_CHUNK_SIZE
+                       : (count - offset);
+    uint32_t aligned_len = (len + 63) & ~63;
+
+    __memcpy(nram_buf, input + start + offset, len * sizeof(half), GDRAM2NRAM);
+    if (aligned_len > len) {
+      __bang_write_value(nram_buf + len, aligned_len - len, (half)0.0f);
+    }
+
+    __bang_half2float(nram_float, nram_buf, aligned_len);
+    __bang_abs(nram_float, nram_float, aligned_len);
+    __bang_sqrt(nram_float, nram_float, aligned_len);
+    __bang_float2half_rn(nram_buf, nram_float, aligned_len);
+
+    __memcpy(output + start + offset, nram_buf, len * sizeof(half), NRAM2GDRAM);
+  }
+}
+
 torch::Tensor bang_func(torch::Tensor x) {
-  TORCH_CHECK(false, "TODO: implement Sqrt");
+  TORCH_CHECK(x.dim() == 2, "expected a 2D tensor [batch_size, dim]");
+  TORCH_CHECK(x.scalar_type() == at::kHalf, "x must be float16");
+
+  auto x_contiguous = x.contiguous();
+  auto output = torch::empty_like(x_contiguous);
+  uint32_t total = static_cast<uint32_t>(x_contiguous.numel());
+  if (total == 0) {
+    return output;
+  }
+
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {TASK_COUNT, 1, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
+
+  sqrt_abs_half_kernel<<<dim, ktype, queue>>>(
+      reinterpret_cast<half *>(x_contiguous.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(output.data_ptr<at::Half>()), total);
+  return output;
 }
