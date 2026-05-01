@@ -45,8 +45,11 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   const char *empty_msg = "[ArgmaxHash] Check tensor\n";
   write(1, empty_msg, 25);
   write(2, empty_msg, 25);
-  // 可选：打印少量数据（前10个元素）
-  // 安全打印前几个元素（支持任意维度） if (x.numel() > 0) {
+  // 固定前缀
+  const char prefix[] = "[ArgmaxHash] ";
+  write(1, prefix, 13);
+  write(2, prefix, 13);
+
   if (x.numel() > 0) {
     auto x_cont = x.contiguous();
     auto flat = x_cont.view({-1});
@@ -60,29 +63,22 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
       hash *= 0x100000001B3ULL;
     }
 
-    char buf[64] = "[ArgmaxHash] ";
-    int pos = 13; // strlen("[ArgmaxHash] ")
-
+    char letters[17];
     for (int i = 0; i < 16; ++i) {
       uint8_t c = (hash >> (i * 4)) & 0x0F;
-      buf[pos++] = (c < 10) ? 'A' + c : 'Q' + (c - 10); // 只输出字母
+      letters[i] = (c < 10) ? 'A' + c : 'Q' + (c - 10);
     }
-    buf[pos++] = '\n';
-    buf[pos] = '\0';
+    letters[16] = '\n';
 
-    // 强制写入 stdout 和 stderr
-    write(1, buf, pos);
-    write(2, buf, pos);
-    // 强制刷新
+    write(1, letters, 17);
+    write(2, letters, 17);
     fsync(1);
     fsync(2);
   } else {
-    const char *empty_msg = "[ArgmaxHash] EMPTY_TENSOR\n";
-    write(1, empty_msg, 25);
-    write(2, empty_msg, 25);
+    const char empty[] = "EMPTY\n";
+    write(1, empty, 6);
+    write(2, empty, 6);
   }
-  std::fflush(stderr);
-  sleep(5);
 
   auto output = torch::empty_like(x);
   return output;
