@@ -1,76 +1,48 @@
+// Best impl
+
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define CHUNK_ELEMS 3072
-#define CHUNKS_PER_TASK 3
-#define ELEMS_PER_TASK 9216
+#define CHUNK_ELEMS 4096
+#define ELEMS_PER_TASK 8192
 
 __mlu_entry__ void
-sqrt_abs_half_kernel_28task_pipeline3(const half *__restrict__ input,
+sqrt_abs_half_kernel_32task_pipeline2(const half *__restrict__ input,
                                       half *__restrict__ output) {
-  const uint32_t tid = taskId;
+  const uint32_t base = taskId * ELEMS_PER_TASK;
 
-  // 28 * 9216 = 258048，还剩 4096 half 给最后 4 个 task 处理
-  // 前 28 个 task 每个处理 9216
-  // 后 4 个 task 每个处理 1024，补足 262144
-  if (tid < 28) {
-    const uint32_t base = tid * ELEMS_PER_TASK;
+  __nram__ half buf0[CHUNK_ELEMS];
+  __nram__ half buf1[CHUNK_ELEMS];
 
-    __nram__ half buf0[CHUNK_ELEMS];
-    __nram__ half buf1[CHUNK_ELEMS];
+  const half *in0 = (const half *)__builtin_assume_aligned(input + base, 512);
+  const half *in1 =
+      (const half *)__builtin_assume_aligned(input + base + CHUNK_ELEMS, 512);
 
-    half *bufs[2] = {buf0, buf1};
+  half *out0 = (half *)__builtin_assume_aligned(output + base, 512);
+  half *out1 =
+      (half *)__builtin_assume_aligned(output + base + CHUNK_ELEMS, 512);
 
-    for (int i = 0; i < CHUNKS_PER_TASK + 2; ++i) {
-      if (i >= 2) {
-        const int sid = i - 2;
-        const int sslot = sid & 1;
+  // L0
+  __memcpy(buf0, in0, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
+  __sync_io();
 
-        half *out_ptr = (half *)__builtin_assume_aligned(
-            output + base + sid * CHUNK_ELEMS, 512);
+  // L1 + C0
+  __memcpy(buf1, in1, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
+  __bang_abs(buf0, buf0, CHUNK_ELEMS);
+  __bang_active_sqrthp(buf0, buf0, CHUNK_ELEMS);
+  __sync_io_move_compute();
 
-        __memcpy(out_ptr, bufs[sslot], CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
-      }
+  // S0 + C1
+  __memcpy(out0, buf0, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
+  __bang_abs(buf1, buf1, CHUNK_ELEMS);
+  __bang_active_sqrthp(buf1, buf1, CHUNK_ELEMS);
+  __sync_io_move_compute();
 
-      if (i >= 1 && i < CHUNKS_PER_TASK + 1) {
-        const int cid = i - 1;
-        const int cslot = cid & 1;
-
-        __bang_abs(bufs[cslot], bufs[cslot], CHUNK_ELEMS);
-        __bang_active_sqrthp(bufs[cslot], bufs[cslot], CHUNK_ELEMS);
-      }
-
-      if (i < CHUNKS_PER_TASK) {
-        const int lid = i;
-        const int lslot = lid & 1;
-
-        const half *in_ptr = (const half *)__builtin_assume_aligned(
-            input + base + lid * CHUNK_ELEMS, 512);
-
-        __memcpy(bufs[lslot], in_ptr, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-      }
-
-      __sync_io_move_compute();
-    }
-  } else {
-    // tail: 262144 - 28 * 9216 = 4096 half
-    // 4 个 task，每个 1024 half
-    const uint32_t local = tid - 28;
-    const uint32_t base = 28 * ELEMS_PER_TASK + local * 1024;
-
-    __nram__ half buf[1024];
-
-    __memcpy(buf, input + base, 1024 * sizeof(half), GDRAM2NRAM);
-    __sync_io();
-
-    __bang_abs(buf, buf, 1024);
-    __bang_active_sqrthp(buf, buf, 1024);
-
-    __memcpy(output + base, buf, 1024 * sizeof(half), NRAM2GDRAM);
-    __sync_io();
-  }
+  // S1
+  __memcpy(out1, buf1, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
+  __sync_io();
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
@@ -81,7 +53,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   cnrtDim3_t dim = {4, 8, 1};
   cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
 
-  sqrt_abs_half_kernel_28task_pipeline3<<<dim, ktype, queue>>>(
+  sqrt_abs_half_kernel_32task_pipeline2<<<dim, ktype, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(output.data_ptr<at::Half>()));
 
