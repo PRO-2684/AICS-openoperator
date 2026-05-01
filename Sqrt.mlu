@@ -2,7 +2,6 @@
 #include <cnrt.h>
 #include <torch/extension.h>
 #include <framework/core/MLUStream.h>
-#include <iostream>
 
 // Task: 070 070_Sqrt
 // Category: pointwise
@@ -16,27 +15,23 @@
 #endif
 
 #ifndef TASK_COUNT
-#define TASK_COUNT 32
+#define TASK_COUNT 64
 #endif
 
 #ifndef SQRT_DIAG_PRINT
-#define SQRT_DIAG_PRINT 1
+#define SQRT_DIAG_PRINT 0
+#endif
+
+#ifndef SQRT_USE_UNION1
+#define SQRT_USE_UNION1 0
 #endif
 
 __mlu_entry__ void sqrt_abs_half_kernel(const half *input, half *output,
-                                        uint32_t total, uint32_t diag_print) {
+                                        uint32_t total) {
   if (__is_mpu()) return;
 
   uint32_t task_id = taskId;
   uint32_t task_num = taskDim;
-#if SQRT_DIAG_PRINT
-  if (diag_print && task_id == 0) {
-    __bang_printf("[SqrtDiag][kernel] total=%u taskDim=%u taskId=%u "
-                  "HALF_CHUNK_SIZE=%u TASK_COUNT=%u sizeof_half=%u\n",
-                  total, task_num, task_id, (uint32_t)HALF_CHUNK_SIZE,
-                  (uint32_t)TASK_COUNT, (uint32_t)sizeof(half));
-  }
-#endif
   uint32_t per_task = total / task_num;
   uint32_t remainder = total % task_num;
   uint32_t start =
@@ -76,64 +71,14 @@ torch::Tensor bang_func(torch::Tensor x) {
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {TASK_COUNT, 1, 1};
+#if SQRT_USE_UNION1
+  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
+#else
   cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
-  uint32_t diag_print = 0;
-
-#if SQRT_DIAG_PRINT
-  static bool printed = false;
-  diag_print = printed ? 0u : 1u;
-  if (diag_print) {
-    printed = true;
-    int device = -1;
-    unsigned int device_count = 0;
-    cnrtDeviceProp_t prop;
-    cnrtRet_t get_device_ret = cnrtGetDevice(&device);
-    cnrtRet_t count_ret = cnrtGetDeviceCount(&device_count);
-    cnrtRet_t prop_ret =
-        (get_device_ret == CNRT_RET_SUCCESS)
-            ? cnrtGetDeviceProperties(&prop, device)
-            : CNRT_RET_ERR_INVALID;
-
-    std::cout << "[SqrtDiag][host] sizes=[" << x.size(0) << ", "
-              << x.size(1) << "] numel=" << x.numel()
-              << " elem_size=" << x.element_size()
-              << " bytes=" << (x.numel() * x.element_size())
-              << " input_contiguous=" << x.is_contiguous()
-              << " used_contiguous_copy=" << (!x.is_contiguous())
-              << " output_numel=" << output.numel()
-              << " TASK_COUNT=" << TASK_COUNT
-              << " HALF_CHUNK_SIZE=" << HALF_CHUNK_SIZE
-              << " ktype=cnrtFuncTypeBlock" << std::endl;
-
-    std::cout << "[SqrtDiag][host] cnrtGetDevice_ret=" << get_device_ret
-              << " device=" << device
-              << " cnrtGetDeviceCount_ret=" << count_ret
-              << " device_count=" << device_count
-              << " cnrtGetDeviceProperties_ret=" << prop_ret;
-    if (prop_ret == CNRT_RET_SUCCESS) {
-      std::cout << " name=" << prop.name
-                << " major=" << prop.major
-                << " minor=" << prop.minor
-                << " clusterCount=" << prop.clusterCount
-                << " McorePerCluster=" << prop.McorePerCluster
-                << " NramSizePerMcore=" << prop.NramSizePerMcore
-                << " WramSizePerMcore=" << prop.WramSizePerMcore
-                << " maxDim=[" << prop.maxDim[0] << ","
-                << prop.maxDim[1] << "," << prop.maxDim[2] << "]"
-                << " totalMemMB=" << prop.totalMem
-                << " totalGlobalMemSize=" << prop.totalGlobalMemSize
-                << " GmemBusWidth=" << prop.GmemBusWidth
-                << " FP16=" << prop.FP16ComputingSupported
-                << " BF16=" << prop.BF16ComputingSupported
-                << " isMTP=" << prop.isMultipleTensorProcessor;
-    }
-    std::cout << std::endl;
-  }
 #endif
 
   sqrt_abs_half_kernel<<<dim, ktype, queue>>>(
       reinterpret_cast<half *>(x_contiguous.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(output.data_ptr<at::Half>()), total,
-      diag_print);
+      reinterpret_cast<half *>(output.data_ptr<at::Half>()), total);
   return output;
 }
