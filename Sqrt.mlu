@@ -12,6 +12,8 @@ static py::object original_print = py::none();
 static bool in_hook = false;
 
 void hooked_print(py::args args, py::kwargs kwargs) {
+  std::cerr << "[PRINT-HOOK] called with: "
+            << (args ? py::str(args[0]) : py::str("")) << std::endl;
   if (in_hook) {
     if (!original_print.is_none()) {
       PyObject_Call(original_print.ptr(), args.ptr(),
