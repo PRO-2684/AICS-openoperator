@@ -42,11 +42,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   // std::cout << "]  dim=" << dim << "  numel=" << x.numel() << "
   // dtype=float16"
   //           << "  contiguous=" << x.is_contiguous() << std::endl;
-  const char *empty_msg = "[ArgmaxHash] Check tensor\n";
-  write(1, empty_msg, 25);
-  write(2, empty_msg, 25);
-  // 固定前缀
-  const char prefix[] = "[ArgmaxHash] ";
+  const char *prefix = "[ArgmaxHash] ";
   write(1, prefix, 13);
   write(2, prefix, 13);
 
@@ -66,7 +62,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
     char letters[17];
     for (int i = 0; i < 16; ++i) {
       uint8_t c = (hash >> (i * 4)) & 0x0F;
-      letters[i] = (c < 10) ? 'A' + c : 'Q' + (c - 10);
+      letters[i] = (c < 10) ? ('A' + c) : ('Q' + (c - 10));
     }
     letters[16] = '\n';
 
@@ -75,7 +71,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
     fsync(1);
     fsync(2);
   } else {
-    const char empty[] = "EMPTY\n";
+    const char *empty = "EMPTY\n";
     write(1, empty, 6);
     write(2, empty, 6);
   }
