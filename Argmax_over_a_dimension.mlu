@@ -3,26 +3,89 @@
 #include <cnnl.h>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <iostream>
+#include <sstream>
 #include <torch/extension.h>
 #include <unistd.h>
 #include <vector>
-
-// Task: 034 034_Argmax_over_a_dimension
-// Category: reduce
-// Difficulty: basic
-// DType: float16
-// Description: 实现一个 BangC
-// 算子，沿指定维度计算输入张量的最大值索引（Argmax）。输入包括形状为 `[D_0,
-// D_1, ..., D_{n-1}]` 的张量 `x` 以及一个用于指定规约维度的整数参数
-// `dim`；输出为移除该维度后的索引张量。 Wrapper: torch::Tensor
-// bang_func(torch::Tensor x, int dim);
 
 #define CNNL_CHECK(expr)                                                       \
   do {                                                                         \
     cnnlStatus_t status = (expr);                                              \
     TORCH_CHECK(status == CNNL_STATUS_SUCCESS, "CNNL call failed: ", status);  \
   } while (0)
+
+static void debug_tensor_half(const torch::Tensor &x, int dim) {
+  std::ostringstream oss;
+
+  oss << "[ArgmaxDebug] ================================\n";
+  oss << "[ArgmaxDebug] x.shape = [";
+  for (int64_t i = 0; i < x.dim(); ++i) {
+    oss << x.size(i);
+    if (i + 1 < x.dim())
+      oss << ", ";
+  }
+  oss << "]\n";
+
+  oss << "[ArgmaxDebug] dim = " << dim << "\n";
+  oss << "[ArgmaxDebug] numel = " << x.numel() << "\n";
+  oss << "[ArgmaxDebug] dtype = " << x.scalar_type() << "\n";
+  oss << "[ArgmaxDebug] device = " << x.device() << "\n";
+  oss << "[ArgmaxDebug] contiguous = " << x.is_contiguous() << "\n";
+
+  if (x.numel() == 0) {
+    oss << "[ArgmaxDebug] EMPTY tensor\n";
+    auto s = oss.str();
+    write(1, s.data(), s.size());
+    write(2, s.data(), s.size());
+    fsync(1);
+    fsync(2);
+    return;
+  }
+
+  // 关键：MLU tensor 不能直接在 host 上 accessor 读取，必须先拷到 CPU。
+  torch::Tensor x_cpu = x.detach().contiguous().cpu();
+  torch::Tensor flat = x_cpu.view({-1});
+
+  auto acc = flat.accessor<at::Half, 1>();
+
+  const int64_t n = flat.numel();
+  const int64_t show_n = std::min<int64_t>(n, 16);
+
+  oss << "[ArgmaxDebug] first " << show_n << " elems = [";
+  for (int64_t i = 0; i < show_n; ++i) {
+    float v = static_cast<float>(acc[i]);
+    oss << v;
+    if (i + 1 < show_n)
+      oss << ", ";
+  }
+  oss << "]\n";
+
+  uint64_t hash = 0xCBF29CE484222325ULL;
+
+  for (int64_t i = 0; i < n; ++i) {
+    float v = static_cast<float>(acc[i]);
+
+    uint32_t bits = 0;
+    std::memcpy(&bits, &v, sizeof(bits));
+
+    hash ^= static_cast<uint64_t>(bits);
+    hash *= 0x100000001B3ULL;
+  }
+
+  oss << "[ArgmaxDebug] hash_hex = 0x";
+  oss << std::hex << std::uppercase << hash << std::dec << "\n";
+  oss << "[ArgmaxDebug] ================================\n";
+
+  auto s = oss.str();
+
+  write(1, s.data(), s.size());
+  write(2, s.data(), s.size());
+
+  fsync(1);
+  fsync(2);
+}
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   TORCH_CHECK(x.scalar_type() == at::kHalf, "x must be float16");
@@ -31,51 +94,30 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   static int call_count = 0;
   call_count++;
 
-  // std::cout << "[ArgmaxDiag][host] ==================== Call " << call_count
-  //           << " ====================" << std::endl;
-  // std::cout << "[ArgmaxDiag][host] x.shape = [";
-  // for (int i = 0; i < x.dim(); ++i) {
-  //   std::cout << x.size(i);
-  //   if (i < x.dim() - 1)
-  //     std::cout << ", ";
-  // }
-  // std::cout << "]  dim=" << dim << "  numel=" << x.numel() << "
-  // dtype=float16"
-  //           << "  contiguous=" << x.is_contiguous() << std::endl;
-  const char *prefix = "[ArgmaxHash] ";
-  write(1, prefix, 13);
-  write(2, prefix, 13);
-
-  if (x.numel() > 0) {
-    auto x_cont = x.contiguous();
-    auto flat = x_cont.view({-1});
-    auto acc = flat.accessor<at::Half, 1>();
-
-    uint64_t hash = 0xCBF29CE484222325ULL;
-    for (int64_t i = 0; i < flat.numel(); ++i) {
-      float v = (float)acc[i];
-      uint32_t bits = reinterpret_cast<const uint32_t &>(v);
-      hash ^= bits;
-      hash *= 0x100000001B3ULL;
-    }
-
-    char letters[17];
-    for (int i = 0; i < 16; ++i) {
-      uint8_t c = (hash >> (i * 4)) & 0x0F;
-      letters[i] = (c < 10) ? ('A' + c) : ('Q' + (c - 10));
-    }
-    letters[16] = '\n';
-
-    write(1, letters, 17);
-    write(2, letters, 17);
-    fsync(1);
-    fsync(2);
-  } else {
-    const char *empty = "EMPTY\n";
-    write(1, empty, 6);
-    write(2, empty, 6);
+  {
+    std::ostringstream oss;
+    oss << "[ArgmaxDebug] call_count = " << call_count << "\n";
+    auto s = oss.str();
+    write(1, s.data(), s.size());
+    write(2, s.data(), s.size());
   }
 
-  auto output = torch::empty_like(x);
+  debug_tensor_half(x, dim);
+
+  if (dim < 0)
+    dim += x.dim();
+  TORCH_CHECK(dim >= 0 && dim < x.dim(), "dim out of range");
+
+  std::vector<int64_t> out_shape;
+  for (int64_t i = 0; i < x.dim(); ++i) {
+    if (i != dim) {
+      out_shape.push_back(x.size(i));
+    }
+  }
+
+  // PyTorch argmax 默认输出 int64。
+  // 如果你的比赛框架要求 int32，可以改成 torch::kInt32。
+  auto output = torch::empty(out_shape, x.options().dtype(torch::kInt64));
+
   return output;
 }
