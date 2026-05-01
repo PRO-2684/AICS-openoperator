@@ -30,16 +30,17 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   static int call_count = 0;
   call_count++;
 
-  std::cout << "[ArgmaxDiag][host] ==================== Call " << call_count
-            << " ====================" << std::endl;
-  std::cout << "[ArgmaxDiag][host] x.shape = [";
-  for (int i = 0; i < x.dim(); ++i) {
-    std::cout << x.size(i);
-    if (i < x.dim() - 1)
-      std::cout << ", ";
-  }
-  std::cout << "]  dim=" << dim << "  numel=" << x.numel() << "  dtype=float16"
-            << "  contiguous=" << x.is_contiguous() << std::endl;
+  // std::cout << "[ArgmaxDiag][host] ==================== Call " << call_count
+  //           << " ====================" << std::endl;
+  // std::cout << "[ArgmaxDiag][host] x.shape = [";
+  // for (int i = 0; i < x.dim(); ++i) {
+  //   std::cout << x.size(i);
+  //   if (i < x.dim() - 1)
+  //     std::cout << ", ";
+  // }
+  // std::cout << "]  dim=" << dim << "  numel=" << x.numel() << "
+  // dtype=float16"
+  //           << "  contiguous=" << x.is_contiguous() << std::endl;
 
   // 可选：打印少量数据（前10个元素）
   // 安全打印前几个元素（支持任意维度） if (x.numel() > 0) {
