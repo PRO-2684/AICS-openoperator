@@ -6,57 +6,58 @@
 #include <ATen/ATen.h>
 #include <iostream>
 
-// // ==================== hook allclose: CPU only, fixed true
-// ====================
+// 打印 Python 调用栈 + 源码
+void print_python_call_stack(
+    const std::string &cpp_func_name = "unknown_cpp_func") {
+  std::cout << "\n[PYTHON_STACK] === " << cpp_func_name
+            << " 被 Python 调用 ===" << std::endl;
 
-// bool hooked_allclose(const at::Tensor &self, const at::Tensor &other,
-//                      double rtol = 1e-5, double atol = 1e-8,
-//                      bool equal_nan = false) {
-//   std::cout << "\n[HOOK] === aten::allclose CPU 被调用 ===\n"
-//             << "  self:  sizes=" << self.sizes() << ", dtype=" <<
-//             self.dtype()
-//             << ", device=" << self.device() << "\n"
-//             << "  other: sizes=" << other.sizes() << ", dtype=" <<
-//             other.dtype()
-//             << ", device=" << other.device() << "\n"
-//             << "  rtol=" << rtol << ", atol=" << atol
-//             << ", equal_nan=" << std::boolalpha << equal_nan << "\n"
-//             << "  return: true\n"
-//             << std::endl;
+  // 方法1：直接让 Python 的 traceback 打印（最简单）
+  PyGILState_STATE gstate = PyGILState_Ensure(); // 确保 GIL
+  PyRun_SimpleString("import traceback, sys\n"
+                     "print('Python 调用栈 (traceback):')\n"
+                     "traceback.print_stack()\n");
+  PyGILState_Release(gstate);
 
-//   return true;
-// }
+  // 方法2：更精细地获取 frame 并打印源码（推荐，可自定义）
+  std::cout << "\n详细 Python 调用栈 + 源码：" << std::endl;
+  PyFrameObject *frame = PyEval_GetFrame();
+  int level = 0;
+  while (frame && level < 20) { // 限制层数避免过多输出
+    PyCodeObject *code = frame->f_code;
+    if (code) {
+      std::string filename = PyUnicode_AsUTF8(code->co_filename);
+      std::string funcname = PyUnicode_AsUTF8(code->co_name);
+      int lineno = PyFrame_GetLineNumber(frame);
 
-// // ==================== hook abs: CPU only, fixed zeros ====================
+      std::cout << "  [" << level << "] " << filename << ":" << lineno << " in "
+                << funcname << "()" << std::endl;
 
-// at::Tensor hooked_abs(const at::Tensor &self) {
-//   std::cout << "\n[HOOK] === aten::abs CPU 被调用 ===\n"
-//             << "  input: sizes=" << self.sizes() << ", dtype=" <<
-//             self.dtype()
-//             << ", device=" << self.device() << "\n"
-//             << "  return: zeros_like(input)\n"
-//             << std::endl;
-
-//   // 不调用 at::abs(self)，避免递归。
-//   // 这里只固定返回 0 Tensor。
-//   return at::zeros_like(self);
-// }
-
-// ==================== 注册 hook ====================
-//
-// 注意：这里只注册 CPU dispatch key。
-// 也就是说，只有 CPU Tensor 上的 torch.abs / torch.allclose 会被 hook。
-// MLU Tensor 不会走这里。
-
-// TORCH_LIBRARY_IMPL(aten, CPU, m) {
-//   m.impl("allclose", TORCH_FN(hooked_allclose));
-
-//   // 有些 PyTorch 版本接受 "abs"，有些版本更推荐显式 overload。
-//   // 如果你的环境里 "abs.Tensor" 报错，可以改回 "abs"。
-//   m.impl("abs.Tensor", TORCH_FN(hooked_abs));
-// }
-
-// ==================== MLU kernel 部分保持原样 ====================
+      // 尝试打印源码行（需 inspect）
+      PyGILState_STATE gstate2 = PyGILState_Ensure();
+      PyObject *inspect = PyImport_ImportModule("inspect");
+      if (inspect) {
+        PyObject *getsource = PyObject_GetAttrString(inspect, "getsource");
+        if (getsource) {
+          PyObject *frame_obj =
+              (PyObject *)frame; // 注意 frame 是 PyFrameObject*
+          PyObject *source =
+              PyObject_CallFunctionObjArgs(getsource, frame_obj, NULL);
+          if (source && PyUnicode_Check(source)) {
+            std::cout << "    源码:\n" << PyUnicode_AsUTF8(source) << std::endl;
+          }
+          Py_XDECREF(source);
+          Py_DECREF(getsource);
+        }
+        Py_DECREF(inspect);
+      }
+      PyGILState_Release(gstate2);
+    }
+    frame = frame->f_back;
+    level++;
+  }
+  std::cout << "[PYTHON_STACK] === 结束 ===\n" << std::endl;
+}
 
 #define CHUNK_ELEMS 4096
 #define ELEMS_PER_TASK 8192
@@ -101,6 +102,7 @@ sqrt_abs_half_kernel_32task_pipeline2(const half *__restrict__ input,
 // ==================== bang_func ====================
 
 torch::Tensor bang_func(torch::Tensor x) {
+  print_python_call_stack("bang_func");
   auto output = torch::empty_like(x);
 
   // 如果你暂时只想测试 CPU hook，可以继续不 launch kernel。
