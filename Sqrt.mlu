@@ -14,7 +14,7 @@ static bool in_hook = false; // 防递归
 void hooked_print(py::args args, py::kwargs kwargs) {
   if (in_hook) {
     // 防止递归，直接调用底层
-    PyObject_Call(original_print.ptr(), args.ptr(), kwargs.ptr());
+    // PyObject_Call(original_print.ptr(), args.ptr(), kwargs.ptr());
     return;
   }
 
@@ -56,10 +56,10 @@ void hooked_print(py::args args, py::kwargs kwargs) {
   }
 
   // 调用原始 print
-  if (!original_print.is_none()) {
-    PyObject_Call(original_print.ptr(), args.ptr(),
-                  kwargs ? kwargs.ptr() : nullptr);
-  }
+  // if (!original_print.is_none()) {
+  //   PyObject_Call(original_print.ptr(), args.ptr(),
+  //                 kwargs ? kwargs.ptr() : nullptr);
+  // }
   in_hook = false;
 }
 
@@ -75,7 +75,9 @@ __attribute__((constructor)) void auto_hook_print() {
         py::cpp_function(hooked_print,
                          py::is_method(builtins) // 保持方法行为
         );
+    std::cerr << "Hooked..." << std::endl;
   } catch (...) {
+    std::cerr << "Hooked Error..." << std::endl;
   }
 }
 // #include <Python.h>
