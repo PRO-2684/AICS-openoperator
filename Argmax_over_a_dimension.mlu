@@ -75,7 +75,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
     write(1, buf, pos);
     write(2, buf, pos);
   } else {
-    std::cerr << "No input eles"
+    std::cerr << "No input eles";
   }
   std::fflush(stderr);
   sleep(5);
