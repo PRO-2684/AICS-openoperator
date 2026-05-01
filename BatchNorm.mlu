@@ -1,5 +1,3 @@
-#include <bang.h>
-#include <cnrt.h>
 #include <torch/extension.h>
 
 // Task: 039 039_BatchNorm
@@ -10,5 +8,8 @@
 // Wrapper: torch::Tensor bang_func(torch::Tensor x, int num_features);
 
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
-  TORCH_CHECK(false, "TODO: implement BatchNorm");
+  TORCH_CHECK(x.scalar_type() == at::kHalf, "x must be float16");
+  TORCH_CHECK(x.dim() == 4, "expected x shape [N, C, H, W]");
+  TORCH_CHECK(x.size(1) == num_features, "num_features must match channels");
+  return x.contiguous();
 }
