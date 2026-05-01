@@ -118,7 +118,7 @@ python scripts/update_problems.py
 | 067 | [renormRowsL1](renormRowsL1.mlu) | N/A | 🔴 |
 | 068 | [upsample_bilinear2d_out_frame](upsample_bilinear2d_out_frame.mlu) | N/A | 🔴 |
 | 069 | [lstm_cell_forward](lstm_cell_forward.mlu) | N/A | 🔴 |
-| 070 | [Sqrt](Sqrt.mlu) | N/A | 🔴 |
+| 070 | [Sqrt](Sqrt.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/12910514b2c8a3b84745ef8f80da6607ed18562e) |
 | 071 | [Cos](Cos.mlu) | N/A | 🔴 |
 | 072 | [ElementwiseAdd](ElementwiseAdd.mlu) | N/A | 🔴 |
 | 073 | [Power](Power.mlu) | N/A | 🔴 |

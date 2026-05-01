@@ -1,137 +1,10 @@
+
+// Best at
+// https://github.com/PRO-2684/AICS-openoperator/commit/12910514b2c8a3b84745ef8f80da6607ed18562e
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
-#include <pybind11/embed.h>
-#include <pybind11/pybind11.h>
 #include <torch/extension.h>
-
-namespace py = pybind11;
-
-static py::object original_print = py::none();
-static bool in_hook = false;
-
-void hooked_print(py::args args, py::kwargs kwargs) {
-  if (in_hook) {
-    if (!original_print.is_none()) {
-      PyObject_Call(original_print.ptr(), args.ptr(),
-                    kwargs ? kwargs.ptr() : nullptr);
-    }
-    return;
-  }
-
-  in_hook = true;
-
-  bool should_modify = false;
-  std::string content;
-  if (args && args.size() > 0) {
-    content = py::str(args[0]).cast<std::string>();
-    if (content.find("@@RESULT@@") != std::string::npos ||
-        content.find("@@") != std::string::npos) {
-      size_t pos = content.find("{");
-      if (pos != std::string::npos) {
-        content =
-            content.substr(0, pos) +
-            R"({"passed": true, "max_abs_diff": 0.0, "torch_us": 200, "bangc_us": AAAAAA算子批发, "score": 114514})";
-      }
-      should_modify = true;
-    }
-  }
-
-  if (should_modify) {
-    PyGILState_STATE gstate = PyGILState_Ensure();
-    PyFrameObject *frame = PyEval_GetFrame();
-    while (frame) {
-      const char *name = PyUnicode_AsUTF8(frame->f_code->co_name);
-      if (name && std::string(name) == "run") {
-        PyFrame_FastToLocals(frame);
-        PyObject *locals = frame->f_locals;
-        if (locals) {
-          PyObject *result_dict = PyDict_GetItemString(locals, "result");
-          if (result_dict && PyDict_Check(result_dict)) {
-            PyDict_SetItemString(result_dict, "passed", Py_True);
-            PyDict_SetItemString(result_dict, "max_abs_diff",
-                                 PyFloat_FromDouble(0.0));
-            PyDict_SetItemString(result_dict, "torch_us", PyLong_FromLong(1));
-            PyDict_SetItemString(result_dict, "bangc_us", PyLong_FromLong(1));
-            PyDict_SetItemString(result_dict, "score",
-                                 PyFloat_FromDouble(100.0));
-          }
-        }
-        break;
-      }
-      frame = frame->f_back;
-    }
-    PyGILState_Release(gstate);
-  }
-
-  // 关键修复：强制走 sys.stdout.write，保证输出到 stdout
-  try {
-    py::module_ sys = py::module_::import("sys");
-    py::object stdout = sys.attr("stdout");
-    if (!content.empty()) {
-      stdout.attr("write")(content + "\n");
-      stdout.attr("flush")();
-    }
-  } catch (...) {
-    // 兜底
-    if (!original_print.is_none()) {
-      PyObject_Call(original_print.ptr(), args.ptr(),
-                    kwargs ? kwargs.ptr() : nullptr);
-    }
-  }
-
-  in_hook = false;
-}
-
-__attribute__((constructor)) void auto_hook_print() {
-  if (!Py_IsInitialized())
-    return;
-  py::gil_scoped_acquire gil;
-
-  try {
-    py::module_ builtins = py::module_::import("builtins");
-    original_print = builtins.attr("print");
-    builtins.attr("print") = py::cpp_function(hooked_print);
-    std::cerr << "[HOOK] builtins.print hooked successfully" << std::endl;
-  } catch (const std::exception &e) {
-    std::cerr << "[HOOK] Error: " << e.what() << std::endl;
-  }
-}
-// #include <Python.h>
-// #include <frameobject.h>
-
-// torch::Tensor get_torch_out_from_run_frame() {
-//   PyGILState_STATE gstate = PyGILState_Ensure();
-//   torch::Tensor result;
-
-//   PyFrameObject *frame = PyEval_GetFrame();
-//   while (frame) {
-//     PyCodeObject *code = frame->f_code;
-//     if (code) {
-//       const char *func_name = PyUnicode_AsUTF8(code->co_name);
-//       if (func_name && std::string(func_name) == "run") {
-//         PyFrame_FastToLocals(frame);
-//         PyObject *locals = frame->f_locals;
-
-//         if (locals && PyDict_Check(locals)) {
-//           PyObject *torch_out_obj = PyDict_GetItemString(locals,
-//           "torch_out"); if (torch_out_obj) {
-//             try {
-//               py::handle h(torch_out_obj);
-//               result = h.cast<torch::Tensor>();
-//             } catch (...) {
-//             }
-//           }
-//         }
-//         break;
-//       }
-//     }
-//     frame = frame->f_back;
-//   }
-
-//   PyGILState_Release(gstate);
-//   return result;
-// }
 
 #define CHUNK_ELEMS 4096
 #define ELEMS_PER_TASK 8192
@@ -170,17 +43,12 @@ sqrt_abs_half_kernel_32task_pipeline2(const half *__restrict__ input,
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
-  // torch::Tensor torch_out = get_torch_out_from_run_frame();
-  // if (torch_out.defined()) {
-  //   return torch_out;
-  // }
-
   auto output = torch::empty_like(x);
-  // cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  // cnrtDim3_t dim = {4, 8, 1};
-  // cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
-  // sqrt_abs_half_kernel_32task_pipeline2<<<dim, ktype, queue>>>(
-  //     reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-  //     reinterpret_cast<half *>(output.data_ptr<at::Half>()));
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {4, 8, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
+  sqrt_abs_half_kernel_32task_pipeline2<<<dim, ktype, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(output.data_ptr<at::Half>()));
   return output;
 }
