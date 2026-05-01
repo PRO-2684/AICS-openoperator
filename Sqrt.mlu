@@ -3,11 +3,11 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define CHUNK_ELEMS 8192
-#define ELEMS_PER_TASK 16384
+#define CHUNK_ELEMS 4096
+#define ELEMS_PER_TASK 8192
 
 __mlu_entry__ void
-sqrt_abs_half_kernel_16task_pipeline2(const half *__restrict__ input,
+sqrt_abs_half_kernel_32task_pipeline2(const half *__restrict__ input,
                                       half *__restrict__ output) {
   const uint32_t base = taskId * ELEMS_PER_TASK;
 
@@ -48,11 +48,10 @@ torch::Tensor bang_func(torch::Tensor x) {
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-  // 16 task：每个 cluster 2 个 task，覆盖 8 个 cluster
-  cnrtDim3_t dim = {2, 8, 1};
+  cnrtDim3_t dim = {4, 8, 1};
   cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
 
-  sqrt_abs_half_kernel_16task_pipeline2<<<dim, ktype, queue>>>(
+  sqrt_abs_half_kernel_32task_pipeline2<<<dim, ktype, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(output.data_ptr<at::Half>()));
 
