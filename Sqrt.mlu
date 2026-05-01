@@ -64,7 +64,7 @@ __mlu_entry__ void sqrt_abs_half_kernel(const half *input, half *output,
       __bang_write_value(nram_buf + len, aligned_len - len, (half)0.0f);
     }
 
-    // __bang_abs(nram_buf, nram_buf, aligned_len);
+    __bang_abs(nram_buf, nram_buf, aligned_len);
 #if SQRT_USE_FAST_SQRT
     __bang_active_sqrt(nram_buf, nram_buf, aligned_len);
 // #if SQRT_FAST_CORRECT_SMALL
