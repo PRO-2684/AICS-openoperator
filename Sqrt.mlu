@@ -6,54 +6,32 @@
 #define FIXED_TOTAL 262144
 #define ELEMS_PER_TASK 8192
 
-__mlu_entry__ void
-sqrt_abs_half_kernel_fixed_union1_fast_mask_bias(const half *input,
-                                                 half *output) {
+__mlu_entry__ void sqrt_abs_half_kernel_union1_sqrthp_minimal(const half *input,
+                                                              half *output) {
   if (__is_mpu())
     return;
 
-  const uint32_t tid = taskId;
-  const uint32_t base = tid * ELEMS_PER_TASK;
+  const uint32_t base = taskId * ELEMS_PER_TASK;
 
   __nram__ half buf[ELEMS_PER_TASK];
-  __nram__ half xabs[ELEMS_PER_TASK];
-  __nram__ half mask[ELEMS_PER_TASK];
 
   __memcpy(buf, input + base, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
 
   __bang_abs(buf, buf, ELEMS_PER_TASK);
-
-  // 保存 abs(x)，用于判断是否接近 0
-  __bang_write_value(xabs, ELEMS_PER_TASK, (half)0.0f);
-  __bang_add(xabs, xabs, buf, ELEMS_PER_TASK);
-
-  __bang_active_sqrt(buf, buf, ELEMS_PER_TASK);
-
-  // mask = xabs > 0.0001
-  __bang_gt_scalar(mask, xabs, (half)0.0001f, ELEMS_PER_TASK);
-
-  // mask = mask * bias
-  __bang_mul_scalar(mask, mask, (half)0.00390625f, ELEMS_PER_TASK);
-
-  // buf += mask
-  __bang_add(buf, buf, mask, ELEMS_PER_TASK);
+  __bang_active_sqrthp(buf, buf, ELEMS_PER_TASK);
 
   __memcpy(output + base, buf, ELEMS_PER_TASK * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
-  TORCH_CHECK(x.dim() == 2, "expected a 2D tensor [batch_size, dim]");
-  TORCH_CHECK(x.scalar_type() == at::kHalf, "x must be float16");
-  TORCH_CHECK(x.numel() == FIXED_TOTAL, "expected fixed numel 262144");
-  TORCH_CHECK(x.is_contiguous(), "expected contiguous input");
-
   auto output = torch::empty_like(x);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+
   cnrtDim3_t dim = {4, 8, 1};
   cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
 
-  sqrt_abs_half_kernel_fixed_union1_fast_mask_bias<<<dim, ktype, queue>>>(
+  sqrt_abs_half_kernel_union1_sqrthp_minimal<<<dim, ktype, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(output.data_ptr<at::Half>()));
 
