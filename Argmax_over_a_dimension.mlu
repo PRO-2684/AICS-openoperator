@@ -1,123 +1,85 @@
-#include <aten/cnnl/cnnlHandle.h>
-#include <bits/stdint-intn.h>
 #include <cnnl.h>
-#include <cstdint>
-#include <cstdio>
-#include <cstring>
-#include <iostream>
-#include <sstream>
 #include <torch/extension.h>
-#include <unistd.h>
+#include <aten/cnnl/cnnlHandle.h>
 #include <vector>
 
-#define CNNL_CHECK(expr)                                                       \
-  do {                                                                         \
-    cnnlStatus_t status = (expr);                                              \
-    TORCH_CHECK(status == CNNL_STATUS_SUCCESS, "CNNL call failed: ", status);  \
+// Task: 034 034_Argmax_over_a_dimension
+// Category: reduce
+// Difficulty: basic
+// DType: float16
+// Description: 实现一个 BangC 算子，沿指定维度计算输入张量的最大值索引（Argmax）。输入包括形状为 `[D_0, D_1, ..., D_{n-1}]` 的张量 `x` 以及一个用于指定规约维度的整数参数 `dim`；输出为移除该维度后的索引张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x, int dim);
+
+#define CNNL_CHECK(expr)                                                     \
+  do {                                                                       \
+    cnnlStatus_t status = (expr);                                            \
+    TORCH_CHECK(status == CNNL_STATUS_SUCCESS, "CNNL call failed: ", status); \
   } while (0)
-
-static void debug_tensor_half(const torch::Tensor &x, int dim) {
-  std::ostringstream oss;
-
-  oss << "[ArgmaxDebug] ================================\n";
-  oss << "[ArgmaxDebug] x.shape = [";
-  for (int64_t i = 0; i < x.dim(); ++i) {
-    oss << x.size(i);
-    if (i + 1 < x.dim())
-      oss << ", ";
-  }
-  oss << "]\n";
-
-  oss << "[ArgmaxDebug] dim = " << dim << "\n";
-  oss << "[ArgmaxDebug] numel = " << x.numel() << "\n";
-  oss << "[ArgmaxDebug] dtype = " << x.scalar_type() << "\n";
-  oss << "[ArgmaxDebug] device = " << x.device() << "\n";
-  oss << "[ArgmaxDebug] contiguous = " << x.is_contiguous() << "\n";
-
-  if (x.numel() == 0) {
-    oss << "[ArgmaxDebug] EMPTY tensor\n";
-    auto s = oss.str();
-    write(1, s.data(), s.size());
-    write(2, s.data(), s.size());
-    fsync(1);
-    fsync(2);
-    return;
-  }
-
-  // 关键：MLU tensor 不能直接在 host 上 accessor 读取，必须先拷到 CPU。
-  torch::Tensor x_cpu = x.detach().contiguous().cpu();
-  torch::Tensor flat = x_cpu.view({-1});
-
-  auto acc = flat.accessor<at::Half, 1>();
-
-  const int64_t n = flat.numel();
-  const int64_t show_n = std::min<int64_t>(n, 16);
-
-  oss << "[ArgmaxDebug] first " << show_n << " elems = [";
-  for (int64_t i = 0; i < show_n; ++i) {
-    float v = static_cast<float>(acc[i]);
-    oss << v;
-    if (i + 1 < show_n)
-      oss << ", ";
-  }
-  oss << "]\n";
-
-  uint64_t hash = 0xCBF29CE484222325ULL;
-
-  for (int64_t i = 0; i < n; ++i) {
-    float v = static_cast<float>(acc[i]);
-
-    uint32_t bits = 0;
-    std::memcpy(&bits, &v, sizeof(bits));
-
-    hash ^= static_cast<uint64_t>(bits);
-    hash *= 0x100000001B3ULL;
-  }
-
-  oss << "[ArgmaxDebug] hash_hex = 0x";
-  oss << std::hex << std::uppercase << hash << std::dec << "\n";
-  oss << "[ArgmaxDebug] ================================\n";
-
-  auto s = oss.str();
-
-  write(1, s.data(), s.size());
-  write(2, s.data(), s.size());
-
-  fsync(1);
-  fsync(2);
-}
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   TORCH_CHECK(x.scalar_type() == at::kHalf, "x must be float16");
   TORCH_CHECK(x.dim() > 0, "argmax dim requires at least one input dimension");
 
-  static int call_count = 0;
-  call_count++;
+  int64_t ndim = x.dim();
+  int64_t axis64 = dim < 0 ? dim + ndim : dim;
+  TORCH_CHECK(axis64 >= 0 && axis64 < ndim, "dim out of range");
 
-  {
-    std::ostringstream oss;
-    oss << "[ArgmaxDebug] call_count = " << call_count << "\n";
-    auto s = oss.str();
-    write(1, s.data(), s.size());
-    write(2, s.data(), s.size());
-  }
+  auto x_contiguous = x.contiguous();
 
-  debug_tensor_half(x, dim);
-
-  if (dim < 0)
-    dim += x.dim();
-  TORCH_CHECK(dim >= 0 && dim < x.dim(), "dim out of range");
-
-  std::vector<int64_t> out_shape;
-  for (int64_t i = 0; i < x.dim(); ++i) {
-    if (i != dim) {
-      out_shape.push_back(x.size(i));
+  std::vector<int64_t> output_shape;
+  output_shape.reserve(ndim - 1);
+  for (int64_t i = 0; i < ndim; ++i) {
+    if (i != axis64) {
+      output_shape.push_back(x_contiguous.size(i));
     }
   }
+  auto output = torch::empty(output_shape, x.options().dtype(torch::kInt64));
+  if (output.numel() == 0) {
+    return output;
+  }
 
-  // PyTorch argmax 默认输出 int64。
-  // 如果你的比赛框架要求 int32，可以改成 torch::kInt32。
-  auto output = torch::empty(out_shape, x.options().dtype(torch::kInt64));
+  std::vector<int> input_dims(ndim);
+  std::vector<int> reduce_dims(ndim);
+  for (int64_t i = 0; i < ndim; ++i) {
+    TORCH_CHECK(x_contiguous.size(i) <= INT_MAX, "tensor dimension too large");
+    input_dims[i] = static_cast<int>(x_contiguous.size(i));
+    reduce_dims[i] = input_dims[i];
+  }
+  reduce_dims[axis64] = 1;
+  int axis = static_cast<int>(axis64);
 
+  cnnlTensorDescriptor_t input_desc;
+  cnnlTensorDescriptor_t indices_desc;
+  cnnlReduceDescriptor_t reduce_desc;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&input_desc));
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&indices_desc));
+  CNNL_CHECK(cnnlCreateReduceDescriptor(&reduce_desc));
+
+  CNNL_CHECK(cnnlSetTensorDescriptor(input_desc, CNNL_LAYOUT_ARRAY,
+                                     CNNL_DTYPE_HALF, static_cast<int>(ndim),
+                                     input_dims.data()));
+  CNNL_CHECK(cnnlSetTensorDescriptor(indices_desc, CNNL_LAYOUT_ARRAY,
+                                     CNNL_DTYPE_INT64, static_cast<int>(ndim),
+                                     reduce_dims.data()));
+  CNNL_CHECK(cnnlSetReduceDescriptor_v2(
+      reduce_desc, &axis, 1, CNNL_REDUCE_MAX, CNNL_DTYPE_HALF,
+      CNNL_NOT_PROPAGATE_NAN, CNNL_REDUCE_ONLY_INDICES, CNNL_64BIT_INDICES,
+      0.0f));
+
+  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
+  size_t workspace_size = 0;
+  CNNL_CHECK(cnnlGetReduceOpWorkspaceSize_v2(
+      handle, input_desc, nullptr, indices_desc, reduce_desc, &workspace_size));
+  auto workspace = torch::empty({static_cast<int64_t>(workspace_size)},
+                                x.options().dtype(torch::kUInt8));
+
+  CNNL_CHECK(cnnlReduce_v2(
+      handle, reduce_desc, input_desc, x_contiguous.data_ptr(), nullptr,
+      nullptr, workspace.data_ptr(), workspace_size, nullptr, nullptr,
+      indices_desc, output.data_ptr()));
+
+  CNNL_CHECK(cnnlDestroyReduceDescriptor(reduce_desc));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(indices_desc));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(input_desc));
   return output;
 }
