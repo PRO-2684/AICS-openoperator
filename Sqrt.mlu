@@ -5,10 +5,8 @@
 
 #define ELEMS_PER_TASK 4096
 
-__mlu_entry__ void sqrt_abs_half_kernel_block_64task(const half *input,
-                                                     half *output) {
-  if (__is_mpu())
-    return;
+__mlu_entry__ void sqrt_abs_half_kernel_union1_64task_8x8(const half *input,
+                                                          half *output) {
 
   const uint32_t base = taskId * ELEMS_PER_TASK;
 
@@ -27,10 +25,10 @@ torch::Tensor bang_func(torch::Tensor x) {
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-  cnrtDim3_t dim = {64, 1, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
+  cnrtDim3_t dim = {8, 8, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
 
-  sqrt_abs_half_kernel_block_64task<<<dim, ktype, queue>>>(
+  sqrt_abs_half_kernel_union1_64task_8x8<<<dim, ktype, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(output.data_ptr<at::Half>()));
 
