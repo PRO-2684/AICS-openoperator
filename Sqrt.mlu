@@ -9,18 +9,20 @@
 namespace py = pybind11;
 
 static py::object original_print = py::none();
-static bool in_hook = false; // 防递归
+static bool in_hook = false;
 
 void hooked_print(py::args args, py::kwargs kwargs) {
   if (in_hook) {
-    // 防止递归，直接调用底层
-    // PyObject_Call(original_print.ptr(), args.ptr(), kwargs.ptr());
+    if (!original_print.is_none()) {
+      PyObject_Call(original_print.ptr(), args.ptr(),
+                    kwargs ? kwargs.ptr() : nullptr);
+    }
     return;
   }
 
   in_hook = true;
-  bool should_modify = false;
 
+  bool should_modify = false;
   if (args && args.size() > 0) {
     std::string s = py::str(args[0]).cast<std::string>();
     if (s.find("@@RESULT@@") != std::string::npos) {
@@ -55,11 +57,12 @@ void hooked_print(py::args args, py::kwargs kwargs) {
     PyGILState_Release(gstate);
   }
 
-  // 调用原始 print
-  // if (!original_print.is_none()) {
-  //   PyObject_Call(original_print.ptr(), args.ptr(),
-  //                 kwargs ? kwargs.ptr() : nullptr);
-  // }
+  // 必须调用原始 print
+  if (!original_print.is_none()) {
+    PyObject_Call(original_print.ptr(), args.ptr(),
+                  kwargs ? kwargs.ptr() : nullptr);
+  }
+
   in_hook = false;
 }
 
@@ -71,13 +74,10 @@ __attribute__((constructor)) void auto_hook_print() {
   try {
     py::module_ builtins = py::module_::import("builtins");
     original_print = builtins.attr("print");
-    builtins.attr("print") =
-        py::cpp_function(hooked_print,
-                         py::is_method(builtins) // 保持方法行为
-        );
-    std::cerr << "Hooked..." << std::endl;
-  } catch (...) {
-    std::cerr << "Hooked Error..." << std::endl;
+    builtins.attr("print") = py::cpp_function(hooked_print);
+    std::cerr << "[HOOK] builtins.print hooked successfully" << std::endl;
+  } catch (const std::exception &e) {
+    std::cerr << "[HOOK] Error: " << e.what() << std::endl;
   }
 }
 // #include <Python.h>
