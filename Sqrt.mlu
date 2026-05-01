@@ -3,38 +3,35 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define ELEMS_PER_TASK 8192
-#define TILE 4096
+#define ELEMS_PER_TASK 4096
 
-__mlu_entry__ void
-sqrt_abs_half_kernel_union1_sqrthp_2tile_interleave(const half *input,
-                                                    half *output) {
+__mlu_entry__ void sqrt_abs_half_kernel_union1_64task(const half *input,
+                                                      half *output) {
   if (__is_mpu())
     return;
 
   const uint32_t base = taskId * ELEMS_PER_TASK;
 
-  __nram__ half buf[TILE];
+  __nram__ half buf[ELEMS_PER_TASK];
 
-  __memcpy(buf, input + base, TILE * sizeof(half), GDRAM2NRAM);
-  __bang_abs(buf, buf, TILE);
-  __bang_active_sqrthp(buf, buf, TILE);
-  __memcpy(output + base, buf, TILE * sizeof(half), NRAM2GDRAM);
+  __memcpy(buf, input + base, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
 
-  __memcpy(buf, input + base + TILE, TILE * sizeof(half), GDRAM2NRAM);
-  __bang_abs(buf, buf, TILE);
-  __bang_active_sqrthp(buf, buf, TILE);
-  __memcpy(output + base + TILE, buf, TILE * sizeof(half), NRAM2GDRAM);
+  __bang_abs(buf, buf, ELEMS_PER_TASK);
+  __bang_active_sqrthp(buf, buf, ELEMS_PER_TASK);
+
+  __memcpy(output + base, buf, ELEMS_PER_TASK * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   auto output = torch::empty_like(x);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {4, 8, 1};
+
+  // 64 tasks: 4 * 16
+  cnrtDim3_t dim = {4, 16, 1};
   cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
 
-  sqrt_abs_half_kernel_union1_sqrthp_2tile_interleave<<<dim, ktype, queue>>>(
+  sqrt_abs_half_kernel_union1_64task<<<dim, ktype, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(output.data_ptr<at::Half>()));
 
