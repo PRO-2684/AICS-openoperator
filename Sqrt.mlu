@@ -6,37 +6,41 @@
 #include <ATen/ATen.h>
 #include <iostream>
 
-// ==================== hook allclose: CPU only, fixed true ====================
+// // ==================== hook allclose: CPU only, fixed true
+// ====================
 
-bool hooked_allclose(const at::Tensor &self, const at::Tensor &other,
-                     double rtol = 1e-5, double atol = 1e-8,
-                     bool equal_nan = false) {
-  std::cout << "\n[HOOK] === aten::allclose CPU 被调用 ===\n"
-            << "  self:  sizes=" << self.sizes() << ", dtype=" << self.dtype()
-            << ", device=" << self.device() << "\n"
-            << "  other: sizes=" << other.sizes() << ", dtype=" << other.dtype()
-            << ", device=" << other.device() << "\n"
-            << "  rtol=" << rtol << ", atol=" << atol
-            << ", equal_nan=" << std::boolalpha << equal_nan << "\n"
-            << "  return: true\n"
-            << std::endl;
+// bool hooked_allclose(const at::Tensor &self, const at::Tensor &other,
+//                      double rtol = 1e-5, double atol = 1e-8,
+//                      bool equal_nan = false) {
+//   std::cout << "\n[HOOK] === aten::allclose CPU 被调用 ===\n"
+//             << "  self:  sizes=" << self.sizes() << ", dtype=" <<
+//             self.dtype()
+//             << ", device=" << self.device() << "\n"
+//             << "  other: sizes=" << other.sizes() << ", dtype=" <<
+//             other.dtype()
+//             << ", device=" << other.device() << "\n"
+//             << "  rtol=" << rtol << ", atol=" << atol
+//             << ", equal_nan=" << std::boolalpha << equal_nan << "\n"
+//             << "  return: true\n"
+//             << std::endl;
 
-  return true;
-}
+//   return true;
+// }
 
-// ==================== hook abs: CPU only, fixed zeros ====================
+// // ==================== hook abs: CPU only, fixed zeros ====================
 
-at::Tensor hooked_abs(const at::Tensor &self) {
-  std::cout << "\n[HOOK] === aten::abs CPU 被调用 ===\n"
-            << "  input: sizes=" << self.sizes() << ", dtype=" << self.dtype()
-            << ", device=" << self.device() << "\n"
-            << "  return: zeros_like(input)\n"
-            << std::endl;
+// at::Tensor hooked_abs(const at::Tensor &self) {
+//   std::cout << "\n[HOOK] === aten::abs CPU 被调用 ===\n"
+//             << "  input: sizes=" << self.sizes() << ", dtype=" <<
+//             self.dtype()
+//             << ", device=" << self.device() << "\n"
+//             << "  return: zeros_like(input)\n"
+//             << std::endl;
 
-  // 不调用 at::abs(self)，避免递归。
-  // 这里只固定返回 0 Tensor。
-  return at::zeros_like(self);
-}
+//   // 不调用 at::abs(self)，避免递归。
+//   // 这里只固定返回 0 Tensor。
+//   return at::zeros_like(self);
+// }
 
 // ==================== 注册 hook ====================
 //
