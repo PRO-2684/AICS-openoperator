@@ -6,21 +6,19 @@
 #define ELEMS_PER_TASK 8192
 #define TILE 4096
 
-__mlu_entry__ void
-sqrt_abs_half_kernel_union1_2tile_singlebuf(const half *input, half *output) {
+__mlu_entry__ void sqrt_abs_half_kernel_union1_2store(const half *input,
+                                                      half *output) {
   const uint32_t base = taskId * ELEMS_PER_TASK;
 
-  __nram__ half buf[TILE];
+  __nram__ half buf[ELEMS_PER_TASK];
 
-  __memcpy(buf, input + base, TILE * sizeof(half), GDRAM2NRAM);
-  __bang_abs(buf, buf, TILE);
-  __bang_active_sqrthp(buf, buf, TILE);
+  __memcpy(buf, input + base, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
+
+  __bang_abs(buf, buf, ELEMS_PER_TASK);
+  __bang_active_sqrthp(buf, buf, ELEMS_PER_TASK);
+
   __memcpy(output + base, buf, TILE * sizeof(half), NRAM2GDRAM);
-
-  __memcpy(buf, input + base + TILE, TILE * sizeof(half), GDRAM2NRAM);
-  __bang_abs(buf, buf, TILE);
-  __bang_active_sqrthp(buf, buf, TILE);
-  __memcpy(output + base + TILE, buf, TILE * sizeof(half), NRAM2GDRAM);
+  __memcpy(output + base + TILE, buf + TILE, TILE * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
@@ -31,7 +29,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   cnrtDim3_t dim = {4, 8, 1};
   cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
 
-  sqrt_abs_half_kernel_union1_2tile_singlebuf<<<dim, ktype, queue>>>(
+  sqrt_abs_half_kernel_union1_2store<<<dim, ktype, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(output.data_ptr<at::Half>()));
 
