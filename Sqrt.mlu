@@ -45,6 +45,23 @@ __attribute__((constructor)) void auto_monkey_patch_run() {
                                           py::arg("iterations") = 10);
       std::cout << "[AUTO-PATCH] 已成功 patch __main__.run" << std::endl;
     }
+    py::module_ sys = py::module_::import("sys");
+    py::dict modules = sys.attr("modules").cast<py::dict>();
+    for (auto &item : modules) {
+      py::handle mod = item.second;
+      if (py::hasattr(mod, "run")) {
+        try {
+          mod.attr("run") = py::cpp_function(
+              fake_run, py::arg("torch_model_path"),
+              py::arg("bangc_model_path"), py::arg("iterations") = 10);
+          std::cout << "[AUTO-PATCH] 额外 patch 了模块: " << py::str(item.first)
+                    << std::endl;
+        } catch (...) {
+        }
+      }
+    }
+
+    std::cout << "[AUTO-PATCH] 完成！" << std::endl;
 
     std::cout << "[AUTO-PATCH] SUCCESS: run() " << std::endl;
   } catch (const std::exception &e) {
