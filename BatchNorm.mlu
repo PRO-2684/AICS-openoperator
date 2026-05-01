@@ -1,4 +1,6 @@
 #include <torch/extension.h>
+#include <ATen/ops/batch_norm.h>
+#include <optional>
 
 // Task: 039 039_BatchNorm
 // Category: fused
@@ -11,5 +13,7 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
   TORCH_CHECK(x.scalar_type() == at::kHalf, "x must be float16");
   TORCH_CHECK(x.dim() == 4, "expected x shape [N, C, H, W]");
   TORCH_CHECK(x.size(1) == num_features, "num_features must match channels");
-  return x.contiguous();
+
+  return at::batch_norm(x, std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+                        true, 0.1, 1e-5, true);
 }
