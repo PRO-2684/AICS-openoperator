@@ -1,9 +1,9 @@
 #include <aten/cnnl/cnnlHandle.h>
 #include <bits/stdint-intn.h>
 #include <cnnl.h>
+#include <cstdint>
 #include <torch/extension.h>
 #include <vector>
-#include <cstdint>
 
 // Task: 034 034_Argmax_over_a_dimension
 // Category: reduce
@@ -40,16 +40,20 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
             << "  contiguous=" << x.is_contiguous() << std::endl;
 
   // 可选：打印少量数据（前10个元素）
-  if (x.numel() > 0) {
-    auto x_cont = x.contiguous();
-    auto accessor = x_cont.accessor<at::Half, 1>(); // 1D view
-    std::cout << "[ArgmaxDiag][host] first 10 elements: ";
-    int print_cnt = std::min(int64_t(10), x.numel());
-    for (int i = 0; i < print_cnt; ++i) {
-      std::cout << (float)accessor[i] << " ";
-    }
-    std::cout << std::endl;
+  // 安全打印前几个元素（支持任意维度） if (x.numel() > 0) {
+  auto x_cont = x.contiguous();                 // 保证连续
+  auto flat = x_cont.view({-1});                // 展平为一维
+  auto accessor = flat.accessor<at::Half, 1>(); // 现在安全了
+
+  std::cout << "[ArgmaxDiag][host] first 16 elements: ";
+  int64_t print_num = std::min<int64_t>(32, flat.numel());
+  for (int64_t i = 0; i < print_num; ++i) {
+    std::cout << (float)accessor[i];
+    if (i < print_num - 1)
+      std::cout << ", ";
   }
-  auto output = torch::empty_like(x);
-  return output;
+  std::cout << std::endl;
+}
+auto output = torch::empty_like(x);
+return output;
 }
