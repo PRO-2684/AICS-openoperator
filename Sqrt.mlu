@@ -15,7 +15,7 @@
 #endif
 
 #ifndef TASK_COUNT
-#define TASK_COUNT 64
+#define TASK_COUNT 32
 #endif
 
 #ifndef SQRT_DIAG_PRINT
@@ -24,6 +24,14 @@
 
 #ifndef SQRT_USE_UNION1
 #define SQRT_USE_UNION1 0
+#endif
+
+#ifndef SQRT_USE_FAST_SQRT
+#define SQRT_USE_FAST_SQRT 0
+#endif
+
+#ifndef SQRT_FAST_CORRECT_SMALL
+#define SQRT_FAST_CORRECT_SMALL 0
 #endif
 
 __mlu_entry__ void sqrt_abs_half_kernel(const half *input, half *output,
@@ -39,6 +47,9 @@ __mlu_entry__ void sqrt_abs_half_kernel(const half *input, half *output,
   uint32_t count = per_task + (task_id < remainder ? 1 : 0);
 
   __nram__ half nram_buf[HALF_CHUNK_SIZE];
+#if SQRT_FAST_CORRECT_SMALL
+  __nram__ half nram_mask[HALF_CHUNK_SIZE];
+#endif
 
   for (uint32_t offset = 0; offset < count; offset += HALF_CHUNK_SIZE) {
     uint32_t len = (offset + HALF_CHUNK_SIZE <= count)
@@ -52,7 +63,16 @@ __mlu_entry__ void sqrt_abs_half_kernel(const half *input, half *output,
     }
 
     __bang_abs(nram_buf, nram_buf, aligned_len);
+#if SQRT_USE_FAST_SQRT
+    __bang_active_sqrt(nram_buf, nram_buf, aligned_len);
+#if SQRT_FAST_CORRECT_SMALL
+    __bang_lt_scalar(nram_mask, nram_buf, (half)0.08f, aligned_len);
+    __bang_mul_scalar(nram_mask, nram_mask, (half)0.006f, aligned_len);
+    __bang_sub(nram_buf, nram_buf, nram_mask, aligned_len);
+#endif
+#else
     __bang_active_sqrthp(nram_buf, nram_buf, aligned_len);
+#endif
 
     __memcpy(output + start + offset, nram_buf, len * sizeof(half), NRAM2GDRAM);
   }
