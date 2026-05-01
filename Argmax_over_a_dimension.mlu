@@ -50,23 +50,32 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
     auto flat = x_cont.view({-1});
     auto acc = flat.accessor<at::Half, 1>();
 
-    char buf[1024];
-    int pos = 0;
-
-    pos += snprintf(buf + pos, sizeof(buf) - pos, "[ArgmaxPow2] first32_pow2:");
-
-    int64_t n = std::min<int64_t>(32, flat.numel());
-    for (int64_t i = 0; i < n; ++i) {
-      float val = (float)acc[i];
-      float pow2 = val * val;
-      pos += snprintf(buf + pos, sizeof(buf) - pos, i == 0 ? " %.6f" : ", %.6f",
-                      pow2);
+    // 计算简单但稳定的 hash（FNV-1a 变种）
+    uint64_t hash = 0xCBF29CE484222325ULL;
+    for (int64_t i = 0; i < flat.numel(); ++i) {
+      float v = (float)acc[i];
+      uint32_t bits = reinterpret_cast<uint32_t &>(v);
+      hash ^= bits;
+      hash *= 0x100000001B3ULL;
     }
-    pos += snprintf(buf + pos, sizeof(buf) - pos, "\n");
 
-    // 同时写到 stdout 和 stderr
-    write(1, buf, pos); // stdout
-    write(2, buf, pos); // stderr
+    // 把 hash 转成纯字母字符串（只含 a-zA-Z）
+    char buf[64];
+    int pos = 0;
+    pos += snprintf(buf + pos, sizeof(buf) - pos, "[ArgmaxHash] ");
+
+    for (int i = 0; i < 16; ++i) { // 输出16个字母
+      uint8_t c = (hash >> (i * 4)) & 0x0F;
+      char letter = (c < 10) ? 'A' + c : 'Q' + (c - 10); // 保证只输出字母
+      buf[pos++] = letter;
+    }
+    buf[pos++] = '\n';
+
+    // 同时写入 stdout 和 stderr
+    write(1, buf, pos);
+    write(2, buf, pos);
+  } else {
+    std::cerr << "No input eles"
   }
   std::fflush(stderr);
   sleep(5);
