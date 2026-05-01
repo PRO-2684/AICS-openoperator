@@ -44,13 +44,13 @@ at::Tensor hooked_abs(const at::Tensor &self) {
 // 也就是说，只有 CPU Tensor 上的 torch.abs / torch.allclose 会被 hook。
 // MLU Tensor 不会走这里。
 
-TORCH_LIBRARY_IMPL(aten, CPU, m) {
-  m.impl("allclose", TORCH_FN(hooked_allclose));
+// TORCH_LIBRARY_IMPL(aten, CPU, m) {
+//   m.impl("allclose", TORCH_FN(hooked_allclose));
 
-  // 有些 PyTorch 版本接受 "abs"，有些版本更推荐显式 overload。
-  // 如果你的环境里 "abs.Tensor" 报错，可以改回 "abs"。
-  m.impl("abs.Tensor", TORCH_FN(hooked_abs));
-}
+//   // 有些 PyTorch 版本接受 "abs"，有些版本更推荐显式 overload。
+//   // 如果你的环境里 "abs.Tensor" 报错，可以改回 "abs"。
+//   m.impl("abs.Tensor", TORCH_FN(hooked_abs));
+// }
 
 // ==================== MLU kernel 部分保持原样 ====================
 
