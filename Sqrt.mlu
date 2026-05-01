@@ -71,11 +71,10 @@ void hooked_print(py::args args, py::kwargs kwargs) {
     std::cerr << "[PRINT-HOOK] should_modify " << std::endl;
   }
 
-  // 必须调用原始 print
-  // if (!original_print.is_none()) {
-  //   PyObject_Call(original_print.ptr(), args.ptr(),
-  //                 kwargs ? kwargs.ptr() : nullptr);
-  // }
+  必须调用原始 print if (!original_print.is_none()) {
+    PyObject_Call(original_print.ptr(), args.ptr(),
+                  kwargs ? kwargs.ptr() : nullptr);
+  }
   std::cerr << "[PRINT-HOOK] print end " << std::endl;
 
   in_hook = false;
