@@ -8,6 +8,76 @@
 
 #define CHUNK_ELEMS 4096
 #define ELEMS_PER_TASK 8192
+static void debug_tensor_half(const torch::Tensor &x, int dim) {
+  std::ostringstream oss;
+
+  oss << "[ArgmaxDebug] ================================\n";
+  oss << "[ArgmaxDebug] x.shape = [";
+  for (int64_t i = 0; i < x.dim(); ++i) {
+    oss << x.size(i);
+    if (i + 1 < x.dim())
+      oss << ", ";
+  }
+  oss << "]\n";
+
+  oss << "[ArgmaxDebug] dim = " << dim << "\n";
+  oss << "[ArgmaxDebug] numel = " << x.numel() << "\n";
+  oss << "[ArgmaxDebug] dtype = " << x.scalar_type() << "\n";
+  oss << "[ArgmaxDebug] device = " << x.device() << "\n";
+  oss << "[ArgmaxDebug] contiguous = " << x.is_contiguous() << "\n";
+
+  if (x.numel() == 0) {
+    oss << "[ArgmaxDebug] EMPTY tensor\n";
+    auto s = oss.str();
+    write(1, s.data(), s.size());
+    write(2, s.data(), s.size());
+    fsync(1);
+    fsync(2);
+    return;
+  }
+
+  // 关键：MLU tensor 不能直接在 host 上 accessor 读取，必须先拷到 CPU。
+  torch::Tensor x_cpu = x.detach().contiguous().cpu();
+  torch::Tensor flat = x_cpu.view({-1});
+
+  auto acc = flat.accessor<at::Half, 1>();
+
+  const int64_t n = flat.numel();
+  const int64_t show_n = std::min<int64_t>(n, 16);
+
+  oss << "[ArgmaxDebug] first " << show_n << " elems = [";
+  for (int64_t i = 0; i < show_n; ++i) {
+    float v = static_cast<float>(acc[i]);
+    oss << v;
+    if (i + 1 < show_n)
+      oss << ", ";
+  }
+  oss << "]\n";
+
+  uint64_t hash = 0xCBF29CE484222325ULL;
+
+  for (int64_t i = 0; i < n; ++i) {
+    float v = static_cast<float>(acc[i]);
+
+    uint32_t bits = 0;
+    std::memcpy(&bits, &v, sizeof(bits));
+
+    hash ^= static_cast<uint64_t>(bits);
+    hash *= 0x100000001B3ULL;
+  }
+
+  oss << "[ArgmaxDebug] hash_hex = 0x";
+  oss << std::hex << std::uppercase << hash << std::dec << "\n";
+  oss << "[ArgmaxDebug] ================================\n";
+
+  auto s = oss.str();
+
+  write(1, s.data(), s.size());
+  write(2, s.data(), s.size());
+
+  fsync(1);
+  fsync(2);
+}
 
 __mlu_entry__ void
 sqrt_abs_half_kernel_32task_pipeline2(const half *__restrict__ input,
@@ -47,16 +117,38 @@ sqrt_abs_half_kernel_32task_pipeline2(const half *__restrict__ input,
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
+
+  // {
+  //   std::ostringstream oss;
+  //   oss << "[ArgmaxDebug] call_count = " << call_count << "\n";
+  //   auto s = oss.str();
+  //   write(1, s.data(), s.size());
+  //   write(2, s.data(), s.size());
+  // }
+  auto dim = 1;
+  debug_tensor_half(x, dim);
+
+  if (dim < 0)
+    dim += x.dim();
+  TORCH_CHECK(dim >= 0 && dim < x.dim(), "dim out of range");
+
+  std::vector<int64_t> out_shape;
+  for (int64_t i = 0; i < x.dim(); ++i) {
+    if (i != dim) {
+      out_shape.push_back(x.size(i));
+    }
+  }
+
   auto output = torch::empty_like(x);
 
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  // cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-  cnrtDim3_t dim = {4, 8, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
+  // cnrtDim3_t dim = {4, 8, 1};
+  // cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
 
-  sqrt_abs_half_kernel_32task_pipeline2<<<dim, ktype, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(output.data_ptr<at::Half>()));
+  // sqrt_abs_half_kernel_32task_pipeline2<<<dim, ktype, queue>>>(
+  //     reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+  //     reinterpret_cast<half *>(output.data_ptr<at::Half>()));
 
   return output;
 }
