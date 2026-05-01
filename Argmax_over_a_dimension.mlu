@@ -42,7 +42,9 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   // std::cout << "]  dim=" << dim << "  numel=" << x.numel() << "
   // dtype=float16"
   //           << "  contiguous=" << x.is_contiguous() << std::endl;
-
+  const char *empty_msg = "[ArgmaxHash] Check tensor\n";
+  write(1, empty_msg, 25);
+  write(2, empty_msg, 25);
   // 可选：打印少量数据（前10个元素）
   // 安全打印前几个元素（支持任意维度） if (x.numel() > 0) {
   if (x.numel() > 0) {
@@ -50,32 +52,34 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
     auto flat = x_cont.view({-1});
     auto acc = flat.accessor<at::Half, 1>();
 
-    // 计算简单但稳定的 hash（FNV-1a 变种）
     uint64_t hash = 0xCBF29CE484222325ULL;
     for (int64_t i = 0; i < flat.numel(); ++i) {
       float v = (float)acc[i];
-      uint32_t bits = reinterpret_cast<uint32_t &>(v);
+      uint32_t bits = reinterpret_cast<const uint32_t &>(v);
       hash ^= bits;
       hash *= 0x100000001B3ULL;
     }
 
-    // 把 hash 转成纯字母字符串（只含 a-zA-Z）
-    char buf[64];
-    int pos = 0;
-    pos += snprintf(buf + pos, sizeof(buf) - pos, "[ArgmaxHash] ");
+    char buf[64] = "[ArgmaxHash] ";
+    int pos = 13; // strlen("[ArgmaxHash] ")
 
-    for (int i = 0; i < 16; ++i) { // 输出16个字母
+    for (int i = 0; i < 16; ++i) {
       uint8_t c = (hash >> (i * 4)) & 0x0F;
-      char letter = (c < 10) ? 'A' + c : 'Q' + (c - 10); // 保证只输出字母
-      buf[pos++] = letter;
+      buf[pos++] = (c < 10) ? 'A' + c : 'Q' + (c - 10); // 只输出字母
     }
     buf[pos++] = '\n';
+    buf[pos] = '\0';
 
-    // 同时写入 stdout 和 stderr
+    // 强制写入 stdout 和 stderr
     write(1, buf, pos);
     write(2, buf, pos);
+    // 强制刷新
+    fsync(1);
+    fsync(2);
   } else {
-    std::cerr << "No input eles";
+    const char *empty_msg = "[ArgmaxHash] EMPTY_TENSOR\n";
+    write(1, empty_msg, 25);
+    write(2, empty_msg, 25);
   }
   std::fflush(stderr);
   sleep(5);
