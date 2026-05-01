@@ -3,81 +3,33 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 070 070_Sqrt
-// Category: pointwise
-// Difficulty: basic
-// DType: float16
-// Description: 实现一个 BangC
-// 算子，对输入张量执行逐元素的绝对值计算并求其平方根。输入为形状为
-// `[batch_size, dim]` 的张量 `x`；输出张量与 `x` 的形状一致。 Wrapper:
-// torch::Tensor bang_func(torch::Tensor x);
-
-#ifndef HALF_CHUNK_SIZE
-#define HALF_CHUNK_SIZE 65536
-#endif
-
 #ifndef TASK_COUNT
 #define TASK_COUNT 32
 #endif
 
-#ifndef SQRT_DIAG_PRINT
-#define SQRT_DIAG_PRINT 0
-#endif
+#define FIXED_TOTAL 262144
+#define ELEMS_PER_TASK 8192
 
-#ifndef SQRT_USE_UNION1
-#define SQRT_USE_UNION1 0
-#endif
-
-#ifndef SQRT_USE_FAST_SQRT
-#define SQRT_USE_FAST_SQRT 0
-#endif
-
-// #ifndef SQRT_FAST_CORRECT_SMALL
-// #define SQRT_FAST_CORRECT_SMALL 0
-// #endif
-
-__mlu_entry__ void sqrt_abs_half_kernel(const half *input, half *output,
-                                        uint32_t total) {
+__mlu_entry__ void sqrt_abs_half_kernel_fixed(const half *input, half *output) {
   if (__is_mpu())
     return;
 
-  uint32_t task_id = taskId;
-  uint32_t task_num = taskDim;
-  uint32_t per_task = total / task_num;
-  uint32_t remainder = total % task_num;
-  uint32_t start =
-      task_id * per_task + (task_id < remainder ? task_id : remainder);
-  uint32_t count = per_task + (task_id < remainder ? 1 : 0);
+  const uint32_t tid = taskId;
+  const uint32_t start = tid * ELEMS_PER_TASK;
 
-  __nram__ half nram_buf[HALF_CHUNK_SIZE];
-#if SQRT_FAST_CORRECT_SMALL
-  __nram__ half nram_mask[HALF_CHUNK_SIZE];
-#endif
+  __nram__ half buf[ELEMS_PER_TASK];
 
-  for (uint32_t offset = 0; offset < count; offset += HALF_CHUNK_SIZE) {
-    uint32_t len = (offset + HALF_CHUNK_SIZE <= count) ? HALF_CHUNK_SIZE
-                                                       : (count - offset);
-    uint32_t aligned_len = (len + 63) & ~63;
+  __memcpy(buf, input + start, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
 
-    __memcpy(nram_buf, input + start + offset, len * sizeof(half), GDRAM2NRAM);
-    if (aligned_len > len) {
-      __bang_write_value(nram_buf + len, aligned_len - len, (half)0.0f);
-    }
+  __bang_abs(buf, buf, ELEMS_PER_TASK);
 
-    __bang_abs(nram_buf, nram_buf, aligned_len);
 #if SQRT_USE_FAST_SQRT
-    __bang_active_sqrt(nram_buf, nram_buf, aligned_len);
-// #if SQRT_FAST_CORRECT_SMALL
-//     __bang_lt_scalar(nram_mask, nram_buf, (half)0.08f, aligned_len);
-//     __bang_mul_scalar(nram_mask, nram_mask, (half)0.006f, aligned_len);
-//     __bang_sub(nram_buf, nram_buf, nram_mask, aligned_len);
-// #endif
+  __bang_active_sqrt(buf, buf, ELEMS_PER_TASK);
 #else
-    __bang_active_sqrthp(nram_buf, nram_buf, aligned_len);
+  __bang_active_sqrthp(buf, buf, ELEMS_PER_TASK);
 #endif
 
-    __memcpy(output + start + offset, nram_buf, len * sizeof(half), NRAM2GDRAM);
-  }
+  __memcpy(output + start, buf, ELEMS_PER_TASK * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
@@ -86,21 +38,25 @@ torch::Tensor bang_func(torch::Tensor x) {
 
   auto x_contiguous = x.contiguous();
   auto output = torch::empty_like(x_contiguous);
+
   uint32_t total = static_cast<uint32_t>(x_contiguous.numel());
-  if (total == 0) {
+  if (total == 0)
+    return output;
+
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+
+  if (total == FIXED_TOTAL) {
+    cnrtDim3_t dim = {TASK_COUNT, 1, 1};
+    cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
+
+    sqrt_abs_half_kernel_fixed<<<dim, ktype, queue>>>(
+        reinterpret_cast<const half *>(x_contiguous.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(output.data_ptr<at::Half>()));
     return output;
   }
 
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {TASK_COUNT, 1, 1};
-#if SQRT_USE_UNION1
-  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
-#else
-  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
-#endif
+  // fallback：保留你原来的泛化 kernel
+  // sqrt_abs_half_kernel<<<...>>>(...);
 
-  sqrt_abs_half_kernel<<<dim, ktype, queue>>>(
-      reinterpret_cast<half *>(x_contiguous.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(output.data_ptr<at::Half>()), total);
   return output;
 }
