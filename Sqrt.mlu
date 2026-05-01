@@ -1,14 +1,16 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <torch/extension.h>
 #include <framework/core/MLUStream.h>
+#include <torch/extension.h>
 
 // Task: 070 070_Sqrt
 // Category: pointwise
 // Difficulty: basic
 // DType: float16
-// Description: 实现一个 BangC 算子，对输入张量执行逐元素的绝对值计算并求其平方根。输入为形状为 `[batch_size, dim]` 的张量 `x`；输出张量与 `x` 的形状一致。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x);
+// Description: 实现一个 BangC
+// 算子，对输入张量执行逐元素的绝对值计算并求其平方根。输入为形状为
+// `[batch_size, dim]` 的张量 `x`；输出张量与 `x` 的形状一致。 Wrapper:
+// torch::Tensor bang_func(torch::Tensor x);
 
 #ifndef HALF_CHUNK_SIZE
 #define HALF_CHUNK_SIZE 65536
@@ -30,13 +32,14 @@
 #define SQRT_USE_FAST_SQRT 0
 #endif
 
-#ifndef SQRT_FAST_CORRECT_SMALL
-#define SQRT_FAST_CORRECT_SMALL 0
-#endif
+// #ifndef SQRT_FAST_CORRECT_SMALL
+// #define SQRT_FAST_CORRECT_SMALL 0
+// #endif
 
 __mlu_entry__ void sqrt_abs_half_kernel(const half *input, half *output,
                                         uint32_t total) {
-  if (__is_mpu()) return;
+  if (__is_mpu())
+    return;
 
   uint32_t task_id = taskId;
   uint32_t task_num = taskDim;
@@ -52,9 +55,8 @@ __mlu_entry__ void sqrt_abs_half_kernel(const half *input, half *output,
 #endif
 
   for (uint32_t offset = 0; offset < count; offset += HALF_CHUNK_SIZE) {
-    uint32_t len = (offset + HALF_CHUNK_SIZE <= count)
-                       ? HALF_CHUNK_SIZE
-                       : (count - offset);
+    uint32_t len = (offset + HALF_CHUNK_SIZE <= count) ? HALF_CHUNK_SIZE
+                                                       : (count - offset);
     uint32_t aligned_len = (len + 63) & ~63;
 
     __memcpy(nram_buf, input + start + offset, len * sizeof(half), GDRAM2NRAM);
