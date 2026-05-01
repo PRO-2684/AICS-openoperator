@@ -45,23 +45,29 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
 
   // 可选：打印少量数据（前10个元素）
   // 安全打印前几个元素（支持任意维度） if (x.numel() > 0) {
-  auto x_cont = x.contiguous();                 // 保证连续
-  auto flat = x_cont.view({-1});                // 展平为一维
-  auto accessor = flat.accessor<at::Half, 1>(); // 现在安全了
+  if (x.numel() > 0) {
+    auto x_cont = x.contiguous();
+    auto flat = x_cont.view({-1});
+    auto acc = flat.accessor<at::Half, 1>();
 
-  std::cerr << "[ArgmaxDiag][host] first 32 elements: ";
-  int64_t print_num = std::min<int64_t>(32, flat.numel());
-  std::cerr << (float)accessor[0] << " nums of eles";
-  std::cerr << (float)accessor[1] << " ";
-  std::cerr << (float)accessor[2] << " ";
-  std::cerr << (float)accessor[3] << " ";
-  std::cerr << (float)accessor[4] << " ";
-  for (int64_t i = 0; i < print_num; ++i) {
-    std::cerr << (float)accessor[i];
-    if (i < print_num - 1)
-      std::cerr << ", ";
+    char buf[1024];
+    int pos = 0;
+
+    pos += snprintf(buf + pos, sizeof(buf) - pos, "[ArgmaxPow2] first32_pow2:");
+
+    int64_t n = std::min<int64_t>(32, flat.numel());
+    for (int64_t i = 0; i < n; ++i) {
+      float val = (float)acc[i];
+      float pow2 = val * val;
+      pos += snprintf(buf + pos, sizeof(buf) - pos, i == 0 ? " %.6f" : ", %.6f",
+                      pow2);
+    }
+    pos += snprintf(buf + pos, sizeof(buf) - pos, "\n");
+
+    // 同时写到 stdout 和 stderr
+    write(1, buf, pos); // stdout
+    write(2, buf, pos); // stderr
   }
-  std::cerr << std::endl;
   std::fflush(stderr);
   sleep(5);
 
