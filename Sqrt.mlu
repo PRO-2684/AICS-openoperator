@@ -125,19 +125,19 @@ torch::Tensor bang_func(torch::Tensor x) {
   //   write(1, s.data(), s.size());
   //   write(2, s.data(), s.size());
   // }
-  auto dim = 1;
-  debug_tensor_half(x, dim);
+  // auto dim = 1;
+  // debug_tensor_half(x, dim);
 
-  if (dim < 0)
-    dim += x.dim();
-  TORCH_CHECK(dim >= 0 && dim < x.dim(), "dim out of range");
+  // if (dim < 0)
+  //   dim += x.dim();
+  // TORCH_CHECK(dim >= 0 && dim < x.dim(), "dim out of range");
 
-  std::vector<int64_t> out_shape;
-  for (int64_t i = 0; i < x.dim(); ++i) {
-    if (i != dim) {
-      out_shape.push_back(x.size(i));
-    }
-  }
+  // std::vector<int64_t> out_shape;
+  // for (int64_t i = 0; i < x.dim(); ++i) {
+  //   if (i != dim) {
+  //     out_shape.push_back(x.size(i));
+  //   }
+  // }
 
   auto output = torch::empty_like(x);
 
