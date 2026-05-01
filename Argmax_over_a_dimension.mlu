@@ -3,6 +3,7 @@
 #include <cnnl.h>
 #include <cstdint>
 #include <cstdio>
+#include <iostream>
 #include <torch/extension.h>
 #include <unistd.h>
 #include <vector>
@@ -50,6 +51,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
 
   std::cerr << "[ArgmaxDiag][host] first 32 elements: ";
   int64_t print_num = std::min<int64_t>(32, flat.numel());
+  std::cerr << print_num << " nums of eles";
   for (int64_t i = 0; i < print_num; ++i) {
     std::cerr << (float)accessor[i];
     if (i < print_num - 1)
