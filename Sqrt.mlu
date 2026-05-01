@@ -3,48 +3,58 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define CHUNK_ELEMS 4096
-#define ELEMS_PER_TASK 8192
+#define CHUNK_ELEMS 2048
+#define CHUNKS_PER_TASK 4
+#define ELEMS_PER_TASK (CHUNK_ELEMS * CHUNKS_PER_TASK)
 
-__mlu_entry__ void sqrt_abs_half_kernel_32task_pipeline2_sync_compute(
-    const half *__restrict__ input, half *__restrict__ output) {
+__mlu_entry__ void
+sqrt_abs_half_kernel_32task_pipeline4(const half *__restrict__ input,
+                                      half *__restrict__ output) {
   const uint32_t base = taskId * ELEMS_PER_TASK;
 
   __nram__ half buf0[CHUNK_ELEMS];
   __nram__ half buf1[CHUNK_ELEMS];
 
-  const half *in0 = (const half *)__builtin_assume_aligned(input + base, 512);
-  const half *in1 =
-      (const half *)__builtin_assume_aligned(input + base + CHUNK_ELEMS, 512);
+  half *bufs[2] = {buf0, buf1};
 
-  half *out0 = (half *)__builtin_assume_aligned(output + base, 512);
-  half *out1 =
-      (half *)__builtin_assume_aligned(output + base + CHUNK_ELEMS, 512);
+  // 三级软流水：
+  // time i:
+  //   S(i - 2)
+  //   C(i - 1)
+  //   L(i)
+  //
+  // 注意：这里沿用文档模板，ping/pong 复用。
+  for (int i = 0; i < CHUNKS_PER_TASK + 2; ++i) {
+    if (i >= 2) {
+      const int sid = i - 2;
+      const int sslot = sid & 1;
 
-  // L0
-  __memcpy(buf0, in0, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  __sync_io();
+      half *out_ptr = (half *)__builtin_assume_aligned(
+          output + base + sid * CHUNK_ELEMS, 512);
 
-  // L1 + C0
-  __memcpy(buf1, in1, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  __bang_abs(buf0, buf0, CHUNK_ELEMS);
-  __bang_active_sqrthp(buf0, buf0, CHUNK_ELEMS);
-  __sync_io_move_compute();
+      __memcpy(out_ptr, bufs[sslot], CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
+    }
 
-  // S0 + C1
-  __memcpy(out0, buf0, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
-  __bang_abs(buf1, buf1, CHUNK_ELEMS);
-  __bang_active_sqrthp(buf1, buf1, CHUNK_ELEMS);
+    if (i >= 1 && i < CHUNKS_PER_TASK + 1) {
+      const int cid = i - 1;
+      const int cslot = cid & 1;
 
-  // 关键优化：
-  // 这里只需要等 C1 结束，不强制等 S0 写回完成。
-  __sync_compute();
+      __bang_abs(bufs[cslot], bufs[cslot], CHUNK_ELEMS);
+      __bang_active_sqrthp(bufs[cslot], bufs[cslot], CHUNK_ELEMS);
+    }
 
-  // S1
-  __memcpy(out1, buf1, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
+    if (i < CHUNKS_PER_TASK) {
+      const int lid = i;
+      const int lslot = lid & 1;
 
-  // 最后统一等待所有 IO 完成
-  __sync_io();
+      const half *in_ptr = (const half *)__builtin_assume_aligned(
+          input + base + lid * CHUNK_ELEMS, 512);
+
+      __memcpy(bufs[lslot], in_ptr, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
+    }
+
+    __sync_io_move_compute();
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
@@ -55,7 +65,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   cnrtDim3_t dim = {4, 8, 1};
   cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
 
-  sqrt_abs_half_kernel_32task_pipeline2_sync_compute<<<dim, ktype, queue>>>(
+  sqrt_abs_half_kernel_32task_pipeline4<<<dim, ktype, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(output.data_ptr<at::Half>()));
 
