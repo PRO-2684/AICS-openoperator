@@ -4,32 +4,26 @@
 #include <torch/extension.h>
 
 #define FIXED_TOTAL 262144
-#define TASK_COUNT 32
 #define ELEMS_PER_TASK 8192
-#define TILE 4096
 
-__mlu_entry__ void sqrt_abs_half_kernel_fixed_2tile(const half *input,
-                                                    half *output) {
+__mlu_entry__ void sqrt_abs_half_kernel_fixed_union1(const half *input,
+                                                     half *output) {
   if (__is_mpu())
     return;
 
   const uint32_t tid = taskId;
   const uint32_t base = tid * ELEMS_PER_TASK;
 
-  __nram__ half buf0[TILE];
-  __nram__ half buf1[TILE];
+  __nram__ half buf[ELEMS_PER_TASK];
 
-  __memcpy(buf0, input + base, TILE * sizeof(half), GDRAM2NRAM);
-  __memcpy(buf1, input + base + TILE, TILE * sizeof(half), GDRAM2NRAM);
+  __memcpy(buf, input + base, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
 
-  __bang_abs(buf0, buf0, TILE);
-  __bang_active_sqrt(buf0, buf0, TILE);
+  __bang_abs(buf, buf, ELEMS_PER_TASK);
 
-  __bang_abs(buf1, buf1, TILE);
-  __bang_active_sqrt(buf1, buf1, TILE);
+  // 低精度快速 sqrt
+  __bang_active_sqrt(buf, buf, ELEMS_PER_TASK);
 
-  __memcpy(output + base, buf0, TILE * sizeof(half), NRAM2GDRAM);
-  __memcpy(output + base + TILE, buf1, TILE * sizeof(half), NRAM2GDRAM);
+  __memcpy(output + base, buf, ELEMS_PER_TASK * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
@@ -41,10 +35,12 @@ torch::Tensor bang_func(torch::Tensor x) {
   auto output = torch::empty_like(x);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {TASK_COUNT, 1, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
 
-  sqrt_abs_half_kernel_fixed_2tile<<<dim, ktype, queue>>>(
+  // MLU370: clusterCount = 8, McorePerCluster = 4
+  cnrtDim3_t dim = {4, 8, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
+
+  sqrt_abs_half_kernel_fixed_union1<<<dim, ktype, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(output.data_ptr<at::Half>()));
 
