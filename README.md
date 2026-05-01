@@ -82,12 +82,12 @@ python scripts/update_problems.py
 | 031 | [Softplus](Softplus.mlu) | N/A | 🔴 |
 | 032 | [Softsign](Softsign.mlu) | N/A | 🔴 |
 | 033 | [Swish](Swish.mlu) | N/A | 🔴 |
-| 034 | [Argmax_over_a_dimension](Argmax_over_a_dimension.mlu) | N/A | 🔴 |
+| 034 | [Argmax_over_a_dimension](Argmax_over_a_dimension.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/53d01e365d40388fde0cc121b74c08228881cd94) |
 | 035 | [L1Norm_](L1Norm_.mlu) | N/A | 🔴 |
 | 036 | [L2Norm_](L2Norm_.mlu) | N/A | 🔴 |
 | 037 | [Max_reduction_over_a_dimension](Max_reduction_over_a_dimension.mlu) | N/A | 🔴 |
 | 038 | [Product_reduction_over_a_dimension](Product_reduction_over_a_dimension.mlu) | N/A | 🔴 |
-| 039 | [BatchNorm](BatchNorm.mlu) | N/A | 🔴 |
+| 039 | [BatchNorm](BatchNorm.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/16e7684032be5f8d19845af49027aef1d2a45221) |
 | 040 | [CosineSimilarityLoss](CosineSimilarityLoss.mlu) | N/A | 🔴 |
 | 041 | [CrossEntropyLoss](CrossEntropyLoss.mlu) | N/A | 🔴 |
 | 042 | [FrobeniusNorm_](FrobeniusNorm_.mlu) | N/A | 🔴 |
@@ -99,7 +99,7 @@ python scripts/update_problems.py
 | 048 | [Max_Pooling_2D](Max_Pooling_2D.mlu) | N/A | 🔴 |
 | 049 | [Max_Pooling_3D](Max_Pooling_3D.mlu) | N/A | 🔴 |
 | 050 | [cumprod](cumprod.mlu) | N/A | 🔴 |
-| 051 | [cumsum](cumsum.mlu) | N/A | 🔴 |
+| 051 | [cumsum](cumsum.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/f5a0c30bb76cd4ecb84ed5a1cc4dd7ec69443cca) |
 | 052 | [cumsum_exclusive](cumsum_exclusive.mlu) | N/A | 🔴 |
 | 053 | [cumsum_reverse](cumsum_reverse.mlu) | N/A | 🔴 |
 | 054 | [binned_gather](binned_gather.mlu) | N/A | 🔴 |
