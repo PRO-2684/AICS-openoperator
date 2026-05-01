@@ -2,7 +2,9 @@
 #include <bits/stdint-intn.h>
 #include <cnnl.h>
 #include <cstdint>
+#include <cstdio>
 #include <torch/extension.h>
+#include <unistd.h>
 #include <vector>
 
 // Task: 034 034_Argmax_over_a_dimension
@@ -45,7 +47,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   auto flat = x_cont.view({-1});                // 展平为一维
   auto accessor = flat.accessor<at::Half, 1>(); // 现在安全了
 
-  std::cout << "[ArgmaxDiag][host] first 16 elements: ";
+  std::cout << "[ArgmaxDiag][host] first 32 elements: ";
   int64_t print_num = std::min<int64_t>(32, flat.numel());
   for (int64_t i = 0; i < print_num; ++i) {
     std::cout << (float)accessor[i];
@@ -53,6 +55,8 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
       std::cout << ", ";
   }
   std::cout << std::endl;
+  std::fflush(stdout);
+  sleep(5);
 
   auto output = torch::empty_like(x);
   return output;
