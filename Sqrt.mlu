@@ -3,22 +3,41 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define ELEMS_PER_TASK 8192
-#define TILE 4096
+#define ELEMS_PER_CORE 8192
+#define ELEMS_PER_CLUSTER (ELEMS_PER_CORE * 4)
 
-__mlu_entry__ void sqrt_abs_half_kernel_union1_2store(const half *input,
-                                                      half *output) {
-  const uint32_t base = taskId * ELEMS_PER_TASK;
+__mlu_shared__ half sram_out[ELEMS_PER_CLUSTER];
 
-  __nram__ half buf[ELEMS_PER_TASK];
+__mlu_entry__ void
+sqrt_abs_half_kernel_sram_store(const half *__restrict__ input,
+                                half *__restrict__ output) {
+  // MLU370: 8 clusters * 4 cores = 32 cores
+  const uint32_t c_id = clusterId;
+  const uint32_t local_core = coreId;
 
-  __memcpy(buf, input + base, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
+  const uint32_t cluster_base = c_id * ELEMS_PER_CLUSTER;
+  const uint32_t core_base = local_core * ELEMS_PER_CORE;
 
-  __bang_abs(buf, buf, ELEMS_PER_TASK);
-  __bang_active_sqrthp(buf, buf, ELEMS_PER_TASK);
+  __nram__ half buf[ELEMS_PER_CORE];
 
-  __memcpy(output + base, buf, TILE * sizeof(half), NRAM2GDRAM);
-  __memcpy(output + base + TILE, buf + TILE, TILE * sizeof(half), NRAM2GDRAM);
+  const half *in_ptr = (const half *)__builtin_assume_aligned(
+      input + cluster_base + core_base, 512);
+  half *out_ptr = (half *)__builtin_assume_aligned(output + cluster_base, 512);
+
+  __memcpy(buf, in_ptr, ELEMS_PER_CORE * sizeof(half), GDRAM2NRAM);
+
+  __bang_abs(buf, buf, ELEMS_PER_CORE);
+  __bang_active_sqrthp(buf, buf, ELEMS_PER_CORE);
+
+  // 4 个 core 分别把 16KB 结果写入同 cluster 的连续 SRAM 区域
+  __memcpy(sram_out + core_base, buf, ELEMS_PER_CORE * sizeof(half), NRAM2SRAM);
+
+  __sync_cluster();
+
+  // 只让 core0 做一次 64KB 连续 SRAM2GDRAM 写回
+  if (local_core == 0) {
+    __memcpy(out_ptr, sram_out, ELEMS_PER_CLUSTER * sizeof(half), SRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
@@ -29,7 +48,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   cnrtDim3_t dim = {4, 8, 1};
   cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
 
-  sqrt_abs_half_kernel_union1_2store<<<dim, ktype, queue>>>(
+  sqrt_abs_half_kernel_sram_store<<<dim, ktype, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(output.data_ptr<at::Half>()));
 
