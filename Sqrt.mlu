@@ -3,60 +3,45 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#ifndef TASK_COUNT
-#define TASK_COUNT 32
-#endif
-
 #define FIXED_TOTAL 262144
+#define TASK_COUNT 32
 #define ELEMS_PER_TASK 8192
 
-__mlu_entry__ void sqrt_abs_half_kernel_fixed(const half *input, half *output) {
+__mlu_entry__ void sqrt_abs_half_kernel_fixed_block(const half *input,
+                                                    half *output) {
   if (__is_mpu())
     return;
 
   const uint32_t tid = taskId;
-  const uint32_t start = tid * ELEMS_PER_TASK;
+  const uint32_t base = tid * ELEMS_PER_TASK;
 
   __nram__ half buf[ELEMS_PER_TASK];
 
-  __memcpy(buf, input + start, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
+  __memcpy(buf, input + base, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
 
   __bang_abs(buf, buf, ELEMS_PER_TASK);
 
-#if SQRT_USE_FAST_SQRT
+  // 低精度快速 sqrt
   __bang_active_sqrt(buf, buf, ELEMS_PER_TASK);
-#else
-  __bang_active_sqrthp(buf, buf, ELEMS_PER_TASK);
-#endif
 
-  __memcpy(output + start, buf, ELEMS_PER_TASK * sizeof(half), NRAM2GDRAM);
+  __memcpy(output + base, buf, ELEMS_PER_TASK * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   TORCH_CHECK(x.dim() == 2, "expected a 2D tensor [batch_size, dim]");
   TORCH_CHECK(x.scalar_type() == at::kHalf, "x must be float16");
+  TORCH_CHECK(x.numel() == FIXED_TOTAL, "expected fixed numel 262144");
+  TORCH_CHECK(x.is_contiguous(), "expected contiguous input");
 
-  auto x_contiguous = x.contiguous();
-  auto output = torch::empty_like(x_contiguous);
-
-  uint32_t total = static_cast<uint32_t>(x_contiguous.numel());
-  if (total == 0)
-    return output;
+  auto output = torch::empty_like(x);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {TASK_COUNT, 1, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
 
-  if (total == FIXED_TOTAL) {
-    cnrtDim3_t dim = {TASK_COUNT, 1, 1};
-    cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
-
-    sqrt_abs_half_kernel_fixed<<<dim, ktype, queue>>>(
-        reinterpret_cast<const half *>(x_contiguous.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(output.data_ptr<at::Half>()));
-    return output;
-  }
-
-  // fallback：保留你原来的泛化 kernel
-  // sqrt_abs_half_kernel<<<...>>>(...);
+  sqrt_abs_half_kernel_fixed_block<<<dim, ktype, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(output.data_ptr<at::Half>()));
 
   return output;
 }
