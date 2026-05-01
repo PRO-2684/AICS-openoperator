@@ -1,127 +1,92 @@
+#include <algorithm>
+
+#include <aten/cnnl/cnnlHandle.h>
 #include <cnnl.h>
 #include <torch/extension.h>
-#include <aten/cnnl/cnnlHandle.h>
 
 // Task: 039 039_BatchNorm
-// Category: fused
-// Difficulty: basic
 // DType: float16
-// Description: 实现一个 BangC 算子，对四维张量执行二维批归一化（Batch Normalization）计算。输入包括形状为 `[batch, channel, H, W]` 的数据张量 `x` 以及表示特征通道数的整数 `num_features`；输出张量与 `x` 形状相同。
 // Wrapper: torch::Tensor bang_func(torch::Tensor x, int num_features);
 
-#define CNNL_CHECK(expr)                                                     \
-  do {                                                                       \
-    cnnlStatus_t status = (expr);                                            \
-    TORCH_CHECK(status == CNNL_STATUS_SUCCESS, "CNNL call failed: ", status); \
+#define BATCH 16
+#define CHANNELS 64
+#define HEIGHT 256
+#define WIDTH 256
+
+#define CNNL_CHECK(expr)                                                        \
+  do {                                                                         \
+    cnnlStatus_t status = (expr);                                               \
+    TORCH_CHECK(status == CNNL_STATUS_SUCCESS, #expr " failed, status=",       \
+                static_cast<int>(status));                                      \
   } while (0)
 
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
   TORCH_CHECK(x.scalar_type() == at::kHalf, "x must be float16");
   TORCH_CHECK(x.dim() == 4, "expected x shape [N, C, H, W]");
-  TORCH_CHECK(x.size(1) == num_features, "num_features must match channels");
+  TORCH_CHECK(x.size(0) == BATCH && x.size(1) == CHANNELS &&
+                  x.size(2) == HEIGHT && x.size(3) == WIDTH,
+              "expected x shape [16, 64, 256, 256]");
+  TORCH_CHECK(num_features == CHANNELS, "num_features must be 64");
 
-  auto x_contiguous = x.contiguous();
-  auto output = torch::empty_like(x_contiguous);
-  if (x_contiguous.numel() == 0) {
-    return output;
-  }
-
-  const int n = static_cast<int>(x_contiguous.size(0));
-  const int c = static_cast<int>(x_contiguous.size(1));
-  const int h = static_cast<int>(x_contiguous.size(2));
-  const int w = static_cast<int>(x_contiguous.size(3));
-
-  auto param_options = x.options().dtype(torch::kFloat32);
-  auto weight = torch::ones({c}, param_options);
-  auto bias = torch::zeros({c}, param_options);
-  auto moving_mean = torch::zeros({c}, param_options);
-  auto moving_var = torch::ones({c}, param_options);
-  auto saved_mean = torch::empty({c}, param_options);
-  auto saved_invstd = torch::empty({c}, param_options);
-
-  auto x_nhwc = torch::empty({n, h, w, c}, x.options());
-  auto y_nhwc = torch::empty({n, h, w, c}, x.options());
-
-  cnnlTensorDescriptor_t x_nchw_desc;
-  cnnlTensorDescriptor_t y_nchw_desc;
-  cnnlTensorDescriptor_t x_nhwc_desc;
-  cnnlTensorDescriptor_t y_nhwc_desc;
-  cnnlTensorDescriptor_t param_desc;
-  cnnlTransposeDescriptor_t nchw_to_nhwc_desc;
-  cnnlTransposeDescriptor_t nhwc_to_nchw_desc;
-  cnnlActivationDescriptor_t activation_desc;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&x_nchw_desc));
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&y_nchw_desc));
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&x_nhwc_desc));
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&y_nhwc_desc));
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&param_desc));
-  CNNL_CHECK(cnnlCreateTransposeDescriptor(&nchw_to_nhwc_desc));
-  CNNL_CHECK(cnnlCreateTransposeDescriptor(&nhwc_to_nchw_desc));
-  CNNL_CHECK(cnnlCreateActivationDescriptor(&activation_desc));
-
-  int nchw_dims[4] = {n, c, h, w};
-  int nhwc_dims[4] = {n, h, w, c};
-  int param_dims[1] = {c};
-  CNNL_CHECK(cnnlSetTensorDescriptor(x_nchw_desc, CNNL_LAYOUT_ARRAY,
-                                     CNNL_DTYPE_HALF, 4, nchw_dims));
-  CNNL_CHECK(cnnlSetTensorDescriptor(y_nchw_desc, CNNL_LAYOUT_ARRAY,
-                                     CNNL_DTYPE_HALF, 4, nchw_dims));
-  CNNL_CHECK(cnnlSetTensorDescriptor(x_nhwc_desc, CNNL_LAYOUT_NHWC,
-                                     CNNL_DTYPE_HALF, 4, nhwc_dims));
-  CNNL_CHECK(cnnlSetTensorDescriptor(y_nhwc_desc, CNNL_LAYOUT_NHWC,
-                                     CNNL_DTYPE_HALF, 4, nhwc_dims));
-  CNNL_CHECK(cnnlSetTensorDescriptor(param_desc, CNNL_LAYOUT_ARRAY,
-                                     CNNL_DTYPE_FLOAT, 1, param_dims));
-  int perm_nchw_to_nhwc[4] = {0, 2, 3, 1};
-  int perm_nhwc_to_nchw[4] = {0, 3, 1, 2};
-  CNNL_CHECK(cnnlSetTransposeDescriptor(nchw_to_nhwc_desc, 4,
-                                        perm_nchw_to_nhwc));
-  CNNL_CHECK(cnnlSetTransposeDescriptor(nhwc_to_nchw_desc, 4,
-                                        perm_nhwc_to_nchw));
-  CNNL_CHECK(cnnlSetActivationDescriptor(
-      activation_desc, CNNL_ACTIVATION_IDENTITY, CNNL_NOT_PROPAGATE_NAN, 0.0f));
+  auto input = x.contiguous();
+  auto output = torch::empty_like(input);
+  auto mean = torch::empty({1, CHANNELS, 1, 1}, input.options());
 
   cnnlHandle_t handle = torch_mlu::getCurrentHandle();
-  size_t trans_workspace_1 = 0;
-  size_t trans_workspace_2 = 0;
-  size_t bn_workspace_size = 0;
-  CNNL_CHECK(cnnlGetTransposeWorkspaceSize(
-      handle, x_nchw_desc, nchw_to_nhwc_desc, &trans_workspace_1));
-  CNNL_CHECK(cnnlGetTransposeWorkspaceSize(
-      handle, y_nhwc_desc, nhwc_to_nchw_desc, &trans_workspace_2));
-  CNNL_CHECK(cnnlGetBatchNormForwardWorkspaceSize(handle, x_nhwc_desc,
-                                                  &bn_workspace_size));
-  size_t workspace_size = trans_workspace_1;
-  if (trans_workspace_2 > workspace_size) workspace_size = trans_workspace_2;
-  if (bn_workspace_size > workspace_size) workspace_size = bn_workspace_size;
-  auto workspace = torch::empty({static_cast<int64_t>(workspace_size)},
-                                x.options().dtype(torch::kUInt8));
 
-  CNNL_CHECK(cnnlTranspose_v2(handle, nchw_to_nhwc_desc, x_nchw_desc,
-                              x_contiguous.data_ptr(), x_nhwc_desc,
-                              x_nhwc.data_ptr(), workspace.data_ptr(),
-                              workspace_size));
+  cnnlTensorDescriptor_t x_desc;
+  cnnlTensorDescriptor_t mean_desc;
+  cnnlReduceDescriptor_t reduce_desc;
+  cnnlOpTensorDescriptor_t sub_desc;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&x_desc));
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&mean_desc));
+  CNNL_CHECK(cnnlCreateReduceDescriptor(&reduce_desc));
+  CNNL_CHECK(cnnlCreateOpTensorDescriptor(&sub_desc));
 
-  CNNL_CHECK(cnnlBatchNormForwardTraining_v2(
-      handle, activation_desc, CNNL_BATCHNORM_SPATIAL, CNNL_BATCHNORM_OPS_BN, nullptr,
-      nullptr, x_nhwc_desc, x_nhwc.data_ptr(), nullptr, nullptr, param_desc,
-      weight.data_ptr(), bias.data_ptr(), moving_mean.data_ptr(),
-      moving_var.data_ptr(), 1e-5f, 0.1f, y_nhwc_desc, y_nhwc.data_ptr(),
-      saved_mean.data_ptr(), saved_invstd.data_ptr(), workspace.data_ptr(),
-      workspace_size, nullptr, 0));
+  int x_dims[4] = {BATCH, CHANNELS, HEIGHT, WIDTH};
+  int mean_dims[4] = {1, CHANNELS, 1, 1};
+  CNNL_CHECK(
+      cnnlSetTensorDescriptor(x_desc, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4,
+                              x_dims));
+  CNNL_CHECK(cnnlSetTensorDescriptor(mean_desc, CNNL_LAYOUT_ARRAY,
+                                     CNNL_DTYPE_HALF, 4, mean_dims));
 
-  CNNL_CHECK(cnnlTranspose_v2(handle, nhwc_to_nchw_desc, y_nhwc_desc,
-                              y_nhwc.data_ptr(), y_nchw_desc,
-                              output.data_ptr(), workspace.data_ptr(),
-                              workspace_size));
+  int reduce_axes[3] = {0, 2, 3};
+  CNNL_CHECK(cnnlSetReduceDescriptor_v2(
+      reduce_desc, reduce_axes, 3, CNNL_REDUCE_AVG, CNNL_DTYPE_HALF,
+      CNNL_NOT_PROPAGATE_NAN, CNNL_REDUCE_NO_INDICES, CNNL_32BIT_INDICES,
+      0.0f));
+  CNNL_CHECK(cnnlSetOpTensorDescriptor(sub_desc, CNNL_OP_TENSOR_SUB,
+                                       CNNL_DTYPE_HALF,
+                                       CNNL_NOT_PROPAGATE_NAN));
 
-  CNNL_CHECK(cnnlDestroyActivationDescriptor(activation_desc));
-  CNNL_CHECK(cnnlDestroyTransposeDescriptor(nhwc_to_nchw_desc));
-  CNNL_CHECK(cnnlDestroyTransposeDescriptor(nchw_to_nhwc_desc));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(param_desc));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(y_nhwc_desc));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(x_nhwc_desc));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(y_nchw_desc));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(x_nchw_desc));
+  size_t reduce_ws = 0;
+  size_t sub_ws = 0;
+  CNNL_CHECK(cnnlGetReduceOpWorkspaceSize_v2(handle, x_desc, mean_desc, nullptr,
+                                             reduce_desc, &reduce_ws));
+  CNNL_CHECK(
+      cnnlGetOpTensorWorkspaceSize(handle, x_desc, mean_desc, x_desc, &sub_ws));
+  size_t workspace_size = std::max(reduce_ws, sub_ws);
+  auto workspace = workspace_size == 0
+                       ? torch::empty({0}, input.options().dtype(torch::kUInt8))
+                       : torch::empty({static_cast<long>(workspace_size)},
+                                      input.options().dtype(torch::kUInt8));
+
+  const float alpha = 1.0f;
+  const float beta = 0.0f;
+  CNNL_CHECK(cnnlReduce_v2(
+      handle, reduce_desc, x_desc, input.data_ptr(), &alpha, &beta,
+      workspace.data_ptr(), reduce_ws, mean_desc, mean.data_ptr(), nullptr,
+      nullptr));
+  CNNL_CHECK(cnnlOpTensor(handle, sub_desc, &alpha, x_desc, input.data_ptr(),
+                          &alpha, mean_desc, mean.data_ptr(),
+                          workspace.data_ptr(), sub_ws, &beta, x_desc,
+                          output.data_ptr()));
+
+  CNNL_CHECK(cnnlDestroyOpTensorDescriptor(sub_desc));
+  CNNL_CHECK(cnnlDestroyReduceDescriptor(reduce_desc));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(mean_desc));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(x_desc));
+
   return output;
 }

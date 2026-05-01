@@ -1,0 +1,1 @@
+For the submission https://github.com/PRO-2684/AICS-openoperator/commit/04e0c42f3a88418589f9379bcb454e0ac38c7b05, which directly returns input of x, it has a probability of directly passing the test. One team in this warehouse passed the test, but the other team did not.git
