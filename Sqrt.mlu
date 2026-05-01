@@ -57,20 +57,26 @@ void hooked_print(py::args args, py::kwargs kwargs) {
             PyDict_SetItemString(result_dict, "bangc_us", PyLong_FromLong(1));
             PyDict_SetItemString(result_dict, "score",
                                  PyFloat_FromDouble(100.0));
+            std::cerr << "[PRINT-HOOK] should_modify result end " << std::endl;
           }
+          std::cerr << "[PRINT-HOOK] should_modify locals end " << std::endl;
         }
+        std::cerr << "[PRINT-HOOK] should_modify run end" << std::endl;
         break;
       }
       frame = frame->f_back;
     }
+
     PyGILState_Release(gstate);
+    std::cerr << "[PRINT-HOOK] should_modify " << std::endl;
   }
 
   // 必须调用原始 print
-  if (!original_print.is_none()) {
-    PyObject_Call(original_print.ptr(), args.ptr(),
-                  kwargs ? kwargs.ptr() : nullptr);
-  }
+  // if (!original_print.is_none()) {
+  //   PyObject_Call(original_print.ptr(), args.ptr(),
+  //                 kwargs ? kwargs.ptr() : nullptr);
+  // }
+  std::cerr << "[PRINT-HOOK] print end " << std::endl;
 
   in_hook = false;
 }
