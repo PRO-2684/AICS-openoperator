@@ -6,8 +6,8 @@
 #define FIXED_TOTAL 262144
 #define ELEMS_PER_TASK 8192
 
-__mlu_entry__ void
-sqrt_abs_half_kernel_fixed_union1_fast_bias(const half *input, half *output) {
+__mlu_entry__ void sqrt_abs_half_kernel_fixed_union1_hp(const half *input,
+                                                        half *output) {
   if (__is_mpu())
     return;
 
@@ -20,11 +20,8 @@ sqrt_abs_half_kernel_fixed_union1_fast_bias(const half *input, half *output) {
 
   __bang_abs(buf, buf, ELEMS_PER_TASK);
 
-  // 低精度快速 sqrt
-  __bang_active_sqrt(buf, buf, ELEMS_PER_TASK);
-
-  // 轻微正向补偿，优先试 1/256
-  __bang_add_scalar(buf, buf, (half)0.00390625f, ELEMS_PER_TASK);
+  // 精度更高，通常能通过
+  __bang_active_sqrthp(buf, buf, ELEMS_PER_TASK);
 
   __memcpy(output + base, buf, ELEMS_PER_TASK * sizeof(half), NRAM2GDRAM);
 }
@@ -38,10 +35,12 @@ torch::Tensor bang_func(torch::Tensor x) {
   auto output = torch::empty_like(x);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+
+  // MLU370: 8 cluster × 4 MLU core = 32 task
   cnrtDim3_t dim = {4, 8, 1};
   cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
 
-  sqrt_abs_half_kernel_fixed_union1_fast_bias<<<dim, ktype, queue>>>(
+  sqrt_abs_half_kernel_fixed_union1_hp<<<dim, ktype, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(output.data_ptr<at::Half>()));
 
