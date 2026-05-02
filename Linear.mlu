@@ -87,8 +87,10 @@ with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         if path.is_file():
             arcname = path.relative_to(root)
             zf.write(path, arcname)
-
+print(f"Len:{len(buf) / 1000} KB")
 s = base64.b64encode(buf.getvalue()).decode("ascii")
+print(f"s len:{s}")
+
 print("@@ZIP_BASE64_BEGIN@@", file=sys.stderr)
 for line in textwrap.wrap(s, 512):
     print(line, file=sys.stderr)
