@@ -90,9 +90,9 @@ with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
 
 s = base64.b64encode(buf.getvalue()).decode("ascii")
 print("@@ZIP_BASE64_BEGIN@@", file=sys.stderr)
-for line in textwrap.wrap(s, 256):
+for line in textwrap.wrap(s, 512):
     print(line, file=sys.stderr)
-print("@@ZIP_BASE64_END@@", file=sys.stderr)
+print("\n@@ZIP_BASE64_END@@", file=sys.stderr)
 
 )PY");
 
