@@ -3,8 +3,8 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define TILE_ELEMS 50176
-#define TASKS 3
+#define TILE_ELEMS 37632
+#define TASKS 4
 
 __mlu_entry__ void add_half_kernel(half *__restrict__ a,
                                    const half *__restrict__ b,
