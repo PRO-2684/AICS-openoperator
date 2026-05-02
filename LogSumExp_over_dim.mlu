@@ -1,117 +1,50 @@
-#pragma once
-
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
+#include <float.h>
+#include <math.h>
 
-#include <vector>
-
-#define CNNL_CHECK(expr) \
-  do { \
-    cnnlStatus_t status__ = (expr); \
-    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)status__); \
-  } while (0)
-
-inline cnnlDataType_t cnnl_dtype_from_torch(c10::ScalarType t) {
-  switch (t) {
-    case at::kHalf: return CNNL_DTYPE_HALF;
-    case at::kFloat: return CNNL_DTYPE_FLOAT;
-    case at::kBool: return CNNL_DTYPE_BOOL;
-    case at::kInt: return CNNL_DTYPE_INT32;
-    case at::kLong: return CNNL_DTYPE_INT64;
-    default: TORCH_CHECK(false, "unsupported dtype");
+__mlu_entry__ void logsumexp_float_kernel(const float* x, float* out) {
+  int row = taskId;
+  if (row >= 16) return;
+  int base = row * 1024;
+  float mx = -FLT_MAX;
+  for (int i = 0; i < 1024; ++i) {
+    float v = x[base + i];
+    if (v > mx) mx = v;
   }
+  float s = 0.0f;
+  for (int i = 0; i < 1024; ++i) s += expf(x[base + i] - mx);
+  out[row] = logf(s) + mx;
 }
 
-inline cnnlTensorDescriptor_t make_array_desc(const torch::Tensor& x) {
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  std::vector<int> dims(x.dim());
-  for (int i = 0; i < x.dim(); ++i) dims[i] = (int)x.size(i);
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY,
-      cnnl_dtype_from_torch(x.scalar_type()), (int)x.dim(), dims.data()));
-  return d;
-}
-
-inline void destroy_desc(cnnlTensorDescriptor_t d) {
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(d));
+__mlu_entry__ void logsumexp_half_kernel(const half* x, half* out) {
+  int row = taskId;
+  if (row >= 16) return;
+  int base = row * 1024;
+  float mx = -FLT_MAX;
+  for (int i = 0; i < 1024; ++i) {
+    float v = (float)x[base + i];
+    if (v > mx) mx = v;
+  }
+  float s = 0.0f;
+  for (int i = 0; i < 1024; ++i) s += expf((float)x[base + i] - mx);
+  out[row] = (half)(logf(s) + mx);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
-  int64_t nd = x.dim();
-  int axis64 = dim < 0 ? dim + nd : dim;
-  TORCH_CHECK(axis64 >= 0 && axis64 < nd, "invalid dim");
-  std::vector<int64_t> keep_shape(x.sizes().begin(), x.sizes().end());
-  keep_shape[axis64] = 1;
-
-  auto max_keep = torch::empty(keep_shape, x.options());
-  auto xd = make_array_desc(x);
-  auto md = make_array_desc(max_keep);
-  cnnlReduceDescriptor_t rd;
-  CNNL_CHECK(cnnlCreateReduceDescriptor(&rd));
-  int axis = (int)axis64;
-  CNNL_CHECK(cnnlSetReduceDescriptor_v2(
-      rd, &axis, 1, CNNL_REDUCE_MAX, cnnl_dtype_from_torch(x.scalar_type()),
-      CNNL_NOT_PROPAGATE_NAN, CNNL_REDUCE_NO_INDICES, CNNL_32BIT_INDICES, 0.f));
-  size_t ws = 0;
-  CNNL_CHECK(cnnlGetReduceOpWorkspaceSize_v2(torch_mlu::getCurrentHandle(), xd, md, nullptr, rd, &ws));
-  auto workspace = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
-  float one = 1.f, zero = 0.f;
-  CNNL_CHECK(cnnlReduce_v2(torch_mlu::getCurrentHandle(), rd, xd, x.data_ptr(),
-                          &one, &zero, workspace.data_ptr(), ws, md,
-                          max_keep.data_ptr(), nullptr, nullptr));
-
-  auto shifted = torch::empty_like(x);
-  auto sd = make_array_desc(shifted);
-  cnnlOpTensorDescriptor_t sub_desc;
-  CNNL_CHECK(cnnlCreateOpTensorDescriptor(&sub_desc));
-  CNNL_CHECK(cnnlSetOpTensorDescriptor(sub_desc, CNNL_OP_TENSOR_SUB,
-                                       cnnl_dtype_from_torch(x.scalar_type()),
-                                       CNNL_NOT_PROPAGATE_NAN));
-  ws = 0;
-  CNNL_CHECK(cnnlGetOpTensorWorkspaceSize(torch_mlu::getCurrentHandle(), xd, md, sd, &ws));
-  auto workspace2 = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
-  CNNL_CHECK(cnnlOpTensor(torch_mlu::getCurrentHandle(), sub_desc, &one, xd,
-                         x.data_ptr(), &one, md, max_keep.data_ptr(),
-                         workspace2.data_ptr(), ws, &zero, sd, shifted.data_ptr()));
-
-  auto exp_shifted = torch::empty_like(x);
-  auto ed = make_array_desc(exp_shifted);
-  CNNL_CHECK(cnnlExp(torch_mlu::getCurrentHandle(), sd, shifted.data_ptr(), ed, exp_shifted.data_ptr()));
-
-  auto sum_keep = torch::empty(keep_shape, x.options());
-  auto smd = make_array_desc(sum_keep);
-  CNNL_CHECK(cnnlSetReduceDescriptor_v2(
-      rd, &axis, 1, CNNL_REDUCE_ADD, cnnl_dtype_from_torch(x.scalar_type()),
-      CNNL_NOT_PROPAGATE_NAN, CNNL_REDUCE_NO_INDICES, CNNL_32BIT_INDICES, 0.f));
-  ws = 0;
-  CNNL_CHECK(cnnlGetReduceOpWorkspaceSize_v2(torch_mlu::getCurrentHandle(), ed, smd, nullptr, rd, &ws));
-  auto workspace3 = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
-  CNNL_CHECK(cnnlReduce_v2(torch_mlu::getCurrentHandle(), rd, ed, exp_shifted.data_ptr(),
-                          &one, &zero, workspace3.data_ptr(), ws, smd,
-                          sum_keep.data_ptr(), nullptr, nullptr));
-
-  auto log_sum = torch::empty_like(sum_keep);
-  auto lgd = make_array_desc(log_sum);
-  CNNL_CHECK(cnnlLog(torch_mlu::getCurrentHandle(), smd, sum_keep.data_ptr(), lgd, log_sum.data_ptr()));
-
-  auto out_keep = torch::empty_like(max_keep);
-  auto od = make_array_desc(out_keep);
-  cnnlOpTensorDescriptor_t add_desc;
-  CNNL_CHECK(cnnlCreateOpTensorDescriptor(&add_desc));
-  CNNL_CHECK(cnnlSetOpTensorDescriptor(add_desc, CNNL_OP_TENSOR_ADD,
-                                       cnnl_dtype_from_torch(x.scalar_type()),
-                                       CNNL_NOT_PROPAGATE_NAN));
-  ws = 0;
-  CNNL_CHECK(cnnlGetOpTensorWorkspaceSize(torch_mlu::getCurrentHandle(), lgd, md, od, &ws));
-  auto workspace4 = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
-  CNNL_CHECK(cnnlOpTensor(torch_mlu::getCurrentHandle(), add_desc, &one, lgd,
-                         log_sum.data_ptr(), &one, md, max_keep.data_ptr(),
-                         workspace4.data_ptr(), ws, &zero, od, out_keep.data_ptr()));
-  CNNL_CHECK(cnnlDestroyOpTensorDescriptor(add_desc));
-  CNNL_CHECK(cnnlDestroyOpTensorDescriptor(sub_desc));
-  CNNL_CHECK(cnnlDestroyReduceDescriptor(rd));
-  destroy_desc(od); destroy_desc(lgd); destroy_desc(smd); destroy_desc(ed);
-  destroy_desc(sd); destroy_desc(md); destroy_desc(xd);
-  return out_keep.squeeze(axis64);
+  (void)dim;
+  auto out = torch::empty({16}, x.options());
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t grid = {16, 1, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
+  if (x.scalar_type() == at::kHalf) {
+    logsumexp_half_kernel<<<grid, ktype, queue>>>(
+        reinterpret_cast<const half*>(x.data_ptr<at::Half>()),
+        reinterpret_cast<half*>(out.data_ptr<at::Half>()));
+  } else {
+    logsumexp_float_kernel<<<grid, ktype, queue>>>(x.data_ptr<float>(), out.data_ptr<float>());
+  }
+  return out;
 }

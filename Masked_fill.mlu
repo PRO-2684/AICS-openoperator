@@ -1,73 +1,39 @@
-#pragma once
-
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
+#include <math.h>
 
-#include <vector>
-
-#define CNNL_CHECK(expr) \
-  do { \
-    cnnlStatus_t status__ = (expr); \
-    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)status__); \
-  } while (0)
-
-inline cnnlDataType_t cnnl_dtype_from_torch(c10::ScalarType t) {
-  switch (t) {
-    case at::kHalf: return CNNL_DTYPE_HALF;
-    case at::kFloat: return CNNL_DTYPE_FLOAT;
-    case at::kBool: return CNNL_DTYPE_BOOL;
-    default: TORCH_CHECK(false, "unsupported dtype");
-  }
+__mlu_entry__ void masked_fill_float_kernel(const float* x, const bool* m, float* out, int n, float v) {
+  int tid = taskId;
+  int task_num = taskDim;
+  int start = (n * tid) / task_num;
+  int end = (n * (tid + 1)) / task_num;
+  for (int i = start; i < end; ++i) out[i] = m[i] ? v : x[i];
 }
 
-inline cnnlTensorDescriptor_t make_array_desc(const torch::Tensor& x) {
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  std::vector<int> dims(x.dim());
-  for (int i = 0; i < x.dim(); ++i) dims[i] = (int)x.size(i);
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY,
-      cnnl_dtype_from_torch(x.scalar_type()), (int)x.dim(), dims.data()));
-  return d;
-}
-
-inline cnnlTensorDescriptor_t make_array_desc_shape(const std::vector<int64_t>& shape,
-                                                    c10::ScalarType type) {
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  std::vector<int> dims(shape.size());
-  for (size_t i = 0; i < shape.size(); ++i) dims[i] = (int)shape[i];
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY,
-      cnnl_dtype_from_torch(type), (int)shape.size(), dims.data()));
-  return d;
-}
-
-inline void destroy_desc(cnnlTensorDescriptor_t d) {
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(d));
+__mlu_entry__ void masked_fill_half_kernel(const half* x, const bool* m, half* out, int n, half v) {
+  int tid = taskId;
+  int task_num = taskDim;
+  int start = (n * tid) / task_num;
+  int end = (n * (tid + 1)) / task_num;
+  for (int i = start; i < end; ++i) out[i] = m[i] ? v : x[i];
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
   auto out = torch::empty_like(x);
-  auto xd = make_array_desc(x);
-  auto md = make_array_desc(mask);
-  auto od = make_array_desc(out);
-  auto vd = make_array_desc_shape({1}, x.scalar_type());
-  size_t ws = 0;
-  CNNL_CHECK(cnnlGetMaskedWorkspaceSize(torch_mlu::getCurrentHandle(),
-      CNNL_MASKED_FILL_HOST, xd, md, vd, od, &ws));
-  auto workspace = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
-  uint32_t number = 0;
+  int n = x.numel();
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {4, 8, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
   if (x.scalar_type() == at::kHalf) {
-    at::Half v = (at::Half)fill_value;
-    CNNL_CHECK(cnnlMasked_v5(torch_mlu::getCurrentHandle(), CNNL_MASKED_FILL_HOST,
-        xd, x.data_ptr(), md, mask.data_ptr(), vd, &v, workspace.data_ptr(), ws,
-        od, out.data_ptr(), &number));
+    masked_fill_half_kernel<<<dim, ktype, queue>>>(
+        reinterpret_cast<const half*>(x.data_ptr<at::Half>()), mask.data_ptr<bool>(),
+        reinterpret_cast<half*>(out.data_ptr<at::Half>()), n, (half)fill_value);
   } else {
-    float v = (float)fill_value;
-    CNNL_CHECK(cnnlMasked_v5(torch_mlu::getCurrentHandle(), CNNL_MASKED_FILL_HOST,
-        xd, x.data_ptr(), md, mask.data_ptr(), vd, &v, workspace.data_ptr(), ws,
-        od, out.data_ptr(), &number));
+    masked_fill_float_kernel<<<dim, ktype, queue>>>(
+        x.data_ptr<float>(), mask.data_ptr<bool>(), out.data_ptr<float>(), n,
+        (float)fill_value);
   }
-  destroy_desc(vd); destroy_desc(od); destroy_desc(md); destroy_desc(xd);
   return out;
 }

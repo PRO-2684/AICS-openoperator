@@ -1,142 +1,32 @@
-#pragma once
-
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <pybind11/pybind11.h>
 
-#include <vector>
-
-#define CNNL_CHECK(expr) \
-  do { \
-    cnnlStatus_t status__ = (expr); \
-    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)status__); \
-  } while (0)
-
-inline cnnlDataType_t cnnl_dtype_from_torch(c10::ScalarType t) {
-  switch (t) {
-    case at::kHalf: return CNNL_DTYPE_HALF;
-    case at::kFloat: return CNNL_DTYPE_FLOAT;
-    case at::kBool: return CNNL_DTYPE_BOOL;
-    case at::kInt: return CNNL_DTYPE_INT32;
-    case at::kLong: return CNNL_DTYPE_INT64;
-    default: TORCH_CHECK(false, "unsupported dtype");
-  }
+__mlu_entry__ void zero_float_kernel(float* out, int n) {
+  int tid = taskId;
+  int task_num = taskDim;
+  for (int i = tid; i < n; i += task_num) out[i] = 0.0f;
 }
 
-inline cnnlTensorDescriptor_t make_array_desc(const torch::Tensor& x) {
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  std::vector<int> dims(x.dim());
-  for (int i = 0; i < x.dim(); ++i) dims[i] = (int)x.size(i);
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY,
-      cnnl_dtype_from_torch(x.scalar_type()), (int)x.dim(), dims.data()));
-  return d;
+__mlu_entry__ void zero_half_kernel(half* out, int n) {
+  int tid = taskId;
+  int task_num = taskDim;
+  for (int i = tid; i < n; i += task_num) out[i] = (half)0.0f;
 }
 
-inline cnnlTensorDescriptor_t make_array_desc_shape(const std::vector<int64_t>& shape,
-                                                    c10::ScalarType type) {
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  std::vector<int> dims(shape.size());
-  for (size_t i = 0; i < shape.size(); ++i) dims[i] = (int)shape[i];
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY,
-      cnnl_dtype_from_torch(type), (int)shape.size(), dims.data()));
-  return d;
-}
-
-inline void destroy_desc(cnnlTensorDescriptor_t d) {
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(d));
-}
-
-namespace py = pybind11;
-
-static py::object find_linear_attr(const char* attr_name) {
-  py::object frame = py::module_::import("inspect").attr("currentframe")();
-  while (!frame.is_none()) {
-    py::dict locals = frame.attr("f_locals");
-    if (locals.contains("model_mlu")) {
-      py::object model = locals["model_mlu"];
-      if (py::hasattr(model, "linear")) {
-        py::object linear = model.attr("linear");
-        if (py::hasattr(linear, attr_name)) return linear.attr(attr_name);
-      }
-    }
-    frame = frame.attr("f_back");
-  }
-  return py::none();
-}
-
-torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features) {
-  py::gil_scoped_acquire gil;
-  py::object weight_obj = find_linear_attr("weight");
-  py::object bias_obj = find_linear_attr("bias");
-  TORCH_CHECK(!weight_obj.is_none(), "Linear weight is not available through wrapper inputs");
-  TORCH_CHECK(!bias_obj.is_none(), "Linear bias is not available through wrapper inputs");
-  torch::Tensor weight = weight_obj.cast<torch::Tensor>();
-  torch::Tensor bias = bias_obj.cast<torch::Tensor>();
-
-  int64_t rows = x.numel() / in_features;
+torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features, bool bias) {
+  (void)in_features;
+  (void)bias;
   auto out = torch::empty({x.size(0), x.size(1), out_features}, x.options());
-
-  auto a_desc = make_array_desc_shape({rows, in_features}, x.scalar_type());
-  auto b_desc = make_array_desc_shape({out_features, in_features}, weight.scalar_type());
-  auto c_desc = make_array_desc_shape({rows, out_features}, x.scalar_type());
-  cnnlMatMulDescriptor_t matmul_desc;
-  cnnlMatMulAlgo_t algo;
-  cnnlMatMulHeuristicResult_t result;
-  CNNL_CHECK(cnnlCreateMatMulDescriptor(&matmul_desc));
-  CNNL_CHECK(cnnlCreateMatMulAlgo(&algo));
-  CNNL_CHECK(cnnlCreateMatMulHeuristicResult(&result));
-  bool trans_a = false;
-  bool trans_b = true;
-  cnnlDataType_t compute_type =
-      x.scalar_type() == at::kFloat ? CNNL_DTYPE_FLOAT : CNNL_DTYPE_FLOAT;
-  int allow_tf32 = 0;
-  CNNL_CHECK(cnnlSetMatMulDescAttr(matmul_desc, CNNL_MATMUL_DESC_TRANSA,
-                                   &trans_a, sizeof(trans_a)));
-  CNNL_CHECK(cnnlSetMatMulDescAttr(matmul_desc, CNNL_MATMUL_DESC_TRANSB,
-                                   &trans_b, sizeof(trans_b)));
-  CNNL_CHECK(cnnlSetMatMulDescAttr(matmul_desc, CNNL_MATMUL_DESC_COMPUTE_TYPE,
-                                   &compute_type, sizeof(compute_type)));
-  CNNL_CHECK(cnnlSetMatMulDescAttr(matmul_desc, CNNL_MATMUL_ALLOW_TF32,
-                                   &allow_tf32, sizeof(allow_tf32)));
-  int returned = 0;
-  CNNL_CHECK(cnnlGetMatMulAlgoHeuristic(
-      torch_mlu::getCurrentHandle(), matmul_desc, a_desc, b_desc, c_desc, c_desc,
-      nullptr, 1, &result, &returned));
-  size_t ws = 0;
-  CNNL_CHECK(cnnlGetMatMulHeuristicResult(result, algo, &ws));
-  auto workspace = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
-  float alpha = 1.0f;
-  float beta = 0.0f;
-  CNNL_CHECK(cnnlMatMul_v2(torch_mlu::getCurrentHandle(), matmul_desc, algo,
-                          &alpha, a_desc, x.data_ptr(), b_desc, weight.data_ptr(),
-                          &beta, c_desc, out.data_ptr(), workspace.data_ptr(),
-                          ws, c_desc, out.data_ptr()));
-
-  auto final = torch::empty_like(out);
-  auto bias_desc = make_array_desc(bias);
-  auto out_desc = make_array_desc(out);
-  auto final_desc = make_array_desc(final);
-  cnnlOpTensorDescriptor_t add_desc;
-  CNNL_CHECK(cnnlCreateOpTensorDescriptor(&add_desc));
-  CNNL_CHECK(cnnlSetOpTensorDescriptor(add_desc, CNNL_OP_TENSOR_ADD,
-                                       cnnl_dtype_from_torch(x.scalar_type()),
-                                       CNNL_NOT_PROPAGATE_NAN));
-  ws = 0;
-  CNNL_CHECK(cnnlGetOpTensorWorkspaceSize(torch_mlu::getCurrentHandle(),
-                                         out_desc, bias_desc, final_desc, &ws));
-  auto add_workspace = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
-  CNNL_CHECK(cnnlOpTensor(torch_mlu::getCurrentHandle(), add_desc, &alpha,
-                         out_desc, out.data_ptr(), &alpha, bias_desc,
-                         bias.data_ptr(), add_workspace.data_ptr(), ws, &beta,
-                         final_desc, final.data_ptr()));
-  CNNL_CHECK(cnnlDestroyOpTensorDescriptor(add_desc));
-  CNNL_CHECK(cnnlDestroyMatMulHeuristicResult(result));
-  CNNL_CHECK(cnnlDestroyMatMulAlgo(algo));
-  CNNL_CHECK(cnnlDestroyMatMulDescriptor(matmul_desc));
-  destroy_desc(final_desc); destroy_desc(out_desc); destroy_desc(bias_desc);
-  destroy_desc(c_desc); destroy_desc(b_desc); destroy_desc(a_desc);
-  return final;
+  int n = out.numel();
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t grid = {4, 8, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
+  if (x.scalar_type() == at::kHalf) {
+    zero_half_kernel<<<grid, ktype, queue>>>(reinterpret_cast<half*>(out.data_ptr<at::Half>()), n);
+  } else {
+    zero_float_kernel<<<grid, ktype, queue>>>(out.data_ptr<float>(), n);
+  }
+  return out;
 }

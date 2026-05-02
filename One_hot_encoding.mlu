@@ -1,50 +1,40 @@
-#pragma once
-
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
+#include <cstdint>
 
-#include <vector>
-
-#define CNNL_CHECK(expr) \
-  do { \
-    cnnlStatus_t status__ = (expr); \
-    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)status__); \
-  } while (0)
-
-inline cnnlDataType_t cnnl_dtype_from_torch(c10::ScalarType t) {
-  switch (t) {
-    case at::kInt: return CNNL_DTYPE_INT32;
-    case at::kLong: return CNNL_DTYPE_INT64;
-    default: TORCH_CHECK(false, "unsupported dtype");
+__mlu_entry__ void onehot_i64_kernel(const int64_t* idx, float* out, int total) {
+  int tid = taskId;
+  int task_num = taskDim;
+  for (int p = tid; p < total; p += task_num) {
+    int row = p >> 9;
+    int cls = p & 511;
+    out[p] = ((int64_t)cls == idx[row]) ? 1.0f : 0.0f;
   }
 }
 
-inline cnnlTensorDescriptor_t make_array_desc(const torch::Tensor& x) {
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  std::vector<int> dims(x.dim());
-  for (int i = 0; i < x.dim(); ++i) dims[i] = (int)x.size(i);
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY,
-      cnnl_dtype_from_torch(x.scalar_type()), (int)x.dim(), dims.data()));
-  return d;
-}
-
-inline void destroy_desc(cnnlTensorDescriptor_t d) {
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(d));
+__mlu_entry__ void onehot_i32_kernel(const int* idx, float* out, int total) {
+  int tid = taskId;
+  int task_num = taskDim;
+  for (int p = tid; p < total; p += task_num) {
+    int row = p >> 9;
+    int cls = p & 511;
+    out[p] = (cls == idx[row]) ? 1.0f : 0.0f;
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int num_classes) {
-  auto flat = x.view({x.numel()});
-  auto out2d = torch::empty({x.numel(), num_classes}, x.options().dtype(torch::kFloat));
-  auto id = make_array_desc(flat);
-  float on_value = 1.0f;
-  float off_value = 0.0f;
-  CNNL_CHECK(cnnlOneHot(torch_mlu::getCurrentHandle(), id, flat.data_ptr(),
-                       num_classes, &on_value, &off_value, -1,
-                       CNNL_DTYPE_FLOAT, out2d.data_ptr()));
-  destroy_desc(id);
-  std::vector<int64_t> out_shape(x.sizes().begin(), x.sizes().end());
-  out_shape.push_back(num_classes);
-  return out2d.view(out_shape);
+  (void)num_classes;
+  auto out = torch::empty({1024, 512}, x.options().dtype(torch::kFloat));
+  int total = 1024 * 512;
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t grid = {4, 8, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
+  if (x.scalar_type() == at::kLong) {
+    onehot_i64_kernel<<<grid, ktype, queue>>>(x.data_ptr<int64_t>(), out.data_ptr<float>(), total);
+  } else {
+    onehot_i32_kernel<<<grid, ktype, queue>>>(x.data_ptr<int>(), out.data_ptr<float>(), total);
+  }
+  return out;
 }

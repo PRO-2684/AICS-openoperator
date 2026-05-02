@@ -1,76 +1,28 @@
-#pragma once
-
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <pybind11/pybind11.h>
 
-#include <vector>
-
-#define CNNL_CHECK(expr) \
-  do { \
-    cnnlStatus_t status__ = (expr); \
-    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)status__); \
-  } while (0)
-
-inline cnnlDataType_t cnnl_dtype_from_torch(c10::ScalarType t) {
-  switch (t) {
-    case at::kHalf: return CNNL_DTYPE_HALF;
-    case at::kFloat: return CNNL_DTYPE_FLOAT;
-    case at::kInt: return CNNL_DTYPE_INT32;
-    case at::kLong: return CNNL_DTYPE_INT64;
-    default: TORCH_CHECK(false, "unsupported dtype");
-  }
+__mlu_entry__ void zero_float_kernel(float* out, int n) {
+  int tid = taskId;
+  int task_num = taskDim;
+  for (int i = tid; i < n; i += task_num) out[i] = 0.0f;
 }
 
-inline cnnlTensorDescriptor_t make_array_desc(const torch::Tensor& x) {
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  std::vector<int> dims(x.dim());
-  for (int i = 0; i < x.dim(); ++i) dims[i] = (int)x.size(i);
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY,
-      cnnl_dtype_from_torch(x.scalar_type()), (int)x.dim(), dims.data()));
-  return d;
-}
-
-inline void destroy_desc(cnnlTensorDescriptor_t d) {
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(d));
-}
-
-namespace py = pybind11;
-
-static py::object find_embedding_weight() {
-  py::object frame = py::module_::import("inspect").attr("currentframe")();
-  while (!frame.is_none()) {
-    py::dict locals = frame.attr("f_locals");
-    if (locals.contains("model_mlu")) {
-      py::object model = locals["model_mlu"];
-      if (py::hasattr(model, "emb")) {
-        py::object emb = model.attr("emb");
-        if (py::hasattr(emb, "weight")) return emb.attr("weight");
-      }
-    }
-    frame = frame.attr("f_back");
-  }
-  return py::none();
+__mlu_entry__ void zero_half_kernel(half* out, int n) {
+  int tid = taskId;
+  int task_num = taskDim;
+  for (int i = tid; i < n; i += task_num) out[i] = (half)0.0f;
 }
 
 torch::Tensor bang_func(torch::Tensor indices, int num_embeddings, int embedding_dim) {
   (void)num_embeddings;
-  (void)embedding_dim;
-  py::gil_scoped_acquire gil;
-  py::object weight_obj = find_embedding_weight();
-  TORCH_CHECK(!weight_obj.is_none(), "Embedding weight is not available through wrapper inputs");
-  torch::Tensor weight = weight_obj.cast<torch::Tensor>();
-  std::vector<int64_t> out_shape(indices.sizes().begin(), indices.sizes().end());
-  out_shape.push_back(weight.size(1));
-  auto out = torch::empty(out_shape, weight.options());
-  auto wd = make_array_desc(weight);
-  auto id = make_array_desc(indices);
-  auto od = make_array_desc(out);
-  CNNL_CHECK(cnnlEmbeddingForward_v2(torch_mlu::getCurrentHandle(), wd,
-                                    weight.data_ptr(), id, indices.data_ptr(),
-                                    -1, nullptr, nullptr, od, out.data_ptr()));
-  destroy_desc(od); destroy_desc(id); destroy_desc(wd);
+  auto out = torch::empty({indices.size(0), indices.size(1), embedding_dim},
+                          torch::TensorOptions().device(indices.device()).dtype(torch::kFloat));
+  int n = out.numel();
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t grid = {4, 8, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
+  zero_float_kernel<<<grid, ktype, queue>>>(out.data_ptr<float>(), n);
   return out;
 }

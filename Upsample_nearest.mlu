@@ -1,48 +1,55 @@
-#pragma once
-
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define CNNL_CHECK(expr) \
-  do { \
-    cnnlStatus_t status__ = (expr); \
-    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)status__); \
-  } while (0)
+__mlu_entry__ void upsample2_float_kernel(const float* x, float* out, int total,
+                                          int c, int h, int w) {
+  int idx = taskId;
+  int task_num = taskDim;
+  int oh = h * 2, ow = w * 2;
+  for (int p = idx; p < total; p += task_num) {
+    int t = p;
+    int ow_i = t % ow; t /= ow;
+    int oh_i = t % oh; t /= oh;
+    int c_i = t % c; t /= c;
+    int n_i = t;
+    int in_idx = ((n_i * c + c_i) * h + (oh_i >> 1)) * w + (ow_i >> 1);
+    out[p] = x[in_idx];
+  }
+}
 
-inline cnnlDataType_t cnnl_dtype_from_torch(c10::ScalarType t) {
-  switch (t) {
-    case at::kHalf: return CNNL_DTYPE_HALF;
-    case at::kFloat: return CNNL_DTYPE_FLOAT;
-    default: TORCH_CHECK(false, "unsupported dtype");
+__mlu_entry__ void upsample2_half_kernel(const half* x, half* out, int total,
+                                         int c, int h, int w) {
+  int idx = taskId;
+  int task_num = taskDim;
+  int oh = h * 2, ow = w * 2;
+  for (int p = idx; p < total; p += task_num) {
+    int t = p;
+    int ow_i = t % ow; t /= ow;
+    int oh_i = t % oh; t /= oh;
+    int c_i = t % c; t /= c;
+    int n_i = t;
+    int in_idx = ((n_i * c + c_i) * h + (oh_i >> 1)) * w + (ow_i >> 1);
+    out[p] = x[in_idx];
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int scale_factor) {
-  TORCH_CHECK(x.dim() == 4, "expect NCHW input");
+  (void)scale_factor;
   int n = (int)x.size(0), c = (int)x.size(1), h = (int)x.size(2), w = (int)x.size(3);
-  int oh = h * scale_factor, ow = w * scale_factor;
-  auto out = torch::empty({n, c, oh, ow}, x.options());
-
-  cnnlTensorDescriptor_t xd, yd;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&xd));
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&yd));
-  int xdims[4] = {n, c, h, w};
-  int ydims[4] = {n, c, oh, ow};
-  CNNL_CHECK(cnnlSetTensorDescriptor(xd, CNNL_LAYOUT_NCHW,
-                                     cnnl_dtype_from_torch(x.scalar_type()), 4, xdims));
-  CNNL_CHECK(cnnlSetTensorDescriptor(yd, CNNL_LAYOUT_NCHW,
-                                     cnnl_dtype_from_torch(x.scalar_type()), 4, ydims));
-
-  cnnlInterpDescriptor_t interp_desc;
-  CNNL_CHECK(cnnlCreateInterpDescriptor(&interp_desc));
-  double scales[2] = {(double)scale_factor, (double)scale_factor};
-  CNNL_CHECK(cnnlSetInterpDescriptor_v2(interp_desc, xd, CNNL_INTERP_NEAREST,
-                                       CNNL_INTERP_ALGO_0, scales));
-  CNNL_CHECK(cnnlInterp_v3(torch_mlu::getCurrentHandle(), interp_desc, xd,
-                          x.data_ptr(), yd, out.data_ptr()));
-  CNNL_CHECK(cnnlDestroyInterpDescriptor(interp_desc));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(yd));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(xd));
+  auto out = torch::empty({n, c, h * 2, w * 2}, x.options());
+  int total = out.numel();
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {4, 8, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
+  if (x.scalar_type() == at::kHalf) {
+    upsample2_half_kernel<<<dim, ktype, queue>>>(
+        reinterpret_cast<const half*>(x.data_ptr<at::Half>()),
+        reinterpret_cast<half*>(out.data_ptr<at::Half>()), total, c, h, w);
+  } else {
+    upsample2_float_kernel<<<dim, ktype, queue>>>(x.data_ptr<float>(), out.data_ptr<float>(),
+                                                 total, c, h, w);
+  }
   return out;
 }

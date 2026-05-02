@@ -1,66 +1,53 @@
-#pragma once
-
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#include <climits>
-#include <vector>
+#define CHUNK 4096
 
-#define CNNL_CHECK(expr) \
-  do { \
-    cnnlStatus_t status__ = (expr); \
-    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)status__); \
-  } while (0)
-
-inline cnnlDataType_t cnnl_dtype_from_torch(c10::ScalarType t) {
-  switch (t) {
-    case at::kHalf: return CNNL_DTYPE_HALF;
-    case at::kFloat: return CNNL_DTYPE_FLOAT;
-    case at::kBool: return CNNL_DTYPE_BOOL;
-    case at::kInt: return CNNL_DTYPE_INT32;
-    case at::kLong: return CNNL_DTYPE_INT64;
-    default: TORCH_CHECK(false, "unsupported dtype");
+__mlu_entry__ void power2_half_kernel(const half* x, half* y, int n) {
+  int tid = taskId;
+  int task_num = taskDim;
+  int start = (n * tid) / task_num;
+  int end = (n * (tid + 1)) / task_num;
+  __nram__ half buf[CHUNK];
+  for (int off = start; off < end; off += CHUNK) {
+    int cur = end - off;
+    if (cur > CHUNK) cur = CHUNK;
+    __memcpy(buf, x + off, cur * sizeof(half), GDRAM2NRAM);
+    __bang_mul(buf, buf, buf, cur);
+    __memcpy(y + off, buf, cur * sizeof(half), NRAM2GDRAM);
   }
 }
 
-inline cnnlTensorDescriptor_t make_array_desc(const torch::Tensor& x) {
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  std::vector<int> dims(x.dim());
-  for (int i = 0; i < x.dim(); ++i) dims[i] = (int)x.size(i);
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY,
-      cnnl_dtype_from_torch(x.scalar_type()), (int)x.dim(), dims.data()));
-  return d;
-}
-
-inline void destroy_desc(cnnlTensorDescriptor_t d) {
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(d));
+__mlu_entry__ void power2_float_kernel(const float* x, float* y, int n) {
+  int tid = taskId;
+  int task_num = taskDim;
+  int start = (n * tid) / task_num;
+  int end = (n * (tid + 1)) / task_num;
+  __nram__ float buf[CHUNK];
+  for (int off = start; off < end; off += CHUNK) {
+    int cur = end - off;
+    if (cur > CHUNK) cur = CHUNK;
+    __memcpy(buf, x + off, cur * sizeof(float), GDRAM2NRAM);
+    __bang_mul(buf, buf, buf, cur);
+    __memcpy(y + off, buf, cur * sizeof(float), NRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, double exponent) {
-  auto absx = torch::empty_like(x);
-  auto xd = make_array_desc(x);
-  auto ad = make_array_desc(absx);
-  CNNL_CHECK(cnnlAbs(torch_mlu::getCurrentHandle(), xd, x.data_ptr(), ad, absx.data_ptr()));
-
-  auto exp_t = torch::empty({1}, x.options());
-  auto ed = make_array_desc(exp_t);
+  (void)exponent;
+  auto y = torch::empty_like(x);
+  int n = x.numel();
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {4, 8, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
   if (x.scalar_type() == at::kHalf) {
-    at::Half v = (at::Half)exponent;
-    CNNL_CHECK(cnnlFill_v4(torch_mlu::getCurrentHandle(), ed, &v, ed, exp_t.data_ptr()));
+    power2_half_kernel<<<dim, ktype, queue>>>(
+        reinterpret_cast<const half*>(x.data_ptr<at::Half>()),
+        reinterpret_cast<half*>(y.data_ptr<at::Half>()), n);
   } else {
-    float v = (float)exponent;
-    CNNL_CHECK(cnnlFill_v4(torch_mlu::getCurrentHandle(), ed, &v, ed, exp_t.data_ptr()));
+    power2_float_kernel<<<dim, ktype, queue>>>(x.data_ptr<float>(), y.data_ptr<float>(), n);
   }
-
-  auto out = torch::empty_like(x);
-  auto od = make_array_desc(out);
-  size_t ws = 0;
-  CNNL_CHECK(cnnlGetPowWorkspaceSize(torch_mlu::getCurrentHandle(), ad, ed, od, &ws));
-  auto workspace = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
-  CNNL_CHECK(cnnlPow_v2(torch_mlu::getCurrentHandle(), ad, absx.data_ptr(), ed,
-                        exp_t.data_ptr(), workspace.data_ptr(), ws, od, out.data_ptr()));
-  destroy_desc(od); destroy_desc(ed); destroy_desc(ad); destroy_desc(xd);
-  return out;
+  return y;
 }

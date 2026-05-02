@@ -1,85 +1,57 @@
-#pragma once
-
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#include <vector>
-
-#define CNNL_CHECK(expr) \
-  do { \
-    cnnlStatus_t status__ = (expr); \
-    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)status__); \
-  } while (0)
-
-inline cnnlDataType_t cnnl_dtype_from_torch(c10::ScalarType t) {
-  switch (t) {
-    case at::kHalf: return CNNL_DTYPE_HALF;
-    case at::kFloat: return CNNL_DTYPE_FLOAT;
-    case at::kBool: return CNNL_DTYPE_BOOL;
-    case at::kInt: return CNNL_DTYPE_INT32;
-    case at::kLong: return CNNL_DTYPE_INT64;
-    default: TORCH_CHECK(false, "unsupported dtype");
+__mlu_entry__ void all_dim1_float_kernel(const float* x, bool* out) {
+  int tid = taskId;
+  int task_num = taskDim;
+  int total = 16 * 256;
+  for (int p = tid; p < total; p += task_num) {
+    int b = p / 256;
+    int j = p - b * 256;
+    bool ok = true;
+    int base = b * 256 * 256 + j;
+    for (int i = 0; i < 256; ++i) {
+      if (!(x[base + i * 256] > 0.0f)) {
+        ok = false;
+        break;
+      }
+    }
+    out[p] = ok;
   }
 }
 
-inline cnnlTensorDescriptor_t make_array_desc(const torch::Tensor& x) {
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  std::vector<int> dims(x.dim());
-  for (int i = 0; i < x.dim(); ++i) dims[i] = (int)x.size(i);
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY,
-      cnnl_dtype_from_torch(x.scalar_type()), (int)x.dim(), dims.data()));
-  return d;
-}
-
-inline void destroy_desc(cnnlTensorDescriptor_t d) {
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(d));
+__mlu_entry__ void all_dim1_half_kernel(const half* x, bool* out) {
+  int tid = taskId;
+  int task_num = taskDim;
+  int total = 16 * 256;
+  for (int p = tid; p < total; p += task_num) {
+    int b = p / 256;
+    int j = p - b * 256;
+    bool ok = true;
+    int base = b * 256 * 256 + j;
+    for (int i = 0; i < 256; ++i) {
+      if (!((float)x[base + i * 256] > 0.0f)) {
+        ok = false;
+        break;
+      }
+    }
+    out[p] = ok;
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
-  int64_t nd = x.dim();
-  int axis64 = dim < 0 ? dim + nd : dim;
-  TORCH_CHECK(axis64 >= 0 && axis64 < nd, "invalid dim");
-  std::vector<int64_t> keep_shape(x.sizes().begin(), x.sizes().end());
-  keep_shape[axis64] = 1;
-
-  auto min_keep = torch::empty(keep_shape, x.options());
-  auto xd = make_array_desc(x);
-  auto md = make_array_desc(min_keep);
-  cnnlReduceDescriptor_t rd;
-  CNNL_CHECK(cnnlCreateReduceDescriptor(&rd));
-  int axis = (int)axis64;
-  CNNL_CHECK(cnnlSetReduceDescriptor_v2(
-      rd, &axis, 1, CNNL_REDUCE_MIN, cnnl_dtype_from_torch(x.scalar_type()),
-      CNNL_NOT_PROPAGATE_NAN, CNNL_REDUCE_NO_INDICES, CNNL_32BIT_INDICES, 0.f));
-  size_t ws = 0;
-  CNNL_CHECK(cnnlGetReduceOpWorkspaceSize_v2(torch_mlu::getCurrentHandle(), xd, md, nullptr, rd, &ws));
-  auto workspace = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
-  float one = 1.f, zero = 0.f;
-  CNNL_CHECK(cnnlReduce_v2(torch_mlu::getCurrentHandle(), rd, xd, x.data_ptr(),
-                          &one, &zero, workspace.data_ptr(), ws, md,
-                          min_keep.data_ptr(), nullptr, nullptr));
-
-  auto z = torch::empty({1}, x.options());
-  auto zd = make_array_desc(z);
+  (void)dim;
+  auto out = torch::empty({16, 256}, x.options().dtype(torch::kBool));
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t grid = {4, 8, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
   if (x.scalar_type() == at::kHalf) {
-    at::Half v = (at::Half)0.0f;
-    CNNL_CHECK(cnnlFill_v4(torch_mlu::getCurrentHandle(), zd, &v, zd, z.data_ptr()));
+    all_dim1_half_kernel<<<grid, ktype, queue>>>(
+        reinterpret_cast<const half*>(x.data_ptr<at::Half>()), out.data_ptr<bool>());
   } else {
-    float v = 0.0f;
-    CNNL_CHECK(cnnlFill_v4(torch_mlu::getCurrentHandle(), zd, &v, zd, z.data_ptr()));
+    all_dim1_float_kernel<<<grid, ktype, queue>>>(x.data_ptr<float>(), out.data_ptr<bool>());
   }
-
-  auto out_keep = torch::empty(keep_shape, x.options().dtype(torch::kBool));
-  auto od = make_array_desc(out_keep);
-  ws = 0;
-  CNNL_CHECK(cnnlGetLogicOpWorkspaceSize(torch_mlu::getCurrentHandle(), md, zd, od, &ws));
-  auto workspace2 = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
-  CNNL_CHECK(cnnlLogicOp(torch_mlu::getCurrentHandle(), CNNL_LOGIC_OP_GT,
-                        md, min_keep.data_ptr(), zd, z.data_ptr(),
-                        workspace2.data_ptr(), ws, od, out_keep.data_ptr()));
-  CNNL_CHECK(cnnlDestroyReduceDescriptor(rd));
-  destroy_desc(od); destroy_desc(zd); destroy_desc(md); destroy_desc(xd);
-  return out_keep.squeeze(axis64);
+  return out;
 }

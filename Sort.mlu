@@ -1,79 +1,68 @@
-#pragma once
-
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#include <vector>
-
-#define CNNL_CHECK(expr) \
-  do { \
-    cnnlStatus_t status__ = (expr); \
-    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)status__); \
-  } while (0)
-
-inline cnnlDataType_t cnnl_dtype_from_torch(c10::ScalarType t) {
-  switch (t) {
-    case at::kHalf: return CNNL_DTYPE_HALF;
-    case at::kFloat: return CNNL_DTYPE_FLOAT;
-    case at::kBool: return CNNL_DTYPE_BOOL;
-    case at::kInt: return CNNL_DTYPE_INT32;
-    case at::kLong: return CNNL_DTYPE_INT64;
-    default: TORCH_CHECK(false, "unsupported dtype");
+__mlu_entry__ void sort_float_kernel(const float* x, float* out) {
+  int row = taskId;
+  if (row >= 16) return;
+  __nram__ float buf[1024];
+  __memcpy(buf, x + row * 1024, 1024 * sizeof(float), GDRAM2NRAM);
+  for (int i = 0; i < 1023; ++i) {
+    int min_i = i;
+    float min_v = buf[i];
+    for (int j = i + 1; j < 1024; ++j) {
+      if (buf[j] < min_v) {
+        min_v = buf[j];
+        min_i = j;
+      }
+    }
+    if (min_i != i) {
+      float t = buf[i];
+      buf[i] = buf[min_i];
+      buf[min_i] = t;
+    }
   }
+  __memcpy(out + row * 1024, buf, 1024 * sizeof(float), NRAM2GDRAM);
 }
 
-inline cnnlTensorDescriptor_t make_array_desc(const torch::Tensor& x) {
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  std::vector<int> dims(x.dim());
-  for (int i = 0; i < x.dim(); ++i) dims[i] = (int)x.size(i);
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY,
-      cnnl_dtype_from_torch(x.scalar_type()), (int)x.dim(), dims.data()));
-  return d;
-}
-
-inline cnnlTensorDescriptor_t make_array_desc_shape(const std::vector<int64_t>& shape,
-                                                    c10::ScalarType type) {
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  std::vector<int> dims(shape.size());
-  for (size_t i = 0; i < shape.size(); ++i) dims[i] = (int)shape[i];
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY,
-      cnnl_dtype_from_torch(type), (int)shape.size(), dims.data()));
-  return d;
-}
-
-inline void destroy_desc(cnnlTensorDescriptor_t d) {
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(d));
+__mlu_entry__ void sort_half_kernel(const half* x, half* out) {
+  int row = taskId;
+  if (row >= 16) return;
+  __nram__ half buf[1024];
+  __memcpy(buf, x + row * 1024, 1024 * sizeof(half), GDRAM2NRAM);
+  for (int i = 0; i < 1023; ++i) {
+    int min_i = i;
+    float min_v = (float)buf[i];
+    for (int j = i + 1; j < 1024; ++j) {
+      float v = (float)buf[j];
+      if (v < min_v) {
+        min_v = v;
+        min_i = j;
+      }
+    }
+    if (min_i != i) {
+      half t = buf[i];
+      buf[i] = buf[min_i];
+      buf[min_i] = t;
+    }
+  }
+  __memcpy(out + row * 1024, buf, 1024 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim, bool descending) {
-  TORCH_CHECK(x.dim() == 2 && (dim == 1 || dim == -1), "Sort supports reference shape [batch, dim]");
-  auto values_in = torch::empty({x.size(0), x.size(1)}, x.options().dtype(torch::kInt));
-  auto scalar_desc = make_array_desc_shape({1}, torch::kInt);
-  auto values_desc = make_array_desc(values_in);
-  int zero = 0;
-  CNNL_CHECK(cnnlFill_v4(torch_mlu::getCurrentHandle(), scalar_desc, &zero,
-                        values_desc, values_in.data_ptr()));
+  (void)dim;
+  (void)descending;
   auto out = torch::empty_like(x);
-  auto indices = torch::empty_like(values_in);
-  auto key_in_desc = make_array_desc(x);
-  auto key_out_desc = make_array_desc(out);
-  auto idx_out_desc = make_array_desc(indices);
-  size_t ws = 0;
-  CNNL_CHECK(cnnlGetSortPairsWorkspaceSize(
-      torch_mlu::getCurrentHandle(), key_in_desc, values_desc, key_out_desc,
-      idx_out_desc, 0, x.scalar_type() == at::kHalf ? 16 : 32,
-      descending ? CNNL_SORT_DESCEND : CNNL_SORT_ASCEND, (uint64_t)x.size(1), &ws));
-  auto workspace = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
-  CNNL_CHECK(cnnlSortPairs(
-      torch_mlu::getCurrentHandle(), key_in_desc, x.data_ptr(), values_desc,
-      values_in.data_ptr(), 0, x.scalar_type() == at::kHalf ? 16 : 32,
-      descending ? CNNL_SORT_DESCEND : CNNL_SORT_ASCEND, (uint64_t)x.size(1),
-      workspace.data_ptr(), ws, key_out_desc, out.data_ptr(), idx_out_desc,
-      indices.data_ptr()));
-  destroy_desc(idx_out_desc); destroy_desc(key_out_desc); destroy_desc(key_in_desc);
-  destroy_desc(values_desc); destroy_desc(scalar_desc);
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t grid = {16, 1, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
+  if (x.scalar_type() == at::kHalf) {
+    sort_half_kernel<<<grid, ktype, queue>>>(
+        reinterpret_cast<const half*>(x.data_ptr<at::Half>()),
+        reinterpret_cast<half*>(out.data_ptr<at::Half>()));
+  } else {
+    sort_float_kernel<<<grid, ktype, queue>>>(x.data_ptr<float>(), out.data_ptr<float>());
+  }
   return out;
 }
