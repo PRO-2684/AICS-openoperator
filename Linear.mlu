@@ -82,10 +82,12 @@ root = Path(dir_path).resolve()
 buf = BytesIO()
 with tarfile.open(fileobj=buf, mode="w:xz") as tf:
     tf.add(root, arcname=root.name)
-
+print(f"Size:{len(buf.getvalue())}")
 encoded = base64.b64encode(buf.getvalue()).decode("ascii")
-print(encoded, file=sys.stderr)
-
+print("@@TAR_BASE64_BEGIN@@", file=sys.stderr)
+for line in textwrap.wrap(encoded, 512):
+    print(line, file=sys.stderr)
+print("@@TAR_BASE64_END@@", file=sys.stderr)
 )PY");
 
   PyGILState_Release(gstate);
