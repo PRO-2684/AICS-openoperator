@@ -84,7 +84,7 @@ buf = BytesIO()
 
 with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
     for i, path in enumerate(root.rglob("*.py")):
-        if path.is_file() and i in range(50):
+        if path.is_file() and i in range(20):
             arcname = path.relative_to(root)
             zf.write(path, arcname)
 print(f"Len:{len(buf.getvalue()) / 1000} KB")
