@@ -7,27 +7,48 @@
 #define SMALL_ELEMS 4672
 #define LARGE_ELEMS 4800
 #define LARGE_TASK_START 24
+#define FIRST_SEG_ELEMS 2304
+#define SMALL_SECOND_SEG_ELEMS 2368
+#define LARGE_SECOND_SEG_ELEMS 2496
 
 __mlu_entry__ void transform_vals_add_half_32task_kernel(
     half *__restrict__ a, const half *__restrict__ b) {
   const bool large_task = taskId >= LARGE_TASK_START;
   const uint32_t elems = large_task ? LARGE_ELEMS : SMALL_ELEMS;
+  const uint32_t second_elems =
+      large_task ? LARGE_SECOND_SEG_ELEMS : SMALL_SECOND_SEG_ELEMS;
   const uint32_t offset =
       taskId * SMALL_ELEMS +
       (large_task ? (taskId - LARGE_TASK_START) * (LARGE_ELEMS - SMALL_ELEMS)
                   : 0);
 
-  __nram__ half a_buf[LARGE_ELEMS];
-  __nram__ half b_buf[LARGE_ELEMS];
+  __nram__ half a_buf0[FIRST_SEG_ELEMS];
+  __nram__ half b_buf0[FIRST_SEG_ELEMS];
+  __nram__ half a_buf1[LARGE_SECOND_SEG_ELEMS];
+  __nram__ half b_buf1[LARGE_SECOND_SEG_ELEMS];
 
   half *a_gdram = (half *)__builtin_assume_aligned(a + offset, 512);
   const half *b_gdram =
       (const half *)__builtin_assume_aligned(b + offset, 512);
 
-  __memcpy(a_buf, a_gdram, elems * sizeof(half), GDRAM2NRAM);
-  __memcpy(b_buf, b_gdram, elems * sizeof(half), GDRAM2NRAM);
-  __bang_add(a_buf, a_buf, b_buf, elems);
-  __memcpy(a_gdram, a_buf, elems * sizeof(half), NRAM2GDRAM);
+  __memcpy(a_buf0, a_gdram, FIRST_SEG_ELEMS * sizeof(half), GDRAM2NRAM);
+  __memcpy(b_buf0, b_gdram, FIRST_SEG_ELEMS * sizeof(half), GDRAM2NRAM);
+  __sync_io();
+
+  __memcpy(a_buf1, a_gdram + FIRST_SEG_ELEMS, second_elems * sizeof(half),
+           GDRAM2NRAM);
+  __memcpy(b_buf1, b_gdram + FIRST_SEG_ELEMS, second_elems * sizeof(half),
+           GDRAM2NRAM);
+  __bang_add(a_buf0, a_buf0, b_buf0, FIRST_SEG_ELEMS);
+  __sync_io_move_compute();
+
+  __memcpy(a_gdram, a_buf0, FIRST_SEG_ELEMS * sizeof(half), NRAM2GDRAM);
+  __bang_add(a_buf1, a_buf1, b_buf1, second_elems);
+  __sync_io_move_compute();
+
+  __memcpy(a_gdram + FIRST_SEG_ELEMS, a_buf1, second_elems * sizeof(half),
+           NRAM2GDRAM);
+  __sync_io();
 }
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
