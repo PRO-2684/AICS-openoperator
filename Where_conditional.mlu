@@ -1,14 +1,97 @@
-#include <bang.h>
-#include <cnrt.h>
+#pragma once
+
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-// Task: 118 118_Where_conditional
-// Category: other
-// Difficulty: easy
-// DType: float16
-// Description: 实现一个 BangC 算子，根据布尔条件张量逐元素从两个输入张量中选择数值。输入包括形状均为 `[M, N]` 的条件张量 `condition` 以及数据张量 `x` 和 `y`；输出结果张量的形状与输入一致。
-// Wrapper: torch::Tensor bang_func(torch::Tensor condition, torch::Tensor x, torch::Tensor y);
+#include <climits>
+#include <vector>
+
+#define CNNL_CHECK(expr) \
+  do { \
+    cnnlStatus_t status__ = (expr); \
+    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)status__); \
+  } while (0)
+
+inline cnnlDataType_t cnnl_dtype_from_torch(c10::ScalarType t) {
+  switch (t) {
+    case at::kHalf: return CNNL_DTYPE_HALF;
+    case at::kFloat: return CNNL_DTYPE_FLOAT;
+    case at::kBool: return CNNL_DTYPE_BOOL;
+    case at::kInt: return CNNL_DTYPE_INT32;
+    case at::kLong: return CNNL_DTYPE_INT64;
+    default: TORCH_CHECK(false, "unsupported dtype");
+  }
+}
+
+inline cnnlTensorDescriptor_t make_array_desc(const torch::Tensor& x) {
+  cnnlTensorDescriptor_t d;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+  std::vector<int> dims(x.dim());
+  for (int i = 0; i < x.dim(); ++i) {
+    TORCH_CHECK(x.size(i) <= INT_MAX, "dim too large");
+    dims[i] = (int)x.size(i);
+  }
+  CNNL_CHECK(cnnlSetTensorDescriptor(
+      d, CNNL_LAYOUT_ARRAY, cnnl_dtype_from_torch(x.scalar_type()), (int)x.dim(), dims.data()));
+  return d;
+}
+
+inline cnnlTensorDescriptor_t make_array_desc_shape(const std::vector<int64_t>& shape, c10::ScalarType t) {
+  cnnlTensorDescriptor_t d;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+  std::vector<int> dims(shape.size());
+  for (size_t i = 0; i < shape.size(); ++i) {
+    TORCH_CHECK(shape[i] <= INT_MAX, "dim too large");
+    dims[i] = (int)shape[i];
+  }
+  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, cnnl_dtype_from_torch(t), (int)shape.size(), dims.data()));
+  return d;
+}
+
+inline void destroy_desc(cnnlTensorDescriptor_t d) { CNNL_CHECK(cnnlDestroyTensorDescriptor(d)); }
+
+inline cnnlActivationDescriptor_t make_activation_desc(cnnlActivationMode_t mode, float coef = 0.0f, bool approximate = false) {
+  cnnlActivationDescriptor_t ad;
+  CNNL_CHECK(cnnlCreateActivationDescriptor(&ad));
+  cnnlActivationMode_t m = mode;
+  cnnlActivationPreference_t pref = CNNL_ACTIVATION_HIGH_PRECISION;
+  cnnlNanPropagation_t nan = CNNL_NOT_PROPAGATE_NAN;
+  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_MODE, &m, sizeof(m)));
+  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_PREFERENCE, &pref, sizeof(pref)));
+  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_NAN_PROP, &nan, sizeof(nan)));
+  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_COEF, &coef, sizeof(coef)));
+  if (mode == CNNL_ACTIVATION_GELU) {
+    CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_APPROXIMATE, &approximate, sizeof(approximate)));
+  }
+  return ad;
+}
+
+inline void activation_forward(const torch::Tensor& x, torch::Tensor& y, cnnlActivationMode_t mode, float coef = 0.0f, bool approximate = false) {
+  auto xd = make_array_desc(x);
+  auto yd = make_array_desc(y);
+  auto ad = make_activation_desc(mode, coef, approximate);
+  float alpha = 1.0f, beta = 0.0f;
+  CNNL_CHECK(cnnlActivationForward(torch_mlu::getCurrentHandle(), ad, &alpha, xd, x.data_ptr(), &beta, yd, y.data_ptr()));
+  CNNL_CHECK(cnnlDestroyActivationDescriptor(ad));
+  destroy_desc(yd);
+  destroy_desc(xd);
+}
+
 
 torch::Tensor bang_func(torch::Tensor condition, torch::Tensor x, torch::Tensor y) {
-  TORCH_CHECK(false, "TODO: implement Where_conditional");
+  auto c = condition.contiguous().to(torch::kBool);
+  auto a = x.contiguous();
+  auto b = y.contiguous();
+  auto out = torch::empty_like(a);
+  auto cd = make_array_desc(c);
+  auto ad = make_array_desc(a);
+  auto bd = make_array_desc(b);
+  auto od = make_array_desc(out);
+  size_t ws = 0;
+  CNNL_CHECK(cnnlGetSelectV2WorkspaceSize(torch_mlu::getCurrentHandle(), cd, ad, bd, od, &ws));
+  auto w = torch::empty({(int64_t)ws}, a.options().dtype(torch::kUInt8));
+  CNNL_CHECK(cnnlSelectV2(torch_mlu::getCurrentHandle(), cd, c.data_ptr(), ad, a.data_ptr(), bd, b.data_ptr(), w.data_ptr(), ws, od, out.data_ptr()));
+  destroy_desc(od); destroy_desc(bd); destroy_desc(ad); destroy_desc(cd);
+  return out;
 }

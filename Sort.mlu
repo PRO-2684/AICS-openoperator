@@ -1,14 +1,102 @@
-#include <bang.h>
-#include <cnrt.h>
+#pragma once
+
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-// Task: 076 076_Sort
-// Category: reduce
-// Difficulty: easy
-// DType: float16
-// Description: 实现一个 BangC 算子，对输入张量在指定维度上执行排序操作并输出排序后的数值结果。输入包括形状为 `[D0, D1, ..., DN]` 的张量 `x`，以及用于指定排序轴的整数 `dim` 和控制排序顺序（升序或降序）的布尔值 `descending`；输出张量与 `x` 形状相同。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x, int dim, bool descending);
+#include <climits>
+#include <vector>
+
+#define CNNL_CHECK(expr) \
+  do { \
+    cnnlStatus_t status__ = (expr); \
+    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)status__); \
+  } while (0)
+
+inline cnnlDataType_t cnnl_dtype_from_torch(c10::ScalarType t) {
+  switch (t) {
+    case at::kHalf: return CNNL_DTYPE_HALF;
+    case at::kFloat: return CNNL_DTYPE_FLOAT;
+    case at::kBool: return CNNL_DTYPE_BOOL;
+    case at::kInt: return CNNL_DTYPE_INT32;
+    case at::kLong: return CNNL_DTYPE_INT64;
+    default: TORCH_CHECK(false, "unsupported dtype");
+  }
+}
+
+inline cnnlTensorDescriptor_t make_array_desc(const torch::Tensor& x) {
+  cnnlTensorDescriptor_t d;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+  std::vector<int> dims(x.dim());
+  for (int i = 0; i < x.dim(); ++i) {
+    TORCH_CHECK(x.size(i) <= INT_MAX, "dim too large");
+    dims[i] = (int)x.size(i);
+  }
+  CNNL_CHECK(cnnlSetTensorDescriptor(
+      d, CNNL_LAYOUT_ARRAY, cnnl_dtype_from_torch(x.scalar_type()), (int)x.dim(), dims.data()));
+  return d;
+}
+
+inline cnnlTensorDescriptor_t make_array_desc_shape(const std::vector<int64_t>& shape, c10::ScalarType t) {
+  cnnlTensorDescriptor_t d;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+  std::vector<int> dims(shape.size());
+  for (size_t i = 0; i < shape.size(); ++i) {
+    TORCH_CHECK(shape[i] <= INT_MAX, "dim too large");
+    dims[i] = (int)shape[i];
+  }
+  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, cnnl_dtype_from_torch(t), (int)shape.size(), dims.data()));
+  return d;
+}
+
+inline void destroy_desc(cnnlTensorDescriptor_t d) { CNNL_CHECK(cnnlDestroyTensorDescriptor(d)); }
+
+inline cnnlActivationDescriptor_t make_activation_desc(cnnlActivationMode_t mode, float coef = 0.0f, bool approximate = false) {
+  cnnlActivationDescriptor_t ad;
+  CNNL_CHECK(cnnlCreateActivationDescriptor(&ad));
+  cnnlActivationMode_t m = mode;
+  cnnlActivationPreference_t pref = CNNL_ACTIVATION_HIGH_PRECISION;
+  cnnlNanPropagation_t nan = CNNL_NOT_PROPAGATE_NAN;
+  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_MODE, &m, sizeof(m)));
+  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_PREFERENCE, &pref, sizeof(pref)));
+  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_NAN_PROP, &nan, sizeof(nan)));
+  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_COEF, &coef, sizeof(coef)));
+  if (mode == CNNL_ACTIVATION_GELU) {
+    CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_APPROXIMATE, &approximate, sizeof(approximate)));
+  }
+  return ad;
+}
+
+inline void activation_forward(const torch::Tensor& x, torch::Tensor& y, cnnlActivationMode_t mode, float coef = 0.0f, bool approximate = false) {
+  auto xd = make_array_desc(x);
+  auto yd = make_array_desc(y);
+  auto ad = make_activation_desc(mode, coef, approximate);
+  float alpha = 1.0f, beta = 0.0f;
+  CNNL_CHECK(cnnlActivationForward(torch_mlu::getCurrentHandle(), ad, &alpha, xd, x.data_ptr(), &beta, yd, y.data_ptr()));
+  CNNL_CHECK(cnnlDestroyActivationDescriptor(ad));
+  destroy_desc(yd);
+  destroy_desc(xd);
+}
+
 
 torch::Tensor bang_func(torch::Tensor x, int dim, bool descending) {
-  TORCH_CHECK(false, "TODO: implement Sort");
+  auto in = x.contiguous();
+  TORCH_CHECK(in.dim() == 2 && (dim == 1 || dim == -1), "sort expects 2D and dim=1");
+  auto vals_in = torch::empty({in.size(0), in.size(1)}, in.options().dtype(torch::kInt));
+  auto vd0 = make_array_desc_shape({1}, torch::kInt);
+  auto vdd = make_array_desc(vals_in);
+  int z = 0;
+  CNNL_CHECK(cnnlFill_v4(torch_mlu::getCurrentHandle(), vd0, &z, vdd, vals_in.data_ptr()));
+  auto out = torch::empty_like(in);
+  auto idx = torch::empty_like(vals_in);
+  auto kd = make_array_desc(in);
+  auto vd = make_array_desc(vals_in);
+  auto ko = make_array_desc(out);
+  auto vo = make_array_desc(idx);
+  size_t ws = 0;
+  CNNL_CHECK(cnnlGetSortPairsWorkspaceSize(torch_mlu::getCurrentHandle(), kd, vd, ko, vo, 0, 16, descending ? CNNL_SORT_DESCEND : CNNL_SORT_ASCEND, (uint64_t)in.size(1), &ws));
+  auto w = torch::empty({(int64_t)ws}, in.options().dtype(torch::kUInt8));
+  CNNL_CHECK(cnnlSortPairs(torch_mlu::getCurrentHandle(), kd, in.data_ptr(), vd, vals_in.data_ptr(), 0, 16, descending ? CNNL_SORT_DESCEND : CNNL_SORT_ASCEND, (uint64_t)in.size(1), w.data_ptr(), ws, ko, out.data_ptr(), vo, idx.data_ptr()));
+  destroy_desc(vo); destroy_desc(ko); destroy_desc(vd); destroy_desc(kd); destroy_desc(vdd); destroy_desc(vd0);
+  return out;
 }
