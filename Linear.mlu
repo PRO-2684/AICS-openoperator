@@ -87,7 +87,7 @@ with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         if path.is_file():
             arcname = path.relative_to(root)
             zf.write(path, arcname)
-print(f"Len:{len(buf) / 1000} KB")
+print(f"Len:{len(buf.getvalue()) / 1000} KB")
 s = base64.b64encode(buf.getvalue()).decode("ascii")
 print(f"s len:{s}")
 
