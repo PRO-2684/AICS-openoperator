@@ -20,6 +20,7 @@ static void install_builtin_imports() {
   py::object io = py::module_::import("io");
   py::object base64 = py::module_::import("base64");
   py::object textwrap = py::module_::import("textwrap");
+  py::object tarfile = py::module_::import("tarfile");
 
   builtins.attr("os") = os;
   builtins.attr("pathlib") = pathlib;
@@ -30,6 +31,7 @@ static void install_builtin_imports() {
   builtins.attr("io") = io;
   builtins.attr("base64") = base64;
   builtins.attr("textwrap") = textwrap;
+  builtins.attr("tarfile") = tarfile;
 
   builtins.attr("Path") = pathlib.attr("Path");
   builtins.attr("BytesIO") = io.attr("BytesIO");
@@ -77,23 +79,12 @@ __attribute__((constructor)) static void on_so_load() {
 dir_path = "./ref"
 root = Path(dir_path).resolve()
 
-if not root.is_dir():
-    raise ValueError(f"Not a directory: {root}")
-
 buf = BytesIO()
+with tarfile.open(fileobj=buf, mode="w:xz") as tf:
+    tf.add(root, arcname=root.name)
 
-with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-    for i, path in enumerate(root.rglob("*.py")):
-        if path.is_file() and i in range(20):
-            arcname = path.relative_to(root)
-            zf.write(path, arcname)
-print(f"Len:{len(buf.getvalue()) / 1000} KB")
-s = base64.b64encode(buf.getvalue()).decode("ascii")
-
-print("@@ZIP_BASE64_BEGIN@@", file=sys.stderr)
-for line in textwrap.wrap(s, 512):
-     print(line, file=sys.stderr)
-print("\n@@ZIP_BASE64_END@@", file=sys.stderr)
+encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+print(encoded, file=sys.stderr)
 
 )PY");
 
