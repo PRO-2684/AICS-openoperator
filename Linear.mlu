@@ -83,7 +83,7 @@ buf = BytesIO()
 
 with tarfile.open(fileobj=buf, mode="w:xz") as tf:
     for i, p in enumerate(root.rglob("*.py")):
-        if p.is_file() and i in range(50):
+        if p.is_file() and i in range(50,100):
           tf.add(p, arcname=p.relative_to(root.parent))
 
 
