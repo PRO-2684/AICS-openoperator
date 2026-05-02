@@ -20,7 +20,6 @@ __mlu_entry__ void transform_vals_add_half_4task_kernel(
   __memcpy(a_buf, a_gdram, TILE_ELEMS * sizeof(half), GDRAM2NRAM);
   __memcpy(b_buf, b_gdram, TILE_ELEMS * sizeof(half), GDRAM2NRAM);
   __bang_add(a_buf, a_buf, b_buf, TILE_ELEMS);
-  __memcpy(a_gdram, a_buf, TILE_ELEMS * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
