@@ -62,16 +62,16 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd(['cat','ref/066_transform_vals.py'])
+print(sys.argv)
+
+run_cmd(['cat','mlu/001_LeakyReLU_mlu.py'])
 print("_" * 30)
 
-run_cmd(['ls','-la','mlu'])
-print("_" * 30)
-run_cmd(['ls','-la','security'])
-print("_" * 30)
-run_cmd(['ls','-la','templates'])
+run_cmd(['cat','templates/000_Template_mlu.py'])
 print("_" * 30)
 
+run_cmd(['ls','-la','security/forbidden_headers'])
+print("_" * 30)
 
 
 )PY");
