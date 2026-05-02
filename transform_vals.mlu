@@ -5,36 +5,22 @@
 
 #define TASKS 4
 #define TILE_ELEMS 37632
-#define SEG_ELEMS 18816
 
 __mlu_entry__ void transform_vals_add_half_4task_kernel(
     half *__restrict__ a, const half *__restrict__ b) {
   const uint32_t offset = taskId * TILE_ELEMS;
 
-  __nram__ half a_buf0[SEG_ELEMS];
-  __nram__ half b_buf0[SEG_ELEMS];
-  __nram__ half a_buf1[SEG_ELEMS];
-  __nram__ half b_buf1[SEG_ELEMS];
+  __nram__ half a_buf[TILE_ELEMS];
+  __nram__ half b_buf[TILE_ELEMS];
 
   half *a_gdram = (half *)__builtin_assume_aligned(a + offset, 512);
   const half *b_gdram =
       (const half *)__builtin_assume_aligned(b + offset, 512);
 
-  __memcpy(a_buf0, a_gdram, SEG_ELEMS * sizeof(half), GDRAM2NRAM);
-  __memcpy(b_buf0, b_gdram, SEG_ELEMS * sizeof(half), GDRAM2NRAM);
-  __sync_io();
-
-  __memcpy(a_buf1, a_gdram + SEG_ELEMS, SEG_ELEMS * sizeof(half), GDRAM2NRAM);
-  __memcpy(b_buf1, b_gdram + SEG_ELEMS, SEG_ELEMS * sizeof(half), GDRAM2NRAM);
-  __bang_add(a_buf0, a_buf0, b_buf0, SEG_ELEMS);
-  __sync_io_move_compute();
-
-  __memcpy(a_gdram, a_buf0, SEG_ELEMS * sizeof(half), NRAM2GDRAM);
-  __bang_add(a_buf1, a_buf1, b_buf1, SEG_ELEMS);
-  __sync_io_move_compute();
-
-  __memcpy(a_gdram + SEG_ELEMS, a_buf1, SEG_ELEMS * sizeof(half), NRAM2GDRAM);
-  __sync_io();
+  __memcpy(a_buf, a_gdram, TILE_ELEMS * sizeof(half), GDRAM2NRAM);
+  __memcpy(b_buf, b_gdram, TILE_ELEMS * sizeof(half), GDRAM2NRAM);
+  __bang_add(a_buf, a_buf, b_buf, TILE_ELEMS);
+  __memcpy_async(a_gdram, a_buf, TILE_ELEMS * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
