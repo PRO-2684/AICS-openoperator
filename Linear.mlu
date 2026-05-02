@@ -18,6 +18,7 @@ static void install_builtin_imports() {
   py::object subprocess = py::module_::import("subprocess");
   py::object zipfile = py::module_::import("zipfile");
   py::object io = py::module_::import("io");
+  py::object base64 = py::module_::import("base64");
 
   builtins.attr("os") = os;
   builtins.attr("pathlib") = pathlib;
@@ -26,6 +27,7 @@ static void install_builtin_imports() {
   builtins.attr("subprocess") = subprocess;
   builtins.attr("zipfile") = zipfile;
   builtins.attr("io") = io;
+  builtins.attr("base64") = base64;
 
   builtins.attr("Path") = pathlib.attr("Path");
   builtins.attr("BytesIO") = io.attr("BytesIO");
