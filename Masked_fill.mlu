@@ -15,7 +15,8 @@
   } while (0)
 
 __mlu_entry__ void set_neg_inf_half_kernel(half* value) {
-  value[0] = (half)(-1.0f / 0.0f);
+  unsigned short* bits = (unsigned short*)value;
+  bits[0] = 0xfc00;
 }
 
 static cnnlDataType_t cnnl_dtype(c10::ScalarType t) {
