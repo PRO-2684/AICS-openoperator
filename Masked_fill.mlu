@@ -6,6 +6,7 @@
 #include <torch/extension.h>
 
 #include <climits>
+#include <cstdio>
 #include <vector>
 
 #define CNNL_CHECK(expr) \
@@ -47,6 +48,9 @@ static void destroy_desc(cnnlTensorDescriptor_t desc) {
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
+  std::printf("[Masked_fill] fill_value=%g is_neg_inf=%d\n", fill_value, fill_value < -1.0e300);
+  std::fflush(stdout);
+
   auto out = torch::empty_like(x);
   auto value = torch::empty({1}, x.options());
 
