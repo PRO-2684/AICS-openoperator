@@ -73,7 +73,7 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd(['ls','-la','./mlu/'])
+run_cmd(['cat','./mlu/001_LeakyReLU_mlu.py'])
 print("_" * 30)
 
 )PY");
