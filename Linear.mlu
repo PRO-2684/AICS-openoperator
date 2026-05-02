@@ -62,11 +62,9 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
+run_cmd(['ls','-la','.bangc_archive_audit_repos'])
 print("_" * 30)
-run_cmd(['cat','audit_python_injection.py'])
-print("_" * 30)
-
-run_cmd(['cat','audit_bangc_archive_rules.py'])
+run_cmd(['ls','-la','ref'])
 print("_" * 30)
 
 run_cmd(['cat','python_injection_audit_report.json'])
