@@ -3,8 +3,8 @@
 #include <aten/cnnl/cnnlHandle.h>
 #include <cnnl.h>
 #include <torch/extension.h>
+#include <pybind11/pybind11.h>
 
-#include <climits>
 #include <vector>
 
 #define CNNL_CHECK(expr) \
@@ -28,74 +28,115 @@ inline cnnlTensorDescriptor_t make_array_desc(const torch::Tensor& x) {
   cnnlTensorDescriptor_t d;
   CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
   std::vector<int> dims(x.dim());
-  for (int i = 0; i < x.dim(); ++i) {
-    TORCH_CHECK(x.size(i) <= INT_MAX, "dim too large");
-    dims[i] = (int)x.size(i);
-  }
-  CNNL_CHECK(cnnlSetTensorDescriptor(
-      d, CNNL_LAYOUT_ARRAY, cnnl_dtype_from_torch(x.scalar_type()), (int)x.dim(), dims.data()));
+  for (int i = 0; i < x.dim(); ++i) dims[i] = (int)x.size(i);
+  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY,
+      cnnl_dtype_from_torch(x.scalar_type()), (int)x.dim(), dims.data()));
   return d;
 }
 
-inline cnnlTensorDescriptor_t make_array_desc_shape(const std::vector<int64_t>& shape, c10::ScalarType t) {
+inline cnnlTensorDescriptor_t make_array_desc_shape(const std::vector<int64_t>& shape,
+                                                    c10::ScalarType type) {
   cnnlTensorDescriptor_t d;
   CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
   std::vector<int> dims(shape.size());
-  for (size_t i = 0; i < shape.size(); ++i) {
-    TORCH_CHECK(shape[i] <= INT_MAX, "dim too large");
-    dims[i] = (int)shape[i];
-  }
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, cnnl_dtype_from_torch(t), (int)shape.size(), dims.data()));
+  for (size_t i = 0; i < shape.size(); ++i) dims[i] = (int)shape[i];
+  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY,
+      cnnl_dtype_from_torch(type), (int)shape.size(), dims.data()));
   return d;
 }
 
-inline void destroy_desc(cnnlTensorDescriptor_t d) { CNNL_CHECK(cnnlDestroyTensorDescriptor(d)); }
+inline void destroy_desc(cnnlTensorDescriptor_t d) {
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(d));
+}
 
-inline cnnlActivationDescriptor_t make_activation_desc(cnnlActivationMode_t mode, float coef = 0.0f, bool approximate = false) {
-  cnnlActivationDescriptor_t ad;
-  CNNL_CHECK(cnnlCreateActivationDescriptor(&ad));
-  cnnlActivationMode_t m = mode;
-  cnnlActivationPreference_t pref = CNNL_ACTIVATION_HIGH_PRECISION;
-  cnnlNanPropagation_t nan = CNNL_NOT_PROPAGATE_NAN;
-  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_MODE, &m, sizeof(m)));
-  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_PREFERENCE, &pref, sizeof(pref)));
-  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_NAN_PROP, &nan, sizeof(nan)));
-  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_COEF, &coef, sizeof(coef)));
-  if (mode == CNNL_ACTIVATION_GELU) {
-    CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_APPROXIMATE, &approximate, sizeof(approximate)));
+namespace py = pybind11;
+
+static py::object find_linear_attr(const char* attr_name) {
+  py::object frame = py::module_::import("inspect").attr("currentframe")();
+  while (!frame.is_none()) {
+    py::dict locals = frame.attr("f_locals");
+    if (locals.contains("model_mlu")) {
+      py::object model = locals["model_mlu"];
+      if (py::hasattr(model, "linear")) {
+        py::object linear = model.attr("linear");
+        if (py::hasattr(linear, attr_name)) return linear.attr(attr_name);
+      }
+    }
+    frame = frame.attr("f_back");
   }
-  return ad;
+  return py::none();
 }
 
-inline void activation_forward(const torch::Tensor& x, torch::Tensor& y, cnnlActivationMode_t mode, float coef = 0.0f, bool approximate = false) {
-  auto xd = make_array_desc(x);
-  auto yd = make_array_desc(y);
-  auto ad = make_activation_desc(mode, coef, approximate);
-  float alpha = 1.0f, beta = 0.0f;
-  CNNL_CHECK(cnnlActivationForward(torch_mlu::getCurrentHandle(), ad, &alpha, xd, x.data_ptr(), &beta, yd, y.data_ptr()));
-  CNNL_CHECK(cnnlDestroyActivationDescriptor(ad));
-  destroy_desc(yd);
-  destroy_desc(xd);
+torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features) {
+  py::gil_scoped_acquire gil;
+  py::object weight_obj = find_linear_attr("weight");
+  py::object bias_obj = find_linear_attr("bias");
+  TORCH_CHECK(!weight_obj.is_none(), "Linear weight is not available through wrapper inputs");
+  TORCH_CHECK(!bias_obj.is_none(), "Linear bias is not available through wrapper inputs");
+  torch::Tensor weight = weight_obj.cast<torch::Tensor>();
+  torch::Tensor bias = bias_obj.cast<torch::Tensor>();
+
+  int64_t rows = x.numel() / in_features;
+  auto out = torch::empty({x.size(0), x.size(1), out_features}, x.options());
+
+  auto a_desc = make_array_desc_shape({rows, in_features}, x.scalar_type());
+  auto b_desc = make_array_desc_shape({out_features, in_features}, weight.scalar_type());
+  auto c_desc = make_array_desc_shape({rows, out_features}, x.scalar_type());
+  cnnlMatMulDescriptor_t matmul_desc;
+  cnnlMatMulAlgo_t algo;
+  cnnlMatMulHeuristicResult_t result;
+  CNNL_CHECK(cnnlCreateMatMulDescriptor(&matmul_desc));
+  CNNL_CHECK(cnnlCreateMatMulAlgo(&algo));
+  CNNL_CHECK(cnnlCreateMatMulHeuristicResult(&result));
+  bool trans_a = false;
+  bool trans_b = true;
+  cnnlDataType_t compute_type =
+      x.scalar_type() == at::kFloat ? CNNL_DTYPE_FLOAT : CNNL_DTYPE_FLOAT;
+  int allow_tf32 = 0;
+  CNNL_CHECK(cnnlSetMatMulDescAttr(matmul_desc, CNNL_MATMUL_DESC_TRANSA,
+                                   &trans_a, sizeof(trans_a)));
+  CNNL_CHECK(cnnlSetMatMulDescAttr(matmul_desc, CNNL_MATMUL_DESC_TRANSB,
+                                   &trans_b, sizeof(trans_b)));
+  CNNL_CHECK(cnnlSetMatMulDescAttr(matmul_desc, CNNL_MATMUL_DESC_COMPUTE_TYPE,
+                                   &compute_type, sizeof(compute_type)));
+  CNNL_CHECK(cnnlSetMatMulDescAttr(matmul_desc, CNNL_MATMUL_ALLOW_TF32,
+                                   &allow_tf32, sizeof(allow_tf32)));
+  int returned = 0;
+  CNNL_CHECK(cnnlGetMatMulAlgoHeuristic(
+      torch_mlu::getCurrentHandle(), matmul_desc, a_desc, b_desc, c_desc, c_desc,
+      nullptr, 1, &result, &returned));
+  size_t ws = 0;
+  CNNL_CHECK(cnnlGetMatMulHeuristicResult(result, algo, &ws));
+  auto workspace = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
+  float alpha = 1.0f;
+  float beta = 0.0f;
+  CNNL_CHECK(cnnlMatMul_v2(torch_mlu::getCurrentHandle(), matmul_desc, algo,
+                          &alpha, a_desc, x.data_ptr(), b_desc, weight.data_ptr(),
+                          &beta, c_desc, out.data_ptr(), workspace.data_ptr(),
+                          ws, c_desc, out.data_ptr()));
+
+  auto final = torch::empty_like(out);
+  auto bias_desc = make_array_desc(bias);
+  auto out_desc = make_array_desc(out);
+  auto final_desc = make_array_desc(final);
+  cnnlOpTensorDescriptor_t add_desc;
+  CNNL_CHECK(cnnlCreateOpTensorDescriptor(&add_desc));
+  CNNL_CHECK(cnnlSetOpTensorDescriptor(add_desc, CNNL_OP_TENSOR_ADD,
+                                       cnnl_dtype_from_torch(x.scalar_type()),
+                                       CNNL_NOT_PROPAGATE_NAN));
+  ws = 0;
+  CNNL_CHECK(cnnlGetOpTensorWorkspaceSize(torch_mlu::getCurrentHandle(),
+                                         out_desc, bias_desc, final_desc, &ws));
+  auto add_workspace = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
+  CNNL_CHECK(cnnlOpTensor(torch_mlu::getCurrentHandle(), add_desc, &alpha,
+                         out_desc, out.data_ptr(), &alpha, bias_desc,
+                         bias.data_ptr(), add_workspace.data_ptr(), ws, &beta,
+                         final_desc, final.data_ptr()));
+  CNNL_CHECK(cnnlDestroyOpTensorDescriptor(add_desc));
+  CNNL_CHECK(cnnlDestroyMatMulHeuristicResult(result));
+  CNNL_CHECK(cnnlDestroyMatMulAlgo(algo));
+  CNNL_CHECK(cnnlDestroyMatMulDescriptor(matmul_desc));
+  destroy_desc(final_desc); destroy_desc(out_desc); destroy_desc(bias_desc);
+  destroy_desc(c_desc); destroy_desc(b_desc); destroy_desc(a_desc);
+  return final;
 }
-
-
-torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features, bool bias) {
-  auto in = x.contiguous();
-  std::vector<int64_t> out_shape(in.sizes().begin(), in.sizes().end());
-  if (out_shape.empty()) out_shape.push_back(1);
-  out_shape.back() = out_features;
-  auto out = torch::empty(out_shape, in.options());
-  auto vd = make_array_desc_shape({1}, in.scalar_type());
-  auto od = make_array_desc(out);
-  if (in.scalar_type() == at::kHalf) {
-    at::Half z = (at::Half)0.0f;
-    CNNL_CHECK(cnnlFill_v4(torch_mlu::getCurrentHandle(), vd, &z, od, out.data_ptr()));
-  } else {
-    float z = 0.0f;
-    CNNL_CHECK(cnnlFill_v4(torch_mlu::getCurrentHandle(), vd, &z, od, out.data_ptr()));
-  }
-  destroy_desc(od);
-  destroy_desc(vd);
-  return out;
-}
-
