@@ -81,15 +81,18 @@ inline void activation_forward(const torch::Tensor& x, torch::Tensor& y, cnnlAct
 
 torch::Tensor bang_func(torch::Tensor indices, int num_embeddings, int embedding_dim) {
   auto idx = indices.contiguous().to(torch::kInt);
-  auto table = torch::empty({num_embeddings, embedding_dim}, torch::TensorOptions().device(indices.device()).dtype(torch::kFloat16));
+  auto table = torch::empty({num_embeddings, embedding_dim}, torch::TensorOptions().device(indices.device()).dtype(torch::kHalf));
   auto td = make_array_desc(table);
   auto vd = make_array_desc_shape({1}, table.scalar_type());
   at::Half one = (at::Half)1.0f;
   CNNL_CHECK(cnnlFill_v4(torch_mlu::getCurrentHandle(), vd, &one, td, table.data_ptr()));
-  auto out = torch::empty({idx.size(0), idx.size(1), embedding_dim}, table.options());
+  std::vector<int64_t> out_shape(idx.sizes().begin(), idx.sizes().end());
+  out_shape.push_back(embedding_dim);
+  auto out = torch::empty(out_shape, table.options());
   auto id = make_array_desc(idx);
   auto od = make_array_desc(out);
   CNNL_CHECK(cnnlEmbeddingForward_v2(torch_mlu::getCurrentHandle(), td, table.data_ptr(), id, idx.data_ptr(), -1, nullptr, nullptr, od, out.data_ptr()));
   destroy_desc(od); destroy_desc(id); destroy_desc(vd); destroy_desc(td);
   return out;
 }
+

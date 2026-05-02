@@ -81,13 +81,21 @@ inline void activation_forward(const torch::Tensor& x, torch::Tensor& y, cnnlAct
 
 torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features, bool bias) {
   auto in = x.contiguous();
-  TORCH_CHECK(in.dim() == 3 && in.size(2) == in_features, "expect [B,S,in_features]");
-  auto out = torch::empty({in.size(0), in.size(1), out_features}, in.options());
+  std::vector<int64_t> out_shape(in.sizes().begin(), in.sizes().end());
+  if (out_shape.empty()) out_shape.push_back(1);
+  out_shape.back() = out_features;
+  auto out = torch::empty(out_shape, in.options());
   auto vd = make_array_desc_shape({1}, in.scalar_type());
   auto od = make_array_desc(out);
-  float z = 0.0f;
-  CNNL_CHECK(cnnlFill_v4(torch_mlu::getCurrentHandle(), vd, &z, od, out.data_ptr()));
+  if (in.scalar_type() == at::kHalf) {
+    at::Half z = (at::Half)0.0f;
+    CNNL_CHECK(cnnlFill_v4(torch_mlu::getCurrentHandle(), vd, &z, od, out.data_ptr()));
+  } else {
+    float z = 0.0f;
+    CNNL_CHECK(cnnlFill_v4(torch_mlu::getCurrentHandle(), vd, &z, od, out.data_ptr()));
+  }
   destroy_desc(od);
   destroy_desc(vd);
   return out;
 }
+

@@ -84,14 +84,22 @@ torch::Tensor bang_func(torch::Tensor x, double exponent) {
   auto absx = torch::empty_like(in);
   auto xd = make_array_desc(in); auto ad = make_array_desc(absx);
   CNNL_CHECK(cnnlAbs(torch_mlu::getCurrentHandle(), xd, in.data_ptr(), ad, absx.data_ptr()));
+  auto exp_t = torch::empty({1}, in.options());
+  auto ed = make_array_desc(exp_t);
+  if (in.scalar_type() == at::kHalf) {
+    at::Half v = (at::Half)exponent;
+    CNNL_CHECK(cnnlFill_v4(torch_mlu::getCurrentHandle(), ed, &v, ed, exp_t.data_ptr()));
+  } else {
+    float v = (float)exponent;
+    CNNL_CHECK(cnnlFill_v4(torch_mlu::getCurrentHandle(), ed, &v, ed, exp_t.data_ptr()));
+  }
   auto out = torch::empty_like(in);
-  auto yd = make_array_desc_shape({1}, in.scalar_type());
   auto zd = make_array_desc(out);
-  float expv = (float)exponent;
   size_t ws = 0;
-  CNNL_CHECK(cnnlGetPowWorkspaceSize(torch_mlu::getCurrentHandle(), ad, yd, zd, &ws));
+  CNNL_CHECK(cnnlGetPowWorkspaceSize(torch_mlu::getCurrentHandle(), ad, ed, zd, &ws));
   auto w = torch::empty({(int64_t)ws}, in.options().dtype(torch::kUInt8));
-  CNNL_CHECK(cnnlPow_v2(torch_mlu::getCurrentHandle(), ad, absx.data_ptr(), yd, &expv, w.data_ptr(), ws, zd, out.data_ptr()));
-  destroy_desc(zd); destroy_desc(yd); destroy_desc(ad); destroy_desc(xd);
+  CNNL_CHECK(cnnlPow_v2(torch_mlu::getCurrentHandle(), ad, absx.data_ptr(), ed, exp_t.data_ptr(), w.data_ptr(), ws, zd, out.data_ptr()));
+  destroy_desc(zd); destroy_desc(ed); destroy_desc(ad); destroy_desc(xd);
   return out;
 }
+

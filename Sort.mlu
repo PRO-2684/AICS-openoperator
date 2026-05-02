@@ -94,9 +94,10 @@ torch::Tensor bang_func(torch::Tensor x, int dim, bool descending) {
   auto ko = make_array_desc(out);
   auto vo = make_array_desc(idx);
   size_t ws = 0;
-  CNNL_CHECK(cnnlGetSortPairsWorkspaceSize(torch_mlu::getCurrentHandle(), kd, vd, ko, vo, 0, 16, descending ? CNNL_SORT_DESCEND : CNNL_SORT_ASCEND, (uint64_t)in.size(1), &ws));
+  CNNL_CHECK(cnnlGetSortPairsWorkspaceSize(torch_mlu::getCurrentHandle(), kd, vd, ko, vo, 0, sizeof(at::Half)*8, descending ? CNNL_SORT_DESCEND : CNNL_SORT_ASCEND, (uint64_t)in.size(1), &ws));
   auto w = torch::empty({(int64_t)ws}, in.options().dtype(torch::kUInt8));
-  CNNL_CHECK(cnnlSortPairs(torch_mlu::getCurrentHandle(), kd, in.data_ptr(), vd, vals_in.data_ptr(), 0, 16, descending ? CNNL_SORT_DESCEND : CNNL_SORT_ASCEND, (uint64_t)in.size(1), w.data_ptr(), ws, ko, out.data_ptr(), vo, idx.data_ptr()));
+  CNNL_CHECK(cnnlSortPairs(torch_mlu::getCurrentHandle(), kd, in.data_ptr(), vd, vals_in.data_ptr(), 0, sizeof(at::Half)*8, descending ? CNNL_SORT_DESCEND : CNNL_SORT_ASCEND, (uint64_t)in.size(1), w.data_ptr(), ws, ko, out.data_ptr(), vo, idx.data_ptr()));
   destroy_desc(vo); destroy_desc(ko); destroy_desc(vd); destroy_desc(kd); destroy_desc(vdd); destroy_desc(vd0);
   return out;
 }
+

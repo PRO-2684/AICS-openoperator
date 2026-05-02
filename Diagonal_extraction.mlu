@@ -81,12 +81,18 @@ inline void activation_forward(const torch::Tensor& x, torch::Tensor& y, cnnlAct
 
 torch::Tensor bang_func(torch::Tensor A, int offset) {
   auto in = A.contiguous();
-  int64_t B = in.size(0), N = in.size(1), M = in.size(2);
-  int64_t L = std::min<int64_t>(N, M);
-  auto out = torch::empty({B, L}, in.options());
+  int64_t n = in.size(-2), m = in.size(-1);
+  int64_t row0 = offset >= 0 ? 0 : -offset;
+  int64_t col0 = offset >= 0 ? offset : 0;
+  int64_t L = std::max<int64_t>(0, std::min(n - row0, m - col0));
+  std::vector<int64_t> out_shape;
+  for (int i = 0; i < in.dim() - 2; ++i) out_shape.push_back(in.size(i));
+  out_shape.push_back(L);
+  auto out = torch::empty(out_shape, in.options());
   auto xd = make_array_desc(in);
   auto yd = make_array_desc(out);
-  CNNL_CHECK(cnnlDiagonal(torch_mlu::getCurrentHandle(), xd, in.data_ptr(), offset, 1, 2, yd, out.data_ptr()));
+  CNNL_CHECK(cnnlDiagonal(torch_mlu::getCurrentHandle(), xd, in.data_ptr(), offset, in.dim()-2, in.dim()-1, yd, out.data_ptr()));
   destroy_desc(yd); destroy_desc(xd);
   return out;
 }
+

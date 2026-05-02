@@ -82,17 +82,25 @@ inline void activation_forward(const torch::Tensor& x, torch::Tensor& y, cnnlAct
 torch::Tensor bang_func(torch::Tensor x, int scale_factor) {
   auto in = x.contiguous();
   TORCH_CHECK(in.dim() == 4, "expect NCHW");
-  int64_t oh = in.size(2) * scale_factor;
-  int64_t ow = in.size(3) * scale_factor;
-  auto out = torch::empty({in.size(0), in.size(1), oh, ow}, in.options());
-  auto xd = make_array_desc(in);
-  auto yd = make_array_desc(out);
+  int n=(int)in.size(0), c=(int)in.size(1), h=(int)in.size(2), w=(int)in.size(3);
+  int oh=h*scale_factor, ow=w*scale_factor;
+  auto out = torch::empty({n,c,oh,ow}, in.options());
+
+  cnnlTensorDescriptor_t xd, yd;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&xd));
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&yd));
+  int xdims[4]={n,c,h,w}, ydims[4]={n,c,oh,ow};
+  CNNL_CHECK(cnnlSetTensorDescriptor(xd, CNNL_LAYOUT_NCHW, cnnl_dtype_from_torch(in.scalar_type()), 4, xdims));
+  CNNL_CHECK(cnnlSetTensorDescriptor(yd, CNNL_LAYOUT_NCHW, cnnl_dtype_from_torch(in.scalar_type()), 4, ydims));
+
   cnnlInterpDescriptor_t d;
   CNNL_CHECK(cnnlCreateInterpDescriptor(&d));
-  double scales[4] = {1.0, 1.0, (double)scale_factor, (double)scale_factor};
+  double scales[2]={(double)scale_factor,(double)scale_factor};
   CNNL_CHECK(cnnlSetInterpDescriptor_v2(d, xd, CNNL_INTERP_NEAREST, CNNL_INTERP_ALGO_0, scales));
   CNNL_CHECK(cnnlInterp_v3(torch_mlu::getCurrentHandle(), d, xd, in.data_ptr(), yd, out.data_ptr()));
   CNNL_CHECK(cnnlDestroyInterpDescriptor(d));
-  destroy_desc(yd); destroy_desc(xd);
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(yd));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(xd));
   return out;
 }
+

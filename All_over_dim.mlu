@@ -83,30 +83,40 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   auto in = x.contiguous();
   int64_t nd = in.dim();
   int64_t axis64 = dim < 0 ? dim + nd : dim;
-  auto zero = torch::empty({1}, in.options());
-  auto zd0 = make_array_desc_shape({1}, in.scalar_type());
-  auto zdd = make_array_desc(zero);
-  float zf = 0.0f;
-  CNNL_CHECK(cnnlFill_v4(torch_mlu::getCurrentHandle(), zd0, &zf, zdd, zero.data_ptr()));
-  auto gt = torch::empty_like(in, in.options().dtype(torch::kBool));
+  std::vector<int64_t> kd(in.sizes().begin(), in.sizes().end());
+  kd[axis64] = 1;
+  auto mn = torch::empty(kd, in.options());
   auto xd = make_array_desc(in);
-  auto zd = make_array_desc_shape({1}, in.scalar_type());
-  auto gd = make_array_desc(gt);
-  size_t ws=0;
-  CNNL_CHECK(cnnlGetLogicOpWorkspaceSize(torch_mlu::getCurrentHandle(), xd, zd, gd, &ws));
+  auto md = make_array_desc(mn);
+  cnnlReduceDescriptor_t rd;
+  CNNL_CHECK(cnnlCreateReduceDescriptor(&rd));
+  int axis = (int)axis64;
+  CNNL_CHECK(cnnlSetReduceDescriptor_v2(rd, &axis, 1, CNNL_REDUCE_MIN, cnnl_dtype_from_torch(in.scalar_type()), CNNL_NOT_PROPAGATE_NAN, CNNL_REDUCE_NO_INDICES, CNNL_32BIT_INDICES, 0.0f));
+  size_t ws = 0;
+  CNNL_CHECK(cnnlGetReduceOpWorkspaceSize_v2(torch_mlu::getCurrentHandle(), xd, md, nullptr, rd, &ws));
   auto w = torch::empty({(int64_t)ws}, in.options().dtype(torch::kUInt8));
-  CNNL_CHECK(cnnlLogicOp(torch_mlu::getCurrentHandle(), CNNL_LOGIC_OP_GT, xd, in.data_ptr(), zd, zero.data_ptr(), w.data_ptr(), ws, gd, gt.data_ptr()));
-  std::vector<int64_t> kd(in.sizes().begin(), in.sizes().end()); kd[axis64]=1;
+  float alpha = 1.0f, beta = 0.0f;
+  CNNL_CHECK(cnnlReduce_v2(torch_mlu::getCurrentHandle(), rd, xd, in.data_ptr(), &alpha, &beta, w.data_ptr(), ws, md, mn.data_ptr(), nullptr, nullptr));
+
+  auto z = torch::empty({1}, in.options());
+  auto zd = make_array_desc(z);
+  if (in.scalar_type() == at::kHalf) {
+    at::Half v = (at::Half)0.0f;
+    CNNL_CHECK(cnnlFill_v4(torch_mlu::getCurrentHandle(), zd, &v, zd, z.data_ptr()));
+  } else {
+    float v = 0.0f;
+    CNNL_CHECK(cnnlFill_v4(torch_mlu::getCurrentHandle(), zd, &v, zd, z.data_ptr()));
+  }
+
   auto outk = torch::empty(kd, in.options().dtype(torch::kBool));
   auto od = make_array_desc(outk);
-  cnnlReduceDescriptor_t rd; CNNL_CHECK(cnnlCreateReduceDescriptor(&rd));
-  int axis=(int)axis64;
-  CNNL_CHECK(cnnlSetReduceDescriptor_v2(rd,&axis,1,CNNL_REDUCE_MUL,CNNL_DTYPE_BOOL,CNNL_NOT_PROPAGATE_NAN,CNNL_REDUCE_NO_INDICES,CNNL_32BIT_INDICES,0.f));
-  ws=0; CNNL_CHECK(cnnlGetReduceOpWorkspaceSize_v2(torch_mlu::getCurrentHandle(), gd, od, nullptr, rd, &ws));
+  ws = 0;
+  CNNL_CHECK(cnnlGetLogicOpWorkspaceSize(torch_mlu::getCurrentHandle(), md, zd, od, &ws));
   auto w2 = torch::empty({(int64_t)ws}, in.options().dtype(torch::kUInt8));
-  float a=1.f,b=0.f;
-  CNNL_CHECK(cnnlReduce_v2(torch_mlu::getCurrentHandle(), rd, gd, gt.data_ptr(), &a, &b, w2.data_ptr(), ws, od, outk.data_ptr(), nullptr, nullptr));
+  CNNL_CHECK(cnnlLogicOp(torch_mlu::getCurrentHandle(), CNNL_LOGIC_OP_GT, md, mn.data_ptr(), zd, z.data_ptr(), w2.data_ptr(), ws, od, outk.data_ptr()));
+
   CNNL_CHECK(cnnlDestroyReduceDescriptor(rd));
-  destroy_desc(od); destroy_desc(gd); destroy_desc(zd); destroy_desc(zdd); destroy_desc(zd0); destroy_desc(xd);
+  destroy_desc(od); destroy_desc(zd); destroy_desc(md); destroy_desc(xd);
   return outk.squeeze(axis64);
 }
+

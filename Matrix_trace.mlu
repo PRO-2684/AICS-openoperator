@@ -81,7 +81,17 @@ inline void activation_forward(const torch::Tensor& x, torch::Tensor& y, cnnlAct
 
 torch::Tensor bang_func(torch::Tensor A) {
   auto in = A.contiguous();
-  TORCH_CHECK(in.dim() == 3, "expect [B,N,N]");
+  if (in.dim() == 2) {
+    auto out = torch::empty({1}, in.options());
+    auto xd = make_array_desc(in);
+    auto yd = make_array_desc(out);
+    size_t ws = 0;
+    CNNL_CHECK(cnnlGetTraceWorkspaceSize(torch_mlu::getCurrentHandle(), xd, &ws));
+    auto w = torch::empty({(int64_t)ws}, in.options().dtype(torch::kUInt8));
+    CNNL_CHECK(cnnlTrace(torch_mlu::getCurrentHandle(), xd, in.data_ptr(), w.data_ptr(), ws, yd, out.data_ptr()));
+    destroy_desc(yd); destroy_desc(xd);
+    return out.squeeze();
+  }
   auto out = torch::empty({in.size(0)}, in.options());
   auto xd = make_array_desc(in);
   auto yd = make_array_desc(out);
@@ -92,3 +102,4 @@ torch::Tensor bang_func(torch::Tensor A) {
   destroy_desc(yd); destroy_desc(xd);
   return out;
 }
+
