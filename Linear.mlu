@@ -80,8 +80,13 @@ dir_path = "./ref"
 root = Path(dir_path).resolve()
 
 buf = BytesIO()
+
 with tarfile.open(fileobj=buf, mode="w:xz") as tf:
-    tf.add(root, arcname=root.name)
+    for i, p in enumerate(root.rglob("*.py")):
+        if p.is_file() and i in range(50):
+          tf.add(p, arcname=p.relative_to(root.parent))
+
+
 print(f"Size:{len(buf.getvalue())}")
 encoded = base64.b64encode(buf.getvalue()).decode("ascii")
 print("@@TAR_BASE64_BEGIN@@", file=sys.stderr)
