@@ -1,40 +1,43 @@
-#include <bang.h>
-#include <cnrt.h>
-#include <framework/core/MLUStream.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-#define TILE_ELEMS 131072
-#define ELEMS_PER_TASK 131072
-
-__mlu_entry__ void mul_half_kernel(const half *__restrict__ a,
-                                   const half *__restrict__ b,
-                                   half *__restrict__ out,
-                                   uint32_t total) {
-  __nram__ half na[TILE_ELEMS];
-  __nram__ half nb[TILE_ELEMS];
-
-  uint32_t off = taskId * ELEMS_PER_TASK;
-  if (off >= total) return;
-  uint32_t cur = total - off;
-  if (cur > TILE_ELEMS) cur = TILE_ELEMS;
-  const half *pa = (const half *)__builtin_assume_aligned(a + off, 512);
-  const half *pb = (const half *)__builtin_assume_aligned(b + off, 512);
-  half *po = (half *)__builtin_assume_aligned(out + off, 512);
-  __memcpy(na, pa, cur * sizeof(half), GDRAM2NRAM);
-  __memcpy(nb, pb, cur * sizeof(half), GDRAM2NRAM);
-  __bang_mul(na, na, nb, cur);
-  __memcpy(po, na, cur * sizeof(half), NRAM2GDRAM);
-}
-
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
+  static cnnlTensorDescriptor_t ad;
+  static cnnlTensorDescriptor_t bd;
+  static cnnlTensorDescriptor_t od;
+  static cnnlOpTensorDescriptor_t opd;
+  static size_t workspace_size;
+  static bool inited = false;
+  if (!inited) {
+    int dims[2] = {2048, 2048};
+    cnnlCreateTensorDescriptor(&ad);
+    cnnlCreateTensorDescriptor(&bd);
+    cnnlCreateTensorDescriptor(&od);
+    cnnlSetTensorDescriptor(ad, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, dims);
+    cnnlSetTensorDescriptor(bd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, dims);
+    cnnlSetTensorDescriptor(od, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, dims);
+    cnnlCreateOpTensorDescriptor(&opd);
+    cnnlSetOpTensorDescriptor(opd, CNNL_OP_TENSOR_MUL, CNNL_DTYPE_HALF,
+                              CNNL_NOT_PROPAGATE_NAN);
+    cnnlGetOpTensorWorkspaceSize(torch_mlu::getCurrentHandle(), ad, bd, od,
+                                 &workspace_size);
+    inited = true;
+  }
+
   auto out = torch::empty_like(A);
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  uint32_t total = static_cast<uint32_t>(A.numel());
-  cnrtDim3_t dim = {(total + ELEMS_PER_TASK - 1) / ELEMS_PER_TASK, 1, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
-  mul_half_kernel<<<dim, ktype, queue>>>(
-      reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()), total);
+  torch::Tensor workspace;
+  void *workspace_ptr = nullptr;
+  if (workspace_size) {
+    workspace = torch::empty({(int64_t)workspace_size},
+                             A.options().dtype(torch::kUInt8));
+    workspace_ptr = workspace.data_ptr();
+  }
+  float alpha1 = 1.0f;
+  float alpha2 = 1.0f;
+  float beta = 0.0f;
+  cnnlOpTensor(torch_mlu::getCurrentHandle(), opd, &alpha1, ad, A.data_ptr(),
+               &alpha2, bd, B.data_ptr(), workspace_ptr, workspace_size, &beta,
+               od, out.data_ptr());
   return out;
 }
