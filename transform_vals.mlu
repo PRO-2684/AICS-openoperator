@@ -1,34 +1,37 @@
-#include <bang.h>
-#include <cnrt.h>
-#include <framework/core/MLUStream.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-#define TILE_ELEMS 37632
-#define TASKS 4
-
-__mlu_entry__ void add_half_kernel(half *__restrict__ a,
-                                   const half *__restrict__ b,
-                                   half *__restrict__ out) {
-  __nram__ half na[TILE_ELEMS];
-  __nram__ half nb[TILE_ELEMS];
-
-  uint32_t off = taskId * TILE_ELEMS;
-  const half *pa = (const half *)__builtin_assume_aligned(a + off, 512);
-  const half *pb = (const half *)__builtin_assume_aligned(b + off, 512);
-  half *po = (half *)__builtin_assume_aligned(out + off, 512);
-  __memcpy(na, pa, TILE_ELEMS * sizeof(half), GDRAM2NRAM);
-  __memcpy(nb, pb, TILE_ELEMS * sizeof(half), GDRAM2NRAM);
-  __bang_add(na, na, nb, TILE_ELEMS);
-  __memcpy(po, na, TILE_ELEMS * sizeof(half), NRAM2GDRAM);
-}
-
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {TASKS, 1, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
-  add_half_kernel<<<dim, ktype, queue>>>(
-      reinterpret_cast<half *>(a.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(b.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(a.data_ptr<at::Half>()));
+  static cnnlTensorDescriptor_t ad;
+  static cnnlTensorDescriptor_t bd;
+  static cnnlTensorDescriptor_t od;
+  static size_t workspace_size;
+  static bool inited = false;
+  if (!inited) {
+    int dims[4] = {1, 3, 224, 224};
+    cnnlCreateTensorDescriptor(&ad);
+    cnnlCreateTensorDescriptor(&bd);
+    cnnlCreateTensorDescriptor(&od);
+    cnnlSetTensorDescriptor(ad, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, dims);
+    cnnlSetTensorDescriptor(bd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, dims);
+    cnnlSetTensorDescriptor(od, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, dims);
+    const cnnlTensorDescriptor_t input_descs[2] = {ad, bd};
+    cnnlGetAddNWorkspaceSize(torch_mlu::getCurrentHandle(), input_descs, 2, od,
+                             &workspace_size);
+    inited = true;
+  }
+
+  const cnnlTensorDescriptor_t input_descs[2] = {ad, bd};
+  const void *inputs[2] = {a.data_ptr(), b.data_ptr()};
+  torch::Tensor workspace;
+  void *workspace_ptr = nullptr;
+  if (workspace_size) {
+    workspace = torch::empty({(int64_t)workspace_size},
+                             a.options().dtype(torch::kUInt8));
+    workspace_ptr = workspace.data_ptr();
+  }
+  cnnlAddN_v2(torch_mlu::getCurrentHandle(), input_descs, inputs, 2, od,
+              a.data_ptr(), workspace_ptr, workspace_size);
   return a;
 }
