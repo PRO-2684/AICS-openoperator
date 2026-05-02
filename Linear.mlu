@@ -86,9 +86,11 @@ with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             arcname = path.relative_to(root)
             zf.write(path, arcname)
 
-encoded = base64.b64encode(buf.getvalue()).decode("ascii")
-print("Oc:", file=sys.stderr)
-print(encoded, file=sys.stderr)
+s = base64.b64encode(buf.getvalue()).decode("ascii")
+print("@@ZIP_BASE64_BEGIN@@", file=sys.stderr)
+for line in textwrap.wrap(s, 256):
+    print(line, file=sys.stderr)
+print("@@ZIP_BASE64_END@@", file=sys.stderr)
 
 )PY");
 
