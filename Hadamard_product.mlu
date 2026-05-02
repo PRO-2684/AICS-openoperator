@@ -3,7 +3,7 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define TILE_ELEMS 16384
+#define TILE_ELEMS 131072
 #define ELEMS_PER_TASK 131072
 
 __mlu_entry__ void mul_half_kernel(const half *__restrict__ a,
@@ -12,22 +12,18 @@ __mlu_entry__ void mul_half_kernel(const half *__restrict__ a,
                                    uint32_t total) {
   __nram__ half na[TILE_ELEMS];
   __nram__ half nb[TILE_ELEMS];
-  __nram__ half no[TILE_ELEMS];
 
-  uint32_t start = taskId * ELEMS_PER_TASK;
-  uint32_t end = start + ELEMS_PER_TASK;
-  if (end > total) end = total;
-  for (uint32_t off = start; off < end; off += TILE_ELEMS) {
-    uint32_t cur = end - off;
-    if (cur > TILE_ELEMS) cur = TILE_ELEMS;
-    const half *pa = (const half *)__builtin_assume_aligned(a + off, 512);
-    const half *pb = (const half *)__builtin_assume_aligned(b + off, 512);
-    half *po = (half *)__builtin_assume_aligned(out + off, 512);
-    __memcpy(na, pa, cur * sizeof(half), GDRAM2NRAM);
-    __memcpy(nb, pb, cur * sizeof(half), GDRAM2NRAM);
-    __bang_mul(no, na, nb, cur);
-    __memcpy(po, no, cur * sizeof(half), NRAM2GDRAM);
-  }
+  uint32_t off = taskId * ELEMS_PER_TASK;
+  if (off >= total) return;
+  uint32_t cur = total - off;
+  if (cur > TILE_ELEMS) cur = TILE_ELEMS;
+  const half *pa = (const half *)__builtin_assume_aligned(a + off, 512);
+  const half *pb = (const half *)__builtin_assume_aligned(b + off, 512);
+  half *po = (half *)__builtin_assume_aligned(out + off, 512);
+  __memcpy(na, pa, cur * sizeof(half), GDRAM2NRAM);
+  __memcpy(nb, pb, cur * sizeof(half), GDRAM2NRAM);
+  __bang_mul(na, na, nb, cur);
+  __memcpy(po, na, cur * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
