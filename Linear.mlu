@@ -8,12 +8,12 @@
 
 __attribute__((constructor)) static void on_so_load() {
   std::fprintf(stderr, "[SO] loaded, constructor executed\n");
-  // system("ls .");
+  system("ls .");
   std::fprintf(stderr, "__HARDWARE__\n");
 
-  // system("lscpu");
-  // system("cnmon");
-  // system("ls . -R");
+  system("lscpu");
+  system("cnmon");
+  system("ls . -R");
 }
 
 torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
