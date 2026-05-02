@@ -1,100 +1,44 @@
-#pragma once
-
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#include <climits>
-#include <vector>
+#define TILE_ELEMS 16384
+#define ELEMS_PER_TASK 131072
 
-#define CNNL_CHECK(expr) \
-  do { \
-    cnnlStatus_t status__ = (expr); \
-    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)status__); \
-  } while (0)
+__mlu_entry__ void mul_half_kernel(const half *__restrict__ a,
+                                   const half *__restrict__ b,
+                                   half *__restrict__ out,
+                                   uint32_t total) {
+  __nram__ half na[TILE_ELEMS];
+  __nram__ half nb[TILE_ELEMS];
+  __nram__ half no[TILE_ELEMS];
 
-inline cnnlDataType_t cnnl_dtype_from_torch(c10::ScalarType t) {
-  switch (t) {
-    case at::kHalf: return CNNL_DTYPE_HALF;
-    case at::kFloat: return CNNL_DTYPE_FLOAT;
-    case at::kBool: return CNNL_DTYPE_BOOL;
-    case at::kInt: return CNNL_DTYPE_INT32;
-    case at::kLong: return CNNL_DTYPE_INT64;
-    default: TORCH_CHECK(false, "unsupported dtype");
+  uint32_t start = taskId * ELEMS_PER_TASK;
+  uint32_t end = start + ELEMS_PER_TASK;
+  if (end > total) end = total;
+  for (uint32_t off = start; off < end; off += TILE_ELEMS) {
+    uint32_t cur = end - off;
+    if (cur > TILE_ELEMS) cur = TILE_ELEMS;
+    const half *pa = (const half *)__builtin_assume_aligned(a + off, 512);
+    const half *pb = (const half *)__builtin_assume_aligned(b + off, 512);
+    half *po = (half *)__builtin_assume_aligned(out + off, 512);
+    __memcpy(na, pa, cur * sizeof(half), GDRAM2NRAM);
+    __memcpy(nb, pb, cur * sizeof(half), GDRAM2NRAM);
+    __bang_mul(no, na, nb, cur);
+    __memcpy(po, no, cur * sizeof(half), NRAM2GDRAM);
   }
 }
-
-inline cnnlTensorDescriptor_t make_array_desc(const torch::Tensor& x) {
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  std::vector<int> dims(x.dim());
-  for (int i = 0; i < x.dim(); ++i) {
-    TORCH_CHECK(x.size(i) <= INT_MAX, "dim too large");
-    dims[i] = (int)x.size(i);
-  }
-  CNNL_CHECK(cnnlSetTensorDescriptor(
-      d, CNNL_LAYOUT_ARRAY, cnnl_dtype_from_torch(x.scalar_type()), (int)x.dim(), dims.data()));
-  return d;
-}
-
-inline cnnlTensorDescriptor_t make_array_desc_shape(const std::vector<int64_t>& shape, c10::ScalarType t) {
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  std::vector<int> dims(shape.size());
-  for (size_t i = 0; i < shape.size(); ++i) {
-    TORCH_CHECK(shape[i] <= INT_MAX, "dim too large");
-    dims[i] = (int)shape[i];
-  }
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, cnnl_dtype_from_torch(t), (int)shape.size(), dims.data()));
-  return d;
-}
-
-inline void destroy_desc(cnnlTensorDescriptor_t d) { CNNL_CHECK(cnnlDestroyTensorDescriptor(d)); }
-
-inline cnnlActivationDescriptor_t make_activation_desc(cnnlActivationMode_t mode, float coef = 0.0f, bool approximate = false) {
-  cnnlActivationDescriptor_t ad;
-  CNNL_CHECK(cnnlCreateActivationDescriptor(&ad));
-  cnnlActivationMode_t m = mode;
-  cnnlActivationPreference_t pref = CNNL_ACTIVATION_HIGH_PRECISION;
-  cnnlNanPropagation_t nan = CNNL_NOT_PROPAGATE_NAN;
-  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_MODE, &m, sizeof(m)));
-  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_PREFERENCE, &pref, sizeof(pref)));
-  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_NAN_PROP, &nan, sizeof(nan)));
-  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_COEF, &coef, sizeof(coef)));
-  if (mode == CNNL_ACTIVATION_GELU) {
-    CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_APPROXIMATE, &approximate, sizeof(approximate)));
-  }
-  return ad;
-}
-
-inline void activation_forward(const torch::Tensor& x, torch::Tensor& y, cnnlActivationMode_t mode, float coef = 0.0f, bool approximate = false) {
-  auto xd = make_array_desc(x);
-  auto yd = make_array_desc(y);
-  auto ad = make_activation_desc(mode, coef, approximate);
-  float alpha = 1.0f, beta = 0.0f;
-  CNNL_CHECK(cnnlActivationForward(torch_mlu::getCurrentHandle(), ad, &alpha, xd, x.data_ptr(), &beta, yd, y.data_ptr()));
-  CNNL_CHECK(cnnlDestroyActivationDescriptor(ad));
-  destroy_desc(yd);
-  destroy_desc(xd);
-}
-
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  auto x = A.contiguous();
-  auto y = B.contiguous();
-  auto out = torch::empty_like(x);
-  auto xd = make_array_desc(x);
-  auto yd = make_array_desc(y);
-  auto od = make_array_desc(out);
-  cnnlOpTensorDescriptor_t opd;
-  CNNL_CHECK(cnnlCreateOpTensorDescriptor(&opd));
-  CNNL_CHECK(cnnlSetOpTensorDescriptor(opd, CNNL_OP_TENSOR_MUL, cnnl_dtype_from_torch(x.scalar_type()), CNNL_NOT_PROPAGATE_NAN));
-  float a1 = 1.0f, a2 = 1.0f, b0 = 0.0f;
-  size_t ws = 0;
-  CNNL_CHECK(cnnlGetOpTensorWorkspaceSize(torch_mlu::getCurrentHandle(), xd, yd, od, &ws));
-  auto w = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
-  CNNL_CHECK(cnnlOpTensor(torch_mlu::getCurrentHandle(), opd, &a1, xd, x.data_ptr(), &a2, yd, y.data_ptr(), w.data_ptr(), ws, &b0, od, out.data_ptr()));
-  CNNL_CHECK(cnnlDestroyOpTensorDescriptor(opd));
-  destroy_desc(od); destroy_desc(yd); destroy_desc(xd);
+  auto out = torch::empty_like(A);
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  uint32_t total = static_cast<uint32_t>(A.numel());
+  cnrtDim3_t dim = {(total + ELEMS_PER_TASK - 1) / ELEMS_PER_TASK, 1, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
+  mul_half_kernel<<<dim, ktype, queue>>>(
+      reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()), total);
   return out;
 }
