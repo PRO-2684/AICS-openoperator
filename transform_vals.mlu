@@ -5,16 +5,20 @@
 
 #define TASKS 32
 #define SMALL_ELEMS 4608
-#define LAST_ELEMS 7680
+#define LARGE_ELEMS 5376
+#define LARGE_TASK_START 28
 
 __mlu_entry__ void transform_vals_add_half_32task_kernel(
     half *__restrict__ a, const half *__restrict__ b) {
-  const bool last = taskId == TASKS - 1;
-  const uint32_t elems = last ? LAST_ELEMS : SMALL_ELEMS;
-  const uint32_t offset = taskId * SMALL_ELEMS;
+  const bool large_task = taskId >= LARGE_TASK_START;
+  const uint32_t elems = large_task ? LARGE_ELEMS : SMALL_ELEMS;
+  const uint32_t offset =
+      taskId * SMALL_ELEMS +
+      (large_task ? (taskId - LARGE_TASK_START) * (LARGE_ELEMS - SMALL_ELEMS)
+                  : 0);
 
-  __nram__ half a_buf[LAST_ELEMS];
-  __nram__ half b_buf[LAST_ELEMS];
+  __nram__ half a_buf[LARGE_ELEMS];
+  __nram__ half b_buf[LARGE_ELEMS];
 
   half *a_gdram = (half *)__builtin_assume_aligned(a + offset, 512);
   const half *b_gdram =
