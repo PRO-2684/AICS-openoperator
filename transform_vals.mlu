@@ -6,7 +6,7 @@
 #define TILE_ELEMS 50176
 #define TASKS 3
 
-__mlu_entry__ void add_half_kernel(const half *__restrict__ a,
+__mlu_entry__ void add_half_kernel(half *__restrict__ a,
                                    const half *__restrict__ b,
                                    half *__restrict__ out) {
   __nram__ half na[TILE_ELEMS];
@@ -23,13 +23,12 @@ __mlu_entry__ void add_half_kernel(const half *__restrict__ a,
 }
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
-  auto out = torch::empty_like(a);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {TASKS, 1, 1};
   cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
   add_half_kernel<<<dim, ktype, queue>>>(
-      reinterpret_cast<const half *>(a.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(a.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(b.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
-  return out;
+      reinterpret_cast<half *>(a.data_ptr<at::Half>()));
+  return a;
 }

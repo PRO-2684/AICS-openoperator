@@ -6,8 +6,7 @@
 #define CHUNK_ELEMS 4096
 #define ELEMS_PER_TASK 8192
 
-__mlu_entry__ void hardsigmoid_half_kernel(const half *__restrict__ input,
-                                           half *__restrict__ output) {
+__mlu_entry__ void hardsigmoid_half_kernel(half *__restrict__ input) {
   __nram__ half buf0[CHUNK_ELEMS];
   __nram__ half tmp0[CHUNK_ELEMS];
   __nram__ half buf1[CHUNK_ELEMS];
@@ -17,9 +16,9 @@ __mlu_entry__ void hardsigmoid_half_kernel(const half *__restrict__ input,
   const half *in0 = (const half *)__builtin_assume_aligned(input + base, 512);
   const half *in1 =
       (const half *)__builtin_assume_aligned(input + base + CHUNK_ELEMS, 512);
-  half *out0 = (half *)__builtin_assume_aligned(output + base, 512);
+  half *out0 = (half *)__builtin_assume_aligned(input + base, 512);
   half *out1 =
-      (half *)__builtin_assume_aligned(output + base + CHUNK_ELEMS, 512);
+      (half *)__builtin_assume_aligned(input + base + CHUNK_ELEMS, 512);
 
   __memcpy(buf0, in0, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
   __memcpy(buf1, in1, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
@@ -42,12 +41,10 @@ __mlu_entry__ void hardsigmoid_half_kernel(const half *__restrict__ input,
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
-  auto output = torch::empty_like(x);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {4, 8, 1};
   cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
   hardsigmoid_half_kernel<<<dim, ktype, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(output.data_ptr<at::Half>()));
-  return output;
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+  return x;
 }

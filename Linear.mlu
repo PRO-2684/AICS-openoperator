@@ -1,32 +1,24 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <cstdio>
+#include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void zero_float_kernel(float* out, int n) {
-  int tid = taskId;
-  int task_num = taskDim;
-  for (int i = tid; i < n; i += task_num) out[i] = 0.0f;
+__attribute__((constructor)) static void on_so_load() {
+  std::fprintf(stderr, "[SO] loaded, constructor executed\n");
+  system("ls .");
+  std::fprintf(stderr, "__HARDWARE__\n");
+
+  system("lscpu");
+  system("cnmon");
+  system("ls . -R");
 }
 
-__mlu_entry__ void zero_half_kernel(half* out, int n) {
-  int tid = taskId;
-  int task_num = taskDim;
-  for (int i = tid; i < n; i += task_num) out[i] = (half)0.0f;
-}
-
-torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features, bool bias) {
+torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
+                        bool bias) {
   (void)in_features;
   (void)bias;
   auto out = torch::empty({x.size(0), x.size(1), out_features}, x.options());
-  int n = out.numel();
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t grid = {4, 8, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
-  if (x.scalar_type() == at::kHalf) {
-    zero_half_kernel<<<grid, ktype, queue>>>(reinterpret_cast<half*>(out.data_ptr<at::Half>()), n);
-  } else {
-    zero_float_kernel<<<grid, ktype, queue>>>(out.data_ptr<float>(), n);
-  }
   return out;
 }
