@@ -165,7 +165,7 @@ python scripts/update_problems.py
 | 114 | [Pad_constant](Pad_constant.mlu) | N/A | 🔴 |
 | 115 | [Unfold](Unfold.mlu) | N/A | 🔴 |
 | 116 | [Grid_sample](Grid_sample.mlu) | N/A | 🔴 |
-| 117 | [Masked_fill](Masked_fill.mlu) | N/A | 🔴 |
+| 117 | [Masked_fill](Masked_fill.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/34b4b3ae47550a2d21386c98098dd82f1493d4bf) |
 | 118 | [Where_conditional](Where_conditional.mlu) | N/A | 🔴 |
 | 119 | [One_hot_encoding](One_hot_encoding.mlu) | N/A | 🔴 |
 | 120 | [Masked_softmax](Masked_softmax.mlu) | N/A | 🔴 |
