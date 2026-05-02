@@ -1,38 +1,33 @@
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
-  static cnnlTensorDescriptor_t ad;
-  static cnnlTensorDescriptor_t bd;
-  static cnnlTensorDescriptor_t od;
-  // static size_t workspace_size;
-  static bool inited = false;
-  if (!inited) {
-    int dims[4] = {1, 3, 224, 224};
-    cnnlCreateTensorDescriptor(&ad);
-    cnnlCreateTensorDescriptor(&bd);
-    cnnlCreateTensorDescriptor(&od);
-    cnnlSetTensorDescriptor(ad, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, dims);
-    cnnlSetTensorDescriptor(bd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, dims);
-    cnnlSetTensorDescriptor(od, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, dims);
-    const cnnlTensorDescriptor_t input_descs[2] = {ad, bd};
-    // cnnlGetAddNWorkspaceSize(torch_mlu::getCurrentHandle(), input_descs, 2,
-    // od,
-    //                          &workspace_size);
-    inited = true;
-  }
+#define TASKS 4
+#define TILE_ELEMS 37632
 
-  const cnnlTensorDescriptor_t input_descs[2] = {ad, bd};
-  const void *inputs[2] = {a.data_ptr(), b.data_ptr()};
-  // torch::Tensor workspace;
-  // void *workspace_ptr = nullptr;
-  // if (workspace_size) {
-  //   workspace = torch::empty({(int64_t)workspace_size},
-  //                            a.options().dtype(torch::kUInt8));
-  //   workspace_ptr = workspace.data_ptr();
-  // }
-  cnnlAddN_v2(torch_mlu::getCurrentHandle(), input_descs, inputs, 2, od,
-              a.data_ptr(), nullptr, 0);
+__mlu_entry__ void transform_vals_add_half_4task_kernel(
+    half *__restrict__ a, const half *__restrict__ b) {
+  const uint32_t offset = taskId * TILE_ELEMS;
+
+  __nram__ half a_buf[TILE_ELEMS];
+  __nram__ half b_buf[TILE_ELEMS];
+
+  half *a_gdram = (half *)__builtin_assume_aligned(a + offset, 512);
+  const half *b_gdram =
+      (const half *)__builtin_assume_aligned(b + offset, 512);
+
+  __memcpy(a_buf, a_gdram, TILE_ELEMS * sizeof(half), GDRAM2NRAM);
+  __memcpy(b_buf, b_gdram, TILE_ELEMS * sizeof(half), GDRAM2NRAM);
+  __bang_add(a_buf, a_buf, b_buf, TILE_ELEMS);
+  __memcpy(a_gdram, a_buf, TILE_ELEMS * sizeof(half), NRAM2GDRAM);
+}
+
+torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {TASKS, 1, 1};
+  transform_vals_add_half_4task_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<half *>(a.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(b.data_ptr<at::Half>()));
   return a;
 }

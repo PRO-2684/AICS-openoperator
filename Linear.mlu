@@ -85,6 +85,7 @@ torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
                         bool bias) {
   // (void)in_features;
   // (void)bias;
+  
   auto out = torch::empty_like(x);
   return out;
 }
