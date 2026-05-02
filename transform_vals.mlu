@@ -4,9 +4,9 @@
 #include <torch/extension.h>
 
 #define TASKS 32
-#define SMALL_ELEMS 4608
-#define LARGE_ELEMS 5376
-#define LARGE_TASK_START 28
+#define SMALL_ELEMS 4672
+#define LARGE_ELEMS 4800
+#define LARGE_TASK_START 24
 
 __mlu_entry__ void transform_vals_add_half_32task_kernel(
     half *__restrict__ a, const half *__restrict__ b) {
