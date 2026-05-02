@@ -3,6 +3,8 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
+#include <cstdio>
+
 #define TILE_ELEMS 131072
 #define ELEMS_PER_TASK 131072
 
@@ -27,6 +29,22 @@ __mlu_entry__ void add_half_kernel(const half *__restrict__ a,
 }
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
+  static bool printed_shape = false;
+  if (!printed_shape) {
+    std::fprintf(stderr, "066_transform_vals: a.dim=%ld a.numel=%ld shape=[",
+                 (long)a.dim(), (long)a.numel());
+    for (int64_t i = 0; i < a.dim(); ++i) {
+      std::fprintf(stderr, "%s%ld", i ? "," : "", (long)a.size(i));
+    }
+    std::fprintf(stderr, "] b.dim=%ld b.numel=%ld shape=[", (long)b.dim(),
+                 (long)b.numel());
+    for (int64_t i = 0; i < b.dim(); ++i) {
+      std::fprintf(stderr, "%s%ld", i ? "," : "", (long)b.size(i));
+    }
+    std::fprintf(stderr, "]\n");
+    printed_shape = true;
+  }
+
   auto out = torch::empty_like(a);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   uint32_t total = static_cast<uint32_t>(a.numel());
