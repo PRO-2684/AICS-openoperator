@@ -114,7 +114,7 @@ python scripts/update_problems.py
 | 063 | [calc_block_sums](calc_block_sums.mlu) | N/A | 🔴 |
 | 064 | [adaptive_average_pool_nhwc](adaptive_average_pool_nhwc.mlu) | N/A | 🔴 |
 | 065 | [lpmax_cleanup](lpmax_cleanup.mlu) | N/A | 🔴 |
-| 066 | [transform_vals](transform_vals.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/1eda60594d6e0b532762d4a53c465437ad2d7e60) |
+| 066 | [transform_vals](transform_vals.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/8c76208a0adf5e85a2caa773df955d0c070b4c42) |
 | 067 | [renormRowsL1](renormRowsL1.mlu) | N/A | 🔴 |
 | 068 | [upsample_bilinear2d_out_frame](upsample_bilinear2d_out_frame.mlu) | N/A | 🔴 |
 | 069 | [lstm_cell_forward](lstm_cell_forward.mlu) | N/A | 🔴 |
