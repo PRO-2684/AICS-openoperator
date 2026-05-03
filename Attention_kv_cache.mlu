@@ -114,10 +114,16 @@ static void bmm(cnnlHandle_t handle, const void* a, const void* b, void* out,
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_cache,
                         torch::Tensor k_new, torch::Tensor v_new) {
   auto out = torch::empty_like(q);
-  auto k_all = torch::empty({1, 8, 513, 64}, q.options());
-  auto v_all = torch::empty_like(k_all);
-  auto scores = torch::empty({8, 1, 513}, q.options());
-  auto probs = torch::empty_like(scores);
+  static torch::Tensor k_all;
+  static torch::Tensor v_all;
+  static torch::Tensor scores;
+  static torch::Tensor probs;
+  if (!k_all.defined()) {
+    k_all = torch::empty({1, 8, 513, 64}, q.options());
+    v_all = torch::empty_like(k_all);
+    scores = torch::empty({8, 1, 513}, q.options());
+    probs = torch::empty_like(scores);
+  }
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t copy_dim = {32, 1, 1};
