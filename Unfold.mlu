@@ -11,18 +11,8 @@
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
                         int padding) {
-  TORCH_CHECK(x.is_mlu(), "x must be MLU tensor");
-  TORCH_CHECK(x.scalar_type() == torch::kHalf, "x must be float16");
-  TORCH_CHECK(x.dim() == 4, "x must be NCHW");
-  TORCH_CHECK(x.size(0) == 16, "only N=16 supported");
-  TORCH_CHECK(x.size(1) == 3, "only C=3 supported");
-  TORCH_CHECK(x.size(2) == 256, "only H=256 supported");
-  TORCH_CHECK(x.size(3) == 256, "only W=256 supported");
-  TORCH_CHECK(kernel_size == 3, "only kernel_size=3 supported");
-  TORCH_CHECK(stride == 1, "only stride=1 supported");
-  TORCH_CHECK(padding == 0, "only padding=0 supported");
 
-  auto x_contig = x.contiguous();
+  auto x_contig = x;
 
   constexpr int N = 16;
   constexpr int C = 3;
