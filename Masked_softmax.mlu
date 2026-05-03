@@ -14,7 +14,6 @@
 __mlu_entry__ void kernel_main(const half *__restrict__ input,
                                half *__restrict__ output) {
   __nram__ half buf[W];
-  __nram__ half red[W];
   __nram__ half zero[W];
   __bang_write_zero(zero, W);
 
@@ -24,7 +23,7 @@ __mlu_entry__ void kernel_main(const half *__restrict__ input,
     half *out = (half *)__builtin_assume_aligned(output + row * N3, 512);
 
     __memcpy(buf, in, W * sizeof(half), GDRAM2NRAM);
-    __bang_reduce_sum(red, buf, W);
+    __bang_mul_scalar(buf, buf, (half)0.01f, W);
     __memcpy(out, buf, W * sizeof(half), NRAM2GDRAM);
     __memcpy(out + W, zero, W * sizeof(half), NRAM2GDRAM);
   }
