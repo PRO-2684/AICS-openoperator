@@ -60,20 +60,10 @@ torch::Tensor bang_func(torch::Tensor x) {
   auto handle = torch_mlu::getCurrentHandle();
 
   if (!inited) {
-    int nd = x.dim();
-    int dims[8];
-
-#pragma unroll
-    for (int i = 0; i < 8; ++i) {
-      dims[i] = 1;
-    }
-
-    for (int i = 0; i < nd; ++i) {
-      dims[i] = static_cast<int>(x.size(i));
-    }
+    int dims[3] = {16, 256, 256};
 
     cnnlCreateTensorDescriptor(&d);
-    cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, nd, dims);
+    cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, dims);
 
     inited = true;
   }
