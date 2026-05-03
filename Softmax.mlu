@@ -28,7 +28,7 @@ __mlu_entry__ void softmax_16x16384_half_kernel(const half *__restrict__ input,
   half row_max = argbuf[0];
 
   __bang_add_scalar(xbuf, xbuf, (half)(-row_max), DIM);
-  __bang_active_exp(xbuf, xbuf, DIM);
+  __bang_active_exp_less_0(xbuf, xbuf, DIM);
 
   __memcpy(sbuf, xbuf, DIM * sizeof(half), NRAM2NRAM);
   __bang_reduce_sum(sbuf, sbuf, DIM);
@@ -53,7 +53,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   auto y = torch::empty_like(x);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t kdim = {BATCH, 1, 1};
-  softmax_16x16384_half_kernel<<<kdim, cnrtFuncTypeUnion1, queue>>>(
+  softmax_16x16384_half_kernel<<<kdim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
