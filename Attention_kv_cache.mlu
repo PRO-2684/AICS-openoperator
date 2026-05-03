@@ -4,6 +4,8 @@
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
+#include <float.h>
+#include <math.h>
 
 // Task: 130 130_Attention_kv_cache
 // Alternative fast path: concatenate KV, then CNNL BMM + softmax + BMM for 8 heads.
@@ -44,6 +46,33 @@ __mlu_entry__ void score_new_kernel(const half* q, const half* k_new, half* scor
   float dot = 0.0f;
   for (int d = 0; d < 64; ++d) dot += (float)qh[d] * (float)kh[d];
   scores[h * 513 + 512] = (half)(dot * 0.125f);
+}
+
+__mlu_entry__ void score_new_softmax_kernel(const half* q, const half* k_new,
+                                            half* scores, half* probs) {
+  int h = taskId;
+  if (h >= 8) return;
+  const half* qh = q + h * 64;
+  const half* kh = k_new + h * 64;
+  float dot = 0.0f;
+  for (int d = 0; d < 64; ++d) dot += (float)qh[d] * (float)kh[d];
+  scores[h * 513 + 512] = (half)(dot * 0.125f);
+
+  half* sh = scores + h * 513;
+  half* ph = probs + h * 513;
+  float mx = -FLT_MAX;
+  for (int i = 0; i < 513; ++i) {
+    float v = (float)sh[i];
+    if (v > mx) mx = v;
+  }
+  float sum = 0.0f;
+  for (int i = 0; i < 513; ++i) {
+    float e = expf((float)sh[i] - mx);
+    sum += e;
+    ph[i] = (half)e;
+  }
+  float inv = 1.0f / sum;
+  for (int i = 0; i < 513; ++i) ph[i] = (half)((float)ph[i] * inv);
 }
 
 __mlu_entry__ void add_new_value_kernel(const half* probs, const half* v_new, half* out) {
@@ -205,11 +234,10 @@ static void bmm_cache512(cnnlHandle_t handle, const void* a, const void* b, void
 
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_cache,
                         torch::Tensor k_new, torch::Tensor v_new) {
-  static torch::Tensor out;
+  auto out = torch::empty_like(q);
   static torch::Tensor scores;
   static torch::Tensor probs;
-  if (!out.defined()) {
-    out = torch::empty_like(q);
+  if (!scores.defined()) {
     scores = torch::empty({8, 1, 513}, q.options());
     probs = torch::empty_like(scores);
   }
@@ -219,15 +247,11 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_
   cnnlHandle_t handle = torch_mlu::getCurrentHandle();
   bmm_cache512(handle, q.data_ptr(), k_cache.data_ptr(), scores.data_ptr(), true);
   cnrtDim3_t small_dim = {8, 1, 1};
-  score_new_kernel<<<small_dim, cnrtFuncTypeBlock, queue>>>(
+  score_new_softmax_kernel<<<small_dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half*>(q.data_ptr<at::Half>()),
       reinterpret_cast<const half*>(k_new.data_ptr<at::Half>()),
-      reinterpret_cast<half*>(scores.data_ptr<at::Half>()));
-  static cnnlTensorDescriptor_t sd = nullptr;
-  if (sd == nullptr) sd = make_3d_desc(8, 1, 513);
-  float one = 1.0f, zero = 0.0f;
-  CNNL_CHECK(cnnlSoftmaxForward(handle, CNNL_SOFTMAX_FAST, CNNL_SOFTMAX_MODE_LOW_DIMENSION,
-                                &one, sd, scores.data_ptr(), &zero, sd, probs.data_ptr()));
+      reinterpret_cast<half*>(scores.data_ptr<at::Half>()),
+      reinterpret_cast<half*>(probs.data_ptr<at::Half>()));
   bmm_cache512(handle, probs.data_ptr(), v_cache.data_ptr(), out.data_ptr(), false);
   cnrtDim3_t add_dim = {32, 1, 1};
   add_new_value_kernel<<<add_dim, cnrtFuncTypeBlock, queue>>>(
