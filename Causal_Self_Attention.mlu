@@ -1,10 +1,7 @@
-#include <bang.h>
 #include <aten/cnnl/cnnlHandle.h>
 #include <cnnl.h>
 #include <cnnl_extra.h>
-#include <cnrt.h>
 #include <dlfcn.h>
-#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
 #include <cmath>
