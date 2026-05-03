@@ -28,7 +28,7 @@ __mlu_entry__ void kernel(const half *__restrict__ input,
 
   __memcpy(ebuf, xbuf, B * sizeof(half), NRAM2NRAM);
   __bang_add_scalar(ebuf, ebuf, (half)(-row_max), B);
-  __bang_active_exp(ebuf, ebuf, B);
+  __bang_active_exp_less_0(ebuf, ebuf, B);
   __bang_reduce_sum(ebuf, ebuf, B);
 
   __memcpy(tmp, ebuf, sizeof(half), NRAM2NRAM, sizeof(half),
