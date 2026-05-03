@@ -14,19 +14,7 @@
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
   auto handle = torch_mlu::getCurrentHandle();
 
-  // 这里先使输入连续，避免 CNNL 内部再走隐式 contiguous。
-  if (!input.is_contiguous()) {
-    input = input.contiguous();
-  }
-  if (!grid.is_contiguous()) {
-    grid = grid.contiguous();
-  }
-
   auto t0 =
-      torch::empty({input.size(0), input.size(2), input.size(3), input.size(1)},
-                   input.options());
-
-  auto t1 =
       torch::empty({input.size(0), grid.size(1), grid.size(2), input.size(1)},
                    input.options());
 
@@ -38,15 +26,12 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
   static cnnlTensorDescriptor_t d1;
   static cnnlTensorDescriptor_t d2;
   static cnnlTensorDescriptor_t d3;
-  static cnnlTensorDescriptor_t d4;
-  static cnnlGridSampleDescriptor_t gdesc;
-  static cnnlTransposeDescriptor_t pdesc0;
-  static cnnlTransposeDescriptor_t pdesc1;
+  static cnnlGridSampleDescriptor_t gd;
+  static cnnlTransposeDescriptor_t td;
   static bool inited = false;
 
   static size_t ws0 = 0;
   static size_t ws1 = 0;
-  static size_t ws2 = 0;
   static size_t ws = 0;
 
   if (!inited) {
@@ -54,52 +39,47 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
     CNNL_CHECK(cnnlCreateTensorDescriptor(&d1));
     CNNL_CHECK(cnnlCreateTensorDescriptor(&d2));
     CNNL_CHECK(cnnlCreateTensorDescriptor(&d3));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&d4));
-
-    CNNL_CHECK(cnnlCreateGridSampleDescriptor(&gdesc));
-    CNNL_CHECK(cnnlCreateTransposeDescriptor(&pdesc0));
-    CNNL_CHECK(cnnlCreateTransposeDescriptor(&pdesc1));
+    CNNL_CHECK(cnnlCreateGridSampleDescriptor(&gd));
+    CNNL_CHECK(cnnlCreateTransposeDescriptor(&td));
 
     int s0[4] = {
         (int)input.size(0),
-        (int)input.size(1),
         (int)input.size(2),
         (int)input.size(3),
+        (int)input.size(1),
+    };
+
+    int st0[4] = {
+        (int)(input.size(1) * input.size(2) * input.size(3)),
+        (int)input.size(3),
+        1,
+        (int)(input.size(2) * input.size(3)),
     };
 
     int s1[4] = {
-        (int)input.size(0),
-        (int)input.size(2),
-        (int)input.size(3),
-        (int)input.size(1),
-    };
-
-    int s2[4] = {
         (int)grid.size(0),
         (int)grid.size(1),
         (int)grid.size(2),
         (int)grid.size(3),
     };
 
+    int s2[4] = {
+        (int)input.size(0),
+        (int)grid.size(1),
+        (int)grid.size(2),
+        (int)input.size(1),
+    };
+
     int s3[4] = {
         (int)input.size(0),
-        (int)grid.size(1),
-        (int)grid.size(2),
-        (int)input.size(1),
-    };
-
-    int s4[4] = {
-        (int)input.size(0),
         (int)input.size(1),
         (int)grid.size(1),
         (int)grid.size(2),
     };
 
-    // 源张量按实际连续内存解释。
-    CNNL_CHECK(
-        cnnlSetTensorDescriptor(d0, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, s0));
+    CNNL_CHECK(cnnlSetTensorDescriptorEx(d0, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF,
+                                         4, s0, st0));
 
-    // grid_sample 相关 descriptor 全部显式使用 NHWC。
     CNNL_CHECK(
         cnnlSetTensorDescriptor(d1, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, s1));
 
@@ -107,32 +87,24 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
         cnnlSetTensorDescriptor(d2, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, s2));
 
     CNNL_CHECK(
-        cnnlSetTensorDescriptor(d3, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, s3));
-
-    // 最终输出按实际连续内存解释。
-    CNNL_CHECK(
-        cnnlSetTensorDescriptor(d4, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, s4));
+        cnnlSetTensorDescriptor(d3, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, s3));
 
     CNNL_CHECK(cnnlSetGridSampleDescriptor(
-        gdesc, CNNL_INTERP_BILINEAR, CNNL_GRIDSAMPLE_PADDING_ZEROS, true));
+        gd, CNNL_INTERP_BILINEAR, CNNL_GRIDSAMPLE_PADDING_ZEROS, true));
 
-    int p0[4] = {0, 2, 3, 1};
-    int p1[4] = {0, 3, 1, 2};
+    int p[4] = {0, 3, 1, 2};
+    CNNL_CHECK(cnnlSetTransposeDescriptor(td, 4, p));
 
-    CNNL_CHECK(cnnlSetTransposeDescriptor(pdesc0, 4, p0));
-    CNNL_CHECK(cnnlSetTransposeDescriptor(pdesc1, 4, p1));
-
-    CNNL_CHECK(cnnlGetTransposeWorkspaceSize(handle, d0, pdesc0, &ws0));
-
-    CNNL_CHECK(cnnlGetGridSampleForwardWorkspaceSize(handle, d1, d2, d3, &ws1));
-
-    CNNL_CHECK(cnnlGetTransposeWorkspaceSize(handle, d3, pdesc1, &ws2));
+    CNNL_CHECK(cnnlGetGridSampleForwardWorkspaceSize(handle, d0, d1, d2, &ws0));
+    CNNL_CHECK(cnnlGetTransposeWorkspaceSize(handle, d2, td, &ws1));
 
     ws = ws0;
     if (ws1 > ws)
       ws = ws1;
-    if (ws2 > ws)
-      ws = ws2;
+
+    size_t extra = (size_t)input.numel() * input.element_size();
+    if (extra > ws)
+      ws = extra;
 
     inited = true;
   }
@@ -145,15 +117,12 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
     workspace_ptr = workspace.data_ptr();
   }
 
-  CNNL_CHECK(cnnlTranspose_v2(handle, pdesc0, d0, input.data_ptr(), d1,
-                              t0.data_ptr(), workspace_ptr, ws0));
+  CNNL_CHECK(cnnlGridSampleForward(handle, gd, d0, input.data_ptr(), d1,
+                                   grid.data_ptr(), d2, t0.data_ptr(),
+                                   workspace_ptr, ws));
 
-  CNNL_CHECK(cnnlGridSampleForward(handle, gdesc, d1, t0.data_ptr(), d2,
-                                   grid.data_ptr(), d3, t1.data_ptr(),
-                                   workspace_ptr, ws1));
-
-  CNNL_CHECK(cnnlTranspose_v2(handle, pdesc1, d3, t1.data_ptr(), d4,
-                              output.data_ptr(), workspace_ptr, ws2));
+  CNNL_CHECK(cnnlTranspose_v2(handle, td, d2, t0.data_ptr(), d3,
+                              output.data_ptr(), workspace_ptr, ws1));
 
   return output;
 }
