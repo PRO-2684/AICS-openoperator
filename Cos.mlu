@@ -19,17 +19,24 @@ __mlu_entry__ void cos_half_kernel(half *__restrict__ input) {
       (half *)__builtin_assume_aligned(input + base + CHUNK_ELEMS, 512);
 
   __memcpy(buf0, in0, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
+  __sync_io();
+
   __memcpy(buf1, in1, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
   __bang_active_cos(buf0, buf0, CHUNK_ELEMS);
+  __sync_io_move_compute();
+
   __memcpy(out0, buf0, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
   __bang_active_cos(buf1, buf1, CHUNK_ELEMS);
+  __sync_io_move_compute();
+
   __memcpy(out1, buf1, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
+  __sync_io();
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {4, 8, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
+  cnrtDim3_t dim = {16, 2, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeUnion4;
   cos_half_kernel<<<dim, ktype, queue>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
   return x;
