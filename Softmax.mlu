@@ -18,42 +18,34 @@ __mlu_entry__ void softmax_16x16384_half_kernel(const half *__restrict__ input,
 
   __nram__ half xbuf[DIM];
   __nram__ half ebuf[DIM];
+  __nram__ half sbuf[DIM];
   __nram__ half argbuf[64];
-  __nram__ half partial[PARTIAL_SUMS];
 
   const half *row_in = input + row * DIM;
   half *row_out = output + row * DIM;
 
   __memcpy(xbuf, row_in, DIM * sizeof(half), GDRAM2NRAM);
-  __sync_io();
 
   __bang_argmax(argbuf, xbuf, DIM);
   half row_max = argbuf[0];
 
   __memcpy(ebuf, xbuf, DIM * sizeof(half), NRAM2NRAM);
   __bang_add_scalar(ebuf, ebuf, (half)(-row_max), DIM);
-  __bang_active_exphp(ebuf, ebuf, DIM);
+  __bang_active_exp(ebuf, ebuf, DIM);
 
-  __bang_reduce_sum(ebuf, ebuf, DIM);
-
-  for (int i = 0; i < PARTIAL_SUMS; ++i) {
-    partial[i] = ebuf[i * REDUCE_BLOCK_HALF];
-  }
+  __memcpy(sbuf, ebuf, DIM * sizeof(half), NRAM2NRAM);
+  __bang_reduce_sum(sbuf, sbuf, DIM);
 
   float row_sum = 0.0f;
   for (int i = 0; i < PARTIAL_SUMS; ++i) {
-    row_sum += (float)partial[i];
+    row_sum += (float)sbuf[i * REDUCE_BLOCK_HALF];
   }
 
   half inv_sum = (half)(1.0f / row_sum);
 
-  __memcpy(ebuf, xbuf, DIM * sizeof(half), NRAM2NRAM);
-  __bang_add_scalar(ebuf, ebuf, (half)(-row_max), DIM);
-  __bang_active_exphp(ebuf, ebuf, DIM);
   __bang_mul_scalar(ebuf, ebuf, inv_sum, DIM);
 
   __memcpy(row_out, ebuf, DIM * sizeof(half), NRAM2GDRAM);
-  __sync_io();
 }
 
 // Specialized for ref/ref_files/058_Softmax.py: x is FP16 [16, 16384], softmax dim=1.
