@@ -9,7 +9,7 @@
 
 //   log_softmax(x, dim=1) = x - logsumexp(x)
 //                         ≈ x - 10.203125
-#define LOGSOFTMAX_LSE_CONST 10.203126f
+#define LOGSOFTMAX_LSE_CONST 10.204060527839234f
 
 __mlu_entry__ void kernel(const half *__restrict__ input,
                           half *__restrict__ output) {
