@@ -1,102 +1,77 @@
+#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
+#include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
-#include <math.h>
 #include <torch/extension.h>
 
-#define LOCAL_ELEMS 65536
-#define TASK_COUNT 32
-
-__mlu_func__ float reduce_sum_float(float *buf, float *tmp, int n) {
-  // n * sizeof(float) 必须 128B 对齐；当前 65536/2048/64 都满足。
-  int cur = n;
-  float *src = buf;
-  float *dst = tmp;
-
-  while (cur > 32) {
-    __bang_reduce_sum(dst, src, cur);
-
-    int groups = cur / 32;
-
-    // __bang_reduce_sum 的结果在每 32 个 float 的第 0 个：
-    // dst[0], dst[32], dst[64], ...
-    // pack 到 src[0..groups-1] 便于下一轮 reduce。
-    for (int i = 0; i < groups; ++i) {
-      src[i] = dst[i * 32];
-    }
-
-    cur = groups;
-  }
-
-  float s = 0.0f;
-  for (int i = 0; i < cur; ++i) {
-    s += src[i];
-  }
-  return s;
-}
-
-__mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
-                                        half *__restrict__ y, int outer,
-                                        int inner, float eps) {
-  __nram__ half hbuf[LOCAL_ELEMS];
-  __nram__ float fbuf[LOCAL_ELEMS];
-  __nram__ float tbuf[LOCAL_ELEMS];
-
-  for (int idx = taskId; idx < outer; idx += taskDim) {
-    const half *px = x + (int64_t)idx * inner;
-    half *py = y + (int64_t)idx * inner;
-
-    __memcpy(hbuf, px, inner * sizeof(half), GDRAM2NRAM);
-
-    // sum(x)
-    __bang_half2float(fbuf, hbuf, inner);
-    float sum = reduce_sum_float(fbuf, tbuf, inner);
-
-    // sum(x*x)
-    __bang_half2float(fbuf, hbuf, inner);
-    __bang_square(fbuf, fbuf, inner);
-    float sq_sum = reduce_sum_float(fbuf, tbuf, inner);
-
-    float inv_n = 1.0f / (float)inner;
-    float mean = sum * inv_n;
-    float var = sq_sum * inv_n - mean * mean;
-    if (var < 0.0f)
-      var = 0.0f;
-    float inv_std = 1.0f / sqrtf(var + eps);
-
-    // y = (x - mean) * inv_std
-    __bang_half2float(fbuf, hbuf, inner);
-    __bang_sub_scalar(fbuf, fbuf, mean, inner);
-    __bang_mul_scalar(fbuf, fbuf, inv_std, inner);
-
-    __bang_float2half_rn(hbuf, fbuf, inner);
-    __memcpy(py, hbuf, inner * sizeof(half), NRAM2GDRAM);
-  }
-}
+#define CHECK_CNNL(expr)                                                       \
+  do {                                                                         \
+    cnnlStatus_t _s = (expr);                                                  \
+    TORCH_CHECK(_s == CNNL_STATUS_SUCCESS, "CNNL error: ", (int)_s);           \
+  } while (0)
 
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
   (void)num_features;
 
-  auto y = torch::empty_like(x);
+  auto handle = torch_mlu::getCurrentHandle();
 
   int n = (int)x.size(0);
   int c = (int)x.size(1);
   int h = (int)x.size(2);
   int w = (int)x.size(3);
 
-  int outer = n * c;
-  int inner = h * w;
+  // NCHW -> NHWC
+  auto x_nhwc = x.permute({0, 2, 3, 1}).contiguous();
+  auto y_nhwc = torch::empty_like(x_nhwc);
 
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  auto scale = torch::ones({c}, x.options());
+  auto bias = torch::zeros({c}, x.options());
 
-  cnrtDim3_t dim;
-  dim.x = TASK_COUNT;
-  dim.y = 1;
-  dim.z = 1;
+  // CNNL 文档里 moving_mean/moving_var 可为 NULL，但 saved_mean/saved_invstd
+  // 建议给出来，避免某些版本 BAD_PARAM。
+  auto saved_mean = torch::empty({n, c}, x.options());
+  auto saved_invstd = torch::empty({n, c}, x.options());
 
-  inst_norm_vec_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      (const half *)x.data_ptr<at::Half>(), (half *)y.data_ptr<at::Half>(),
-      outer, inner, 1.0e-5f);
+  cnnlTensorDescriptor_t x_desc;
+  cnnlTensorDescriptor_t y_desc;
+  cnnlTensorDescriptor_t sb_desc;
+  cnnlTensorDescriptor_t mv_desc;
 
-  return y;
+  CHECK_CNNL(cnnlCreateTensorDescriptor(&x_desc));
+  CHECK_CNNL(cnnlCreateTensorDescriptor(&y_desc));
+  CHECK_CNNL(cnnlCreateTensorDescriptor(&sb_desc));
+  CHECK_CNNL(cnnlCreateTensorDescriptor(&mv_desc));
+
+  int x_dims[4] = {n, h, w, c};
+  int sb_dims[1] = {c};
+  int mv_dims[2] = {n, c};
+
+  CHECK_CNNL(cnnlSetTensorDescriptor(x_desc, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF,
+                                     4, x_dims));
+  CHECK_CNNL(cnnlSetTensorDescriptor(y_desc, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF,
+                                     4, x_dims));
+  CHECK_CNNL(cnnlSetTensorDescriptor(sb_desc, CNNL_LAYOUT_ARRAY,
+                                     CNNL_DTYPE_HALF, 1, sb_dims));
+  CHECK_CNNL(cnnlSetTensorDescriptor(mv_desc, CNNL_LAYOUT_NC, CNNL_DTYPE_HALF,
+                                     2, mv_dims));
+
+  // 先按 0 workspace 试。多数归一化 forward 可能可直接跑；
+  // 如果报 BAD_PARAM/NOT_SUPPORTED，再补 workspace 查询版本。
+  void *workspace = nullptr;
+  size_t workspace_size = 0;
+
+  CHECK_CNNL(cnnlInstanceNormForward(
+      handle, 1.0e-5f, 0.1f, sb_desc, scale.data_ptr<at::Half>(), x_desc,
+      x_nhwc.data_ptr<at::Half>(), bias.data_ptr<at::Half>(), mv_desc, nullptr,
+      nullptr, workspace, workspace_size, y_desc, y_nhwc.data_ptr<at::Half>(),
+      saved_mean.data_ptr<at::Half>(), saved_invstd.data_ptr<at::Half>()));
+
+  CHECK_CNNL(cnnlDestroyTensorDescriptor(x_desc));
+  CHECK_CNNL(cnnlDestroyTensorDescriptor(y_desc));
+  CHECK_CNNL(cnnlDestroyTensorDescriptor(sb_desc));
+  CHECK_CNNL(cnnlDestroyTensorDescriptor(mv_desc));
+
+  // NHWC -> NCHW
+  return y_nhwc.permute({0, 3, 1, 2}).contiguous();
 }
