@@ -21,8 +21,9 @@ __mlu_entry__ void softmax_16x16384_half_kernel(const half *__restrict__ input,
   __nram__ half sbuf[DIM];
   __nram__ half argbuf[64];
 
-  const half *row_in = input + row * DIM;
-  half *row_out = output + row * DIM;
+  const half *row_in =
+      (const half *)__builtin_assume_aligned(input + row * DIM, 512);
+  half *row_out = (half *)__builtin_assume_aligned(output + row * DIM, 512);
 
   __memcpy(xbuf, row_in, DIM * sizeof(half), GDRAM2NRAM);
 
