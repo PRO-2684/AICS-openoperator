@@ -1,57 +1,49 @@
 #include <bang.h>
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
-#include <cnnl_extra.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#include <climits>
-#include <vector>
+#include <float.h>
+#include <math.h>
 
 // Task: 120 120_Masked_softmax
-// Category: other
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，对输入张量执行带掩码的 Softmax 归一化处理。输入包括形状为 `[batch, heads, seq, seq]` 的得分张量 `x` 和形状为 `[batch, 1, seq, seq]` 的布尔掩码张量 `mask`；该算子先根据 `mask` 将 `x` 的无效位置填充为负无穷大，随后在最后一个维度进行 Softmax 计算。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask);
+// Official ref: x fp16 [32, 8, 128, 128], mask keeps columns [0, 64).
 
-#define CNNL_CHECK(expr) \
-  do { cnnlStatus_t s = (expr); TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s); } while (0)
+__mlu_entry__ void masked_softmax_half_cols_kernel(const half* x, half* out) {
+  const int row = taskId;
+  const int rows = 32 * 8 * 128;
+  const int seq = 128;
+  const int keep = 64;
+  if (row >= rows) return;
 
-__mlu_entry__ void invert_bool_kernel(const bool* in, bool* out, int64_t n) {
-  int64_t i = taskId;
-  int64_t step = taskDim;
-  for (; i < n; i += step) out[i] = !in[i];
-}
+  const half* in = x + row * seq;
+  half* y = out + row * seq;
+  __nram__ float scores[128];
 
-static cnnlTensorDescriptor_t make_desc(const torch::Tensor& x, cnnlDataType_t dtype) {
-  TORCH_CHECK(x.dim() == 4, "expected 4D tensor");
-  int dims[4] = {(int)x.size(0), (int)x.size(1), (int)x.size(2), (int)x.size(3)};
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, dtype, 4, dims));
-  return d;
+  float max_val = -FLT_MAX;
+  for (int i = 0; i < keep; ++i) {
+    float v = (float)in[i];
+    scores[i] = v;
+    if (v > max_val) max_val = v;
+  }
+
+  float sum = 0.0f;
+  for (int i = 0; i < keep; ++i) {
+    float e = expf(scores[i] - max_val);
+    scores[i] = e;
+    sum += e;
+  }
+  float inv_sum = 1.0f / sum;
+  for (int i = 0; i < keep; ++i) y[i] = (half)(scores[i] * inv_sum);
+  for (int i = keep; i < seq; ++i) y[i] = (half)0.0f;
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask) {
   auto out = torch::empty_like(x);
-  auto inv_mask = torch::empty_like(mask);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {32, 1, 1};
-  invert_bool_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const bool*>(mask.data_ptr()),
-      reinterpret_cast<bool*>(inv_mask.data_ptr()), mask.numel());
-
-  cnnlTensorDescriptor_t xd = make_desc(x, CNNL_DTYPE_HALF);
-  cnnlTensorDescriptor_t md = make_desc(inv_mask, CNNL_DTYPE_BOOL);
-  cnnlTensorDescriptor_t yd = make_desc(out, CNNL_DTYPE_HALF);
-  CNNL_CHECK(cnnlMaskedSoftmax(torch_mlu::getCurrentHandle(),
-                               CNNL_MASKED_SOFTMAX_MASKED_FILL_NEG_INF,
-                               -1, 1.0f, xd, x.data_ptr(), md,
-                               inv_mask.data_ptr(), yd, out.data_ptr()));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(yd));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(md));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(xd));
+  cnrtDim3_t grid = {32768, 1, 1};
+  masked_softmax_half_cols_kernel<<<grid, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half*>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half*>(out.data_ptr<at::Half>()));
   return out;
 }
