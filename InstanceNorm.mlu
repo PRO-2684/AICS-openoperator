@@ -21,15 +21,13 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
   int h = (int)x.size(2);
   int w = (int)x.size(3);
 
-  // NCHW -> NHWC
   auto x_nhwc = x.permute({0, 2, 3, 1}).contiguous();
   auto y_nhwc = torch::empty_like(x_nhwc);
 
   auto scale = torch::ones({c}, x.options());
   auto bias = torch::zeros({c}, x.options());
 
-  // CNNL 文档里 moving_mean/moving_var 可为 NULL，但 saved_mean/saved_invstd
-  // 建议给出来，避免某些版本 BAD_PARAM。
+
   auto saved_mean = torch::empty({n, c}, x.options());
   auto saved_invstd = torch::empty({n, c}, x.options());
 
@@ -56,8 +54,7 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
   CHECK_CNNL(cnnlSetTensorDescriptor(mv_desc, CNNL_LAYOUT_NC, CNNL_DTYPE_HALF,
                                      2, mv_dims));
 
-  // 先按 0 workspace 试。多数归一化 forward 可能可直接跑；
-  // 如果报 BAD_PARAM/NOT_SUPPORTED，再补 workspace 查询版本。
+
   void *workspace = nullptr;
   size_t workspace_size = 0;
 
@@ -72,6 +69,5 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
   CHECK_CNNL(cnnlDestroyTensorDescriptor(sb_desc));
   CHECK_CNNL(cnnlDestroyTensorDescriptor(mv_desc));
 
-  // NHWC -> NCHW
   return y_nhwc.permute({0, 3, 1, 2}).contiguous();
 }
