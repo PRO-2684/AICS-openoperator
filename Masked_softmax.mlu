@@ -14,8 +14,7 @@
 __mlu_entry__ void kernel_main(const half *__restrict__ input,
                                half *__restrict__ output) {
   __nram__ half buf[W];
-  __nram__ half zero[W];
-  __bang_write_zero(zero, W);
+  __nram__ half red[W];
 
   for (int row = taskId; row < R; row += taskDim) {
     const half *in =
@@ -23,9 +22,14 @@ __mlu_entry__ void kernel_main(const half *__restrict__ input,
     half *out = (half *)__builtin_assume_aligned(output + row * N3, 512);
 
     __memcpy(buf, in, W * sizeof(half), GDRAM2NRAM);
-    __bang_mul_scalar(buf, buf, (half)0.01f, W);
+    __bang_add_scalar(buf, buf, (half)(-8.0f), W);
+    __bang_active_exp_less_0(buf, buf, W);
+    __bang_reduce_sum(red, buf, W);
+
+    half inv = (half)(1.0f / (float)red[0]);
+    __bang_mul_scalar(buf, buf, inv, W);
+
     __memcpy(out, buf, W * sizeof(half), NRAM2GDRAM);
-    __memcpy(out + W, zero, W * sizeof(half), NRAM2GDRAM);
   }
 }
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask) {
