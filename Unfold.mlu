@@ -4,51 +4,49 @@
 #include <torch/extension.h>
 
 #define TASK_NUM 32
-#define ROWS_TILE 8
-#define OW 254
+#define ROWS_TILE 16
+#define OW_SIZE 254
 
-__mlu_entry__ void unfold_direct_2d_kernel(const half *__restrict__ x,
+__mlu_entry__ void kernel_unfold_direct_2d(const half *__restrict__ x,
                                            half *__restrict__ y) {
-  constexpr int N = 16;
-  constexpr int C = 3;
-  constexpr int H = 256;
-  constexpr int W = 256;
-  constexpr int K = 3;
-  constexpr int OH = 254;
-  constexpr int AREA = OH * OW;
-  constexpr int BLOCK = C * K * K;
+  constexpr int n_size = 16;
+  constexpr int c_size = 3;
+  constexpr int h_size = 256;
+  constexpr int w_size = 256;
+  constexpr int k_size = 3;
+  constexpr int oh_size = 254;
+  constexpr int area = oh_size * OW_SIZE;
+  constexpr int block = c_size * k_size * k_size;
+  constexpr int tile_per_group = (oh_size + ROWS_TILE - 1) / ROWS_TILE;
 
-  __nram__ half buf[ROWS_TILE * OW];
+  __nram__ half buf[ROWS_TILE * OW_SIZE];
 
-  const int groups = N * BLOCK;
-  const int total_tiles = groups * ((OH + ROWS_TILE - 1) / ROWS_TILE);
+  const int total_tiles = n_size * block * tile_per_group;
 
   for (int tile_id = taskId; tile_id < total_tiles; tile_id += taskDim) {
-    int tile_per_group = (OH + ROWS_TILE - 1) / ROWS_TILE;
+    const int g = tile_id / tile_per_group;
+    const int tile = tile_id - g * tile_per_group;
 
-    int g = tile_id / tile_per_group;
-    int tile = tile_id - g * tile_per_group;
+    const int n = g / block;
+    const int b = g - n * block;
 
-    int n = g / BLOCK;
-    int b = g - n * BLOCK;
+    const int kw = b % k_size;
+    const int kh = (b / k_size) % k_size;
+    const int c = b / (k_size * k_size);
 
-    int kw = b % K;
-    int kh = (b / K) % K;
-    int c = b / (K * K);
-
-    int oh0 = tile * ROWS_TILE;
+    const int oh0 = tile * ROWS_TILE;
     int rows = ROWS_TILE;
-    if (oh0 + rows > OH)
-      rows = OH - oh0;
+    if (oh0 + rows > oh_size)
+      rows = oh_size - oh0;
 
-    int in_base = ((n * C + c) * H + (oh0 + kh)) * W + kw;
-    int out_base = (n * BLOCK + b) * AREA + oh0 * OW;
+    const int in_base = ((n * c_size + c) * h_size + (oh0 + kh)) * w_size + kw;
+    const int out_base = (n * block + b) * area + oh0 * OW_SIZE;
 
-    __memcpy(buf, x + in_base, OW * sizeof(half), GDRAM2NRAM, OW * sizeof(half),
-             W * sizeof(half), rows - 1);
+    __memcpy(buf, x + in_base, OW_SIZE * sizeof(half), GDRAM2NRAM,
+             OW_SIZE * sizeof(half), w_size * sizeof(half), rows - 1);
 
-    __memcpy(y + out_base, buf, OW * sizeof(half), NRAM2GDRAM,
-             OW * sizeof(half), OW * sizeof(half), rows - 1);
+    __memcpy(y + out_base, buf, OW_SIZE * sizeof(half), NRAM2GDRAM,
+             OW_SIZE * sizeof(half), OW_SIZE * sizeof(half), rows - 1);
   }
 }
 
