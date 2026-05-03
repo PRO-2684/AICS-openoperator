@@ -4,8 +4,8 @@
 #include <math.h>
 #include <torch/extension.h>
 
-#define PARTS 4
-#define LOCAL_ELEMS 8192 * 2
+#define PARTS 2
+#define LOCAL_ELEMS 8192 * 4
 
 __mlu_func__ float reduce_sum_float_small(float *buf, float *tmp, int n) {
   int cur = n;
