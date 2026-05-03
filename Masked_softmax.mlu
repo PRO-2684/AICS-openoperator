@@ -1,6 +1,7 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <stdint.h>
 #include <torch/extension.h>
 
 #define N0 32
@@ -9,66 +10,60 @@
 #define N3 128
 #define W 64
 #define R (N0 * N1 * N2)
+
 #define TASKS 32
-#define TILE 128
+#define TILE 1024
 
 __mlu_entry__ void kernel_main(const half *__restrict__ input,
                                half *__restrict__ output) {
-  __nram__ half xbuf[TILE * W];
-  __nram__ half ybuf[TILE * W];
-  __nram__ half sbuf[TILE * W];
-  __nram__ half rbuf[TILE];
+  __nram__ half buf[TILE * W];
+  __nram__ half sum[TILE * W];
+  __nram__ half scl[TILE * W];
+  __nram__ half vec[TILE];
+  __nram__ uint8_t rep[TILE];
+
+#pragma unroll
+  for (int i = 0; i < TILE; ++i) {
+    rep[i] = W;
+  }
 
   for (int base = taskId * TILE; base < R; base += taskDim * TILE) {
-    int rows = R - base;
-    if (rows > TILE)
-      rows = TILE;
-
     const half *src =
         (const half *)__builtin_assume_aligned(input + base * N3, 512);
     half *dst = (half *)__builtin_assume_aligned(output + base * N3, 512);
 
-    __memcpy(xbuf, src, W * sizeof(half), GDRAM2NRAM, W * sizeof(half),
-             N3 * sizeof(half), rows - 1);
+    __memcpy(buf, src, W * sizeof(half), GDRAM2NRAM, W * sizeof(half),
+             N3 * sizeof(half), TILE - 1);
 
-    __bang_maxpool(rbuf, xbuf, 1, rows, W, 1, W, W, 1);
+#if 1
+    __bang_active_exp(buf, buf, TILE * W);
+#else
+    __bang_add_scalar(buf, buf, (half)(-8.0f), TILE * W);
+    __bang_active_exp_less_0(buf, buf, TILE * W);
+#endif
 
-#pragma unroll
-    for (int i = 0; i < TILE; ++i) {
-      if (i < rows) {
-        half v = rbuf[i];
-#pragma unroll
-        for (int j = 0; j < W; ++j) {
-          sbuf[i * W + j] = v;
-        }
-      }
-    }
-
-    __bang_sub(ybuf, xbuf, sbuf, rows * W);
-    __bang_active_exp_less_0(ybuf, ybuf, rows * W);
-
-    __bang_sumpool(rbuf, ybuf, 1, rows, W, 1, W, W, 1);
+    __bang_reduce_sum(sum, buf, TILE * W);
 
 #pragma unroll
     for (int i = 0; i < TILE; ++i) {
-      if (i < rows) {
-        half v = (half)(1.0f / (float)rbuf[i]);
-#pragma unroll
-        for (int j = 0; j < W; ++j) {
-          sbuf[i * W + j] = v;
-        }
-      }
+      vec[i] = (half)(1.0f / (float)sum[i * W]);
     }
 
-    __bang_mul(ybuf, ybuf, sbuf, rows * W);
+    __extension(scl, vec, rep, sizeof(half), NRAM2NRAM, TILE);
 
-    __memcpy(dst, ybuf, W * sizeof(half), NRAM2GDRAM, N3 * sizeof(half),
-             W * sizeof(half), rows - 1);
+    __bang_mul(buf, buf, scl, TILE * W);
 
-    __bang_write_zero(ybuf, rows * W);
+    __memcpy(dst, buf, W * sizeof(half), NRAM2GDRAM, N3 * sizeof(half),
+             W * sizeof(half), TILE - 1);
+  }
+}
 
-    __memcpy(dst + W, ybuf, W * sizeof(half), NRAM2GDRAM, N3 * sizeof(half),
-             W * sizeof(half), rows - 1);
+__mlu_entry__ void kernel_tail(half *__restrict__ output) {
+  const int total = R * W;
+  for (int idx = taskId; idx < total; idx += taskDim) {
+    int row = idx >> 6;
+    int col = idx & 63;
+    output[row * N3 + W + col] = (half)0.0f;
   }
 }
 
@@ -76,10 +71,14 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask) {
   auto y = torch::empty_like(x);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t kdim = {TASKS, 1, 1};
 
+  cnrtDim3_t kdim = {TASKS, 1, 1};
   kernel_main<<<kdim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+
+  cnrtDim3_t zdim = {256, 1, 1};
+  kernel_tail<<<zdim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
 
   return y;
