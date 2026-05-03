@@ -6,41 +6,36 @@
 
 torch::Tensor bang_func(torch::Tensor x) {
   static cnnlTensorDescriptor_t d;
-  static size_t ws0 = 0;
-  static size_t ws1 = 0;
   static bool inited = false;
 
   auto handle = torch_mlu::getCurrentHandle();
 
   if (!inited) {
-    int dims[3] = {16, 256, 256};
+    int nd = x.dim();
+    int dims[8];
+
+#pragma unroll
+    for (int i = 0; i < 8; ++i) {
+      dims[i] = 1;
+    }
+
+    for (int i = 0; i < nd; ++i) {
+      dims[i] = static_cast<int>(x.size(i));
+    }
 
     cnnlCreateTensorDescriptor(&d);
-    cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, dims);
-
-    cnnlGetCumsumWorkspaceSize(handle, d, 1, &ws0);
-    cnnlGetCumsumWorkspaceSize(handle, d, 2, &ws1);
+    cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, nd, dims);
 
     inited = true;
   }
 
-  auto tmp = torch::empty_like(x);
-  auto out = torch::empty_like(x);
+  auto y = torch::empty_like(x);
 
-  size_t ws = ws0 > ws1 ? ws0 : ws1;
-  torch::Tensor workspace;
-  void *workspace_ptr = nullptr;
+  cnnlCumsum_v2(handle, d, x.data_ptr<at::Half>(), 1, false, false,
+                CNNL_NOT_PROPAGATE_NAN, d, y.data_ptr<at::Half>(), nullptr, 0);
 
-  if (ws) {
-    workspace = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
-    workspace_ptr = workspace.data_ptr();
-  }
+  cnnlCumsum_v2(handle, d, y.data_ptr<at::Half>(), 2, false, false,
+                CNNL_NOT_PROPAGATE_NAN, d, y.data_ptr<at::Half>(), nullptr, 0);
 
-  cnnlCumsum_v2(handle, d, x.data_ptr(), 1, false, false,
-                CNNL_NOT_PROPAGATE_NAN, d, tmp.data_ptr(), workspace_ptr, ws0);
-
-  cnnlCumsum_v2(handle, d, tmp.data_ptr(), 2, false, false,
-                CNNL_NOT_PROPAGATE_NAN, d, out.data_ptr(), workspace_ptr, ws1);
-
-  return out;
+  return y;
 }
