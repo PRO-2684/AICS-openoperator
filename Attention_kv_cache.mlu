@@ -47,8 +47,10 @@ __mlu_entry__ void concat_kv_kernel(const half* k_cache, const half* v_cache,
 __mlu_entry__ void fused_kv_attn_kernel(const half* q, const half* k_cache,
                                         const half* v_cache, const half* k_new,
                                         const half* v_new, half* out) {
-  int h = taskId;
+  int h = taskId / 4;
+  int part = taskId - h * 4;
   if (h >= 8) return;
+  int d0 = part * 16;
   const half* qh = q + h * 64;
   const half* kch = k_cache + h * 512 * 64;
   const half* vch = v_cache + h * 512 * 64;
@@ -64,8 +66,8 @@ __mlu_entry__ void fused_kv_attn_kernel(const half* q, const half* k_cache,
     if (s > mx) mx = s;
   }
 
-  float acc[64];
-  for (int d = 0; d < 64; ++d) acc[d] = 0.0f;
+  float acc[16];
+  for (int d = 0; d < 16; ++d) acc[d] = 0.0f;
   float denom = 0.0f;
   for (int t = 0; t < 513; ++t) {
     const half* kh = (t < 512) ? (kch + t * 64) : knh;
@@ -74,9 +76,9 @@ __mlu_entry__ void fused_kv_attn_kernel(const half* q, const half* k_cache,
     for (int d = 0; d < 64; ++d) dot += (float)qh[d] * (float)kh[d];
     float w = expf(dot * 0.125f - mx);
     denom += w;
-    for (int d = 0; d < 64; ++d) acc[d] += w * (float)vh[d];
+    for (int d = 0; d < 16; ++d) acc[d] += w * (float)vh[d0 + d];
   }
-  for (int d = 0; d < 64; ++d) out[h * 64 + d] = (half)(acc[d] / denom);
+  for (int d = 0; d < 16; ++d) out[h * 64 + d0 + d] = (half)(acc[d] / denom);
 }
 
 static cnnlTensorDescriptor_t make_1d_desc(int64_t n) {
@@ -188,7 +190,7 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_
                         torch::Tensor k_new, torch::Tensor v_new) {
   auto out = torch::empty_like(q);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {8, 1, 1};
+  cnrtDim3_t dim = {32, 1, 1};
   fused_kv_attn_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half*>(q.data_ptr<at::Half>()),
       reinterpret_cast<const half*>(k_cache.data_ptr<at::Half>()),
