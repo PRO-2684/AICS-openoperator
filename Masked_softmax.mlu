@@ -9,38 +9,31 @@
 #define N3 128
 #define W 64
 #define R (N0 * N1 * N2)
-#define TASKS 128
+#define TASKS 32
 
 __mlu_entry__ void kernel_main(const half *__restrict__ input,
                                half *__restrict__ output) {
-  __nram__ half buf[W];
+  __nram__ half obuf[N3];
   __nram__ half red[W];
-  __nram__ half zero[W];
 
-  __bang_write_zero(zero, W);
+  __bang_write_zero(obuf, N3);
 
   for (int row = taskId; row < R; row += taskDim) {
     const half *in =
         (const half *)__builtin_assume_aligned(input + row * N3, 512);
     half *out = (half *)__builtin_assume_aligned(output + row * N3, 512);
 
-    __memcpy(buf, in, W * sizeof(half), GDRAM2NRAM);
+    __memcpy(obuf, in, W * sizeof(half), GDRAM2NRAM);
 
-    __bang_add_scalar(buf, buf, (half)(-8.0f), W);
-    __bang_active_exp_less_0(buf, buf, W);
+    __bang_add_scalar(obuf, obuf, (half)(-8.0f), W);
+    __bang_active_exp_less_0(obuf, obuf, W);
 
-    __memcpy(red, buf, W * sizeof(half), NRAM2NRAM);
-    __bang_reduce_sum(red, red, W);
+    __bang_reduce_sum(red, obuf, W);
 
-    float inv = 1.0f / (float)red[0];
+    half inv = (half)(1.0f / (float)red[0]);
+    __bang_mul_scalar(obuf, obuf, inv, W);
 
-#pragma unroll
-    for (int i = 0; i < W; ++i) {
-      buf[i] = (half)((float)buf[i] * inv);
-    }
-
-    __memcpy(out, buf, W * sizeof(half), NRAM2GDRAM);
-    __memcpy(out + W, zero, W * sizeof(half), NRAM2GDRAM);
+    __memcpy(out, obuf, N3 * sizeof(half), NRAM2GDRAM);
   }
 }
 
