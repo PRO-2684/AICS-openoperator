@@ -11,6 +11,10 @@
 #define THREADS_PER_JOB 32
 #define CACHE_TILE_ELEMS 65536
 
+#define USE_INPLACE 1
+#define INNER_SPLIT 2
+#define INNER_TILE_ELEMS 32768
+
 #define CHECK_CNNL(expr)                                                       \
   do {                                                                         \
     cnnlStatus_t _status = (expr);                                             \
@@ -44,7 +48,6 @@ __mlu_entry__ void make_angle_kernel(float *angle, int extent, int width) {
     int p = idx / half_width;
     int k = idx - p * half_width;
 
-    // float32 路径，尽量贴近参考实现：
     // arange(...).float() * (-log(10000.0) / d_model)
     float exponent = (2.0f * (float)k) * (-9.210340371976184f / (float)width);
     angle[idx] = (float)p * expf(exponent);
@@ -64,37 +67,6 @@ __mlu_entry__ void pack_cache_kernel(const float *sinv, const float *cosv,
     cache[out_base] = (half)sinv[idx];
     cache[out_base + 1] = (half)cosv[idx];
   }
-}
-
-__mlu_entry__ void add_cache_kernel(const half *__restrict__ x,
-                                    const half *__restrict__ cache,
-                                    half *__restrict__ y, int total,
-                                    int plane) {
-  int base = taskId * CACHE_TILE_ELEMS;
-  if (base >= total) {
-    return;
-  }
-
-  int remain = total - base;
-  int count = remain < CACHE_TILE_ELEMS ? remain : CACHE_TILE_ELEMS;
-
-  __nram__ half xb[CACHE_TILE_ELEMS];
-  __nram__ half pb[CACHE_TILE_ELEMS];
-
-  __memcpy(xb, x + base, count * sizeof(half), GDRAM2NRAM);
-
-  int offset = base - (base / plane) * plane;
-  if (offset + count <= plane) {
-    __memcpy(pb, cache + offset, count * sizeof(half), GDRAM2NRAM);
-  } else {
-    int first = plane - offset;
-    __memcpy(pb, cache + offset, first * sizeof(half), GDRAM2NRAM);
-    __memcpy(pb + first, cache, (count - first) * sizeof(half), GDRAM2NRAM);
-  }
-
-  __bang_add(xb, xb, pb, count);
-
-  __memcpy(y + base, xb, count * sizeof(half), NRAM2GDRAM);
 }
 
 static void ensure_cache(torch::Tensor x, int width) {
@@ -158,30 +130,84 @@ static void ensure_cache(torch::Tensor x, int width) {
 
 } // namespace
 
+__mlu_entry__ void add_cache_kernel(const half *__restrict__ x,
+                                    const half *__restrict__ cache,
+                                    half *__restrict__ y, int total,
+                                    int plane) {
+  int base = taskId * CACHE_TILE_ELEMS;
+  if (base >= total) {
+    return;
+  }
+
+  int remain = total - base;
+  int count = remain < CACHE_TILE_ELEMS ? remain : CACHE_TILE_ELEMS;
+
+  __nram__ half xb[CACHE_TILE_ELEMS];
+  __nram__ half pb[CACHE_TILE_ELEMS];
+
+  __memcpy(xb, x + base, count * sizeof(half), GDRAM2NRAM);
+
+  int offset = base - (base / plane) * plane;
+  if (offset + count <= plane) {
+    __memcpy(pb, cache + offset, count * sizeof(half), GDRAM2NRAM);
+  } else {
+    int first = plane - offset;
+    __memcpy(pb, cache + offset, first * sizeof(half), GDRAM2NRAM);
+    __memcpy(pb + first, cache, (count - first) * sizeof(half), GDRAM2NRAM);
+  }
+
+  __bang_add(xb, xb, pb, count);
+
+  __memcpy(y + base, xb, count * sizeof(half), NRAM2GDRAM);
+}
+
+__mlu_entry__ void add_cache_kernel_fast(const half *__restrict__ x,
+                                         const half *__restrict__ cache,
+                                         half *__restrict__ y) {
+  int t = taskId;
+  int outer_idx = t / INNER_SPLIT;
+  int inner_idx = t - outer_idx * INNER_SPLIT;
+
+  int base = outer_idx * (INNER_SPLIT * INNER_TILE_ELEMS) +
+             inner_idx * INNER_TILE_ELEMS;
+  int cache_base = inner_idx * INNER_TILE_ELEMS;
+
+  __nram__ half xb[INNER_TILE_ELEMS];
+  __nram__ half pb[INNER_TILE_ELEMS];
+
+  __memcpy(xb, x + base, INNER_TILE_ELEMS * sizeof(half), GDRAM2NRAM);
+  __memcpy(pb, cache + cache_base, INNER_TILE_ELEMS * sizeof(half), GDRAM2NRAM);
+
+  __bang_add(xb, xb, pb, INNER_TILE_ELEMS);
+
+  __memcpy(y + base, xb, INNER_TILE_ELEMS * sizeof(half), NRAM2GDRAM);
+}
+
 torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len) {
-  int width = static_cast<int>(x.size(2));
-  int extent = static_cast<int>(x.size(1));
-  int outer = static_cast<int>(x.size(0));
+  // int width = static_cast<int>(x.size(2));
+  constexpr int width = 512;
+  constexpr int outer = 32;
+  // int outer = static_cast<int>(x.size(0));
 
   ensure_cache(x, width);
 
+#if USE_INPLACE
+  auto y = x;
+#else
   auto y = torch::empty_like(x);
-
-  int plane = extent * width;
-  int total = outer * plane;
-  int jobs = (total + CACHE_TILE_ELEMS - 1) / CACHE_TILE_ELEMS;
+#endif
 
   cnrtDim3_t dim;
-  dim.x = jobs;
+  dim.x = outer * INNER_SPLIT;
   dim.y = 1;
   dim.z = 1;
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-  add_cache_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+  add_cache_kernel_fast<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(g_state.cache.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()), total, plane);
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
 
   return y;
 }

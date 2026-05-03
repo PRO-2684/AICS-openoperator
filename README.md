@@ -136,7 +136,7 @@ python scripts/update_problems.py
 | 085 | [Linear](Linear.mlu) | N/A | 🔴 |
 | 086 | [Batch_outer_product](Batch_outer_product.mlu) | N/A | 🔴 |
 | 087 | [Hadamard_product](Hadamard_product.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/1eda60594d6e0b532762d4a53c465437ad2d7e60) |
-| 088 | [Matrix_trace](Matrix_trace.mlu) | N/A | 🔴 |
+| 088 | [Matrix_trace](Matrix_trace.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/591ffedc0fbb7528b8e252a2d94c663eb19484ec) |
 | 089 | [Diagonal_extraction](Diagonal_extraction.mlu) | N/A | 🔴 |
 | 090 | [Einsum_4D_contract](Einsum_4D_contract.mlu) | N/A | 🔴 |
 | 091 | [Matrix_inverse](Matrix_inverse.mlu) | N/A | 🔴 |
