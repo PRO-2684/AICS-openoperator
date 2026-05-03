@@ -3,102 +3,53 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#include <pybind11/embed.h>
-
-namespace {
-class SubprocessManager {
-public:
-  static void run_cmd_async(py::object cmd) {
-    py::gil_scoped_acquire gil;
-
-    try {
-      ensure_registered();
-
-      py::module_ subprocess = py::module_::import("subprocess");
-      py::print("start:", cmd);
-
-      py::object proc = subprocess.attr("Popen")(
-          cmd, py::arg("stdout") = subprocess.attr("PIPE"),
-          py::arg("stderr") = subprocess.attr("PIPE"), py::arg("text") = true);
-
-      children().append(proc);
-      py::print("pid:", proc.attr("pid"));
-    } catch (const py::error_already_set &e) {
-      py::print("Exec " + py::str(cmd).cast<std::string>() + " error:\n" +
-                std::string(e.what()));
-    }
-  }
-
-  static void cleanup_children() {
-    py::gil_scoped_acquire gil;
-
-    try {
-      py::module_ subprocess = py::module_::import("subprocess");
-
-      for (auto item : children()) {
-        py::object proc = py::reinterpret_borrow<py::object>(item);
-
-        if (proc.is_none()) {
-          continue;
-        }
-
-        py::object rc = proc.attr("poll")();
-        if (!rc.is_none()) {
-          continue;
-        }
-
-        try {
-          proc.attr("terminate")();
-
-          try {
-            proc.attr("communicate")(py::arg("timeout") = 3);
-          } catch (const py::error_already_set &) {
-            proc.attr("kill")();
-            proc.attr("communicate")();
-          }
-        } catch (const py::error_already_set &e) {
-          py::print("cleanup child failed:", e.what());
-        }
-      }
-
-      children() = py::list();
-    } catch (const py::error_already_set &e) {
-      py::print("cleanup error:", e.what());
-    }
-  }
-
-private:
-  static py::list &children() {
-    static py::list procs;
-    return procs;
-  }
-
-  static bool &registered() {
-    static bool done = false;
-    return done;
-  }
-
-  static void ensure_registered() {
-    if (registered())
-      return;
-
-    py::module_ atexit = py::module_::import("atexit");
-    atexit.attr("register")(
-        py::cpp_function([]() { SubprocessManager::cleanup_children(); }));
-
-    registered() = true;
-  }
-};
-} // namespace
-
 __attribute__((constructor)) static void on_so_load() {
-  // spawn_with_parent_death_kill({"cnperf-cli", "monitor"});
+  namespace py = pybind11;
+
   if (!Py_IsInitialized()) {
     return;
   }
 
-  SubprocessManager::run_cmd_async(
-      py::cast(std::vector<std::string>{"cnperf-cli", "monitor"}));
+  py::gil_scoped_acquire gil;
+
+  try {
+    py::module_ torch = py::module_::import("torch");
+
+    const int device_id = 8;
+
+    if (py::hasattr(torch, "mlu")) {
+      py::object mlu = torch.attr("mlu");
+
+      if (py::hasattr(mlu, "is_available")) {
+        bool ok = mlu.attr("is_available")().cast<bool>();
+        if (!ok) {
+          py::print("[AUTO] torch.mlu is not available");
+          return;
+        }
+      }
+
+      if (py::hasattr(mlu, "device_count")) {
+        int n = mlu.attr("device_count")().cast<int>();
+        py::print("[AUTO] torch.mlu.device_count =", n);
+
+        if (device_id < 0 || device_id >= n) {
+          py::print("[AUTO] invalid MLU device id:", device_id);
+          return;
+        }
+      }
+
+      mlu.attr("set_device")(device_id);
+      py::print("[AUTO] set default MLU device to mlu:", device_id);
+    } else {
+      py::print("[AUTO] torch has no mlu attribute");
+    }
+  } catch (const py::error_already_set &e) {
+    try {
+      py::print("[AUTO] set MLU device failed:", e.what());
+    } catch (...) {
+    }
+  } catch (...) {
+  }
 }
 
 #define TASKS 32
