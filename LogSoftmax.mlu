@@ -14,7 +14,6 @@ __mlu_entry__ void kernel(const half *__restrict__ input,
   const int row = taskId;
 
   __nram__ half xbuf[B];
-  __nram__ half ebuf[B];
   __nram__ half tmp[D];
 
   const half *row_in =
@@ -26,12 +25,11 @@ __mlu_entry__ void kernel(const half *__restrict__ input,
   __bang_argmax(tmp, xbuf, B);
   half row_max = tmp[0];
 
-  __memcpy(ebuf, xbuf, B * sizeof(half), NRAM2NRAM);
-  __bang_add_scalar(ebuf, ebuf, (half)(-row_max), B);
-  __bang_active_exp_less_0(ebuf, ebuf, B);
-  __bang_reduce_sum(ebuf, ebuf, B);
+  __bang_add_scalar(xbuf, xbuf, (half)(-row_max), B);
+  __bang_active_exp_less_0(xbuf, xbuf, B);
+  __bang_reduce_sum(xbuf, xbuf, B);
 
-  __memcpy(tmp, ebuf, sizeof(half), NRAM2NRAM, sizeof(half),
+  __memcpy(tmp, xbuf, sizeof(half), NRAM2NRAM, sizeof(half),
            C * sizeof(half), D - 1);
   __bang_reduce_sum(tmp, tmp, D);
 
@@ -40,6 +38,7 @@ __mlu_entry__ void kernel(const half *__restrict__ input,
   __bang_active_log(tmp, tmp, C);
   half lse = tmp[0] + row_max;
 
+  __memcpy(xbuf, row_in, B * sizeof(half), GDRAM2NRAM);
   __bang_add_scalar(xbuf, xbuf, (half)(-lse), B);
   __memcpy(row_out, xbuf, B * sizeof(half), NRAM2GDRAM);
 }
@@ -48,7 +47,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   auto y = torch::empty_like(x);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t kdim = {A, 1, 1};
-  kernel<<<kdim, cnrtFuncTypeUnion2, queue>>>(
+  kernel<<<kdim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
