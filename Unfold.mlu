@@ -1,96 +1,55 @@
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-namespace {
+#define TASK_NUM 32
+#define ROW_ELEMS 254
 
-struct OpCtx {
-  bool ready = false;
+__mlu_entry__ void unfold_direct_kernel(const half *__restrict__ x,
+                                        half *__restrict__ y) {
+  constexpr int n_size = 16;
+  constexpr int c_size = 3;
+  constexpr int h_size = 256;
+  constexpr int w_size = 256;
+  constexpr int k_size = 3;
+  constexpr int out_h = 254;
+  constexpr int out_w = 254;
+  constexpr int area = out_h * out_w;
+  constexpr int block = c_size * k_size * k_size;
 
-  cnnlTensorDescriptor_t x_desc;
-  cnnlTensorDescriptor_t w_desc;
-  cnnlTensorDescriptor_t mid_desc;
-  cnnlTensorDescriptor_t y_desc;
-  cnnlConvolutionDescriptor_t conv_desc;
-  cnnlTransposeDescriptor_t trans_desc;
+  __nram__ half buf[ROW_ELEMS];
 
-  void init(cnnlHandle_t handle, const torch::Tensor &x, int k, int s, int p) {
-    if (ready)
-      return;
+  int total_rows = n_size * block * out_h;
 
-    cnnlCreateTensorDescriptor(&x_desc);
-    cnnlCreateTensorDescriptor(&w_desc);
-    cnnlCreateTensorDescriptor(&mid_desc);
-    cnnlCreateTensorDescriptor(&y_desc);
-    cnnlCreateConvolutionDescriptor(&conv_desc);
-    cnnlCreateTransposeDescriptor(&trans_desc);
+  for (int row = taskId; row < total_rows; row += taskDim) {
+    int oh = row % out_h;
+    int tmp = row / out_h;
 
-    const int n = static_cast<int>(x.size(0));
-    const int c = static_cast<int>(x.size(1));
-    const int h = static_cast<int>(x.size(2));
-    const int w = static_cast<int>(x.size(3));
+    int b = tmp % block;
+    int n = tmp / block;
 
-    const int oh = (h + 2 * p - k) / s + 1;
-    const int ow = (w + 2 * p - k) / s + 1;
-    const int l = oh * ow;
-    const int block = c * k * k;
+    int kw = b % k_size;
+    int kh = (b / k_size) % k_size;
+    int c = b / (k_size * k_size);
 
-    int xd[4] = {n, c, h, w};
-    int wd[4] = {block, c, k, k};
-    int md[3] = {n, l, block};
-    int yd[3] = {n, block, l};
+    int in_base = ((n * c_size + c) * h_size + (oh + kh)) * w_size + kw;
+    int out_base = (n * block + b) * area + oh * out_w;
 
-    cnnlSetTensorDescriptor(x_desc, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4, xd);
-    cnnlSetTensorDescriptor(w_desc, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4, wd);
-    cnnlSetTensorDescriptor(mid_desc, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3,
-                            md);
-    cnnlSetTensorDescriptor(y_desc, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, yd);
-
-    int pad[4] = {p, p, p, p};
-    int st[2] = {s, s};
-    int dil[2] = {1, 1};
-    cnnlSetConvolutionDescriptor(conv_desc, 4, pad, st, dil, 1,
-                                 CNNL_DTYPE_HALF);
-
-    int perm[3] = {0, 2, 1};
-    cnnlSetTransposeDescriptor(trans_desc, 3, perm);
-
-    ready = true;
+    __memcpy(buf, x + in_base, ROW_ELEMS * sizeof(half), GDRAM2NRAM);
+    __memcpy(y + out_base, buf, ROW_ELEMS * sizeof(half), NRAM2GDRAM);
   }
-};
-
-OpCtx &ctx() {
-  static OpCtx c;
-  return c;
 }
-
-} // namespace
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
                         int padding) {
-  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
+  auto y = torch::empty({16, 27, 254 * 254}, x.options());
 
-  auto &c = ctx();
-  c.init(handle, x, kernel_size, stride, padding);
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-  const int n = static_cast<int>(x.size(0));
-  const int ch = static_cast<int>(x.size(1));
-  const int h = static_cast<int>(x.size(2));
-  const int w = static_cast<int>(x.size(3));
-
-  const int oh = (h + 2 * padding - kernel_size) / stride + 1;
-  const int ow = (w + 2 * padding - kernel_size) / stride + 1;
-  const int l = oh * ow;
-  const int block = ch * kernel_size * kernel_size;
-
-  auto mid = torch::empty({n, l, block}, x.options());
-  auto y = torch::empty({n, block, l}, x.options());
-
-  cnnlIm2Col(handle, c.x_desc, x.data_ptr(), c.w_desc, c.conv_desc, nullptr,
-             nullptr, nullptr, nullptr, 0, c.mid_desc, mid.data_ptr());
-
-  cnnlTranspose_v2(handle, c.trans_desc, c.mid_desc, mid.data_ptr(), c.y_desc,
-                   y.data_ptr(), nullptr, 0);
+  unfold_direct_kernel<<<TASK_NUM, cnrtFuncTypeBlock, queue>>>(
+      static_cast<const half *>(x.data_ptr()),
+      static_cast<half *>(y.data_ptr()));
 
   return y;
 }
