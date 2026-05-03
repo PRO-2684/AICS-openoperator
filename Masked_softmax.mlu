@@ -19,7 +19,7 @@ __mlu_entry__ void kernel_main(const half *__restrict__ input,
   for (int row = taskId; row < R; row += taskDim) {
     half *out = (half *)__builtin_assume_aligned(output + row * N3, 512);
 
-    __memcpy(out, buf, W * sizeof(half), NRAM2GDRAM);
+    __memcpy(out + W, buf, W * sizeof(half), NRAM2GDRAM);
   }
 }
 
