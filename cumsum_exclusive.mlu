@@ -24,9 +24,7 @@ __mlu_entry__ void shift_kernel(const half *__restrict__ x,
 
   int base = row * COLS;
   y[base] = (half)0.0f;
-  for (int i = 1; i < COLS; ++i) {
-    y[base + i] = x[base + i - 1];
-  }
+  __memcpy(y + base + 1, x + base, (COLS - 1) * sizeof(half), GDRAM2GDRAM);
 }
 
 static void cumsum_dim1(torch::Tensor in, torch::Tensor out) {
