@@ -14,6 +14,7 @@ __mlu_entry__ void softmax_16x16384_half_kernel(const half *__restrict__ input,
   const int row = taskId;
 
   __nram__ half xbuf[DIM];
+  __nram__ half partial_sum[PARTIAL_SUMS];
   __nram__ half argbuf[64];
 
   const half *row_in =
@@ -30,12 +31,14 @@ __mlu_entry__ void softmax_16x16384_half_kernel(const half *__restrict__ input,
 
   __bang_reduce_sum(xbuf, xbuf, DIM);
 
-  float row_sum = 0.0f;
-  for (int i = 0; i < PARTIAL_SUMS; ++i) {
-    row_sum += (float)xbuf[i * REDUCE_BLOCK_HALF];
-  }
+  __memcpy(partial_sum, xbuf, sizeof(half), NRAM2NRAM, sizeof(half),
+           REDUCE_BLOCK_HALF * sizeof(half), PARTIAL_SUMS - 1);
+  __bang_reduce_sum(partial_sum, partial_sum, PARTIAL_SUMS);
 
-  half inv_sum = (half)(1.0f / row_sum);
+  half row_sum = partial_sum[0] + partial_sum[REDUCE_BLOCK_HALF] +
+                 partial_sum[REDUCE_BLOCK_HALF * 2] +
+                 partial_sum[REDUCE_BLOCK_HALF * 3];
+  half inv_sum = (half)(1.0f / (float)row_sum);
 
   __bang_mul_scalar(xbuf, xbuf, inv_sum, DIM);
 
@@ -47,7 +50,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   auto y = torch::empty_like(x);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t kdim = {BATCH, 1, 1};
-  softmax_16x16384_half_kernel<<<kdim, cnrtFuncTypeUnion4, queue>>>(
+  softmax_16x16384_half_kernel<<<kdim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
