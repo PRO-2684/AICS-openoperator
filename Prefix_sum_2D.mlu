@@ -4,44 +4,41 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void stage0(const half *__restrict__ x, half *__restrict__ tmp) {
-  __nram__ half h[256];
-  __nram__ float f[256];
-  __nram__ float s[256];
+  __nram__ half a[256];
+  __nram__ half s[256];
 
   for (int t = taskId; t < 16; t += taskDim) {
     const int p = t << 16;
 
-    __bang_write_value(s, 256, 0.0f);
+    __bang_write_value(s, 256, (half)0.0f);
 
     for (int i = 0; i < 256; ++i) {
       const int q = p + (i << 8);
 
-      __memcpy(h, x + q, 512, GDRAM2NRAM);
-      __bang_half2float(f, h, 256);
-      __bang_add(s, s, f, 256);
-      __bang_float2half_rn(h, s, 256);
-      __memcpy(tmp + q, h, 512, NRAM2GDRAM);
+      __memcpy(a, x + q, 512, GDRAM2NRAM);
+      __bang_add(s, s, a, 256);
+      __memcpy(tmp + q, s, 512, NRAM2GDRAM);
     }
   }
 }
 
 __mlu_entry__ void stage1(const half *__restrict__ tmp,
                           half *__restrict__ out) {
-  __nram__ half h[256];
+  __nram__ half a[256];
 
   for (int t = taskId; t < 4096; t += taskDim) {
     const int p = t << 8;
 
-    __memcpy(h, tmp + p, 512, GDRAM2NRAM);
+    __memcpy(a, tmp + p, 512, GDRAM2NRAM);
 
-    float s = 0.0f;
+    half s = (half)0.0f;
 #pragma unroll
     for (int i = 0; i < 256; ++i) {
-      s += (float)h[i];
-      h[i] = (half)s;
+      s = (half)((float)s + (float)a[i]);
+      a[i] = s;
     }
 
-    __memcpy(out + p, h, 512, NRAM2GDRAM);
+    __memcpy(out + p, a, 512, NRAM2GDRAM);
   }
 }
 
@@ -50,8 +47,8 @@ torch::Tensor bang_func(torch::Tensor x) {
   auto out = torch::empty_like(x);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {32, 1, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
+  cnrtDim3_t dim = {4, 8, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
 
   stage0<<<dim, ktype, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
