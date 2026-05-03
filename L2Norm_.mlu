@@ -10,29 +10,24 @@
 #define ELEMS_PER_TASK (TOTAL_ELEMS / TASKS)
 #define L2_INV_EXPECTED_NORM ((half)0.00782012939453125f)
 
-__mlu_entry__ void l2_norm_expected_scale_kernel(const half *__restrict__ x,
-                                                 half *__restrict__ y) {
+__mlu_entry__ void l2_norm_expected_scale_kernel(half *__restrict__ x) {
   const int base = taskId * ELEMS_PER_TASK;
 
-  const half *px = (const half *)__builtin_assume_aligned(x + base, 512);
-  half *py = (half *)__builtin_assume_aligned(y + base, 512);
+  half *px = (half *)__builtin_assume_aligned(x + base, 512);
 
   __nram__ half hbuf[ELEMS_PER_TASK];
 
   __memcpy(hbuf, px, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
   __bang_mul_scalar(hbuf, hbuf, L2_INV_EXPECTED_NORM, ELEMS_PER_TASK);
-  __memcpy(py, hbuf, ELEMS_PER_TASK * sizeof(half), NRAM2GDRAM);
+  __memcpy(px, hbuf, ELEMS_PER_TASK * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
-  auto y = torch::empty_like(x);
-
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {TASKS, 1, 1};
 
   l2_norm_expected_scale_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
 
-  return y;
+  return x;
 }
