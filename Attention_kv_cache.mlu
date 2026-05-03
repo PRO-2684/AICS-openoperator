@@ -63,7 +63,7 @@ __mlu_entry__ void init_new_value_kernel(const half* probs, const half* v_new, h
   for (; idx < total; idx += taskDim) {
     int h = idx / 64;
     int d = idx % 64;
-    out[idx] = (half)((float)probs[h * 513 + 512] * (float)v_new[h * 64 + d]);
+    out[idx] = probs[h * 513 + 512] * v_new[h * 64 + d];
   }
 }
 
@@ -215,11 +215,10 @@ static void bmm_cache512(cnnlHandle_t handle, const void* a, const void* b, void
 
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_cache,
                         torch::Tensor k_new, torch::Tensor v_new) {
-  static torch::Tensor out;
+  auto out = torch::empty_like(q);
   static torch::Tensor scores;
   static torch::Tensor probs;
-  if (!out.defined()) {
-    out = torch::empty_like(q);
+  if (!scores.defined()) {
     scores = torch::empty({8, 1, 513}, q.options());
     probs = torch::empty_like(scores);
   }
