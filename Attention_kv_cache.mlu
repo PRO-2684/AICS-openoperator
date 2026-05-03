@@ -1,85 +1,93 @@
 #include <bang.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
+#include <cnnl_extra.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#include <float.h>
-
 // Task: 130 130_Attention_kv_cache
-// Category: attention
-// Difficulty: hard
-// DType: float16
-// Description: 实现一个 BangC 算子，将新生成的键值数据与历史 KV Cache 拼接后，对查询向量执行缩放点积注意力（Scaled Dot-Product Attention）计算。输入包括形状为 `[batch, heads, new_len, dim]` 的 `q`、`k_new` 和 `v_new`，以及形状为 `[batch, heads, cache_len, dim]` 的 `k_cache` 和 `v_cache`；算子返回形状为 `[batch, heads, new_len, dim]` 的注意力加权结果。
-// Wrapper: torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_cache, torch::Tensor k_new, torch::Tensor v_new);
+// Official ref: q [1,8,1,64], k/v cache [1,8,512,64], k/v new [1,8,1,64].
+// Concatenate KV to [1,8,513,64], then run CNNL SDPA for q_len=1.
 
-__mlu_entry__ void kv_cache_probs_kernel(const half* q, const half* k_cache, const half* k_new,
-                                         float* probs) {
-  const int head = taskId;
-  const int heads = 8;
-  const int dim = 64;
-  const int cache_len = 512;
-  const int total_len = 513;
-  if (head >= heads) return;
+#define CNNL_CHECK(expr) \
+  do { \
+    cnnlStatus_t s = (expr); \
+    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s); \
+  } while (0)
 
-  __nram__ float scores[1024];
-  const half* qh = q + head * dim;
-  float max_score = -FLT_MAX;
-  for (int t = 0; t < total_len; ++t) {
-    const half* kh = (t < cache_len)
-                         ? (k_cache + (head * cache_len + t) * dim)
-                         : (k_new + head * dim);
-    float dot = 0.0f;
-    for (int d = 0; d < dim; ++d) dot += (float)qh[d] * (float)kh[d];
-    float s = dot * 0.125f;
-    scores[t] = s;
-    if (s > max_score) max_score = s;
+__mlu_entry__ void concat_kv_kernel(const half* k_cache, const half* v_cache,
+                                    const half* k_new, const half* v_new,
+                                    half* k_all, half* v_all) {
+  int idx = taskId;
+  const int total = 8 * 513 * 64;
+  const int step = taskDim;
+  for (; idx < total; idx += step) {
+    int d = idx % 64;
+    int t = (idx / 64) % 513;
+    int h = idx / (513 * 64);
+    if (t < 512) {
+      int src = (h * 512 + t) * 64 + d;
+      k_all[idx] = k_cache[src];
+      v_all[idx] = v_cache[src];
+    } else {
+      int src = h * 64 + d;
+      k_all[idx] = k_new[src];
+      v_all[idx] = v_new[src];
+    }
   }
-
-  float denom = 0.0f;
-  for (int t = 0; t < total_len; ++t) {
-    float e = expf(scores[t] - max_score);
-    scores[t] = e;
-    denom += e;
-  }
-  float inv = 1.0f / denom;
-  float* ph = probs + head * total_len;
-  for (int t = 0; t < total_len; ++t) ph[t] = scores[t] * inv;
 }
 
-__mlu_entry__ void kv_cache_out_kernel(const float* probs, const half* v_cache,
-                                       const half* v_new, half* out) {
-  const int idx = taskId;
-  const int total = 8 * 64;
-  const int dim = 64;
-  const int cache_len = 512;
-  const int total_len = 513;
-  if (idx >= total) return;
-  const int head = idx / dim;
-  const int d = idx % dim;
-  const float* ph = probs + head * total_len;
-  float acc = 0.0f;
-  for (int t = 0; t < cache_len; ++t) {
-    acc += ph[t] * (float)v_cache[(head * cache_len + t) * dim + d];
-  }
-  acc += ph[cache_len] * (float)v_new[head * dim + d];
-  out[idx] = (half)acc;
+static cnnlTensorDescriptor_t bshd_view(const torch::Tensor& x) {
+  int b = (int)x.size(0), h = (int)x.size(1), s = (int)x.size(2), d = (int)x.size(3);
+  int dims[4] = {b, s, h, d};
+  int strides[4] = {h * s * d, d, s * d, 1};
+  cnnlTensorDescriptor_t desc;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&desc));
+  CNNL_CHECK(cnnlSetTensorDescriptorEx(desc, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, dims, strides));
+  return desc;
 }
 
-torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_cache, torch::Tensor k_new, torch::Tensor v_new) {
+static void destroy(cnnlTensorDescriptor_t d) { CNNL_CHECK(cnnlDestroyTensorDescriptor(d)); }
+
+torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_cache,
+                        torch::Tensor k_new, torch::Tensor v_new) {
   auto out = torch::empty_like(q);
-  auto probs = torch::empty({8, 513}, q.options().dtype(torch::kFloat));
+  auto k_all = torch::empty({1, 8, 513, 64}, q.options());
+  auto v_all = torch::empty_like(k_all);
+
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t score_dim = {8, 1, 1};
-  kv_cache_probs_kernel<<<score_dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half*>(q.data_ptr<at::Half>()),
+  cnrtDim3_t copy_dim = {32, 1, 1};
+  concat_kv_kernel<<<copy_dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half*>(k_cache.data_ptr<at::Half>()),
-      reinterpret_cast<const half*>(k_new.data_ptr<at::Half>()),
-      reinterpret_cast<float*>(probs.data_ptr<float>()));
-  cnrtDim3_t out_dim = {512, 1, 1};
-  kv_cache_out_kernel<<<out_dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const float*>(probs.data_ptr<float>()),
       reinterpret_cast<const half*>(v_cache.data_ptr<at::Half>()),
+      reinterpret_cast<const half*>(k_new.data_ptr<at::Half>()),
       reinterpret_cast<const half*>(v_new.data_ptr<at::Half>()),
-      reinterpret_cast<half*>(out.data_ptr<at::Half>()));
+      reinterpret_cast<half*>(k_all.data_ptr<at::Half>()),
+      reinterpret_cast<half*>(v_all.data_ptr<at::Half>()));
+
+  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
+  auto qd = bshd_view(q);
+  auto kd = bshd_view(k_all);
+  auto vd = bshd_view(v_all);
+  auto od = bshd_view(out);
+  size_t ws_size = 0;
+  CNNL_CHECK(cnnlGetScaledDotProductAttnWorkspaceSize_v3(
+      handle, nullptr, nullptr, qd, kd, vd, nullptr, nullptr, nullptr, nullptr, nullptr,
+      1, 513, false, -1, -1, false, CNNL_COMPUTATION_HIGH_PRECISION,
+      CNNL_DTYPE_FLOAT, &ws_size));
+  auto ws = torch::empty({(int64_t)ws_size}, q.options().dtype(torch::kUInt8));
+  CNNL_CHECK(cnnlScaledDotProductAttn_v4(
+      handle, nullptr, nullptr, qd, q.data_ptr(), kd, k_all.data_ptr(), vd, v_all.data_ptr(),
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, 1, 513, false, -1, -1, 0.125f,
+      CNNL_COMPUTATION_HIGH_PRECISION, CNNL_DTYPE_FLOAT,
+      ws_size ? ws.data_ptr() : nullptr, ws_size, false, nullptr, nullptr,
+      od, out.data_ptr()));
+
+  destroy(od);
+  destroy(vd);
+  destroy(kd);
+  destroy(qd);
   return out;
 }
