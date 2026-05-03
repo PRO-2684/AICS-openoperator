@@ -94,7 +94,7 @@ python scripts/update_problems.py
 | 043 | [GroupNorm_](GroupNorm_.mlu) | N/A | 🔴 |
 | 044 | [HingeLoss](HingeLoss.mlu) | N/A | 🔴 |
 | 045 | [HuberLoss](HuberLoss.mlu) | N/A | 🔴 |
-| 046 | [InstanceNorm](InstanceNorm.mlu) | N/A | 🔴 |
+| 046 | [InstanceNorm](InstanceNorm.mlu) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/31e0f2284b472e870d2cd68210da7fb8c6429716) |
 | 047 | [Max_Pooling_1D](Max_Pooling_1D.mlu) | N/A | 🔴 |
 | 048 | [Max_Pooling_2D](Max_Pooling_2D.mlu) | N/A | 🔴 |
 | 049 | [Max_Pooling_3D](Max_Pooling_3D.mlu) | N/A | 🔴 |
