@@ -35,7 +35,7 @@ __mlu_entry__ void kernel(const half *__restrict__ input,
   __bang_reduce_sum(tmp, tmp, D);
 
   half row_sum = tmp[0] + tmp[C] + tmp[C * 2] + tmp[C * 3];
-  half inv_sum = (half)(1.0f / (float)row_sum);
+  half inv_sum = ((half)1.0) / row_sum;
 
   __bang_mul_scalar(xbuf, xbuf, inv_sum, B);
 
