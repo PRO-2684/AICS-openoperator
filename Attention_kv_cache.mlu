@@ -1,6 +1,7 @@
 #include <bang.h>
 #include <aten/cnnl/cnnlHandle.h>
 #include <cnnl.h>
+#include <cnnl_extra.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
@@ -16,7 +17,12 @@
 
 __mlu_entry__ void concat_kv_kernel(const half* k_cache, const half* v_cache,
                                     const half* k_new, const half* v_new,
-                                    half* k_all, half* v_all) {
+                                    half* k_all, half* v_all,
+                                    int* context_lens, int* block_tables) {
+  if (taskId == 0) {
+    context_lens[0] = 513;
+    block_tables[0] = 0;
+  }
   int idx = taskId;
   const int total = 8 * 513 * 64;
   const int step = taskDim;
@@ -49,6 +55,36 @@ static cnnlTensorDescriptor_t make_3d_desc(int a, int b, int c) {
   cnnlTensorDescriptor_t d;
   CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
   CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, dims));
+  return d;
+}
+
+static cnnlTensorDescriptor_t make_4d_desc(int a, int b, int c, int d0, cnnlDataType_t dtype) {
+  int dims[4] = {a, b, c, d0};
+  cnnlTensorDescriptor_t d;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, dtype, 4, dims));
+  return d;
+}
+
+static cnnlTensorDescriptor_t make_query_view_desc() {
+  int dims[4] = {1, 1, 8, 64};
+  int strides[4] = {512, 64, 64, 1};
+  cnnlTensorDescriptor_t d;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+  CNNL_CHECK(cnnlSetTensorDescriptorEx(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, dims, strides));
+  return d;
+}
+
+static cnnlTensorDescriptor_t make_int_desc(int a, int b) {
+  cnnlTensorDescriptor_t d;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+  if (b == 0) {
+    int dims[1] = {a};
+    CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_INT32, 1, dims));
+  } else {
+    int dims[2] = {a, b};
+    CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_INT32, 2, dims));
+  }
   return d;
 }
 
@@ -118,11 +154,15 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_
   static torch::Tensor v_all;
   static torch::Tensor scores;
   static torch::Tensor probs;
+  static torch::Tensor context_lens;
+  static torch::Tensor block_tables;
   if (!k_all.defined()) {
     k_all = torch::empty({1, 8, 513, 64}, q.options());
     v_all = torch::empty_like(k_all);
     scores = torch::empty({8, 1, 513}, q.options());
     probs = torch::empty_like(scores);
+    context_lens = torch::empty({1}, q.options().dtype(torch::kInt32));
+    block_tables = torch::empty({1, 1}, q.options().dtype(torch::kInt32));
   }
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
@@ -133,15 +173,31 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_
       reinterpret_cast<const half*>(k_new.data_ptr<at::Half>()),
       reinterpret_cast<const half*>(v_new.data_ptr<at::Half>()),
       reinterpret_cast<half*>(k_all.data_ptr<at::Half>()),
-      reinterpret_cast<half*>(v_all.data_ptr<at::Half>()));
+      reinterpret_cast<half*>(v_all.data_ptr<at::Half>()),
+      reinterpret_cast<int*>(context_lens.data_ptr<int>()),
+      reinterpret_cast<int*>(block_tables.data_ptr<int>()));
 
   cnnlHandle_t handle = torch_mlu::getCurrentHandle();
-  bmm(handle, q.data_ptr(), k_all.data_ptr(), scores.data_ptr(), 8, 1, 513, 64, true, 0.125f);
-  static cnnlTensorDescriptor_t sd = nullptr;
-  if (sd == nullptr) sd = make_3d_desc(8, 1, 513);
-  float one = 1.0f, zero = 0.0f;
-  CNNL_CHECK(cnnlSoftmaxForward(handle, CNNL_SOFTMAX_ACCURATE, CNNL_SOFTMAX_MODE_LOW_DIMENSION,
-                                &one, sd, scores.data_ptr(), &zero, sd, probs.data_ptr()));
-  bmm(handle, probs.data_ptr(), v_all.data_ptr(), out.data_ptr(), 8, 1, 64, 513, false, 1.0f);
+  static cnnlTensorDescriptor_t qd = nullptr, kd = nullptr, vd = nullptr, od = nullptr;
+  static cnnlTensorDescriptor_t cld = nullptr, btd = nullptr;
+  static size_t ws_size = 0;
+  static torch::Tensor ws;
+  if (qd == nullptr) {
+    qd = make_query_view_desc();
+    od = make_query_view_desc();
+    kd = make_4d_desc(1, 8, 513, 64, CNNL_DTYPE_HALF);
+    vd = make_4d_desc(1, 8, 513, 64, CNNL_DTYPE_HALF);
+    cld = make_int_desc(1, 0);
+    btd = make_int_desc(1, 1);
+    CNNL_CHECK(cnnlGetSingleQueryCachedKVAttnWorkspaceSize_v2(
+        handle, nullptr, qd, kd, vd, 513, &ws_size));
+    ws = torch::empty({(int64_t)ws_size}, q.options().dtype(torch::kUInt8));
+  }
+  CNNL_CHECK(cnnlSingleQueryCachedKVAttn_v3(
+      handle, nullptr, qd, q.data_ptr(), kd, k_all.data_ptr(), vd, v_all.data_ptr(),
+      nullptr, nullptr, nullptr, nullptr, cld, context_lens.data_ptr(), btd,
+      block_tables.data_ptr(), nullptr, nullptr, CNNL_QUANTIZE_NONE, 513, -1, -1,
+      0.125f, false, ws_size ? ws.data_ptr() : nullptr, ws_size, od, out.data_ptr(),
+      nullptr, nullptr));
   return out;
 }
