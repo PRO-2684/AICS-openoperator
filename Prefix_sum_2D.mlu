@@ -50,8 +50,8 @@ torch::Tensor bang_func(torch::Tensor x) {
   auto out = torch::empty_like(x);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {4, 8, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
+  cnrtDim3_t dim = {32, 1, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
 
   stage0<<<dim, ktype, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
