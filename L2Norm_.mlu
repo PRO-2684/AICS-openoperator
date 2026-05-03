@@ -7,8 +7,8 @@
 // Official ref/ref_files/036_L2Norm_.py uses FP16 x with shape [16, 16384].
 #define L2_ROWS 16
 #define L2_COLS 16384
-#define REDUCE_STRIDE 32
-#define FIRST_GROUPS (L2_COLS / REDUCE_STRIDE)
+#define HREDUCE_STRIDE 64
+#define HFIRST_GROUPS (L2_COLS / HREDUCE_STRIDE)
 
 __mlu_entry__ void l2_norm_half_kernel(const half *__restrict__ x,
                                        half *__restrict__ y) {
@@ -22,30 +22,27 @@ __mlu_entry__ void l2_norm_half_kernel(const half *__restrict__ x,
   half *row_y = (half *)__builtin_assume_aligned(y + row * L2_COLS, 512);
 
   __nram__ half hbuf[L2_COLS];
-  __nram__ float fbuf[L2_COLS];
-  __nram__ float reduce[FIRST_GROUPS];
+  __nram__ half reduce[HFIRST_GROUPS];
 
   __memcpy(hbuf, row_x, L2_COLS * sizeof(half), GDRAM2NRAM);
 
-  __bang_half2float(fbuf, hbuf, L2_COLS);
-  __bang_square(fbuf, fbuf, L2_COLS);
+  __bang_square(hbuf, hbuf, L2_COLS);
 
-  __bang_reduce_sum(fbuf, fbuf, L2_COLS);
-  __memcpy(reduce, fbuf, sizeof(float), NRAM2NRAM, sizeof(float),
-           REDUCE_STRIDE * sizeof(float), FIRST_GROUPS - 1);
-  __bang_reduce_sum(reduce, reduce, FIRST_GROUPS);
+  __bang_reduce_sum(hbuf, hbuf, L2_COLS);
+  __memcpy(reduce, hbuf, sizeof(half), NRAM2NRAM, sizeof(half),
+           HREDUCE_STRIDE * sizeof(half), HFIRST_GROUPS - 1);
+  __bang_reduce_sum(reduce, reduce, HFIRST_GROUPS);
 
   float sum_sq = 0.0f;
 #pragma unroll
-  for (int i = 0; i < FIRST_GROUPS; i += REDUCE_STRIDE) {
+  for (int i = 0; i < HFIRST_GROUPS; i += HREDUCE_STRIDE) {
     sum_sq += reduce[i];
   }
 
   float inv_norm = 1.0f / sqrtf(sum_sq);
 
-  __bang_half2float(fbuf, hbuf, L2_COLS);
-  __bang_mul_scalar(fbuf, fbuf, inv_norm, L2_COLS);
-  __bang_float2half_rn(hbuf, fbuf, L2_COLS);
+  __memcpy(hbuf, row_x, L2_COLS * sizeof(half), GDRAM2NRAM);
+  __bang_mul_scalar(hbuf, hbuf, (half)inv_norm, L2_COLS);
 
   __memcpy(row_y, hbuf, L2_COLS * sizeof(half), NRAM2GDRAM);
 }
