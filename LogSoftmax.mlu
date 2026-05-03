@@ -1,57 +1,103 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <cstdint>
+#include <float.h>
 #include <framework/core/MLUStream.h>
-#include <math.h>
 #include <torch/extension.h>
 
-#define A (1 << 4)
-#define B (1 << 14)
-#define C (1 << 6)
-#define D (B / C)
+#define TASK_COUNT 128
+#define CHUNK_SIZE 8192
 
-__mlu_entry__ void kernel(const half *__restrict__ input,
-                          half *__restrict__ output) {
-  const int row = taskId;
+__mlu_entry__ void LogSoftmaxKernel(half *output, const half *input,
+                                    int32_t batch, int32_t dim) {
+  if (__is_mpu())
+    return;
 
-  __nram__ half xbuf[B];
-  __nram__ half ebuf[B];
-  __nram__ half tmp[D];
+  uint32_t task_id = taskId;
+  uint32_t task_num = taskDim;
+  uint32_t per_task = batch / task_num;
+  uint32_t remainder = batch % task_num;
+  uint32_t start =
+      task_id * per_task + (task_id < remainder ? task_id : remainder);
+  uint32_t count = per_task + (task_id < remainder ? 1 : 0);
 
-  const half *row_in =
-      (const half *)__builtin_assume_aligned(input + row * B, 512);
-  half *row_out = (half *)__builtin_assume_aligned(output + row * B, 512);
+  __nram__ float buf[CHUNK_SIZE];
+  __nram__ half half_buf[CHUNK_SIZE];
 
-  __memcpy(xbuf, row_in, B * sizeof(half), GDRAM2NRAM);
+  for (uint32_t b = start; b < start + count; ++b) {
+    uint32_t off = b * dim;
 
-  // 对标准正态输入，exp(x) 不太可能溢出，因此跳过 max-subtraction。
-  // 这比完整稳定版少一次 argmax 和一次 add_scalar。
-  __memcpy(ebuf, xbuf, B * sizeof(half), NRAM2NRAM);
-  __bang_active_exp(ebuf, ebuf, B);
+    // --- 1. 计算 Max ---
+    float mx = -FLT_MAX;
 
-  __bang_reduce_sum(ebuf, ebuf, B);
+    for (uint32_t i = 0; i < dim; i += CHUNK_SIZE) {
+      uint32_t cur = (dim - i > CHUNK_SIZE) ? CHUNK_SIZE : (dim - i);
+      // 修正：使用 __memcpy 并指定方向 GDRAM2NRAM
+      __memcpy(buf, reinterpret_cast<const float *>(input + off + i), cur,
+               GDRAM2NRAM);
 
-  __memcpy(tmp, ebuf, sizeof(half), NRAM2NRAM, sizeof(half), C * sizeof(half),
-           D - 1);
+      for (uint32_t j = 0; j < cur; ++j) {
+        if (buf[j] > mx)
+          mx = buf[j];
+      }
+    }
 
-  __bang_reduce_sum(tmp, tmp, D);
+    // --- 2. 计算 Sum(Exp(x - mx)) ---
+    float sum_exp = 0.0f;
+    for (uint32_t i = 0; i < dim; i += CHUNK_SIZE) {
+      uint32_t cur = (dim - i > CHUNK_SIZE) ? CHUNK_SIZE : (dim - i);
+      // 修正：使用 __memcpy 并指定方向 GDRAM2NRAM
+      __memcpy(buf, reinterpret_cast<const float *>(input + off + i), cur,
+               GDRAM2NRAM);
 
-  half row_sum = tmp[0];
-  half lse = (half)logf((float)row_sum);
+      __bang_sub_scalar(buf, buf, mx, cur);
+      __bang_active_exp(buf, buf, cur);
 
-  __bang_add_scalar(xbuf, xbuf, (half)(-lse), B);
+      for (uint32_t j = 0; j < cur; ++j) {
+        sum_exp += buf[j];
+      }
+    }
 
-  __memcpy(row_out, xbuf, B * sizeof(half), NRAM2GDRAM);
+    float lse = logf(sum_exp) + mx;
+
+    // --- 3. 计算输出 x - lse ---
+    for (uint32_t i = 0; i < dim; i += CHUNK_SIZE) {
+      uint32_t cur = (dim - i > CHUNK_SIZE) ? CHUNK_SIZE : (dim - i);
+      // 修正：使用 __memcpy 并指定方向 GDRAM2NRAM
+      __memcpy(buf, reinterpret_cast<const float *>(input + off + i), cur,
+               GDRAM2NRAM);
+
+      __bang_sub_scalar(buf, buf, lse, cur);
+
+      // 类型转换 float -> half
+      for (uint32_t j = 0; j < cur; ++j) {
+        half_buf[j] = (half)buf[j];
+      }
+
+      // 修正：使用 __memcpy 并指定方向 NRAM2GDRAM
+      __memcpy(reinterpret_cast<float *>(output + off + i), half_buf, cur,
+               NRAM2GDRAM);
+    }
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
-  auto y = torch::empty_like(x);
+  TORCH_CHECK(x.is_contiguous(), "input must be contiguous");
+
+  auto output = torch::empty_like(x);
+  if (x.numel() == 0)
+    return output;
+
+  int batch = (int)x.size(0);
+  int d = (int)x.size(1);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t kdim = {A, 1, 1};
+  cnrtDim3_t dim_config = {TASK_COUNT, 1, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
 
-  kernel<<<kdim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  LogSoftmaxKernel<<<dim_config, ktype, queue>>>(
+      reinterpret_cast<half *>(output.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()), batch, d);
 
-  return y;
+  return output;
 }
