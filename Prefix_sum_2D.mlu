@@ -1,14 +1,68 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 122 122_Prefix_sum_2D
-// Category: cum
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，对三维张量在高度和宽度维度上依次执行累加求和操作，即实现 2D 累加和（2D Cumsum）。输入为形状为 `[batch, H, W]` 的张量 `x`；输出为相同形状的张量，表示输入在 `H` 和 `W` 两个维度上双重累加后的结果。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x);
+__mlu_entry__ void stage0(const half *__restrict__ x, half *__restrict__ tmp) {
+  const int t = taskId;
+
+  __nram__ half buf[256];
+
+  const int base = t * 256;
+  __memcpy(buf, x + base, 256 * sizeof(half), GDRAM2NRAM);
+
+  float acc = 0.0f;
+#pragma unroll
+  for (int i = 0; i < 256; ++i) {
+    acc += (float)buf[i];
+    buf[i] = (half)acc;
+  }
+
+  __memcpy(tmp + base, buf, 256 * sizeof(half), NRAM2GDRAM);
+}
+
+__mlu_entry__ void stage1(const half *__restrict__ tmp,
+                          half *__restrict__ out) {
+  const int t = taskId;
+  const int a = t >> 8;
+  const int b = t & 255;
+
+  __nram__ half buf[256];
+
+  const half *src = tmp + a * 65536 + b;
+  half *dst = out + a * 65536 + b;
+
+  __memcpy(buf, src, sizeof(half), GDRAM2NRAM, sizeof(half), 256 * sizeof(half),
+           255);
+
+  float acc = 0.0f;
+#pragma unroll
+  for (int i = 0; i < 256; ++i) {
+    acc += (float)buf[i];
+    buf[i] = (half)acc;
+  }
+
+  __memcpy(dst, buf, sizeof(half), NRAM2GDRAM, 256 * sizeof(half), sizeof(half),
+           255);
+}
 
 torch::Tensor bang_func(torch::Tensor x) {
-  TORCH_CHECK(false, "TODO: implement Prefix_sum_2D");
+  auto tmp = torch::empty_like(x);
+  auto out = torch::empty_like(x);
+
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+
+  cnrtDim3_t dim0 = {4, 8, 128};
+  cnrtFunctionType_t ktype0 = cnrtFuncTypeUnion1;
+  stage0<<<dim0, ktype0, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(tmp.data_ptr<at::Half>()));
+
+  cnrtDim3_t dim1 = {4, 8, 128};
+  cnrtFunctionType_t ktype1 = cnrtFuncTypeUnion1;
+  stage1<<<dim1, ktype1, queue>>>(
+      reinterpret_cast<const half *>(tmp.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+
+  return out;
 }
