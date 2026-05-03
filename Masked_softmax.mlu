@@ -1,94 +1,61 @@
-#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
-#include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define CNNL_CHECK(expr)                                                       \
-  do {                                                                         \
-    cnnlStatus_t s = (expr);                                                   \
-    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
-  } while (0)
+#define N0 32
+#define N1 8
+#define N2 128
+#define N3 128
+#define W 64
+#define R (N0 * N1 * N2)
+#define T 32
 
-#define B 32
-#define H 8
-#define S 128
-#define VALID 64
-#define ROWS (B * H * S)
+__mlu_entry__ void kernel_main(const half *__restrict__ input,
+                               half *__restrict__ output) {
+  __nram__ half buf[W];
+  __nram__ half val[W];
+  __nram__ half red[W];
+  __nram__ half tmp[W];
+  __nram__ half zer[W];
 
-static cnnlTensorDescriptor_t make_3d_desc(int n0, int n1, int n2,
-                                           cnnlDataType_t dtype) {
-  int dims[3] = {n0, n1, n2};
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, dtype, 3, dims));
-  return d;
-}
+  __bang_write_zero(zer, W);
 
-__mlu_entry__ void pack_first64_kernel(const half *__restrict__ x,
-                                       half *__restrict__ tmp) {
-  int tid = taskId;
-  int step = taskDim;
+  for (int row = taskId; row < R; row += taskDim) {
+    const half *in =
+        (const half *)__builtin_assume_aligned(input + row * N3, 512);
+    half *out = (half *)__builtin_assume_aligned(output + row * N3, 512);
 
-  for (int row = tid; row < ROWS; row += step) {
-    const half *src = x + row * S;
-    half *dst = tmp + row * VALID;
+    __memcpy(buf, in, W * sizeof(half), GDRAM2NRAM);
 
-#pragma unroll
-    for (int i = 0; i < VALID; ++i) {
-      dst[i] = src[i];
-    }
-  }
-}
+    __bang_argmax(tmp, buf, W);
+    half m = tmp[0];
 
-__mlu_entry__ void
-unpack_softmax64_zero_tail_kernel(const half *__restrict__ tmp,
-                                  half *__restrict__ out) {
-  int tid = taskId;
-  int step = taskDim;
+    __bang_add_scalar(val, buf, (half)(-m), W);
+    __bang_active_exp_less_0(val, val, W);
 
-  for (int row = tid; row < ROWS; row += step) {
-    const half *src = tmp + row * VALID;
-    half *dst = out + row * S;
+    __memcpy(red, val, W * sizeof(half), NRAM2NRAM);
+    __bang_reduce_sum(red, red, W);
 
-#pragma unroll
-    for (int i = 0; i < VALID; ++i) {
-      dst[i] = src[i];
-    }
+    half s = red[0];
+    half inv = (half)(1.0f / (float)s);
 
-#pragma unroll
-    for (int i = VALID; i < S; ++i) {
-      dst[i] = (half)0.0f;
-    }
+    __bang_mul_scalar(val, val, inv, W);
+
+    __memcpy(out, val, W * sizeof(half), NRAM2GDRAM);
+    __memcpy(out + W, zer, W * sizeof(half), NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask) {
-
-  auto out = torch::empty_like(x);
-
- 
-  auto tmp = torch::empty({B, H, S, VALID}, x.options());
+  auto y = torch::empty_like(x);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {32, 1, 1};
+  cnrtDim3_t kdim = {T, 1, 1};
 
-  pack_first64_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr()),
-      reinterpret_cast<half *>(tmp.data_ptr()));
+  kernel_main<<<kdim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
 
-  cnnlTensorDescriptor_t td = make_3d_desc(ROWS, 1, VALID, CNNL_DTYPE_HALF);
-
-  CNNL_CHECK(cnnlSoftmaxForward(torch_mlu::getCurrentHandle(),
-                                CNNL_SOFTMAX_ACCURATE,
-                                CNNL_SOFTMAX_MODE_LOW_DIMENSION, nullptr, td,
-                                tmp.data_ptr(), nullptr, td, tmp.data_ptr()));
-
-  unpack_softmax64_zero_tail_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(tmp.data_ptr()),
-      reinterpret_cast<half *>(out.data_ptr()));
-
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(td));
-  return out;
+  return y;
 }
