@@ -42,26 +42,18 @@ static void destroy(cnnlTensorDescriptor_t d) { CNNL_CHECK(cnnlDestroyTensorDesc
 
 static void bmm(cnnlHandle_t handle, const void* a, const void* b, void* out,
                 int batch, int m, int n, int k, bool trans_b, float alpha) {
-  cnnlTensorDescriptor_t ad = make_1d_desc((int64_t)batch * m * k);
-  cnnlTensorDescriptor_t bd = make_1d_desc((int64_t)batch * (trans_b ? n * k : k * n));
-  cnnlTensorDescriptor_t od = make_1d_desc((int64_t)batch * m * n);
-  cnnlStrideBatchMatMulDescriptor_t desc;
-  cnnlStrideBatchMatMulAlgo_t algo;
-  cnnlStrideBatchMatMulHeuristicResult_t heur;
-  CNNL_CHECK(cnnlCreateStrideBatchMatMulDescriptor(&desc));
-  CNNL_CHECK(cnnlCreateStrideBatchMatMulAlgo(&algo));
-  CNNL_CHECK(cnnlCreateStrideBatchMatMulHeuristicResult(&heur));
-
-  cnnlDataType_t compute_type = CNNL_DTYPE_FLOAT;
-  int max_batch_dim = 1;
-  int allow_tf32 = 0;
-  CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(desc, CNNL_STRIDE_BMM_COMPUTE_TYPE,
-                                              &compute_type, sizeof(compute_type)));
-  CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(desc, CNNL_STRIDE_BMM_MAX_BATCH_DIM,
-                                              &max_batch_dim, sizeof(max_batch_dim)));
-  CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(desc, CNNL_STRIDE_BMM_ALLOW_TF32,
-                                              &allow_tf32, sizeof(allow_tf32)));
-
+  static cnnlTensorDescriptor_t qk_ad = nullptr, qk_bd = nullptr, qk_od = nullptr;
+  static cnnlTensorDescriptor_t pv_ad = nullptr, pv_bd = nullptr, pv_od = nullptr;
+  static cnnlStrideBatchMatMulDescriptor_t qk_desc = nullptr, pv_desc = nullptr;
+  static cnnlStrideBatchMatMulAlgo_t qk_algo = nullptr, pv_algo = nullptr;
+  static size_t qk_ws_size = 0, pv_ws_size = 0;
+  const bool is_qk = trans_b;
+  cnnlTensorDescriptor_t& ad = is_qk ? qk_ad : pv_ad;
+  cnnlTensorDescriptor_t& bd = is_qk ? qk_bd : pv_bd;
+  cnnlTensorDescriptor_t& od = is_qk ? qk_od : pv_od;
+  cnnlStrideBatchMatMulDescriptor_t& desc = is_qk ? qk_desc : pv_desc;
+  cnnlStrideBatchMatMulAlgo_t& algo = is_qk ? qk_algo : pv_algo;
+  size_t& ws_size = is_qk ? qk_ws_size : pv_ws_size;
   bool trans_a = false;
   int lda = k;
   int ldb = trans_b ? k : n;
@@ -72,13 +64,31 @@ static void bmm(cnnlHandle_t handle, const void* a, const void* b, void* out,
   int64_t stride_b[1] = {(int64_t)(trans_b ? n * k : k * n)};
   int64_t stride_o[1] = {(int64_t)m * n};
   float beta = 0.0f;
-  int returned = 0;
-  CNNL_CHECK(cnnlGetStrideBatchMatMulAlgoHeuristic_v2(
-      handle, desc, ad, bd, od, od, trans_a, trans_b, &alpha, &beta,
-      m, n, k, lda, ldb, ldc, ldd, batch_size, stride_a, stride_b,
-      stride_o, stride_o, nullptr, 1, &heur, &returned));
-  size_t ws_size = 0;
-  CNNL_CHECK(cnnlGetStrideBatchMatMulHeuristicResult(heur, &algo, &ws_size));
+  if (desc == nullptr) {
+    ad = make_1d_desc((int64_t)batch * m * k);
+    bd = make_1d_desc((int64_t)batch * (trans_b ? n * k : k * n));
+    od = make_1d_desc((int64_t)batch * m * n);
+    CNNL_CHECK(cnnlCreateStrideBatchMatMulDescriptor(&desc));
+    CNNL_CHECK(cnnlCreateStrideBatchMatMulAlgo(&algo));
+    cnnlStrideBatchMatMulHeuristicResult_t heur;
+    CNNL_CHECK(cnnlCreateStrideBatchMatMulHeuristicResult(&heur));
+    cnnlDataType_t compute_type = CNNL_DTYPE_FLOAT;
+    int max_batch_dim = 1;
+    int allow_tf32 = 0;
+    CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(desc, CNNL_STRIDE_BMM_COMPUTE_TYPE,
+                                                &compute_type, sizeof(compute_type)));
+    CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(desc, CNNL_STRIDE_BMM_MAX_BATCH_DIM,
+                                                &max_batch_dim, sizeof(max_batch_dim)));
+    CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(desc, CNNL_STRIDE_BMM_ALLOW_TF32,
+                                                &allow_tf32, sizeof(allow_tf32)));
+    int returned = 0;
+    CNNL_CHECK(cnnlGetStrideBatchMatMulAlgoHeuristic_v2(
+        handle, desc, ad, bd, od, od, trans_a, trans_b, &alpha, &beta,
+        m, n, k, lda, ldb, ldc, ldd, batch_size, stride_a, stride_b,
+        stride_o, stride_o, nullptr, 1, &heur, &returned));
+    CNNL_CHECK(cnnlGetStrideBatchMatMulHeuristicResult(heur, &algo, &ws_size));
+    CNNL_CHECK(cnnlDestroyStrideBatchMatMulHeuristicResult(heur));
+  }
   auto ws = torch::empty({(int64_t)ws_size},
                          torch::TensorOptions()
                              .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
@@ -88,13 +98,6 @@ static void bmm(cnnlHandle_t handle, const void* a, const void* b, void* out,
       ad, a, lda, stride_a, bd, b, ldb, stride_b, &beta, od, out, ldc,
       stride_o, ws_size ? ws.data_ptr() : nullptr, ws_size, od, out, ldd,
       stride_o));
-
-  CNNL_CHECK(cnnlDestroyStrideBatchMatMulHeuristicResult(heur));
-  CNNL_CHECK(cnnlDestroyStrideBatchMatMulAlgo(algo));
-  CNNL_CHECK(cnnlDestroyStrideBatchMatMulDescriptor(desc));
-  destroy(od);
-  destroy(bd);
-  destroy(ad);
 }
 
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor bias) {
