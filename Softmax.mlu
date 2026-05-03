@@ -34,11 +34,10 @@ __mlu_entry__ void kernel(const half *__restrict__ input,
            C * sizeof(half), D - 1);
   __bang_reduce_sum(tmp, tmp, D);
 
-  float row_sum = (float)tmp[0] + (float)tmp[C] + (float)tmp[C * 2] +
-                  (float)tmp[C * 3];
-  half inv_sum = (half)(1.0f / row_sum);
+  half row_sum = tmp[0] + tmp[C] + tmp[C * 2] + tmp[C * 3];
+  half inv_sum = (half)(1.0f / (float)row_sum);
 
-  __bang_mul_const(xbuf, xbuf, inv_sum, B);
+  __bang_mul_scalar(xbuf, xbuf, inv_sum, B);
 
   __memcpy(row_out, xbuf, B * sizeof(half), NRAM2GDRAM);
 }
@@ -47,7 +46,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   auto y = torch::empty_like(x);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t kdim = {A, 1, 1};
-  kernel<<<kdim, cnrtFuncTypeUnion4, queue>>>(
+  kernel<<<kdim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
