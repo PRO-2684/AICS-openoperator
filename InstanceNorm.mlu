@@ -5,47 +5,51 @@
 #include <torch/extension.h>
 
 #define LOCAL_ELEMS 65536
+#define TASK_COUNT 32
 
-__mlu_entry__ void inst_norm_kernel(const half *__restrict__ x,
-                                    half *__restrict__ y, int outer, int inner,
-                                    float eps) {
-  int idx = taskId;
-  if (idx >= outer)
-    return;
+__mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
+                                        half *__restrict__ y, int outer,
+                                        int inner, float eps) {
+  __nram__ half hbuf[LOCAL_ELEMS];
+  __nram__ float fbuf[LOCAL_ELEMS];
+  __nram__ float stat[64];
 
-  const half *px = x + (int64_t)idx * inner;
-  half *py = y + (int64_t)idx * inner;
+  for (int idx = taskId; idx < outer; idx += taskDim) {
+    const half *px = x + (int64_t)idx * inner;
+    half *py = y + (int64_t)idx * inner;
 
-  __nram__ half buf[LOCAL_ELEMS];
+    __memcpy(hbuf, px, inner * sizeof(half), GDRAM2NRAM);
 
-  __memcpy(buf, px, inner * sizeof(half), GDRAM2NRAM);
+    // sum(x)
+    __bang_half2float(fbuf, hbuf, inner);
+    __bang_sum(stat, fbuf, inner);
+    float sum = stat[0];
 
-  float sum = 0.0f;
-  float sq_sum = 0.0f;
+    // sum(x*x)
+    __bang_square(fbuf, fbuf, inner);
+    __bang_sum(stat, fbuf, inner);
+    float sq_sum = stat[0];
 
-  for (int i = 0; i < inner; ++i) {
-    float v = (float)buf[i];
-    sum += v;
-    sq_sum += v * v;
+    float inv_n = 1.0f / (float)inner;
+    float mean = sum * inv_n;
+    float var = sq_sum * inv_n - mean * mean;
+    if (var < 0.0f)
+      var = 0.0f;
+    float inv_std = 1.0f / sqrtf(var + eps);
+
+    // y = (x - mean) * inv_std
+    __bang_half2float(fbuf, hbuf, inner);
+    __bang_sub_scalar(fbuf, fbuf, mean, inner);
+    __bang_mul_scalar(fbuf, fbuf, inv_std, inner);
+
+    __bang_float2half_rn(hbuf, fbuf, inner);
+    __memcpy(py, hbuf, inner * sizeof(half), NRAM2GDRAM);
   }
-
-  float inv_n = 1.0f / (float)inner;
-  float mean = sum * inv_n;
-  float var = sq_sum * inv_n - mean * mean;
-  if (var < 0.0f)
-    var = 0.0f;
-
-  float inv_std = 1.0f / sqrtf(var + eps);
-
-  for (int i = 0; i < inner; ++i) {
-    float v = (float)buf[i];
-    buf[i] = (half)((v - mean) * inv_std);
-  }
-
-  __memcpy(py, buf, inner * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
+  (void)num_features;
+
   auto y = torch::empty_like(x);
 
   int n = (int)x.size(0);
@@ -59,11 +63,11 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
   cnrtDim3_t dim;
-  dim.x = outer;
+  dim.x = TASK_COUNT;
   dim.y = 1;
   dim.z = 1;
 
-  inst_norm_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+  inst_norm_vec_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       (const half *)x.data_ptr<at::Half>(), (half *)y.data_ptr<at::Half>(),
       outer, inner, 1.0e-5f);
 

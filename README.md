@@ -155,7 +155,7 @@ python scripts/update_problems.py
 | 104 | [KL_Divergence_Loss](KL_Divergence_Loss.mlu) | N/A | 🔴 |
 | 105 | [Embedding_lookup](Embedding_lookup.mlu) | N/A | 🔴 |
 | 106 | [Embedding_bag_mean](Embedding_bag_mean.mlu) | N/A | 🔴 |
-| 107 | [Sinusoidal_positional_encoding](Sinusoidal_positional_encoding.mlu) | N/A | 🔴 |
+| 107 | [Sinusoidal_positional_encoding](Sinusoidal_positional_encoding.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/69d89838b33a63c71fee6f860051f5c3c333bb4f) |
 | 108 | [ALiBi_attention_bias](ALiBi_attention_bias.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/e75ce60ab51fc881aa0b5945af39e76104a1a355) |
 | 109 | [Scatter_add](Scatter_add.mlu) | N/A | 🔴 |
 | 110 | [Gather_rows](Gather_rows.mlu) | N/A | 🔴 |
