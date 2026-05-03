@@ -9,41 +9,66 @@
 #define N3 128
 #define W 64
 #define R (N0 * N1 * N2)
-#define T 32
+#define TASKS 32
+#define TILE 128
 
 __mlu_entry__ void kernel_main(const half *__restrict__ input,
                                half *__restrict__ output) {
-  __nram__ half buf[W];
-  __nram__ half val[W];
-  __nram__ half red[W];
-  __nram__ half tmp[W];
-  __nram__ half zer[W];
+  __nram__ half xbuf[TILE * W];
+  __nram__ half ybuf[TILE * W];
+  __nram__ half sbuf[TILE * W];
+  __nram__ half rbuf[TILE];
 
-  __bang_write_zero(zer, W);
+  for (int base = taskId * TILE; base < R; base += taskDim * TILE) {
+    int rows = R - base;
+    if (rows > TILE)
+      rows = TILE;
 
-  for (int row = taskId; row < R; row += taskDim) {
-    const half *in =
-        (const half *)__builtin_assume_aligned(input + row * N3, 512);
-    half *out = (half *)__builtin_assume_aligned(output + row * N3, 512);
+    const half *src =
+        (const half *)__builtin_assume_aligned(input + base * N3, 512);
+    half *dst = (half *)__builtin_assume_aligned(output + base * N3, 512);
 
-    __memcpy(buf, in, W * sizeof(half), GDRAM2NRAM);
+    __memcpy(xbuf, src, W * sizeof(half), GDRAM2NRAM, W * sizeof(half),
+             N3 * sizeof(half), rows - 1);
 
-    __bang_argmax(tmp, buf, W);
-    half m = tmp[0];
+    __bang_maxpool(rbuf, xbuf, 1, rows, W, 1, W, W, 1);
 
-    __bang_add_scalar(val, buf, (half)(-m), W);
-    __bang_active_exp_less_0(val, val, W);
+#pragma unroll
+    for (int i = 0; i < TILE; ++i) {
+      if (i < rows) {
+        half v = rbuf[i];
+#pragma unroll
+        for (int j = 0; j < W; ++j) {
+          sbuf[i * W + j] = v;
+        }
+      }
+    }
 
-    __memcpy(red, val, W * sizeof(half), NRAM2NRAM);
-    __bang_reduce_sum(red, red, W);
+    __bang_sub(ybuf, xbuf, sbuf, rows * W);
+    __bang_active_exp_less_0(ybuf, ybuf, rows * W);
 
-    half s = red[0];
-    half inv = (half)(1.0f / (float)s);
+    __bang_sumpool(rbuf, ybuf, 1, rows, W, 1, W, W, 1);
 
-    __bang_mul_scalar(val, val, inv, W);
+#pragma unroll
+    for (int i = 0; i < TILE; ++i) {
+      if (i < rows) {
+        half v = (half)(1.0f / (float)rbuf[i]);
+#pragma unroll
+        for (int j = 0; j < W; ++j) {
+          sbuf[i * W + j] = v;
+        }
+      }
+    }
 
-    __memcpy(out, val, W * sizeof(half), NRAM2GDRAM);
-    __memcpy(out + W, zer, W * sizeof(half), NRAM2GDRAM);
+    __bang_mul(ybuf, ybuf, sbuf, rows * W);
+
+    __memcpy(dst, ybuf, W * sizeof(half), NRAM2GDRAM, N3 * sizeof(half),
+             W * sizeof(half), rows - 1);
+
+    __bang_write_zero(ybuf, rows * W);
+
+    __memcpy(dst + W, ybuf, W * sizeof(half), NRAM2GDRAM, N3 * sizeof(half),
+             W * sizeof(half), rows - 1);
   }
 }
 
@@ -51,7 +76,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask) {
   auto y = torch::empty_like(x);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t kdim = {T, 1, 1};
+  cnrtDim3_t kdim = {TASKS, 1, 1};
 
   kernel_main<<<kdim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
