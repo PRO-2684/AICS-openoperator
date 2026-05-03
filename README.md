@@ -130,8 +130,8 @@ python scripts/update_problems.py
 | 079 | [Global_sum](Global_sum.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/1eda60594d6e0b532762d4a53c465437ad2d7e60) |   
 | 080 | [All_over_dim](All_over_dim.mlu) | N/A | 🔴 |
 | 081 | [Sum_2D_reduction](Sum_2D_reduction.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/1eda60594d6e0b532762d4a53c465437ad2d7e60) |
-| 082 | [Scaled_Dot_Product_Attention](Scaled_Dot_Product_Attention.mlu) | N/A | 🔴 |
-| 083 | [Causal_Self_Attention](Causal_Self_Attention.mlu) | N/A | 🔴 |
+| 082 | [Scaled_Dot_Product_Attention](Scaled_Dot_Product_Attention.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/a105aa2c69c8fb104689ec98f98f377f59da8374) |
+| 083 | [Causal_Self_Attention](Causal_Self_Attention.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/a105aa2c69c8fb104689ec98f98f377f59da8374) |
 | 084 | [Cross_Attention](Cross_Attention.mlu) | N/A | 🔴 |
 | 085 | [Linear](Linear.mlu) | N/A | 🔴 |
 | 086 | [Batch_outer_product](Batch_outer_product.mlu) | N/A | 🔴 |
@@ -146,7 +146,7 @@ python scripts/update_problems.py
 | 095 | [Add_RMSNorm](Add_RMSNorm.mlu) | N/A | 🔴 |
 | 096 | [LocalResponseNorm](LocalResponseNorm.mlu) | N/A | 🔴 |
 | 097 | [PixelShuffle](PixelShuffle.mlu) | N/A | 🔴 |
-| 098 | [Attention_with_temperature](Attention_with_temperature.mlu) | N/A | 🔴 |
+| 098 | [Attention_with_temperature](Attention_with_temperature.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/a105aa2c69c8fb104689ec98f98f377f59da8374) |
 | 099 | [DropPath](DropPath.mlu) | N/A | 🔴 |
 | 100 | [Adaptive_Max_Pool_2D](Adaptive_Max_Pool_2D.mlu) | N/A | 🔴 |
 | 101 | [Max_Pool_2D_with_indices](Max_Pool_2D_with_indices.mlu) | N/A | 🔴 |
@@ -156,7 +156,7 @@ python scripts/update_problems.py
 | 105 | [Embedding_lookup](Embedding_lookup.mlu) | N/A | 🔴 |
 | 106 | [Embedding_bag_mean](Embedding_bag_mean.mlu) | N/A | 🔴 |
 | 107 | [Sinusoidal_positional_encoding](Sinusoidal_positional_encoding.mlu) | N/A | 🔴 |
-| 108 | [ALiBi_attention_bias](ALiBi_attention_bias.mlu) | N/A | 🔴 |
+| 108 | [ALiBi_attention_bias](ALiBi_attention_bias.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/e75ce60ab51fc881aa0b5945af39e76104a1a355) |
 | 109 | [Scatter_add](Scatter_add.mlu) | N/A | 🔴 |
 | 110 | [Gather_rows](Gather_rows.mlu) | N/A | 🔴 |
 | 111 | [Masked_select](Masked_select.mlu) | N/A | 🔴 |
@@ -169,7 +169,7 @@ python scripts/update_problems.py
 | 118 | [Where_conditional](Where_conditional.mlu) | N/A | 🔴 |
 | 119 | [One_hot_encoding](One_hot_encoding.mlu) | N/A | 🔴 |
 | 120 | [Masked_softmax](Masked_softmax.mlu) | N/A | 🔴 |
-| 121 | [Scaled_masked_softmax](Scaled_masked_softmax.mlu) | N/A | 🔴 |
+| 121 | [Scaled_masked_softmax](Scaled_masked_softmax.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/a105aa2c69c8fb104689ec98f98f377f59da8374) |
 | 122 | [Prefix_sum_2D](Prefix_sum_2D.mlu) | N/A | 🔴 |
 | 123 | [Masked_cumsum](Masked_cumsum.mlu) | N/A | 🔴 |
 | 124 | [Weight_standardization](Weight_standardization.mlu) | N/A | 🔴 |
@@ -177,7 +177,7 @@ python scripts/update_problems.py
 | 126 | [QR_decomposition](QR_decomposition.mlu) | N/A | 🔴 |
 | 127 | [Cholesky_decomposition](Cholesky_decomposition.mlu) | N/A | 🔴 |
 | 128 | [Batch_norm_1D](Batch_norm_1D.mlu) | N/A | 🔴 |
-| 129 | [Attention_score_with_bias](Attention_score_with_bias.mlu) | N/A | 🔴 |
+| 129 | [Attention_score_with_bias](Attention_score_with_bias.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/e75ce60ab51fc881aa0b5945af39e76104a1a355) |
 | 130 | [Attention_kv_cache](Attention_kv_cache.mlu) | N/A | 🔴 |
 | 131 | [Relative_position_encoding](Relative_position_encoding.mlu) | N/A | 🔴 |
 | 132 | [Sparse_embedding](Sparse_embedding.mlu) | N/A | 🔴 |
@@ -187,4 +187,4 @@ python scripts/update_problems.py
 | 136 | [Grouped_conv_2D](Grouped_conv_2D.mlu) | N/A | 🔴 |
 | 137 | [LSTM_forward](LSTM_forward.mlu) | N/A | 🔴 |
 | 138 | [GRU_forward](GRU_forward.mlu) | N/A | 🔴 |
-| 139 | [Sparse_attention_mask](Sparse_attention_mask.mlu) | N/A | 🔴 |
+| 139 | [Sparse_attention_mask](Sparse_attention_mask.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/a105aa2c69c8fb104689ec98f98f377f59da8374) |
