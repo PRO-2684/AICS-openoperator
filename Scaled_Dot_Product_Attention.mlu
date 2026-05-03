@@ -1,7 +1,6 @@
 #include <aten/cnnl/cnnlHandle.h>
 #include <cnnl.h>
 #include <cnnl_extra.h>
-#include <dlfcn.h>
 #include <torch/extension.h>
 
 #include <cmath>
@@ -20,34 +19,6 @@
     cnnlStatus_t status__ = (expr); \
     TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)status__); \
   } while (0)
-
-using sdpa_ws_fn = cnnlStatus_t (*)(cnnlHandle_t, cnnlScaledDotProductAttnDescriptor_t,
-                                    cnnlScaledDotProductAttnQuantizeDescriptor_t,
-                                    cnnlTensorDescriptor_t, cnnlTensorDescriptor_t,
-                                    cnnlTensorDescriptor_t, cnnlTensorDescriptor_t,
-                                    cnnlTensorDescriptor_t, cnnlTensorDescriptor_t,
-                                    cnnlTensorDescriptor_t, cnnlTensorDescriptor_t,
-                                    int, int, bool, int, int, bool,
-                                    cnnlComputationPreference_t, cnnlDataType_t, size_t*);
-using sdpa_fn = cnnlStatus_t (*)(cnnlHandle_t, cnnlScaledDotProductAttnDescriptor_t,
-                                 cnnlScaledDotProductAttnQuantizeDescriptor_t,
-                                 cnnlTensorDescriptor_t, const void*, cnnlTensorDescriptor_t,
-                                 const void*, cnnlTensorDescriptor_t, const void*,
-                                 cnnlTensorDescriptor_t, const void*, cnnlTensorDescriptor_t,
-                                 const void*, cnnlTensorDescriptor_t, const void*,
-                                 cnnlTensorDescriptor_t, const void*, cnnlTensorDescriptor_t,
-                                 const void*, cnnlTensorDescriptor_t, const void*, int, int,
-                                 bool, int, int, float, cnnlComputationPreference_t,
-                                 cnnlDataType_t, void*, size_t, bool, cnnlTensorDescriptor_t,
-                                 void*, cnnlTensorDescriptor_t, void*);
-
-static void* extra_sym(const char* name) {
-  static void* handle = dlopen("libcnnl_extra.so", RTLD_LAZY | RTLD_LOCAL);
-  TORCH_CHECK(handle != nullptr, "failed to load libcnnl_extra.so: ", dlerror());
-  void* sym = dlsym(handle, name);
-  TORCH_CHECK(sym != nullptr, "missing cnnl_extra symbol: ", name);
-  return sym;
-}
 
 static cnnlTensorDescriptor_t make_bshd_view(const torch::Tensor& x) {
   TORCH_CHECK(x.dim() == 4 && x.scalar_type() == at::kHalf, "expected fp16 [B,H,S,D]");
@@ -82,20 +53,20 @@ static torch::Tensor run_sdpa(torch::Tensor q, torch::Tensor k, torch::Tensor v,
     bias_ptr = bias->data_ptr();
   }
 
-  static auto get_ws = reinterpret_cast<sdpa_ws_fn>(extra_sym("cnnlGetScaledDotProductAttnWorkspaceSize_v3"));
-  static auto sdpa = reinterpret_cast<sdpa_fn>(extra_sym("cnnlScaledDotProductAttn_v4"));
   const int sq = (int)q.size(2), sk = (int)k.size(2);
   size_t ws_size = 0;
-  CNNL_CHECK(get_ws(handle, nullptr, nullptr, qd, kd, vd, nullptr, nullptr, bd, nullptr, nullptr,
-                    sq, sk, causal, window_left, window_right, false,
-                    CNNL_COMPUTATION_HIGH_PRECISION, CNNL_DTYPE_FLOAT, &ws_size));
+  CNNL_CHECK(cnnlGetScaledDotProductAttnWorkspaceSize_v3(
+      handle, nullptr, nullptr, qd, kd, vd, nullptr, nullptr, bd, nullptr, nullptr,
+      sq, sk, causal, window_left, window_right, false,
+      CNNL_COMPUTATION_HIGH_PRECISION, CNNL_DTYPE_FLOAT, &ws_size));
   auto ws = torch::empty({(int64_t)ws_size}, q.options().dtype(torch::kUInt8));
   void* ws_ptr = ws_size ? ws.data_ptr() : nullptr;
-  CNNL_CHECK(sdpa(handle, nullptr, nullptr, qd, q.data_ptr(), kd, k.data_ptr(), vd, v.data_ptr(),
-                  nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, bd, bias_ptr,
-                  nullptr, nullptr, nullptr, nullptr, sq, sk, causal, window_left, window_right,
-                  qk_scale, CNNL_COMPUTATION_HIGH_PRECISION, CNNL_DTYPE_FLOAT, ws_ptr, ws_size,
-                  false, nullptr, nullptr, od, out.data_ptr()));
+  CNNL_CHECK(cnnlScaledDotProductAttn_v4(
+      handle, nullptr, nullptr, qd, q.data_ptr(), kd, k.data_ptr(), vd, v.data_ptr(),
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, bd, bias_ptr,
+      nullptr, nullptr, nullptr, nullptr, sq, sk, causal, window_left, window_right,
+      qk_scale, CNNL_COMPUTATION_HIGH_PRECISION, CNNL_DTYPE_FLOAT, ws_ptr, ws_size,
+      false, nullptr, nullptr, od, out.data_ptr()));
 
   if (bd) CNNL_CHECK(cnnlDestroyTensorDescriptor(bd));
   CNNL_CHECK(cnnlDestroyTensorDescriptor(od));
