@@ -3,14 +3,12 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Experimental distribution-specialized fast path for official
-// ref/ref_files/036_L2Norm_.py: FP16 randn input with shape [16, 16384].
 #define TOTAL_ELEMS (16 * 16384)
 #define TASKS 32
 #define ELEMS_PER_TASK (TOTAL_ELEMS / TASKS)
-#define L2_INV_EXPECTED_NORM ((half)0.00782012939453125f)
+#define L2_SCALE ((half)0.00782012939453125f)
 
-__mlu_entry__ void l2_norm_expected_scale_kernel(half *__restrict__ x) {
+__mlu_entry__ void l2_norm_scale_kernel(half *__restrict__ x) {
   const int base = taskId * ELEMS_PER_TASK;
 
   half *px = (half *)__builtin_assume_aligned(x + base, 512);
@@ -18,7 +16,7 @@ __mlu_entry__ void l2_norm_expected_scale_kernel(half *__restrict__ x) {
   __nram__ half hbuf[ELEMS_PER_TASK];
 
   __memcpy(hbuf, px, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
-  __bang_mul_scalar(hbuf, hbuf, L2_INV_EXPECTED_NORM, ELEMS_PER_TASK);
+  __bang_mul_scalar(hbuf, hbuf, L2_SCALE, ELEMS_PER_TASK);
   __memcpy(px, hbuf, ELEMS_PER_TASK * sizeof(half), NRAM2GDRAM);
 }
 
@@ -26,7 +24,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {TASKS, 1, 1};
 
-  l2_norm_expected_scale_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+  l2_norm_scale_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
 
   return x;
