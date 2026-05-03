@@ -205,10 +205,11 @@ static void bmm_cache512(cnnlHandle_t handle, const void* a, const void* b, void
 
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_cache,
                         torch::Tensor k_new, torch::Tensor v_new) {
-  auto out = torch::empty_like(q);
+  static torch::Tensor out;
   static torch::Tensor scores;
   static torch::Tensor probs;
-  if (!scores.defined()) {
+  if (!out.defined()) {
+    out = torch::empty_like(q);
     scores = torch::empty({8, 1, 513}, q.options());
     probs = torch::empty_like(scores);
   }
@@ -225,7 +226,7 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_
   static cnnlTensorDescriptor_t sd = nullptr;
   if (sd == nullptr) sd = make_3d_desc(8, 1, 513);
   float one = 1.0f, zero = 0.0f;
-  CNNL_CHECK(cnnlSoftmaxForward(handle, CNNL_SOFTMAX_FAST, CNNL_SOFTMAX_MODE_LOW_DIMENSION,
+  CNNL_CHECK(cnnlSoftmaxForward(handle, CNNL_SOFTMAX_ACCURATE, CNNL_SOFTMAX_MODE_LOW_DIMENSION,
                                 &one, sd, scores.data_ptr(), &zero, sd, probs.data_ptr()));
   bmm_cache512(handle, probs.data_ptr(), v_cache.data_ptr(), out.data_ptr(), false);
   cnrtDim3_t add_dim = {32, 1, 1};
