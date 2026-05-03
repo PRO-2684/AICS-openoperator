@@ -4,67 +4,38 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void stage0(const half *__restrict__ x, half *__restrict__ tmp) {
-  __nram__ half a[256];
-  __nram__ half b[256];
+  for (int t = taskId; t < 4096; t += taskDim) {
+    const int a = t >> 8;
+    const int b = t & 255;
+    const int p = a * 65536 + b;
 
-  for (int t = taskId; t < 16; t += taskDim) {
-    const int p = t << 16;
-
-    __memcpy(a, x + p, 512, GDRAM2NRAM);
-    __memcpy(tmp + p, a, 512, NRAM2GDRAM);
-
-    for (int i = 1; i < 256; ++i) {
+    float s = 0.0f;
+#pragma unroll
+    for (int i = 0; i < 256; ++i) {
       const int q = p + (i << 8);
-      __memcpy(b, x + q, 512, GDRAM2NRAM);
-      __bang_add(a, a, b, 256);
-      __memcpy(tmp + q, a, 512, NRAM2GDRAM);
+      s += (float)x[q];
+      tmp[q] = (half)s;
     }
   }
 }
 
 __mlu_entry__ void stage1(const half *__restrict__ tmp,
                           half *__restrict__ out) {
-  __nram__ half a[256];
-  __nram__ half b[256];
+  __nram__ half buf[256];
 
   for (int t = taskId; t < 4096; t += taskDim) {
     const int p = t << 8;
 
-    __memcpy(a, tmp + p, 512, GDRAM2NRAM);
+    __memcpy(buf, tmp + p, 512, GDRAM2NRAM);
 
-    __bang_write_value(b, 256, (half)0.0f);
-    __memcpy(b + 1, a, 510, NRAM2NRAM);
-    __bang_add(a, a, b, 256);
+    float s = 0.0f;
+#pragma unroll
+    for (int i = 0; i < 256; ++i) {
+      s += (float)buf[i];
+      buf[i] = (half)s;
+    }
 
-    __bang_write_value(b, 256, (half)0.0f);
-    __memcpy(b + 2, a, 508, NRAM2NRAM);
-    __bang_add(a, a, b, 256);
-
-    __bang_write_value(b, 256, (half)0.0f);
-    __memcpy(b + 4, a, 504, NRAM2NRAM);
-    __bang_add(a, a, b, 256);
-
-    __bang_write_value(b, 256, (half)0.0f);
-    __memcpy(b + 8, a, 496, NRAM2NRAM);
-    __bang_add(a, a, b, 256);
-
-    __bang_write_value(b, 256, (half)0.0f);
-    __memcpy(b + 16, a, 480, NRAM2NRAM);
-    __bang_add(a, a, b, 256);
-
-    __bang_write_value(b, 256, (half)0.0f);
-    __memcpy(b + 32, a, 448, NRAM2NRAM);
-    __bang_add(a, a, b, 256);
-
-    __bang_write_value(b, 256, (half)0.0f);
-    __memcpy(b + 64, a, 384, NRAM2NRAM);
-    __bang_add(a, a, b, 256);
-
-    __bang_write_value(b, 256, (half)0.0f);
-    __memcpy(b + 128, a, 256, NRAM2NRAM);
-    __bang_add(a, a, b, 256);
-
-    __memcpy(out + p, a, 512, NRAM2GDRAM);
+    __memcpy(out + p, buf, 512, NRAM2GDRAM);
   }
 }
 
