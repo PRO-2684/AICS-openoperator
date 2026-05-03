@@ -2,6 +2,7 @@
 #include <bang.h>
 #include <cnnl.h>
 #include <cnrt.h>
+#include <cstdio>
 #include <torch/extension.h>
 
 #define CNNL_CHECK(call)                                                       \
@@ -105,7 +106,7 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
     size_t extra = (size_t)input.numel() * input.element_size();
     if (extra > ws)
       ws = extra;
-
+    std::printf("ws: %zu %zu %zu\n", ws, ws0, ws1);
     inited = true;
   }
 
