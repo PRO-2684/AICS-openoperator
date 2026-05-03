@@ -36,7 +36,9 @@ __mlu_entry__ void kernel(const half *__restrict__ input,
   __bang_reduce_sum(tmp, tmp, D);
 
   half row_sum = tmp[0] + tmp[C] + tmp[C * 2] + tmp[C * 3];
-  half lse = (half)(logf((float)row_sum) + (float)row_max);
+  tmp[0] = row_sum;
+  __bang_active_log(tmp, tmp, C);
+  half lse = tmp[0] + row_max;
 
   __bang_add_scalar(xbuf, xbuf, (half)(-lse), B);
   __memcpy(row_out, xbuf, B * sizeof(half), NRAM2GDRAM);
