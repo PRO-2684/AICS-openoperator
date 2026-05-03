@@ -8,14 +8,12 @@
 
 #define REDUCE_BLOCK_HALF 64
 #define PARTIAL_SUMS (DIM / REDUCE_BLOCK_HALF)
-#define FINAL_SUMS (PARTIAL_SUMS / REDUCE_BLOCK_HALF)
 
 __mlu_entry__ void softmax_16x16384_half_kernel(const half *__restrict__ input,
                                                 half *__restrict__ output) {
   const int row = taskId;
 
   __nram__ half xbuf[DIM];
-  __nram__ half ebuf[DIM];
   __nram__ half sbuf[DIM];
   __nram__ half partial[PARTIAL_SUMS];
   __nram__ half argbuf[64];
@@ -29,11 +27,10 @@ __mlu_entry__ void softmax_16x16384_half_kernel(const half *__restrict__ input,
   __bang_argmax(argbuf, xbuf, DIM);
   half row_max = argbuf[0];
 
-  __memcpy(ebuf, xbuf, DIM * sizeof(half), NRAM2NRAM);
-  __bang_add_scalar(ebuf, ebuf, (half)(-row_max), DIM);
-  __bang_active_exp(ebuf, ebuf, DIM);
+  __bang_add_scalar(xbuf, xbuf, (half)(-row_max), DIM);
+  __bang_active_exp(xbuf, xbuf, DIM);
 
-  __memcpy(sbuf, ebuf, DIM * sizeof(half), NRAM2NRAM);
+  __memcpy(sbuf, xbuf, DIM * sizeof(half), NRAM2NRAM);
   __bang_reduce_sum(sbuf, sbuf, DIM);
 
   __memcpy(partial, sbuf, sizeof(half), NRAM2NRAM, sizeof(half),
@@ -46,9 +43,9 @@ __mlu_entry__ void softmax_16x16384_half_kernel(const half *__restrict__ input,
 
   half inv_sum = (half)(1.0f / row_sum);
 
-  __bang_mul_scalar(ebuf, ebuf, inv_sum, DIM);
+  __bang_mul_scalar(xbuf, xbuf, inv_sum, DIM);
 
-  __memcpy(row_out, ebuf, DIM * sizeof(half), NRAM2GDRAM);
+  __memcpy(row_out, xbuf, DIM * sizeof(half), NRAM2GDRAM);
 }
 
 // Specialized for ref/ref_files/058_Softmax.py: x is FP16 [16, 16384], softmax dim=1.
@@ -56,7 +53,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   auto y = torch::empty_like(x);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t kdim = {BATCH, 1, 1};
-  softmax_16x16384_half_kernel<<<kdim, cnrtFuncTypeUnion1, queue>>>(
+  softmax_16x16384_half_kernel<<<kdim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
