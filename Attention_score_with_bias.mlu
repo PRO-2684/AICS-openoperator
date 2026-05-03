@@ -1,6 +1,12 @@
 #include <bang.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
+#include <cnnl_extra.h>
 #include <cnrt.h>
+#include <dlfcn.h>
 #include <torch/extension.h>
+
+#include <cmath>
 
 // Task: 129 129_Attention_score_with_bias
 // Category: attention
@@ -9,6 +15,23 @@
 // Description: 实现一个 BangC 算子，执行带偏置项的缩放点积注意力（Scaled Dot-Product Attention）计算。输入包含形状均为 `[batch, heads, seq, dim]` 的查询张量 `q`、键张量 `k` 和值张量 `v`，以及形状为 `[1, heads, seq, seq]` 的偏置张量 `bias`；算子输出为注意力加权后的结果，形状与 `q` 保持一致。
 // Wrapper: torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor bias);
 
+#define CNNL_CHECK(expr) do { cnnlStatus_t s=(expr); TORCH_CHECK(s==CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s); } while (0)
+using ws_fn = cnnlStatus_t (*)(cnnlHandle_t, cnnlScaledDotProductAttnDescriptor_t, cnnlScaledDotProductAttnQuantizeDescriptor_t, cnnlTensorDescriptor_t, cnnlTensorDescriptor_t, cnnlTensorDescriptor_t, cnnlTensorDescriptor_t, cnnlTensorDescriptor_t, cnnlTensorDescriptor_t, cnnlTensorDescriptor_t, cnnlTensorDescriptor_t, int, int, bool, int, int, bool, cnnlComputationPreference_t, cnnlDataType_t, size_t*);
+using op_fn = cnnlStatus_t (*)(cnnlHandle_t, cnnlScaledDotProductAttnDescriptor_t, cnnlScaledDotProductAttnQuantizeDescriptor_t, cnnlTensorDescriptor_t, const void*, cnnlTensorDescriptor_t, const void*, cnnlTensorDescriptor_t, const void*, cnnlTensorDescriptor_t, const void*, cnnlTensorDescriptor_t, const void*, cnnlTensorDescriptor_t, const void*, cnnlTensorDescriptor_t, const void*, cnnlTensorDescriptor_t, const void*, cnnlTensorDescriptor_t, const void*, int, int, bool, int, int, float, cnnlComputationPreference_t, cnnlDataType_t, void*, size_t, bool, cnnlTensorDescriptor_t, void*, cnnlTensorDescriptor_t, void*);
+static void* sym(const char* n){ static void* h=dlopen("libcnnl_extra.so",RTLD_LAZY|RTLD_LOCAL); TORCH_CHECK(h, "failed to load libcnnl_extra.so"); void* p=dlsym(h,n); TORCH_CHECK(p, "missing cnnl_extra symbol: ", n); return p; }
+static cnnlTensorDescriptor_t bshd(const torch::Tensor& x){ int b=x.size(0),h=x.size(1),s=x.size(2),d=x.size(3); int dims[4]={b,s,h,d}; int strides[4]={h*s*d,d,s*d,1}; cnnlTensorDescriptor_t desc; CNNL_CHECK(cnnlCreateTensorDescriptor(&desc)); CNNL_CHECK(cnnlSetTensorDescriptorEx(desc,CNNL_LAYOUT_ARRAY,CNNL_DTYPE_HALF,4,dims,strides)); return desc; }
+static cnnlTensorDescriptor_t arr4(const torch::Tensor& x){ int dims[4]={(int)x.size(0),(int)x.size(1),(int)x.size(2),(int)x.size(3)}; cnnlTensorDescriptor_t d; CNNL_CHECK(cnnlCreateTensorDescriptor(&d)); CNNL_CHECK(cnnlSetTensorDescriptor(d,CNNL_LAYOUT_ARRAY,CNNL_DTYPE_HALF,4,dims)); return d; }
+
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v, torch::Tensor bias) {
-  TORCH_CHECK(false, "TODO: implement Attention_score_with_bias");
+  auto out=torch::empty_like(q);
+  auto qd=bshd(q), kd=bshd(k), vd=bshd(v), od=bshd(out), bd=arr4(bias);
+  auto handle=torch_mlu::getCurrentHandle();
+  static auto get_ws=reinterpret_cast<ws_fn>(sym("cnnlGetScaledDotProductAttnWorkspaceSize_v3"));
+  static auto sdpa=reinterpret_cast<op_fn>(sym("cnnlScaledDotProductAttn_v4"));
+  int seq=q.size(2); size_t ws_size=0; float scale=1.0f/std::sqrt((float)q.size(3));
+  CNNL_CHECK(get_ws(handle,nullptr,nullptr,qd,kd,vd,nullptr,nullptr,bd,nullptr,nullptr,seq,seq,false,-1,-1,false,CNNL_COMPUTATION_HIGH_PRECISION,CNNL_DTYPE_FLOAT,&ws_size));
+  auto ws=torch::empty({(int64_t)ws_size},q.options().dtype(torch::kUInt8));
+  CNNL_CHECK(sdpa(handle,nullptr,nullptr,qd,q.data_ptr(),kd,k.data_ptr(),vd,v.data_ptr(),nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,bd,bias.data_ptr(),nullptr,nullptr,nullptr,nullptr,seq,seq,false,-1,-1,scale,CNNL_COMPUTATION_HIGH_PRECISION,CNNL_DTYPE_FLOAT,ws_size?ws.data_ptr():nullptr,ws_size,false,nullptr,nullptr,od,out.data_ptr()));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(bd)); CNNL_CHECK(cnnlDestroyTensorDescriptor(od)); CNNL_CHECK(cnnlDestroyTensorDescriptor(vd)); CNNL_CHECK(cnnlDestroyTensorDescriptor(kd)); CNNL_CHECK(cnnlDestroyTensorDescriptor(qd));
+  return out;
 }

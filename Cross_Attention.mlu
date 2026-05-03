@@ -1,6 +1,12 @@
 #include <bang.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
+#include <cnnl_extra.h>
 #include <cnrt.h>
+#include <dlfcn.h>
 #include <torch/extension.h>
+
+#include <cmath>
 
 // Task: 084 084_Cross_Attention
 // Category: attention
@@ -9,6 +15,43 @@
 // Description: 实现一个 BangC 算子，完成多头注意力（Multi-head Attention）的前向计算。输入包括形状为 `[batch, q_seq, d_model]` 的查询张量 `query`、形状为 `[batch, kv_seq, d_model]` 的键值对张量 `key_value`，以及注意力头数 `num_heads`；该算子通过计算注意力得分并加权聚合，输出形状为 `[batch, q_seq, d_model]` 的结果张量。
 // Wrapper: torch::Tensor bang_func(torch::Tensor query, torch::Tensor key_value, int d_model, int num_heads);
 
+#define CNNL_CHECK(expr) do { cnnlStatus_t s=(expr); TORCH_CHECK(s==CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s); } while (0)
+using ws_fn = cnnlStatus_t (*)(cnnlHandle_t, cnnlScaledDotProductAttnDescriptor_t, cnnlScaledDotProductAttnQuantizeDescriptor_t, cnnlTensorDescriptor_t, cnnlTensorDescriptor_t, cnnlTensorDescriptor_t, cnnlTensorDescriptor_t, cnnlTensorDescriptor_t, cnnlTensorDescriptor_t, cnnlTensorDescriptor_t, cnnlTensorDescriptor_t, int, int, bool, int, int, bool, cnnlComputationPreference_t, cnnlDataType_t, size_t*);
+using op_fn = cnnlStatus_t (*)(cnnlHandle_t, cnnlScaledDotProductAttnDescriptor_t, cnnlScaledDotProductAttnQuantizeDescriptor_t, cnnlTensorDescriptor_t, const void*, cnnlTensorDescriptor_t, const void*, cnnlTensorDescriptor_t, const void*, cnnlTensorDescriptor_t, const void*, cnnlTensorDescriptor_t, const void*, cnnlTensorDescriptor_t, const void*, cnnlTensorDescriptor_t, const void*, cnnlTensorDescriptor_t, const void*, cnnlTensorDescriptor_t, const void*, int, int, bool, int, int, float, cnnlComputationPreference_t, cnnlDataType_t, void*, size_t, bool, cnnlTensorDescriptor_t, void*, cnnlTensorDescriptor_t, void*);
+static void* sym(const char* n){ static void* h=dlopen("libcnnl_extra.so",RTLD_LAZY|RTLD_LOCAL); TORCH_CHECK(h, "failed to load libcnnl_extra.so"); void* p=dlsym(h,n); TORCH_CHECK(p, "missing cnnl_extra symbol: ", n); return p; }
+static cnnlTensorDescriptor_t bshd_contig(int b, int s, int h, int d) {
+  int dims[4] = {b, s, h, d};
+  cnnlTensorDescriptor_t desc;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&desc));
+  CNNL_CHECK(cnnlSetTensorDescriptor(desc, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, dims));
+  return desc;
+}
+
 torch::Tensor bang_func(torch::Tensor query, torch::Tensor key_value, int d_model, int num_heads) {
-  TORCH_CHECK(false, "TODO: implement Cross_Attention");
+  const int b = (int)query.size(0);
+  const int q_seq = (int)query.size(1);
+  const int kv_seq = (int)key_value.size(1);
+  const int head_dim = d_model / num_heads;
+  auto out = torch::empty_like(query);
+  auto qd = bshd_contig(b, q_seq, num_heads, head_dim);
+  auto kd = bshd_contig(b, kv_seq, num_heads, head_dim);
+  auto vd = bshd_contig(b, kv_seq, num_heads, head_dim);
+  auto od = bshd_contig(b, q_seq, num_heads, head_dim);
+  auto handle = torch_mlu::getCurrentHandle();
+  static auto get_ws = reinterpret_cast<ws_fn>(sym("cnnlGetScaledDotProductAttnWorkspaceSize_v3"));
+  static auto sdpa = reinterpret_cast<op_fn>(sym("cnnlScaledDotProductAttn_v4"));
+  size_t ws_size = 0;
+  float scale = 1.0f / std::sqrt((float)head_dim);
+  CNNL_CHECK(get_ws(handle,nullptr,nullptr,qd,kd,vd,nullptr,nullptr,nullptr,nullptr,nullptr,
+                    q_seq,kv_seq,false,-1,-1,false,CNNL_COMPUTATION_HIGH_PRECISION,
+                    CNNL_DTYPE_FLOAT,&ws_size));
+  auto ws=torch::empty({(int64_t)ws_size},query.options().dtype(torch::kUInt8));
+  CNNL_CHECK(sdpa(handle,nullptr,nullptr,qd,query.data_ptr(),kd,key_value.data_ptr(),
+                  vd,key_value.data_ptr(),nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,
+                  nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,q_seq,kv_seq,false,-1,-1,
+                  scale,CNNL_COMPUTATION_HIGH_PRECISION,CNNL_DTYPE_FLOAT,
+                  ws_size?ws.data_ptr():nullptr,ws_size,false,nullptr,nullptr,od,out.data_ptr()));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(od)); CNNL_CHECK(cnnlDestroyTensorDescriptor(vd));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(kd)); CNNL_CHECK(cnnlDestroyTensorDescriptor(qd));
+  return out;
 }

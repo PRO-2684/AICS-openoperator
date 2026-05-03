@@ -1,6 +1,9 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
+
+#include <cmath>
 
 // Task: 108 108_ALiBi_attention_bias
 // Category: embedding
@@ -9,6 +12,27 @@
 // Description: 实现一个 BangC 算子，用于计算 Transformer 架构中的 ALiBi 线性位置偏置矩阵。该算子接收表示注意力头数的标量 `num_heads` 和序列长度的标量 `seq_len` 作为输入，计算序列内各位置的绝对距离并结合不同头的衰减斜率生成偏置权重；输出张量的形状为 `[num_heads, seq_len, seq_len]`。
 // Wrapper: torch::Tensor bang_func(int seq_len, int num_heads);
 
+__mlu_entry__ void alibi_kernel(half* out, int seq_len, int num_heads, int64_t n) {
+  int64_t idx = taskId;
+  int64_t step = taskDim;
+  for (; idx < n; idx += step) {
+    int col = idx % seq_len;
+    int row = (idx / seq_len) % seq_len;
+    int head = idx / (seq_len * seq_len);
+    int dist = row > col ? row - col : col - row;
+    float slope = exp2f(-8.0f * (float)(head + 1) / (float)num_heads);
+    out[idx] = (half)(-slope * (float)dist);
+  }
+}
+
 torch::Tensor bang_func(int seq_len, int num_heads) {
-  TORCH_CHECK(false, "TODO: implement ALiBi_attention_bias");
+  auto out = torch::empty({num_heads, seq_len, seq_len},
+                          torch::TensorOptions()
+                              .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                              .dtype(torch::kHalf));
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {32, 1, 1};
+  alibi_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<half*>(out.data_ptr<at::Half>()), seq_len, num_heads, out.numel());
+  return out;
 }
