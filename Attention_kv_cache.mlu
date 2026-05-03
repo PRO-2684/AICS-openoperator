@@ -36,6 +36,27 @@ __mlu_entry__ void concat_kv_kernel(const half* k_cache, const half* v_cache,
   }
 }
 
+__mlu_entry__ void score_new_kernel(const half* q, const half* k_new, half* scores) {
+  int h = taskId;
+  if (h >= 8) return;
+  const half* qh = q + h * 64;
+  const half* kh = k_new + h * 64;
+  float dot = 0.0f;
+  for (int d = 0; d < 64; ++d) dot += (float)qh[d] * (float)kh[d];
+  scores[h * 513 + 512] = (half)(dot * 0.125f);
+}
+
+__mlu_entry__ void add_new_value_kernel(const half* probs, const half* v_new, half* out) {
+  int idx = taskId;
+  const int total = 8 * 64;
+  for (; idx < total; idx += taskDim) {
+    int h = idx / 64;
+    int d = idx % 64;
+    float x = (float)out[idx] + (float)probs[h * 513 + 512] * (float)v_new[h * 64 + d];
+    out[idx] = (half)x;
+  }
+}
+
 static cnnlTensorDescriptor_t make_1d_desc(int64_t n) {
   int dims[1] = {(int)n};
   cnnlTensorDescriptor_t d;
@@ -113,37 +134,104 @@ static void bmm(cnnlHandle_t handle, const void* a, const void* b, void* out,
       stride_o));
 }
 
+static void bmm_cache512(cnnlHandle_t handle, const void* a, const void* b, void* out,
+                         bool is_qk) {
+  static cnnlTensorDescriptor_t qk_ad = nullptr, qk_bd = nullptr, qk_od = nullptr;
+  static cnnlTensorDescriptor_t pv_ad = nullptr, pv_bd = nullptr, pv_od = nullptr;
+  static cnnlStrideBatchMatMulDescriptor_t qk_desc = nullptr, pv_desc = nullptr;
+  static cnnlStrideBatchMatMulAlgo_t qk_algo = nullptr, pv_algo = nullptr;
+  static size_t qk_ws_size = 0, pv_ws_size = 0;
+  static torch::Tensor qk_ws, pv_ws;
+  cnnlTensorDescriptor_t& ad = is_qk ? qk_ad : pv_ad;
+  cnnlTensorDescriptor_t& bd = is_qk ? qk_bd : pv_bd;
+  cnnlTensorDescriptor_t& od = is_qk ? qk_od : pv_od;
+  cnnlStrideBatchMatMulDescriptor_t& desc = is_qk ? qk_desc : pv_desc;
+  cnnlStrideBatchMatMulAlgo_t& algo = is_qk ? qk_algo : pv_algo;
+  size_t& ws_size = is_qk ? qk_ws_size : pv_ws_size;
+  torch::Tensor& ws = is_qk ? qk_ws : pv_ws;
+
+  const int batch = 8;
+  const int m = 1;
+  const int n = is_qk ? 512 : 64;
+  const int k = is_qk ? 64 : 512;
+  const bool trans_a = false;
+  const bool trans_b = is_qk;
+  const int lda = k;
+  const int ldb = is_qk ? 64 : 64;
+  const int ldc = n;
+  const int ldd = n;
+  int batch_size[1] = {batch};
+  int64_t stride_a[1] = {is_qk ? 64 : 513};
+  int64_t stride_b[1] = {512 * 64};
+  int64_t stride_o[1] = {is_qk ? 513 : 64};
+  float alpha = is_qk ? 0.125f : 1.0f;
+  float beta = 0.0f;
+
+  if (desc == nullptr) {
+    ad = make_1d_desc(is_qk ? 8 * 64 : 8 * 513);
+    bd = make_1d_desc(8 * 512 * 64);
+    od = make_1d_desc(is_qk ? 8 * 513 : 8 * 64);
+    CNNL_CHECK(cnnlCreateStrideBatchMatMulDescriptor(&desc));
+    CNNL_CHECK(cnnlCreateStrideBatchMatMulAlgo(&algo));
+    cnnlStrideBatchMatMulHeuristicResult_t heur;
+    CNNL_CHECK(cnnlCreateStrideBatchMatMulHeuristicResult(&heur));
+    cnnlDataType_t compute_type = CNNL_DTYPE_FLOAT;
+    int max_batch_dim = 1;
+    int allow_tf32 = 0;
+    CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(desc, CNNL_STRIDE_BMM_COMPUTE_TYPE,
+                                                &compute_type, sizeof(compute_type)));
+    CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(desc, CNNL_STRIDE_BMM_MAX_BATCH_DIM,
+                                                &max_batch_dim, sizeof(max_batch_dim)));
+    CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(desc, CNNL_STRIDE_BMM_ALLOW_TF32,
+                                                &allow_tf32, sizeof(allow_tf32)));
+    int returned = 0;
+    CNNL_CHECK(cnnlGetStrideBatchMatMulAlgoHeuristic_v2(
+        handle, desc, ad, bd, od, od, trans_a, trans_b, &alpha, &beta,
+        m, n, k, lda, ldb, ldc, ldd, batch_size, stride_a, stride_b,
+        stride_o, stride_o, nullptr, 1, &heur, &returned));
+    CNNL_CHECK(cnnlGetStrideBatchMatMulHeuristicResult(heur, &algo, &ws_size));
+    CNNL_CHECK(cnnlDestroyStrideBatchMatMulHeuristicResult(heur));
+    ws = torch::empty({(int64_t)ws_size},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                          .dtype(torch::kUInt8));
+  }
+  CNNL_CHECK(cnnlStrideBatchMatMul_v3(
+      handle, desc, algo, trans_a, trans_b, m, n, k, batch_size, &alpha,
+      ad, a, lda, stride_a, bd, b, ldb, stride_b, &beta, od, out, ldc,
+      stride_o, ws_size ? ws.data_ptr() : nullptr, ws_size, od, out, ldd,
+      stride_o));
+}
+
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_cache,
                         torch::Tensor k_new, torch::Tensor v_new) {
   auto out = torch::empty_like(q);
-  static torch::Tensor k_all;
-  static torch::Tensor v_all;
   static torch::Tensor scores;
   static torch::Tensor probs;
-  if (!k_all.defined()) {
-    k_all = torch::empty({1, 8, 513, 64}, q.options());
-    v_all = torch::empty_like(k_all);
+  if (!scores.defined()) {
     scores = torch::empty({8, 1, 513}, q.options());
     probs = torch::empty_like(scores);
   }
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t copy_dim = {32, 1, 1};
-  concat_kv_kernel<<<copy_dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half*>(k_cache.data_ptr<at::Half>()),
-      reinterpret_cast<const half*>(v_cache.data_ptr<at::Half>()),
-      reinterpret_cast<const half*>(k_new.data_ptr<at::Half>()),
-      reinterpret_cast<const half*>(v_new.data_ptr<at::Half>()),
-      reinterpret_cast<half*>(k_all.data_ptr<at::Half>()),
-      reinterpret_cast<half*>(v_all.data_ptr<at::Half>()));
 
   cnnlHandle_t handle = torch_mlu::getCurrentHandle();
-  bmm(handle, q.data_ptr(), k_all.data_ptr(), scores.data_ptr(), 8, 1, 513, 64, true, 0.125f);
+  bmm_cache512(handle, q.data_ptr(), k_cache.data_ptr(), scores.data_ptr(), true);
+  cnrtDim3_t small_dim = {8, 1, 1};
+  score_new_kernel<<<small_dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half*>(q.data_ptr<at::Half>()),
+      reinterpret_cast<const half*>(k_new.data_ptr<at::Half>()),
+      reinterpret_cast<half*>(scores.data_ptr<at::Half>()));
   static cnnlTensorDescriptor_t sd = nullptr;
   if (sd == nullptr) sd = make_3d_desc(8, 1, 513);
   float one = 1.0f, zero = 0.0f;
   CNNL_CHECK(cnnlSoftmaxForward(handle, CNNL_SOFTMAX_ACCURATE, CNNL_SOFTMAX_MODE_LOW_DIMENSION,
                                 &one, sd, scores.data_ptr(), &zero, sd, probs.data_ptr()));
-  bmm(handle, probs.data_ptr(), v_all.data_ptr(), out.data_ptr(), 8, 1, 64, 513, false, 1.0f);
+  bmm_cache512(handle, probs.data_ptr(), v_cache.data_ptr(), out.data_ptr(), false);
+  cnrtDim3_t add_dim = {32, 1, 1};
+  add_new_value_kernel<<<add_dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half*>(probs.data_ptr<at::Half>()),
+      reinterpret_cast<const half*>(v_new.data_ptr<at::Half>()),
+      reinterpret_cast<half*>(out.data_ptr<at::Half>()));
   return out;
 }
