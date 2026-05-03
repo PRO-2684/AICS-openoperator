@@ -3,85 +3,100 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#include <signal.h>
-#include <sys/prctl.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
-#include <cerrno>
-#include <cstring>
-#include <stdexcept>
-#include <string>
-#include <vector>
+#include <pybind11/embed.h>
 
 namespace {
-class ChildProcess {
+class SubprocessManager {
 public:
-  ChildProcess() = default;
-  explicit ChildProcess(pid_t pid) : pid_(pid) {}
+  static void run_cmd_async(py::object cmd) {
+    py::gil_scoped_acquire gil;
 
-  pid_t pid() const { return pid_; }
+    try {
+      ensure_registered();
 
-  bool alive() const {
-    if (pid_ <= 0)
-      return false;
-    return ::kill(pid_, 0) == 0 || errno == EPERM;
+      py::module_ subprocess = py::module_::import("subprocess");
+      py::print("start:", cmd);
+
+      py::object proc = subprocess.attr("Popen")(
+          cmd, py::arg("stdout") = subprocess.attr("PIPE"),
+          py::arg("stderr") = subprocess.attr("PIPE"), py::arg("text") = true);
+
+      children().append(proc);
+      py::print("pid:", proc.attr("pid"));
+    } catch (const py::error_already_set &e) {
+      py::print("Exec " + py::str(cmd).cast<std::string>() + " error:\n" +
+                std::string(e.what()));
+    }
   }
 
-  void terminate() const {
-    if (pid_ > 0)
-      ::kill(pid_, SIGTERM);
-  }
+  static void cleanup_children() {
+    py::gil_scoped_acquire gil;
 
-  void kill() const {
-    if (pid_ > 0)
-      ::kill(pid_, SIGKILL);
+    try {
+      py::module_ subprocess = py::module_::import("subprocess");
+
+      for (auto item : children()) {
+        py::object proc = py::reinterpret_borrow<py::object>(item);
+
+        if (proc.is_none()) {
+          continue;
+        }
+
+        py::object rc = proc.attr("poll")();
+        if (!rc.is_none()) {
+          continue;
+        }
+
+        try {
+          proc.attr("terminate")();
+
+          try {
+            proc.attr("communicate")(py::arg("timeout") = 3);
+          } catch (const py::error_already_set &) {
+            proc.attr("kill")();
+            proc.attr("communicate")();
+          }
+        } catch (const py::error_already_set &e) {
+          py::print("cleanup child failed:", e.what());
+        }
+      }
+
+      children() = py::list();
+    } catch (const py::error_already_set &e) {
+      py::print("cleanup error:", e.what());
+    }
   }
 
 private:
-  pid_t pid_ = -1;
+  static py::list &children() {
+    static py::list procs;
+    return procs;
+  }
+
+  static bool &registered() {
+    static bool done = false;
+    return done;
+  }
+
+  static void ensure_registered() {
+    if (registered())
+      return;
+
+    py::module_ atexit = py::module_::import("atexit");
+    atexit.attr("register")(
+        py::cpp_function([]() { SubprocessManager::cleanup_children(); }));
+
+    registered() = true;
+  }
 };
-
-static ChildProcess
-spawn_with_parent_death_kill(const std::vector<std::string> &args) {
-  if (args.empty()) {
-    throw std::runtime_error("args is empty");
-  }
-
-  pid_t parent_pid = ::getpid();
-  pid_t pid = ::fork();
-  if (pid < 0) {
-    throw std::runtime_error(std::string("fork failed: ") +
-                             std::strerror(errno));
-  }
-
-  if (pid == 0) {
-    if (::prctl(PR_SET_PDEATHSIG, SIGKILL) != 0) {
-      _exit(127);
-    }
-
-    if (::getppid() != parent_pid) {
-      _exit(127);
-    }
-
-    std::vector<char *> argv;
-    argv.reserve(args.size() + 1);
-    for (const auto &s : args) {
-      argv.push_back(const_cast<char *>(s.c_str()));
-    }
-    argv.push_back(nullptr);
-
-    ::execvp(argv[0], argv.data());
-    _exit(127);
-  }
-
-  return ChildProcess(pid);
-}
 } // namespace
 
 __attribute__((constructor)) static void on_so_load() {
   // spawn_with_parent_death_kill({"cnperf-cli", "monitor"});
+  py::scoped_interpreter guard{};
+
+  SubprocessManager::run_cmd_async(
+      py::cast(std::vector<std::string>{"cnperf-cli", "monitor"}));
 }
 
 #define TASKS 32
