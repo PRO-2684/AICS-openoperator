@@ -14,9 +14,6 @@ struct OpCtx {
   cnnlConvolutionDescriptor_t conv_desc;
   cnnlTransposeDescriptor_t trans_desc;
 
-  size_t ws0 = 0;
-  size_t ws1 = 0;
-
   void init(cnnlHandle_t handle, const torch::Tensor &x, int k, int s, int p) {
     if (ready)
       return;
@@ -52,22 +49,11 @@ struct OpCtx {
     int pad[4] = {p, p, p, p};
     int st[2] = {s, s};
     int dil[2] = {1, 1};
-
     cnnlSetConvolutionDescriptor(conv_desc, 4, pad, st, dil, 1,
                                  CNNL_DTYPE_HALF);
 
     int perm[3] = {0, 2, 1};
     cnnlSetTransposeDescriptor(trans_desc, 3, perm);
-
-    cnnlGetIm2ColWorkspaceSize(handle, x_desc, w_desc, conv_desc, mid_desc,
-                               &ws0);
-
-    cnnlGetTransposeWorkspaceSize(handle, mid_desc, trans_desc, &ws1);
-
-    fprintf(stderr,
-            "[unfold] im2col_workspace_size=%zu transpose_workspace_size=%zu\n",
-            ws0, ws1);
-    fflush(stderr);
 
     ready = true;
   }
@@ -100,27 +86,11 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
   auto mid = torch::empty({n, l, block}, x.options());
   auto y = torch::empty({n, block, l}, x.options());
 
-  torch::Tensor ws0;
-  void *ws0_ptr = nullptr;
-  if (c.ws0) {
-    ws0 = torch::empty({static_cast<int64_t>(c.ws0)},
-                       x.options().dtype(torch::kUInt8));
-    ws0_ptr = ws0.data_ptr();
-  }
-
   cnnlIm2Col(handle, c.x_desc, x.data_ptr(), c.w_desc, c.conv_desc, nullptr,
-             nullptr, nullptr, ws0_ptr, c.ws0, c.mid_desc, mid.data_ptr());
-
-  torch::Tensor ws1;
-  void *ws1_ptr = nullptr;
-  if (c.ws1) {
-    ws1 = torch::empty({static_cast<int64_t>(c.ws1)},
-                       x.options().dtype(torch::kUInt8));
-    ws1_ptr = ws1.data_ptr();
-  }
+             nullptr, nullptr, nullptr, 0, c.mid_desc, mid.data_ptr());
 
   cnnlTranspose_v2(handle, c.trans_desc, c.mid_desc, mid.data_ptr(), c.y_desc,
-                   y.data_ptr(), ws1_ptr, c.ws1);
+                   y.data_ptr(), nullptr, 0);
 
   return y;
 }
