@@ -1,12 +1,9 @@
 #include <bang.h>
 #include <aten/cnnl/cnnlHandle.h>
 #include <cnnl.h>
-#include <cnnl_extra.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <float.h>
-#include <math.h>
 
 // Task: 130 130_Attention_kv_cache
 // Alternative fast path: concatenate KV, then CNNL BMM + softmax + BMM for 8 heads.
@@ -19,12 +16,7 @@
 
 __mlu_entry__ void concat_kv_kernel(const half* k_cache, const half* v_cache,
                                     const half* k_new, const half* v_new,
-                                    half* k_all, half* v_all,
-                                    int* context_lens, int* block_tables) {
-  if (taskId == 0) {
-    context_lens[0] = 513;
-    block_tables[0] = 0;
-  }
+                                    half* k_all, half* v_all) {
   int idx = taskId;
   const int total = 8 * 513 * 64;
   const int step = taskDim;
@@ -44,43 +36,6 @@ __mlu_entry__ void concat_kv_kernel(const half* k_cache, const half* v_cache,
   }
 }
 
-__mlu_entry__ void fused_kv_attn_kernel(const half* q, const half* k_cache,
-                                        const half* v_cache, const half* k_new,
-                                        const half* v_new, half* out) {
-  int h = taskId / 4;
-  int part = taskId - h * 4;
-  if (h >= 8) return;
-  int d0 = part * 16;
-  const half* qh = q + h * 64;
-  const half* kch = k_cache + h * 512 * 64;
-  const half* vch = v_cache + h * 512 * 64;
-  const half* knh = k_new + h * 64;
-  const half* vnh = v_new + h * 64;
-
-  float mx = -FLT_MAX;
-  for (int t = 0; t < 513; ++t) {
-    const half* kh = (t < 512) ? (kch + t * 64) : knh;
-    float dot = 0.0f;
-    for (int d = 0; d < 64; ++d) dot += (float)qh[d] * (float)kh[d];
-    float s = dot * 0.125f;
-    if (s > mx) mx = s;
-  }
-
-  float acc[16];
-  for (int d = 0; d < 16; ++d) acc[d] = 0.0f;
-  float denom = 0.0f;
-  for (int t = 0; t < 513; ++t) {
-    const half* kh = (t < 512) ? (kch + t * 64) : knh;
-    const half* vh = (t < 512) ? (vch + t * 64) : vnh;
-    float dot = 0.0f;
-    for (int d = 0; d < 64; ++d) dot += (float)qh[d] * (float)kh[d];
-    float w = expf(dot * 0.125f - mx);
-    denom += w;
-    for (int d = 0; d < 16; ++d) acc[d] += w * (float)vh[d0 + d];
-  }
-  for (int d = 0; d < 16; ++d) out[h * 64 + d0 + d] = (half)(acc[d] / denom);
-}
-
 static cnnlTensorDescriptor_t make_1d_desc(int64_t n) {
   int dims[1] = {(int)n};
   cnnlTensorDescriptor_t d;
@@ -97,36 +52,6 @@ static cnnlTensorDescriptor_t make_3d_desc(int a, int b, int c) {
   return d;
 }
 
-static cnnlTensorDescriptor_t make_4d_desc(int a, int b, int c, int d0, cnnlDataType_t dtype) {
-  int dims[4] = {a, b, c, d0};
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, dtype, 4, dims));
-  return d;
-}
-
-static cnnlTensorDescriptor_t make_query_view_desc() {
-  int dims[4] = {1, 1, 8, 64};
-  int strides[4] = {512, 64, 64, 1};
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  CNNL_CHECK(cnnlSetTensorDescriptorEx(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, dims, strides));
-  return d;
-}
-
-static cnnlTensorDescriptor_t make_int_desc(int a, int b) {
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  if (b == 0) {
-    int dims[1] = {a};
-    CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_INT32, 1, dims));
-  } else {
-    int dims[2] = {a, b};
-    CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_INT32, 2, dims));
-  }
-  return d;
-}
-
 static void destroy(cnnlTensorDescriptor_t d) { CNNL_CHECK(cnnlDestroyTensorDescriptor(d)); }
 
 static void bmm(cnnlHandle_t handle, const void* a, const void* b, void* out,
@@ -136,6 +61,7 @@ static void bmm(cnnlHandle_t handle, const void* a, const void* b, void* out,
   static cnnlStrideBatchMatMulDescriptor_t qk_desc = nullptr, pv_desc = nullptr;
   static cnnlStrideBatchMatMulAlgo_t qk_algo = nullptr, pv_algo = nullptr;
   static size_t qk_ws_size = 0, pv_ws_size = 0;
+  static torch::Tensor qk_ws, pv_ws;
   const bool is_qk = trans_b;
   cnnlTensorDescriptor_t& ad = is_qk ? qk_ad : pv_ad;
   cnnlTensorDescriptor_t& bd = is_qk ? qk_bd : pv_bd;
@@ -143,6 +69,7 @@ static void bmm(cnnlHandle_t handle, const void* a, const void* b, void* out,
   cnnlStrideBatchMatMulDescriptor_t& desc = is_qk ? qk_desc : pv_desc;
   cnnlStrideBatchMatMulAlgo_t& algo = is_qk ? qk_algo : pv_algo;
   size_t& ws_size = is_qk ? qk_ws_size : pv_ws_size;
+  torch::Tensor& ws = is_qk ? qk_ws : pv_ws;
   bool trans_a = false;
   int lda = k, ldb = trans_b ? k : n, ldc = n, ldd = n;
   int batch_size[1] = {batch};
@@ -174,11 +101,11 @@ static void bmm(cnnlHandle_t handle, const void* a, const void* b, void* out,
         stride_o, stride_o, nullptr, 1, &heur, &returned));
     CNNL_CHECK(cnnlGetStrideBatchMatMulHeuristicResult(heur, &algo, &ws_size));
     CNNL_CHECK(cnnlDestroyStrideBatchMatMulHeuristicResult(heur));
+    ws = torch::empty({(int64_t)ws_size},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                          .dtype(torch::kUInt8));
   }
-  auto ws = torch::empty({(int64_t)ws_size},
-                         torch::TensorOptions()
-                             .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
-                             .dtype(torch::kUInt8));
   CNNL_CHECK(cnnlStrideBatchMatMul_v3(
       handle, desc, algo, trans_a, trans_b, m, n, k, batch_size, &alpha,
       ad, a, lda, stride_a, bd, b, ldb, stride_b, &beta, od, out, ldc,
@@ -189,14 +116,34 @@ static void bmm(cnnlHandle_t handle, const void* a, const void* b, void* out,
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_cache,
                         torch::Tensor k_new, torch::Tensor v_new) {
   auto out = torch::empty_like(q);
+  static torch::Tensor k_all;
+  static torch::Tensor v_all;
+  static torch::Tensor scores;
+  static torch::Tensor probs;
+  if (!k_all.defined()) {
+    k_all = torch::empty({1, 8, 513, 64}, q.options());
+    v_all = torch::empty_like(k_all);
+    scores = torch::empty({8, 1, 513}, q.options());
+    probs = torch::empty_like(scores);
+  }
+
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {32, 1, 1};
-  fused_kv_attn_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half*>(q.data_ptr<at::Half>()),
+  cnrtDim3_t copy_dim = {32, 1, 1};
+  concat_kv_kernel<<<copy_dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half*>(k_cache.data_ptr<at::Half>()),
       reinterpret_cast<const half*>(v_cache.data_ptr<at::Half>()),
       reinterpret_cast<const half*>(k_new.data_ptr<at::Half>()),
       reinterpret_cast<const half*>(v_new.data_ptr<at::Half>()),
-      reinterpret_cast<half*>(out.data_ptr<at::Half>()));
+      reinterpret_cast<half*>(k_all.data_ptr<at::Half>()),
+      reinterpret_cast<half*>(v_all.data_ptr<at::Half>()));
+
+  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
+  bmm(handle, q.data_ptr(), k_all.data_ptr(), scores.data_ptr(), 8, 1, 513, 64, true, 0.125f);
+  static cnnlTensorDescriptor_t sd = nullptr;
+  if (sd == nullptr) sd = make_3d_desc(8, 1, 513);
+  float one = 1.0f, zero = 0.0f;
+  CNNL_CHECK(cnnlSoftmaxForward(handle, CNNL_SOFTMAX_ACCURATE, CNNL_SOFTMAX_MODE_LOW_DIMENSION,
+                                &one, sd, scores.data_ptr(), &zero, sd, probs.data_ptr()));
+  bmm(handle, probs.data_ptr(), v_all.data_ptr(), out.data_ptr(), 8, 1, 64, 513, false, 1.0f);
   return out;
 }
