@@ -14,80 +14,87 @@
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
   auto handle = torch_mlu::getCurrentHandle();
 
+  auto buf0 =
+      torch::empty({input.size(0), input.size(2), input.size(3), input.size(1)},
+                   input.options());
+
+  auto buf1 =
+      torch::empty({input.size(0), grid.size(1), grid.size(2), input.size(1)},
+                   input.options());
+
   auto output =
       torch::empty({input.size(0), input.size(1), grid.size(1), grid.size(2)},
                    input.options());
 
-  auto temp =
-      torch::empty({input.size(0), grid.size(1), grid.size(2), input.size(1)},
-                   input.options());
-
-  static cnnlTensorDescriptor_t a_desc;
-  static cnnlTensorDescriptor_t b_desc;
-  static cnnlTensorDescriptor_t c_desc;
-  static cnnlTensorDescriptor_t t0_desc;
-  static cnnlTensorDescriptor_t t1_desc;
-  static cnnlGridSampleDescriptor_t op_desc;
-  static cnnlTransposeDescriptor_t trans_desc;
+  static cnnlTensorDescriptor_t d0;
+  static cnnlTensorDescriptor_t d1;
+  static cnnlTensorDescriptor_t d2;
+  static cnnlTensorDescriptor_t d3;
+  static cnnlTensorDescriptor_t d4;
+  static cnnlGridSampleDescriptor_t gd;
+  static cnnlTransposeDescriptor_t td0;
+  static cnnlTransposeDescriptor_t td1;
   static bool inited = false;
 
   if (!inited) {
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&a_desc));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&b_desc));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&c_desc));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&t0_desc));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&t1_desc));
-    CNNL_CHECK(cnnlCreateGridSampleDescriptor(&op_desc));
-    CNNL_CHECK(cnnlCreateTransposeDescriptor(&trans_desc));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&d0));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&d1));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&d2));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&d3));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&d4));
+    CNNL_CHECK(cnnlCreateGridSampleDescriptor(&gd));
+    CNNL_CHECK(cnnlCreateTransposeDescriptor(&td0));
+    CNNL_CHECK(cnnlCreateTransposeDescriptor(&td1));
 
-    int a_dims[4] = {(int)input.size(0), (int)input.size(2), (int)input.size(3),
-                     (int)input.size(1)};
-    int a_strides[4] = {
-        (int)(input.size(1) * input.size(2) * input.size(3)),
-        (int)input.size(3),
-        1,
-        (int)(input.size(2) * input.size(3)),
-    };
+    int x0[4] = {(int)input.size(0), (int)input.size(1), (int)input.size(2),
+                 (int)input.size(3)};
 
-    int b_dims[4] = {(int)grid.size(0), (int)grid.size(1), (int)grid.size(2),
-                     (int)grid.size(3)};
+    int x1[4] = {(int)input.size(0), (int)input.size(2), (int)input.size(3),
+                 (int)input.size(1)};
 
-    int c_dims[4] = {(int)input.size(0), (int)grid.size(1), (int)grid.size(2),
-                     (int)input.size(1)};
+    int x2[4] = {(int)grid.size(0), (int)grid.size(1), (int)grid.size(2),
+                 (int)grid.size(3)};
 
-    int o_dims[4] = {(int)input.size(0), (int)input.size(1), (int)grid.size(1),
-                     (int)grid.size(2)};
+    int x3[4] = {(int)input.size(0), (int)grid.size(1), (int)grid.size(2),
+                 (int)input.size(1)};
 
-    CNNL_CHECK(cnnlSetTensorDescriptorEx(
-        a_desc, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, a_dims, a_strides));
+    int x4[4] = {(int)input.size(0), (int)input.size(1), (int)grid.size(1),
+                 (int)grid.size(2)};
 
-    CNNL_CHECK(cnnlSetTensorDescriptor(b_desc, CNNL_LAYOUT_NHWC,
-                                       CNNL_DTYPE_HALF, 4, b_dims));
+    CNNL_CHECK(
+        cnnlSetTensorDescriptor(d0, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, x0));
+    CNNL_CHECK(
+        cnnlSetTensorDescriptor(d1, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, x1));
 
-    CNNL_CHECK(cnnlSetTensorDescriptor(c_desc, CNNL_LAYOUT_NHWC,
-                                       CNNL_DTYPE_HALF, 4, c_dims));
+    CNNL_CHECK(
+        cnnlSetTensorDescriptor(d2, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, x2));
+    CNNL_CHECK(
+        cnnlSetTensorDescriptor(d3, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, x3));
 
-    CNNL_CHECK(cnnlSetTensorDescriptor(t0_desc, CNNL_LAYOUT_ARRAY,
-                                       CNNL_DTYPE_HALF, 4, c_dims));
-
-    CNNL_CHECK(cnnlSetTensorDescriptor(t1_desc, CNNL_LAYOUT_ARRAY,
-                                       CNNL_DTYPE_HALF, 4, o_dims));
+    CNNL_CHECK(
+        cnnlSetTensorDescriptor(d4, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, x4));
 
     CNNL_CHECK(cnnlSetGridSampleDescriptor(
-        op_desc, CNNL_INTERP_BILINEAR, CNNL_GRIDSAMPLE_PADDING_ZEROS, true));
+        gd, CNNL_INTERP_BILINEAR, CNNL_GRIDSAMPLE_PADDING_ZEROS, true));
 
-    int perm[4] = {0, 3, 1, 2};
-    CNNL_CHECK(cnnlSetTransposeDescriptor(trans_desc, 4, perm));
+    int p0[4] = {0, 2, 3, 1};
+    int p1[4] = {0, 3, 1, 2};
+
+    CNNL_CHECK(cnnlSetTransposeDescriptor(td0, 4, p0));
+    CNNL_CHECK(cnnlSetTransposeDescriptor(td1, 4, p1));
 
     inited = true;
   }
 
-  CNNL_CHECK(cnnlGridSampleForward(handle, op_desc, a_desc, input.data_ptr(),
-                                   b_desc, grid.data_ptr(), c_desc,
-                                   temp.data_ptr(), nullptr, 0));
+  CNNL_CHECK(cnnlTranspose_v2(handle, td0, d0, input.data_ptr(), d1,
+                              buf0.data_ptr(), nullptr, 0));
 
-  CNNL_CHECK(cnnlTranspose_v2(handle, trans_desc, t0_desc, temp.data_ptr(),
-                              t1_desc, output.data_ptr(), nullptr, 0));
+  CNNL_CHECK(cnnlGridSampleForward(handle, gd, d1, buf0.data_ptr(), d2,
+                                   grid.data_ptr(), d3, buf1.data_ptr(),
+                                   nullptr, 0));
+
+  CNNL_CHECK(cnnlTranspose_v2(handle, td1, d3, buf1.data_ptr(), d4,
+                              output.data_ptr(), nullptr, 0));
 
   return output;
 }
