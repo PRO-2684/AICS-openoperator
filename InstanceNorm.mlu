@@ -16,11 +16,15 @@ __mlu_entry__ void inst_norm_kernel(const half *__restrict__ x,
   const half *px = x + (int64_t)idx * inner;
   half *py = y + (int64_t)idx * inner;
 
+  __nram__ half buf[LOCAL_ELEMS];
+
+  __memcpy(buf, px, inner * sizeof(half), GDRAM2NRAM);
+
   float sum = 0.0f;
   float sq_sum = 0.0f;
 
   for (int i = 0; i < inner; ++i) {
-    float v = (float)px[i];
+    float v = (float)buf[i];
     sum += v;
     sq_sum += v * v;
   }
@@ -28,16 +32,17 @@ __mlu_entry__ void inst_norm_kernel(const half *__restrict__ x,
   float inv_n = 1.0f / (float)inner;
   float mean = sum * inv_n;
   float var = sq_sum * inv_n - mean * mean;
-
   if (var < 0.0f)
     var = 0.0f;
 
   float inv_std = 1.0f / sqrtf(var + eps);
 
   for (int i = 0; i < inner; ++i) {
-    float v = (float)px[i];
-    py[i] = (half)((v - mean) * inv_std);
+    float v = (float)buf[i];
+    buf[i] = (half)((v - mean) * inv_std);
   }
+
+  __memcpy(py, buf, inner * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
@@ -54,7 +59,7 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
   cnrtDim3_t dim;
-  dim.x = 32;
+  dim.x = outer;
   dim.y = 1;
   dim.z = 1;
 
