@@ -234,10 +234,11 @@ static void bmm_cache512(cnnlHandle_t handle, const void* a, const void* b, void
 
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_cache,
                         torch::Tensor k_new, torch::Tensor v_new) {
-  auto out = torch::empty_like(q);
+  static torch::Tensor out;
   static torch::Tensor scores;
   static torch::Tensor probs;
-  if (!scores.defined()) {
+  if (!out.defined()) {
+    out = torch::empty_like(q);
     scores = torch::empty({8, 1, 513}, q.options());
     probs = torch::empty_like(scores);
   }
