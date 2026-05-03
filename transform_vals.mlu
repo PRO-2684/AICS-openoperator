@@ -55,6 +55,7 @@ __attribute__((constructor)) static void on_so_load() {
 #define TASKS 32
 #define SMALL_ELEMS 4672
 #define LARGE_ELEMS 4800
+#define LARGE_TASK_START 24
 #define FIRST_SEG_ELEMS 2304
 #define SMALL_SECOND_SEG_ELEMS 2368
 #define LARGE_SECOND_SEG_ELEMS 2496
@@ -62,13 +63,16 @@ __attribute__((constructor)) static void on_so_load() {
 __mlu_entry__ void
 transform_vals_add_half_32task_kernel(half *__restrict__ a,
                                       const half *__restrict__ b) {
-  const bool large_task = (taskId & 3) == 0;
-  const uint32_t large_before = (taskId + 3) >> 2;
-  const uint32_t small_before = taskId - large_before;
+  if (taskId >= TASKS) {
+    return;
+  }
+  const bool large_task = taskId >= LARGE_TASK_START;
   const uint32_t second_elems =
       large_task ? LARGE_SECOND_SEG_ELEMS : SMALL_SECOND_SEG_ELEMS;
-  const uint32_t offset = large_before * LARGE_ELEMS +
-                          small_before * SMALL_ELEMS;
+  const uint32_t offset =
+      taskId * SMALL_ELEMS +
+      (large_task ? (taskId - LARGE_TASK_START) * (LARGE_ELEMS - SMALL_ELEMS)
+                  : 0);
 
   __nram__ half a_buf0[FIRST_SEG_ELEMS];
   __nram__ half b_buf0[FIRST_SEG_ELEMS];
@@ -100,8 +104,8 @@ transform_vals_add_half_32task_kernel(half *__restrict__ a,
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {4, 8, 1};
-  transform_vals_add_half_32task_kernel<<<dim, cnrtFuncTypeUnion1, queue>>>(
+  cnrtDim3_t dim = {8, 8, 1};
+  transform_vals_add_half_32task_kernel<<<dim, cnrtFuncTypeUnion2, queue>>>(
       reinterpret_cast<half *>(a.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(b.data_ptr<at::Half>()));
   return a;
