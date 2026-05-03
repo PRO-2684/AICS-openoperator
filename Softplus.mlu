@@ -62,7 +62,7 @@ __mlu_func__ void softplus_compute_stable_no_relu(half *x, half *tmp, half *pos,
   __bang_add_scalar(tmp, tmp, (half)1.0f, elems);
 
   // x = log(1 + exp(-abs(x)))
-  __bang_active_log(x, tmp, elems);
+  __bang_active_loghp(x, tmp, elems);
 
   // x += max(original x, 0)
   __bang_add(x, x, pos, elems);
