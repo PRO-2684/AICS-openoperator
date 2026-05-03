@@ -56,9 +56,9 @@ __attribute__((constructor)) static void on_so_load() {
 #define SMALL_ELEMS 4672
 #define LARGE_ELEMS 4800
 #define LARGE_TASK_START 24
-#define FIRST_SEG_ELEMS 2560
-#define SMALL_SECOND_SEG_ELEMS 2112
-#define LARGE_SECOND_SEG_ELEMS 2240
+#define FIRST_SEG_ELEMS 2304
+#define SMALL_SECOND_SEG_ELEMS 2368
+#define LARGE_SECOND_SEG_ELEMS 2496
 
 __mlu_entry__ void
 transform_vals_add_half_32task_kernel(half *__restrict__ a,
@@ -101,7 +101,6 @@ transform_vals_add_half_32task_kernel(half *__restrict__ a,
 }
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
-
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {4, 8, 1};
   transform_vals_add_half_32task_kernel<<<dim, cnrtFuncTypeUnion1, queue>>>(
