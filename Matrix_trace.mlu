@@ -3,39 +3,49 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void trace_float_kernel(const float *a, float *out, int batch,
-                                      int n) {
-  int b = taskId;
-  if (b >= batch)
-    return;
-  float sum = 0.0f;
-  int base = b * n * n;
-  for (int i = 0; i < n; ++i)
-    sum += a[base + i * n + i];
-  out[b] = sum;
-}
+#define ALIGN_UP(x, a) (((x) + (a)-1) / (a) * (a))
 
-__mlu_entry__ void trace_half_kernel(const half *a, half *out, int batch,
-                                     int n) {
+__mlu_entry__ void trace_half_vec_kernel(const half *__restrict__ a,
+                                         half *__restrict__ out, int batch,
+                                         int n) {
   int b = taskId;
   if (b >= batch)
     return;
-  half sum = 0.0f;
-  int base = b * n * n;
-  for (int i = 0; i < n; ++i)
-    sum += a[base + i * n + i];
-  out[b] = sum;
+
+  const int aligned_n = ALIGN_UP(n, 64);
+  const int base = b * n * n;
+
+  __nram__ half hbuf[1024];
+  float *fbuf = (float *)hbuf;
+
+  __bang_write_value(hbuf, aligned_n, (half)0.0f);
+
+  __memcpy_async(hbuf, a + base, sizeof(half), GDRAM2NRAM, sizeof(half),
+                 (n + 1) * sizeof(half), n - 1);
+
+  __asm__ volatile("sync;");
+
+  __bang_half2float(fbuf, hbuf, aligned_n);
+  __bang_sum(fbuf, fbuf, aligned_n);
+
+  __bang_float2half_rn(hbuf, fbuf, 64);
+  __memcpy(out + b, hbuf, sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor A) {
   int batch = (int)A.size(0);
   int n = (int)A.size(1);
+
   auto out = torch::empty({batch}, A.options());
+
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {4, 8, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
-  trace_half_kernel<<<dim, ktype, queue>>>(
+
+  cnrtDim3_t dim = {32, 1, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
+
+  trace_half_vec_kernel<<<dim, ktype, queue>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()), batch, n);
+
   return out;
 }
