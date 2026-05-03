@@ -37,7 +37,7 @@ __mlu_entry__ void kernel(const half *__restrict__ input,
                   (float)tmp[C * 3];
   half inv_sum = (half)(1.0f / row_sum);
 
-  __bang_mul_scalar(xbuf, xbuf, inv_sum, B);
+  __bang_mul_const(xbuf, xbuf, inv_sum, B);
 
   __memcpy(row_out, xbuf, B * sizeof(half), NRAM2GDRAM);
 }
