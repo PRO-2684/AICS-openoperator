@@ -1,4 +1,5 @@
 #include <bang.h>
+#include <bang_device_functions_decls.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
@@ -52,10 +53,10 @@ __mlu_func__ void softplus_compute_stable_no_relu(half *x, half *tmp, half *pos,
   __bang_mul_scalar(pos, pos, (half)0.5f, elems);
 
   // x = -abs(original x)
-  __bang_mul_scalar(x, x, (half)-1.0f, elems);
+  __bang_neg(x, x, elems);
 
   // tmp = exp(-abs(x))
-  __bang_active_exphp(tmp, x, elems);
+  __bang_active_exp_less_0(tmp, x, elems);
 
   // tmp = 1 + exp(-abs(x))
   __bang_add_scalar(tmp, tmp, (half)1.0f, elems);
@@ -67,7 +68,7 @@ __mlu_func__ void softplus_compute_stable_no_relu(half *x, half *tmp, half *pos,
   __bang_add(x, x, pos, elems);
 }
 
-const auto softplus_compute = softplus_compute_stable;
+const auto softplus_compute = softplus_compute_stable_no_relu;
 
 __mlu_entry__ void softplus_half_kernel(half *__restrict__ input) {
   __nram__ half buf0[CHUNK_ELEMS];
