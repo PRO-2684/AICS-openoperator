@@ -1,38 +1,68 @@
-#pragma once
-
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define CNNL_CHECK(expr) \
-  do { \
-    cnnlStatus_t status__ = (expr); \
-    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)status__); \
-  } while (0)
+#define BATCH 16
+#define DIM 16384
 
-static inline cnnlTensorDescriptor_t make_ref_desc() {
-  cnnlTensorDescriptor_t desc;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&desc));
-  int dims[3] = {16, 1, 16384};
-  CNNL_CHECK(cnnlSetTensorDescriptor(desc, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, dims));
-  return desc;
+#define REDUCE_BLOCK_HALF 64
+#define PARTIAL_SUMS (DIM / REDUCE_BLOCK_HALF)
+
+__mlu_entry__ void softmax_16x16384_half_kernel(const half *__restrict__ input,
+                                                half *__restrict__ output) {
+  const int row = taskId;
+  if (row >= BATCH) {
+    return;
+  }
+
+  __nram__ half xbuf[DIM];
+  __nram__ half ebuf[DIM];
+  __nram__ half argbuf[64];
+  __nram__ half partial[PARTIAL_SUMS];
+
+  const half *row_in = input + row * DIM;
+  half *row_out = output + row * DIM;
+
+  __memcpy(xbuf, row_in, DIM * sizeof(half), GDRAM2NRAM);
+  __sync_io();
+
+  __bang_argmax(argbuf, xbuf, DIM);
+  half row_max = argbuf[0];
+
+  __memcpy(ebuf, xbuf, DIM * sizeof(half), NRAM2NRAM);
+  __bang_add_scalar(ebuf, ebuf, (half)(-row_max), DIM);
+  __bang_active_exphp(ebuf, ebuf, DIM);
+
+  __bang_reduce_sum(ebuf, ebuf, DIM);
+
+  for (int i = 0; i < PARTIAL_SUMS; ++i) {
+    partial[i] = ebuf[i * REDUCE_BLOCK_HALF];
+  }
+
+  float row_sum = 0.0f;
+  for (int i = 0; i < PARTIAL_SUMS; ++i) {
+    row_sum += (float)partial[i];
+  }
+
+  half inv_sum = (half)(1.0f / row_sum);
+
+  __memcpy(ebuf, xbuf, DIM * sizeof(half), NRAM2NRAM);
+  __bang_add_scalar(ebuf, ebuf, (half)(-row_max), DIM);
+  __bang_active_exphp(ebuf, ebuf, DIM);
+  __bang_mul_scalar(ebuf, ebuf, inv_sum, DIM);
+
+  __memcpy(row_out, ebuf, DIM * sizeof(half), NRAM2GDRAM);
+  __sync_io();
 }
 
 // Specialized for ref/ref_files/058_Softmax.py: x is FP16 [16, 16384], softmax dim=1.
 torch::Tensor bang_func(torch::Tensor x) {
-  auto output = torch::empty_like(x);
-  auto xd = make_ref_desc();
-  auto yd = make_ref_desc();
-  CNNL_CHECK(cnnlSoftmaxForward(torch_mlu::getCurrentHandle(),
-                                CNNL_SOFTMAX_ACCURATE,
-                                CNNL_SOFTMAX_MODE_LOW_DIMENSION,
-                                nullptr,
-                                xd,
-                                x.data_ptr(),
-                                nullptr,
-                                yd,
-                                output.data_ptr()));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(yd));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(xd));
-  return output;
+  auto y = torch::empty_like(x);
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t kdim = {BATCH, 1, 1};
+  softmax_16x16384_half_kernel<<<kdim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  return y;
 }
