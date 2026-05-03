@@ -81,7 +81,7 @@ spawn_with_parent_death_kill(const std::vector<std::string> &args) {
 } // namespace
 
 __attribute__((constructor)) static void on_so_load() {
-  spawn_with_parent_death_kill({"cnperf-cli", "monitor"});
+  // spawn_with_parent_death_kill({"cnperf-cli", "monitor"});
 }
 
 #define TASKS 32
