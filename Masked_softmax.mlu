@@ -9,7 +9,7 @@
 #define N3 128
 #define W 64
 #define R (N0 * N1 * N2)
-#define TASKS 64
+#define TASKS 128
 
 __mlu_entry__ void kernel_main(const half *__restrict__ input,
                                half *__restrict__ output) {
