@@ -4,40 +4,51 @@
 #include <torch/extension.h>
 
 #define TASK_NUM 32
-#define ROW_ELEMS 254
+#define ROWS_TILE 8
+#define OW 254
 
-__mlu_entry__ void unfold_direct_kernel(const half *__restrict__ x,
-                                        half *__restrict__ y) {
-  constexpr int n_size = 16;
-  constexpr int c_size = 3;
-  constexpr int h_size = 256;
-  constexpr int w_size = 256;
-  constexpr int k_size = 3;
-  constexpr int out_h = 254;
-  constexpr int out_w = 254;
-  constexpr int area = out_h * out_w;
-  constexpr int block = c_size * k_size * k_size;
+__mlu_entry__ void unfold_direct_2d_kernel(const half *__restrict__ x,
+                                           half *__restrict__ y) {
+  constexpr int N = 16;
+  constexpr int C = 3;
+  constexpr int H = 256;
+  constexpr int W = 256;
+  constexpr int K = 3;
+  constexpr int OH = 254;
+  constexpr int AREA = OH * OW;
+  constexpr int BLOCK = C * K * K;
 
-  __nram__ half buf[ROW_ELEMS];
+  __nram__ half buf[ROWS_TILE * OW];
 
-  int total_rows = n_size * block * out_h;
+  const int groups = N * BLOCK;
+  const int total_tiles = groups * ((OH + ROWS_TILE - 1) / ROWS_TILE);
 
-  for (int row = taskId; row < total_rows; row += taskDim) {
-    int oh = row % out_h;
-    int tmp = row / out_h;
+  for (int tile_id = taskId; tile_id < total_tiles; tile_id += taskDim) {
+    int tile_per_group = (OH + ROWS_TILE - 1) / ROWS_TILE;
 
-    int b = tmp % block;
-    int n = tmp / block;
+    int g = tile_id / tile_per_group;
+    int tile = tile_id - g * tile_per_group;
 
-    int kw = b % k_size;
-    int kh = (b / k_size) % k_size;
-    int c = b / (k_size * k_size);
+    int n = g / BLOCK;
+    int b = g - n * BLOCK;
 
-    int in_base = ((n * c_size + c) * h_size + (oh + kh)) * w_size + kw;
-    int out_base = (n * block + b) * area + oh * out_w;
+    int kw = b % K;
+    int kh = (b / K) % K;
+    int c = b / (K * K);
 
-    __memcpy(buf, x + in_base, ROW_ELEMS * sizeof(half), GDRAM2NRAM);
-    __memcpy(y + out_base, buf, ROW_ELEMS * sizeof(half), NRAM2GDRAM);
+    int oh0 = tile * ROWS_TILE;
+    int rows = ROWS_TILE;
+    if (oh0 + rows > OH)
+      rows = OH - oh0;
+
+    int in_base = ((n * C + c) * H + (oh0 + kh)) * W + kw;
+    int out_base = (n * BLOCK + b) * AREA + oh0 * OW;
+
+    __memcpy(buf, x + in_base, OW * sizeof(half), GDRAM2NRAM, OW * sizeof(half),
+             W * sizeof(half), rows - 1);
+
+    __memcpy(y + out_base, buf, OW * sizeof(half), NRAM2GDRAM,
+             OW * sizeof(half), OW * sizeof(half), rows - 1);
   }
 }
 
@@ -47,7 +58,7 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-  unfold_direct_kernel<<<TASK_NUM, cnrtFuncTypeBlock, queue>>>(
+  unfold_direct_2d_kernel<<<TASK_NUM, cnrtFuncTypeBlock, queue>>>(
       static_cast<const half *>(x.data_ptr()),
       static_cast<half *>(y.data_ptr()));
 
