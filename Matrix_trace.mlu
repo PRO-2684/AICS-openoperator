@@ -1,4 +1,5 @@
 #include <bang.h>
+#include <bang_device_functions_decls.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
@@ -26,7 +27,7 @@ __mlu_entry__ void trace_half_vec_kernel(const half *__restrict__ a,
   __asm__ volatile("sync;");
 
   __bang_half2float(fbuf, hbuf, aligned_n);
-  __bang_sum(fbuf, fbuf, aligned_n);
+  __bang_reduce_sum(fbuf, fbuf, aligned_n);
 
   __bang_float2half_rn(hbuf, fbuf, 64);
   __memcpy(out + b, hbuf, sizeof(half), NRAM2GDRAM);
