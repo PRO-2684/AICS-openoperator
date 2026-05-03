@@ -8,9 +8,9 @@
 #define FIXED_TASK_Z 1
 #define TRACE_N 512
 
-__mlu_entry__ void trace_half_reduce_kernel(const half *__restrict__ a,
-                                            half *__restrict__ out, int batch,
-                                            int n) {
+__mlu_entry__ void trace_half_addtree_kernel(const half *__restrict__ a,
+                                             half *__restrict__ out, int batch,
+                                             int n) {
   const int b = taskId;
   if (b >= batch)
     return;
@@ -19,18 +19,18 @@ __mlu_entry__ void trace_half_reduce_kernel(const half *__restrict__ a,
 
   __nram__ half buf[TRACE_N];
 
-  // 抽取 A[b, i, i]，NRAM 中连续存 512 个 half。
   __memcpy_async(buf, a + base, sizeof(half), GDRAM2NRAM, sizeof(half),
                  (n + 1) * sizeof(half), n - 1);
   __asm__ volatile("sync;");
 
-  // 对 half 来说，每 64 个元素归约一次。
-  // 512 half -> 8 个 partial sum，分别在 buf[0], buf[64], ...
-  __bang_reduce_sum(buf, buf, TRACE_N);
+  // 512 -> 256 -> 128 -> 64
+  __bang_add(buf, buf, buf + 256, 256);
+  __bang_add(buf, buf, buf + 128, 128);
+  __bang_add(buf, buf, buf + 64, 64);
 
   half s = (half)0.0f;
 #pragma unroll
-  for (int i = 0; i < TRACE_N; i += 64) {
+  for (int i = 0; i < 64; ++i) {
     s += buf[i];
   }
 
