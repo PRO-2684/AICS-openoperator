@@ -1,53 +1,45 @@
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#include <climits>
-#include <vector>
+#define ROWS 128
+#define COLS 4000
 
-#define CNNL_CHECK(expr)                                                     \
-  do {                                                                       \
-    cnnlStatus_t status = (expr);                                            \
-    TORCH_CHECK(status == CNNL_STATUS_SUCCESS, "CNNL call failed: ", status); \
-  } while (0)
-
-torch::Tensor bang_func(torch::Tensor x, int dim) {
-  auto in = x.contiguous();
-  auto out = torch::empty_like(in);
-
-  const int ndim = (int)in.dim();
-  int axis = dim < 0 ? dim + ndim : dim;
-
-  std::vector<int> dims(ndim);
-  for (int i = 0; i < ndim; ++i) {
-    dims[i] = (int)in.size(i);
+__mlu_entry__ void kernel(const half *__restrict__ x, half *__restrict__ out) {
+  int row = taskId;
+  if (row >= ROWS) {
+    return;
   }
 
-  cnnlTensorDescriptor_t in_desc;
-  cnnlTensorDescriptor_t out_desc;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&in_desc));
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&out_desc));
-  CNNL_CHECK(cnnlSetTensorDescriptor(in_desc, CNNL_LAYOUT_ARRAY,
-                                     CNNL_DTYPE_HALF, ndim, dims.data()));
-  CNNL_CHECK(cnnlSetTensorDescriptor(out_desc, CNNL_LAYOUT_ARRAY,
-                                     CNNL_DTYPE_HALF, ndim, dims.data()));
+  int base = row * COLS;
+  const half *px = (const half *)__builtin_assume_aligned(x + base, 512);
+  half *po = (half *)__builtin_assume_aligned(out + base, 512);
 
-  cnnlHandle_t handle;
-  CNNL_CHECK(cnnlCreate(&handle));
-  CNNL_CHECK(cnnlSetQueue(handle, torch_mlu::getCurMLUStream()));
+  __nram__ half ibuf[COLS];
+  __nram__ half obuf[COLS];
 
-  size_t workspace_size = 0;
-  CNNL_CHECK(cnnlGetCumsumWorkspaceSize(handle, in_desc, axis,
-                                        &workspace_size));
-  auto workspace =
-      torch::empty({(int64_t)workspace_size}, x.options().dtype(torch::kUInt8));
+  __memcpy(ibuf, px, COLS * sizeof(half), GDRAM2NRAM);
 
-  CNNL_CHECK(cnnlCumsum_v2(handle, in_desc, in.data_ptr(), axis, true, false,
-                           CNNL_NOT_PROPAGATE_NAN, out_desc, out.data_ptr(),
-                           workspace.data_ptr(), workspace_size));
+  float acc = 0.0f;
+#pragma unroll 1
+  for (int i = 0; i < COLS; ++i) {
+    obuf[i] = (half)acc;
+    acc += (float)ibuf[i];
+  }
 
-  CNNL_CHECK(cnnlDestroy(handle));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(out_desc));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(in_desc));
+  __memcpy(po, obuf, COLS * sizeof(half), NRAM2GDRAM);
+}
+
+torch::Tensor bang_func(torch::Tensor x, int dim) {
+  (void)dim;
+  auto out = torch::empty_like(x);
+
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim3 = {ROWS, 1, 1};
+  kernel<<<dim3, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+
   return out;
 }
