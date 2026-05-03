@@ -8,6 +8,7 @@
 
 #define REDUCE_BLOCK_HALF 64
 #define PARTIAL_SUMS (DIM / REDUCE_BLOCK_HALF)
+#define FINAL_SUMS (PARTIAL_SUMS / REDUCE_BLOCK_HALF)
 
 __mlu_entry__ void softmax_16x16384_half_kernel(const half *__restrict__ input,
                                                 half *__restrict__ output) {
@@ -16,6 +17,7 @@ __mlu_entry__ void softmax_16x16384_half_kernel(const half *__restrict__ input,
   __nram__ half xbuf[DIM];
   __nram__ half ebuf[DIM];
   __nram__ half sbuf[DIM];
+  __nram__ half partial[PARTIAL_SUMS];
   __nram__ half argbuf[64];
 
   const half *row_in =
@@ -34,10 +36,13 @@ __mlu_entry__ void softmax_16x16384_half_kernel(const half *__restrict__ input,
   __memcpy(sbuf, ebuf, DIM * sizeof(half), NRAM2NRAM);
   __bang_reduce_sum(sbuf, sbuf, DIM);
 
-  float row_sum = 0.0f;
-  for (int i = 0; i < PARTIAL_SUMS; ++i) {
-    row_sum += (float)sbuf[i * REDUCE_BLOCK_HALF];
-  }
+  __memcpy(partial, sbuf, sizeof(half), NRAM2NRAM, sizeof(half),
+           REDUCE_BLOCK_HALF * sizeof(half), PARTIAL_SUMS - 1);
+  __bang_reduce_sum(partial, partial, PARTIAL_SUMS);
+
+  float row_sum = (float)partial[0] + (float)partial[REDUCE_BLOCK_HALF] +
+                  (float)partial[REDUCE_BLOCK_HALF * 2] +
+                  (float)partial[REDUCE_BLOCK_HALF * 3];
 
   half inv_sum = (half)(1.0f / row_sum);
 
