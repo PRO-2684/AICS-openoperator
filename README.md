@@ -106,7 +106,7 @@ python scripts/update_problems.py
 | 055 | [binned_scatter](binned_scatter.mlu) | N/A | 🔴 |
 | 056 | [gather](gather.mlu) | N/A | 🔴 |
 | 057 | [rotary_pos_emb_fusion](rotary_pos_emb_fusion.mlu) | N/A | 🔴 |
-| 058 | [Softmax](Softmax.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/1eda60594d6e0b532762d4a53c465437ad2d7e60) |
+| 058 | [Softmax](Softmax.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/e10226bead0673dae0803184816c6687fe4dd5a5) |
 | 059 | [hstu_mask_var_len_fwd](hstu_mask_var_len_fwd.mlu) | N/A | 🔴 |
 | 060 | [cross_entropy](cross_entropy.mlu) | N/A | 🔴 |
 | 061 | [adaptiveaveragepool](adaptiveaveragepool.mlu) | N/A | 🔴 |
