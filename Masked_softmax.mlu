@@ -12,7 +12,16 @@
 #define TASKS 32
 
 __mlu_entry__ void kernel_main(const half *__restrict__ input,
-                               half *__restrict__ output) {}
+                               half *__restrict__ output) {
+  __nram__ half buf[W];
+
+  for (int row = taskId; row < R; row += taskDim) {
+    const half *in =
+        (const half *)__builtin_assume_aligned(input + row * N3, 512);
+
+    __memcpy(buf, in, W * sizeof(half), GDRAM2NRAM);
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask) {
   auto y = torch::empty_like(x);
