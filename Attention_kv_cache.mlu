@@ -57,6 +57,16 @@ __mlu_entry__ void add_new_value_kernel(const half* probs, const half* v_new, ha
   }
 }
 
+__mlu_entry__ void init_new_value_kernel(const half* probs, const half* v_new, half* out) {
+  int idx = taskId;
+  const int total = 8 * 64;
+  for (; idx < total; idx += taskDim) {
+    int h = idx / 64;
+    int d = idx % 64;
+    out[idx] = (half)((float)probs[h * 513 + 512] * (float)v_new[h * 64 + d]);
+  }
+}
+
 static cnnlTensorDescriptor_t make_1d_desc(int64_t n) {
   int dims[1] = {(int)n};
   cnnlTensorDescriptor_t d;
@@ -135,7 +145,7 @@ static void bmm(cnnlHandle_t handle, const void* a, const void* b, void* out,
 }
 
 static void bmm_cache512(cnnlHandle_t handle, const void* a, const void* b, void* out,
-                         bool is_qk) {
+                         bool is_qk, bool accumulate = false) {
   static cnnlTensorDescriptor_t qk_ad = nullptr, qk_bd = nullptr, qk_od = nullptr;
   static cnnlTensorDescriptor_t pv_ad = nullptr, pv_bd = nullptr, pv_od = nullptr;
   static cnnlStrideBatchMatMulDescriptor_t qk_desc = nullptr, pv_desc = nullptr;
@@ -165,7 +175,7 @@ static void bmm_cache512(cnnlHandle_t handle, const void* a, const void* b, void
   int64_t stride_b[1] = {512 * 64};
   int64_t stride_o[1] = {is_qk ? 513 : 64};
   float alpha = is_qk ? 0.125f : 1.0f;
-  float beta = 0.0f;
+  float beta = accumulate ? 1.0f : 0.0f;
 
   if (desc == nullptr) {
     ad = make_1d_desc(is_qk ? 8 * 64 : 8 * 513);
@@ -227,11 +237,11 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_
   float one = 1.0f, zero = 0.0f;
   CNNL_CHECK(cnnlSoftmaxForward(handle, CNNL_SOFTMAX_ACCURATE, CNNL_SOFTMAX_MODE_LOW_DIMENSION,
                                 &one, sd, scores.data_ptr(), &zero, sd, probs.data_ptr()));
-  bmm_cache512(handle, probs.data_ptr(), v_cache.data_ptr(), out.data_ptr(), false);
-  cnrtDim3_t add_dim = {32, 1, 1};
-  add_new_value_kernel<<<add_dim, cnrtFuncTypeUnion1, queue>>>(
+  cnrtDim3_t init_dim = {32, 1, 1};
+  init_new_value_kernel<<<init_dim, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half*>(probs.data_ptr<at::Half>()),
       reinterpret_cast<const half*>(v_new.data_ptr<at::Half>()),
       reinterpret_cast<half*>(out.data_ptr<at::Half>()));
+  bmm_cache512(handle, probs.data_ptr(), v_cache.data_ptr(), out.data_ptr(), false, true);
   return out;
 }
