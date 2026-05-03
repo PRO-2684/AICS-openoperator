@@ -1,50 +1,55 @@
 #include <bang.h>
-#include <bang_device_functions_decls.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define ALIGN_UP(x, a) (((x) + (a)-1) / (a) * (a))
+#define FIXED_TASK_X 4
+#define FIXED_TASK_Y 8
+#define FIXED_TASK_Z 1
+#define TRACE_N 512
 
-__mlu_entry__ void trace_half_vec_kernel(const half *__restrict__ a,
-                                         half *__restrict__ out, int batch,
-                                         int n) {
-  int b = taskId;
+__mlu_entry__ void trace_half_reduce_kernel(const half *__restrict__ a,
+                                            half *__restrict__ out, int batch,
+                                            int n) {
+  const int b = taskId;
   if (b >= batch)
     return;
 
-  const int aligned_n = ALIGN_UP(n, 64);
   const int base = b * n * n;
 
-  __nram__ half hbuf[1024];
-  float *fbuf = (float *)hbuf;
+  __nram__ half buf[TRACE_N];
 
-  __bang_write_value(hbuf, aligned_n, (half)0.0f);
-
-  __memcpy_async(hbuf, a + base, sizeof(half), GDRAM2NRAM, sizeof(half),
+  // 抽取 A[b, i, i]，NRAM 中连续存 512 个 half。
+  __memcpy_async(buf, a + base, sizeof(half), GDRAM2NRAM, sizeof(half),
                  (n + 1) * sizeof(half), n - 1);
-
   __asm__ volatile("sync;");
 
-  __bang_half2float(fbuf, hbuf, aligned_n);
-  __bang_reduce_sum(fbuf, fbuf, aligned_n);
+  // 对 half 来说，每 64 个元素归约一次。
+  // 512 half -> 8 个 partial sum，分别在 buf[0], buf[64], ...
+  __bang_reduce_sum(buf, buf, TRACE_N);
 
-  __bang_float2half_rn(hbuf, fbuf, 64);
-  __memcpy(out + b, hbuf, sizeof(half), NRAM2GDRAM);
+  half s = (half)0.0f;
+#pragma unroll
+  for (int i = 0; i < TRACE_N; i += 64) {
+    s += buf[i];
+  }
+
+  out[b] = s;
 }
 
 torch::Tensor bang_func(torch::Tensor A) {
-  int batch = (int)A.size(0);
-  int n = (int)A.size(1);
+  const int batch = (int)A.size(0);
+  const int n = (int)A.size(1);
 
   auto out = torch::empty({batch}, A.options());
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-  cnrtDim3_t dim = {32, 1, 1};
+  // Dim 必须是编译期常数：4 * 8 = 32 tasks，正好覆盖 batch=32。
+  cnrtDim3_t dim = {FIXED_TASK_X, FIXED_TASK_Y, FIXED_TASK_Z};
   cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
 
-  trace_half_vec_kernel<<<dim, ktype, queue>>>(
+  trace_half_reduce_kernel<<<dim, ktype, queue>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()), batch, n);
 

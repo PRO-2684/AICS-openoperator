@@ -36,7 +36,7 @@ struct LocalState {
 static LocalState g_state;
 static std::mutex g_lock;
 
-__mlu_entry__ void make_angle_kernel(half *angle, int extent, int width) {
+__mlu_entry__ void make_angle_kernel(float *angle, int extent, int width) {
   int half_width = width >> 1;
   int total = extent * half_width;
 
@@ -44,15 +44,14 @@ __mlu_entry__ void make_angle_kernel(half *angle, int extent, int width) {
     int p = idx / half_width;
     int k = idx - p * half_width;
 
-    // div_term = exp(arange(0, width, 2) * (-log(10000.0) / width))
-    // angle[p, k] = p * div_term[k]
+    // float32 路径，尽量贴近参考实现：
+    // arange(...).float() * (-log(10000.0) / d_model)
     float exponent = (2.0f * (float)k) * (-9.210340371976184f / (float)width);
-    float v = (float)p * expf(exponent);
-    angle[idx] = (half)v;
+    angle[idx] = (float)p * expf(exponent);
   }
 }
 
-__mlu_entry__ void pack_cache_kernel(const half *sinv, const half *cosv,
+__mlu_entry__ void pack_cache_kernel(const float *sinv, const float *cosv,
                                      half *cache, int extent, int width) {
   int half_width = width >> 1;
   int total = extent * half_width;
@@ -62,8 +61,8 @@ __mlu_entry__ void pack_cache_kernel(const half *sinv, const half *cosv,
     int k = idx - p * half_width;
 
     int out_base = p * width + (k << 1);
-    cache[out_base] = sinv[idx];
-    cache[out_base + 1] = cosv[idx];
+    cache[out_base] = (half)sinv[idx];
+    cache[out_base + 1] = (half)cosv[idx];
   }
 }
 
@@ -103,66 +102,62 @@ static void ensure_cache(torch::Tensor x, int width) {
   TORCH_CHECK(width == static_cast<int>(x.size(2)), "unexpected width");
   TORCH_CHECK((width & 1) == 0, "width must be even");
 
-  {
-    std::lock_guard<std::mutex> guard(g_lock);
-    if (g_state.ready && g_state.cached_extent == extent &&
-        g_state.cached_width == width) {
-      return;
-    }
+  std::lock_guard<std::mutex> guard(g_lock);
 
-    int half_width = width >> 1;
-
-    auto half_opts = x.options().dtype(torch::kHalf);
-
-    g_state.angle = torch::empty({extent, half_width}, half_opts);
-    g_state.sinv = torch::empty({extent, half_width}, half_opts);
-    g_state.cosv = torch::empty({extent, half_width}, half_opts);
-    g_state.cache = torch::empty({extent, width}, half_opts);
-
-    if (g_state.trig_desc == nullptr) {
-      CHECK_CNNL(cnnlCreateTensorDescriptor(&g_state.trig_desc));
-    }
-
-    int dims[2] = {extent, half_width};
-    CHECK_CNNL(cnnlSetTensorDescriptor(g_state.trig_desc, CNNL_LAYOUT_ARRAY,
-                                       CNNL_DTYPE_HALF, 2, dims));
-
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnnlHandle_t handle = torch_mlu::getCurrentHandle();
-
-    cnrtDim3_t dim;
-    dim.x = THREADS_PER_JOB;
-    dim.y = 1;
-    dim.z = 1;
-
-    make_angle_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<half *>(g_state.angle.data_ptr<at::Half>()), extent,
-        width);
-
-    CHECK_CNNL(cnnlSin(handle, g_state.trig_desc,
-                       g_state.angle.data_ptr<at::Half>(), g_state.trig_desc,
-                       g_state.sinv.data_ptr<at::Half>()));
-
-    CHECK_CNNL(cnnlCos(handle, g_state.trig_desc,
-                       g_state.angle.data_ptr<at::Half>(), g_state.trig_desc,
-                       g_state.cosv.data_ptr<at::Half>()));
-
-    pack_cache_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<const half *>(g_state.sinv.data_ptr<at::Half>()),
-        reinterpret_cast<const half *>(g_state.cosv.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(g_state.cache.data_ptr<at::Half>()), extent,
-        width);
-
-    g_state.ready = true;
-    g_state.cached_extent = extent;
-    g_state.cached_width = width;
+  if (g_state.ready && g_state.cached_extent == extent &&
+      g_state.cached_width == width) {
+    return;
   }
+
+  int half_width = width >> 1;
+
+  auto float_opts = x.options().dtype(torch::kFloat);
+  auto half_opts = x.options().dtype(torch::kHalf);
+
+  g_state.angle = torch::empty({extent, half_width}, float_opts);
+  g_state.sinv = torch::empty({extent, half_width}, float_opts);
+  g_state.cosv = torch::empty({extent, half_width}, float_opts);
+  g_state.cache = torch::empty({extent, width}, half_opts);
+
+  if (g_state.trig_desc == nullptr) {
+    CHECK_CNNL(cnnlCreateTensorDescriptor(&g_state.trig_desc));
+  }
+
+  int dims[2] = {extent, half_width};
+  CHECK_CNNL(cnnlSetTensorDescriptor(g_state.trig_desc, CNNL_LAYOUT_ARRAY,
+                                     CNNL_DTYPE_FLOAT, 2, dims));
+
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
+
+  cnrtDim3_t dim;
+  dim.x = THREADS_PER_JOB;
+  dim.y = 1;
+  dim.z = 1;
+
+  make_angle_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<float *>(g_state.angle.data_ptr<float>()), extent,
+      width);
+
+  CHECK_CNNL(cnnlSin(handle, g_state.trig_desc, g_state.angle.data_ptr<float>(),
+                     g_state.trig_desc, g_state.sinv.data_ptr<float>()));
+
+  CHECK_CNNL(cnnlCos(handle, g_state.trig_desc, g_state.angle.data_ptr<float>(),
+                     g_state.trig_desc, g_state.cosv.data_ptr<float>()));
+
+  pack_cache_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const float *>(g_state.sinv.data_ptr<float>()),
+      reinterpret_cast<const float *>(g_state.cosv.data_ptr<float>()),
+      reinterpret_cast<half *>(g_state.cache.data_ptr<at::Half>()), extent,
+      width);
+
+  g_state.ready = true;
+  g_state.cached_extent = extent;
+  g_state.cached_width = width;
 }
 
 } // namespace
 
-// Task: 107 107_Sinusoidal_positional_encoding
-// Wrapper: torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len);
 torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len) {
   int width = static_cast<int>(x.size(2));
   int extent = static_cast<int>(x.size(1));
@@ -174,7 +169,6 @@ torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len) {
 
   int plane = extent * width;
   int total = outer * plane;
-
   int jobs = (total + CACHE_TILE_ELEMS - 1) / CACHE_TILE_ELEMS;
 
   cnrtDim3_t dim;
