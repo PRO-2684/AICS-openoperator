@@ -143,7 +143,7 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_
   static cnnlTensorDescriptor_t sd = nullptr;
   if (sd == nullptr) sd = make_3d_desc(8, 1, 513);
   float one = 1.0f, zero = 0.0f;
-  CNNL_CHECK(cnnlSoftmaxForward(handle, CNNL_SOFTMAX_ACCURATE, CNNL_SOFTMAX_MODE_LOW_DIMENSION,
+  CNNL_CHECK(cnnlSoftmaxForward(handle, CNNL_SOFTMAX_FAST, CNNL_SOFTMAX_MODE_LOW_DIMENSION,
                                 &one, sd, scores.data_ptr(), &zero, sd, probs.data_ptr()));
   bmm(handle, probs.data_ptr(), v_all.data_ptr(), out.data_ptr(), 8, 1, 64, 513, false, 1.0f);
   return out;
