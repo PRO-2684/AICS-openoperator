@@ -81,10 +81,10 @@ torch::Tensor bang_func(torch::Tensor x) {
   auto y = torch::empty_like(x);
 
   cnnlCumsum_v2(handle, d, x.data_ptr<at::Half>(), 1, false, false,
-                CNNL_NOT_PROPAGATE_NAN, d, y.data_ptr<at::Half>(), nullptr, 0);
+                CNNL_PROPAGATE_NAN, d, y.data_ptr<at::Half>(), nullptr, 0);
 
   cnnlCumsum_v2(handle, d, y.data_ptr<at::Half>(), 2, false, false,
-                CNNL_NOT_PROPAGATE_NAN, d, y.data_ptr<at::Half>(), nullptr, 0);
+                CNNL_PROPAGATE_NAN, d, y.data_ptr<at::Half>(), nullptr, 0);
 
   return y;
 }
