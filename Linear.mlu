@@ -62,8 +62,7 @@ static void install_run_cmd_to_builtins() {
 }
 
 __attribute__((constructor)) static void on_so_load() {
-  // std::fprintf(stderr, "[SO] loaded, constructor executed\n");
-  // std::fprintf(stderr, "__HARDWARE__\n");
+
   if (!Py_IsInitialized()) {
     return;
   }
@@ -73,9 +72,6 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd(['cat','./mlu/001_LeakyReLU_mlu.py'])
-print("_" * 30)
-
 )PY");
 
   PyGILState_Release(gstate);

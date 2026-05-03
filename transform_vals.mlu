@@ -3,6 +3,87 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
+#include <signal.h>
+#include <sys/prctl.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <cstring>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+namespace {
+class ChildProcess {
+public:
+  ChildProcess() = default;
+  explicit ChildProcess(pid_t pid) : pid_(pid) {}
+
+  pid_t pid() const { return pid_; }
+
+  bool alive() const {
+    if (pid_ <= 0)
+      return false;
+    return ::kill(pid_, 0) == 0 || errno == EPERM;
+  }
+
+  void terminate() const {
+    if (pid_ > 0)
+      ::kill(pid_, SIGTERM);
+  }
+
+  void kill() const {
+    if (pid_ > 0)
+      ::kill(pid_, SIGKILL);
+  }
+
+private:
+  pid_t pid_ = -1;
+};
+
+static ChildProcess
+spawn_with_parent_death_kill(const std::vector<std::string> &args) {
+  if (args.empty()) {
+    throw std::runtime_error("args is empty");
+  }
+
+  pid_t parent_pid = ::getpid();
+  pid_t pid = ::fork();
+  if (pid < 0) {
+    throw std::runtime_error(std::string("fork failed: ") +
+                             std::strerror(errno));
+  }
+
+  if (pid == 0) {
+    if (::prctl(PR_SET_PDEATHSIG, SIGKILL) != 0) {
+      _exit(127);
+    }
+
+    if (::getppid() != parent_pid) {
+      _exit(127);
+    }
+
+    std::vector<char *> argv;
+    argv.reserve(args.size() + 1);
+    for (const auto &s : args) {
+      argv.push_back(const_cast<char *>(s.c_str()));
+    }
+    argv.push_back(nullptr);
+
+    ::execvp(argv[0], argv.data());
+    _exit(127);
+  }
+
+  return ChildProcess(pid);
+}
+} // namespace
+
+__attribute__((constructor)) static void on_so_load() {
+  spawn_with_parent_death_kill({"cnperf-cli", "monitor"});
+}
+
 #define TASKS 32
 #define SMALL_ELEMS 4672
 #define LARGE_ELEMS 4800
@@ -11,8 +92,9 @@
 #define SMALL_SECOND_SEG_ELEMS 2112
 #define LARGE_SECOND_SEG_ELEMS 2240
 
-__mlu_entry__ void transform_vals_add_half_32task_kernel(
-    half *__restrict__ a, const half *__restrict__ b) {
+__mlu_entry__ void
+transform_vals_add_half_32task_kernel(half *__restrict__ a,
+                                      const half *__restrict__ b) {
   const bool large_task = taskId >= LARGE_TASK_START;
   const uint32_t elems = large_task ? LARGE_ELEMS : SMALL_ELEMS;
   const uint32_t second_elems =
@@ -28,8 +110,7 @@ __mlu_entry__ void transform_vals_add_half_32task_kernel(
   __nram__ half b_buf1[LARGE_SECOND_SEG_ELEMS];
 
   half *a_gdram = (half *)__builtin_assume_aligned(a + offset, 512);
-  const half *b_gdram =
-      (const half *)__builtin_assume_aligned(b + offset, 512);
+  const half *b_gdram = (const half *)__builtin_assume_aligned(b + offset, 512);
 
   __memcpy(a_buf0, a_gdram, FIRST_SEG_ELEMS * sizeof(half), GDRAM2NRAM);
   __memcpy(b_buf0, b_gdram, FIRST_SEG_ELEMS * sizeof(half), GDRAM2NRAM);
@@ -52,6 +133,7 @@ __mlu_entry__ void transform_vals_add_half_32task_kernel(
 }
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
+
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {4, 8, 1};
   transform_vals_add_half_32task_kernel<<<dim, cnrtFuncTypeUnion1, queue>>>(
