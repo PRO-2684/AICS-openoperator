@@ -4,37 +4,40 @@
 #include <torch/extension.h>
 #include <cstdint>
 
-__mlu_entry__ void onehot_i64_kernel(const int64_t* idx, float* out, int total) {
-  int tid = taskId;
-  int task_num = taskDim;
-  for (int p = tid; p < total; p += task_num) {
-    int row = p >> 9;
-    int cls = p & 511;
-    out[p] = ((int64_t)cls == idx[row]) ? 1.0f : 0.0f;
-  }
-}
+#define ROWS 1024
+#define CLASSES 512
+#define TASKS 32
+#define ROWS_PER_TASK (ROWS / TASKS)
+#define OUT_PER_TASK (ROWS_PER_TASK * CLASSES)
 
-__mlu_entry__ void onehot_i32_kernel(const int* idx, float* out, int total) {
-  int tid = taskId;
-  int task_num = taskDim;
-  for (int p = tid; p < total; p += task_num) {
-    int row = p >> 9;
-    int cls = p & 511;
-    out[p] = (cls == idx[row]) ? 1.0f : 0.0f;
+__mlu_entry__ void onehot_i64_kernel(const int64_t *__restrict__ idx,
+                                     float *__restrict__ out) {
+  const int row_base = taskId * ROWS_PER_TASK;
+  const int out_base = row_base * CLASSES;
+
+  float *po = (float *)__builtin_assume_aligned(out + out_base, 512);
+
+  __nram__ float obuf[OUT_PER_TASK];
+  __bang_write_zero(obuf, OUT_PER_TASK);
+
+#pragma unroll
+  for (int r = 0; r < ROWS_PER_TASK; ++r) {
+    const int cls = (int)idx[row_base + r];
+    obuf[r * CLASSES + cls] = 1.0f;
   }
+
+  __memcpy(po, obuf, OUT_PER_TASK * sizeof(float), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int num_classes) {
   (void)num_classes;
-  auto out = torch::empty({1024, 512}, x.options().dtype(torch::kFloat));
-  int total = 1024 * 512;
+  auto out = torch::empty({ROWS, CLASSES}, x.options().dtype(torch::kFloat));
+
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t grid = {4, 8, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
-  if (x.scalar_type() == at::kLong) {
-    onehot_i64_kernel<<<grid, ktype, queue>>>(x.data_ptr<int64_t>(), out.data_ptr<float>(), total);
-  } else {
-    onehot_i32_kernel<<<grid, ktype, queue>>>(x.data_ptr<int>(), out.data_ptr<float>(), total);
-  }
+  cnrtDim3_t dim = {TASKS, 1, 1};
+
+  onehot_i64_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      x.data_ptr<int64_t>(), out.data_ptr<float>());
+
   return out;
 }
