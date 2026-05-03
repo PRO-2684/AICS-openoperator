@@ -12,6 +12,31 @@ __mlu_func__ void softplus_compute_plain(half *x, half *tmp, uint32_t elems) {
   __bang_active_loghp(x, tmp, elems);
 }
 
+__mlu_func__ void softplus_compute_stable(half *x, half *tmp, half *pos,
+                                          uint32_t elems) {
+  // pos = max(x, 0)
+  __memcpy(pos, x, elems * sizeof(half), NRAM2NRAM);
+  __bang_active_relu(pos, pos, elems);
+
+  // x = abs(x)
+  __bang_abs(x, x, elems);
+
+  // x = -abs(x)
+  __bang_mul_scalar(x, x, (half)-1.0f, elems);
+
+  // tmp = exp(-abs(x))
+  __bang_active_exphp(tmp, x, elems);
+
+  // tmp = 1 + exp(-abs(x))
+  __bang_add_scalar(tmp, tmp, (half)1.0f, elems);
+
+  // x = log(1 + exp(-abs(x)))
+  __bang_active_loghp(x, tmp, elems);
+
+  // x = max(original_x, 0) + log(1 + exp(-abs(original_x)))
+  __bang_add(x, x, pos, elems);
+}
+
 __mlu_func__ void softplus_compute_stable_no_relu(half *x, half *tmp, half *pos,
                                                   uint32_t elems) {
   // pos = original x
@@ -42,7 +67,7 @@ __mlu_func__ void softplus_compute_stable_no_relu(half *x, half *tmp, half *pos,
   __bang_add(x, x, pos, elems);
 }
 
-const auto softplus_compute = softplus_compute_stable_no_relu;
+const auto softplus_compute = softplus_compute_stable;
 
 __mlu_entry__ void softplus_half_kernel(half *__restrict__ input) {
   __nram__ half buf0[CHUNK_ELEMS];
