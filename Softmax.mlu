@@ -12,9 +12,6 @@
 __mlu_entry__ void softmax_16x16384_half_kernel(const half *__restrict__ input,
                                                 half *__restrict__ output) {
   const int row = taskId;
-  if (row >= BATCH) {
-    return;
-  }
 
   __nram__ half xbuf[DIM];
   __nram__ half ebuf[DIM];
