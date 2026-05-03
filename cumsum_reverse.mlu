@@ -21,9 +21,16 @@ __mlu_entry__ void flip_kernel(const half *__restrict__ x,
   }
 
   int base = row * COLS;
+
+  __nram__ half ibuf[COLS];
+  __nram__ half obuf[COLS];
+
+  __memcpy(ibuf, x + base, COLS * sizeof(half), GDRAM2NRAM);
+#pragma unroll 1
   for (int i = 0; i < COLS; ++i) {
-    y[base + i] = x[base + COLS - 1 - i];
+    obuf[i] = ibuf[COLS - 1 - i];
   }
+  __memcpy(y + base, obuf, COLS * sizeof(half), NRAM2GDRAM);
 }
 
 static void cumsum_dim1(torch::Tensor in, torch::Tensor out) {
