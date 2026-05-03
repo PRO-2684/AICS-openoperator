@@ -5,3 +5,6 @@ ref/
 compile_commands.json
 AGENTS.md
 .agent/
+.cache/
+.vscode/
+CLAUDE.md
