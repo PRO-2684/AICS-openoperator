@@ -16,7 +16,7 @@ __attribute__((constructor)) static void on_so_load() {
   try {
     py::module_ torch = py::module_::import("torch");
 
-    const int device_id = 5;
+    const int device_id = 6;
 
     if (py::hasattr(torch, "mlu")) {
       py::object mlu = torch.attr("mlu");
