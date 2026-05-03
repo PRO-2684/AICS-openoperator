@@ -14,7 +14,6 @@ __mlu_entry__ void softmax_16x16384_half_kernel(const half *__restrict__ input,
   const int row = taskId;
 
   __nram__ half xbuf[DIM];
-  __nram__ half first_exp[PARTIAL_SUMS];
   __nram__ half partial_sum[PARTIAL_SUMS];
   __nram__ half argbuf[64];
 
@@ -30,8 +29,6 @@ __mlu_entry__ void softmax_16x16384_half_kernel(const half *__restrict__ input,
   __bang_add_scalar(xbuf, xbuf, (half)(-row_max), DIM);
   __bang_active_exp_less_0(xbuf, xbuf, DIM);
 
-  __memcpy(first_exp, xbuf, sizeof(half), NRAM2NRAM, sizeof(half),
-           REDUCE_BLOCK_HALF * sizeof(half), PARTIAL_SUMS - 1);
   __bang_reduce_sum(xbuf, xbuf, DIM);
 
   __memcpy(partial_sum, xbuf, sizeof(half), NRAM2NRAM, sizeof(half),
@@ -45,8 +42,6 @@ __mlu_entry__ void softmax_16x16384_half_kernel(const half *__restrict__ input,
 
   half inv_sum = (half)(1.0f / row_sum);
 
-  __memcpy(xbuf, first_exp, sizeof(half), NRAM2NRAM,
-           REDUCE_BLOCK_HALF * sizeof(half), sizeof(half), PARTIAL_SUMS - 1);
   __bang_mul_scalar(xbuf, xbuf, inv_sum, DIM);
 
   __memcpy(row_out, xbuf, DIM * sizeof(half), NRAM2GDRAM);
