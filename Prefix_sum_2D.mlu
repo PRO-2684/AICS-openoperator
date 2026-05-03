@@ -7,44 +7,35 @@ __mlu_entry__ void stage0(const half *__restrict__ x, half *__restrict__ tmp) {
   __nram__ half buf[256];
 
   for (int t = taskId; t < 4096; t += taskDim) {
-    const int base = t << 8;
+    const int p = t << 8;
 
-    __memcpy(buf, x + base, 512, GDRAM2NRAM);
+    __memcpy(buf, x + p, 512, GDRAM2NRAM);
 
-    float acc = 0.0f;
+    float s = 0.0f;
 #pragma unroll
     for (int i = 0; i < 256; ++i) {
-      acc += (float)buf[i];
-      buf[i] = (half)acc;
+      s += (float)buf[i];
+      buf[i] = (half)s;
     }
 
-    __memcpy(tmp + base, buf, 512, NRAM2GDRAM);
+    __memcpy(tmp + p, buf, 512, NRAM2GDRAM);
   }
 }
 
 __mlu_entry__ void stage1(const half *__restrict__ tmp,
                           half *__restrict__ out) {
-  __nram__ half buf[256];
-
   for (int t = taskId; t < 4096; t += taskDim) {
     const int a = t >> 8;
     const int b = t & 255;
+    const int p = a * 65536 + b;
 
-    const half *src = tmp + a * 65536 + b;
-    half *dst = out + a * 65536 + b;
-
-    __memcpy_async(buf, src, sizeof(half), GDRAM2NRAM, sizeof(half), 512, 255);
-    __sync_io();
-
-    float acc = 0.0f;
+    float s = 0.0f;
 #pragma unroll
     for (int i = 0; i < 256; ++i) {
-      acc += (float)buf[i];
-      buf[i] = (half)acc;
+      const int q = p + (i << 8);
+      s += (float)tmp[q];
+      out[q] = (half)s;
     }
-
-    __memcpy_async(dst, buf, sizeof(half), NRAM2GDRAM, 512, sizeof(half), 255);
-    __sync_io();
   }
 }
 
