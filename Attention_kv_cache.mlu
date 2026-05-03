@@ -5,6 +5,8 @@
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
+#include <float.h>
+#include <math.h>
 
 // Task: 130 130_Attention_kv_cache
 // Alternative fast path: concatenate KV, then CNNL BMM + softmax + BMM for 8 heads.
@@ -39,6 +41,44 @@ __mlu_entry__ void concat_kv_kernel(const half* k_cache, const half* v_cache,
       k_all[idx] = k_new[src];
       v_all[idx] = v_new[src];
     }
+  }
+}
+
+__mlu_entry__ void fused_kv_attn_kernel(const half* q, const half* k_cache,
+                                        const half* v_cache, const half* k_new,
+                                        const half* v_new, half* out) {
+  int idx = taskId;
+  const int total = 8 * 64;
+  for (; idx < total; idx += taskDim) {
+    int h = idx / 64;
+    int od = idx % 64;
+    const half* qh = q + h * 64;
+    const half* kch = k_cache + h * 512 * 64;
+    const half* vch = v_cache + h * 512 * 64;
+    const half* knh = k_new + h * 64;
+    const half* vnh = v_new + h * 64;
+
+    float mx = -FLT_MAX;
+    for (int t = 0; t < 513; ++t) {
+      const half* kh = (t < 512) ? (kch + t * 64) : knh;
+      float dot = 0.0f;
+      for (int d = 0; d < 64; ++d) dot += (float)qh[d] * (float)kh[d];
+      float s = dot * 0.125f;
+      if (s > mx) mx = s;
+    }
+
+    float denom = 0.0f;
+    float acc = 0.0f;
+    for (int t = 0; t < 513; ++t) {
+      const half* kh = (t < 512) ? (kch + t * 64) : knh;
+      const half* vh = (t < 512) ? (vch + t * 64) : vnh;
+      float dot = 0.0f;
+      for (int d = 0; d < 64; ++d) dot += (float)qh[d] * (float)kh[d];
+      float w = expf(dot * 0.125f - mx);
+      denom += w;
+      acc += w * (float)vh[od];
+    }
+    out[idx] = (half)(acc / denom);
   }
 }
 
@@ -150,54 +190,14 @@ static void bmm(cnnlHandle_t handle, const void* a, const void* b, void* out,
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_cache,
                         torch::Tensor k_new, torch::Tensor v_new) {
   auto out = torch::empty_like(q);
-  static torch::Tensor k_all;
-  static torch::Tensor v_all;
-  static torch::Tensor scores;
-  static torch::Tensor probs;
-  static torch::Tensor context_lens;
-  static torch::Tensor block_tables;
-  if (!k_all.defined()) {
-    k_all = torch::empty({1, 8, 513, 64}, q.options());
-    v_all = torch::empty_like(k_all);
-    scores = torch::empty({8, 1, 513}, q.options());
-    probs = torch::empty_like(scores);
-    context_lens = torch::empty({1}, q.options().dtype(torch::kInt32));
-    block_tables = torch::empty({1, 1}, q.options().dtype(torch::kInt32));
-  }
-
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t copy_dim = {32, 1, 1};
-  concat_kv_kernel<<<copy_dim, cnrtFuncTypeBlock, queue>>>(
+  cnrtDim3_t dim = {32, 1, 1};
+  fused_kv_attn_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half*>(q.data_ptr<at::Half>()),
       reinterpret_cast<const half*>(k_cache.data_ptr<at::Half>()),
       reinterpret_cast<const half*>(v_cache.data_ptr<at::Half>()),
       reinterpret_cast<const half*>(k_new.data_ptr<at::Half>()),
       reinterpret_cast<const half*>(v_new.data_ptr<at::Half>()),
-      reinterpret_cast<half*>(k_all.data_ptr<at::Half>()),
-      reinterpret_cast<half*>(v_all.data_ptr<at::Half>()),
-      reinterpret_cast<int*>(context_lens.data_ptr<int>()),
-      reinterpret_cast<int*>(block_tables.data_ptr<int>()));
-
-  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
-  static cnnlTensorDescriptor_t qd = nullptr, kd = nullptr, vd = nullptr, od = nullptr;
-  static cnnlTensorDescriptor_t cld = nullptr, btd = nullptr;
-  static size_t ws_size = 0;
-  static torch::Tensor ws;
-  if (qd == nullptr) {
-    qd = make_query_view_desc();
-    od = make_query_view_desc();
-    kd = make_4d_desc(1, 8, 513, 64, CNNL_DTYPE_HALF);
-    vd = make_4d_desc(1, 8, 513, 64, CNNL_DTYPE_HALF);
-    cld = make_int_desc(1, 0);
-    btd = make_int_desc(1, 1);
-    CNNL_CHECK(cnnlGetSingleQueryCachedKVAttnWorkspaceSize_v2(
-        handle, nullptr, qd, kd, vd, 513, &ws_size));
-    ws = torch::empty({(int64_t)ws_size}, q.options().dtype(torch::kUInt8));
-  }
-  CNNL_CHECK(cnnlSingleQueryCachedKVAttn_v3(
-      handle, nullptr, qd, q.data_ptr(), kd, k_all.data_ptr(), vd, v_all.data_ptr(),
-      nullptr, nullptr, nullptr, nullptr, cld, context_lens.data_ptr(), btd,
-      block_tables.data_ptr(), nullptr, nullptr, CNNL_QUANTIZE_NONE, 513, -1, -1,
-      0.125f, false, ws_size ? ws.data_ptr() : nullptr, ws_size, od, out.data_ptr(),
-      nullptr, nullptr));
+      reinterpret_cast<half*>(out.data_ptr<at::Half>()));
   return out;
 }
