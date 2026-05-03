@@ -32,7 +32,7 @@ __mlu_entry__ void kernel(const half *__restrict__ x,
       half w = weights[idx];
 #pragma unroll
       for (int j = 0; j < H; ++j) {
-        acc[j] = (half)((float)acc[j] + (float)x[src_base + j] * (float)w);
+        acc[j] = acc[j] + x[src_base + j] * w;
       }
     }
   }
