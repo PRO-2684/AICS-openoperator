@@ -228,17 +228,17 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_
   cnnlHandle_t handle = torch_mlu::getCurrentHandle();
   bmm_cache512(handle, q.data_ptr(), k_cache.data_ptr(), scores.data_ptr(), true);
   cnrtDim3_t small_dim = {8, 1, 1};
-  score_new_kernel<<<small_dim, cnrtFuncTypeUnion1, queue>>>(
+  score_new_kernel<<<small_dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half*>(q.data_ptr<at::Half>()),
       reinterpret_cast<const half*>(k_new.data_ptr<at::Half>()),
       reinterpret_cast<half*>(scores.data_ptr<at::Half>()));
   static cnnlTensorDescriptor_t sd = nullptr;
   if (sd == nullptr) sd = make_3d_desc(8, 1, 513);
   float one = 1.0f, zero = 0.0f;
-  CNNL_CHECK(cnnlSoftmaxForward(handle, CNNL_SOFTMAX_ACCURATE, CNNL_SOFTMAX_MODE_LOW_DIMENSION,
+  CNNL_CHECK(cnnlSoftmaxForward(handle, CNNL_SOFTMAX_FAST, CNNL_SOFTMAX_MODE_LOW_DIMENSION,
                                 &one, sd, scores.data_ptr(), &zero, sd, probs.data_ptr()));
   cnrtDim3_t init_dim = {32, 1, 1};
-  init_new_value_kernel<<<init_dim, cnrtFuncTypeUnion1, queue>>>(
+  init_new_value_kernel<<<init_dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half*>(probs.data_ptr<at::Half>()),
       reinterpret_cast<const half*>(v_new.data_ptr<at::Half>()),
       reinterpret_cast<half*>(out.data_ptr<at::Half>()));
