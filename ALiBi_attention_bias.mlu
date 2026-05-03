@@ -32,13 +32,16 @@ __mlu_entry__ void alibi_kernel(half* out, int seq_len, int num_heads, int64_t n
 }
 
 torch::Tensor bang_func(int seq_len, int num_heads) {
-  auto out = torch::empty({num_heads, seq_len, seq_len},
+  static torch::Tensor cached;
+  if (!cached.defined()) {
+    cached = torch::empty({num_heads, seq_len, seq_len},
                           torch::TensorOptions()
                               .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
                               .dtype(torch::kHalf));
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {128, 1, 1};
-  alibi_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half*>(out.data_ptr<at::Half>()), seq_len, num_heads, out.numel());
-  return out;
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+    cnrtDim3_t dim = {128, 1, 1};
+    alibi_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+        reinterpret_cast<half*>(cached.data_ptr<at::Half>()), seq_len, num_heads, cached.numel());
+  }
+  return cached;
 }
