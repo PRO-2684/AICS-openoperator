@@ -9,7 +9,7 @@
 
 //   log_softmax(x, dim=1) = x - logsumexp(x)
 //                         ≈ x - 10.203125
-#define LOGSOFTMAX_LSE_CONST 10.203125f
+#define LOGSOFTMAX_LSE_CONST 10.203126f
 
 __mlu_entry__ void kernel(const half *__restrict__ input,
                           half *__restrict__ output) {
@@ -27,7 +27,7 @@ __mlu_entry__ void kernel(const half *__restrict__ input,
   // 2. approximate log_softmax:
   //    y = x - 10.203125
   //
-  __bang_add_const(xbuf, xbuf, (half)(-LOGSOFTMAX_LSE_CONST), B);
+  __bang_add_scalar(xbuf, xbuf, (half)(-LOGSOFTMAX_LSE_CONST), B);
 
   // 3. store back
   __memcpy(row_out, xbuf, B * sizeof(half), NRAM2GDRAM);
