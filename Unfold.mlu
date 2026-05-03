@@ -2,113 +2,120 @@
 #include <cnnl.h>
 #include <torch/extension.h>
 
-#define CNNL_CHECK(expr)                                                       \
-  do {                                                                         \
-    cnnlStatus_t status = (expr);                                              \
-    TORCH_CHECK(status == CNNL_STATUS_SUCCESS,                                 \
-                #expr " failed, status = ", static_cast<int>(status));         \
-  } while (0)
+namespace {
+
+struct OpCtx {
+  bool ready = false;
+
+  cnnlTensorDescriptor_t x_desc;
+  cnnlTensorDescriptor_t w_desc;
+  cnnlTensorDescriptor_t mid_desc;
+  cnnlTensorDescriptor_t y_desc;
+  cnnlConvolutionDescriptor_t conv_desc;
+  cnnlTransposeDescriptor_t trans_desc;
+
+  size_t ws0 = 0;
+  size_t ws1 = 0;
+
+  void init(cnnlHandle_t handle, const torch::Tensor &x, int k, int s, int p) {
+    if (ready)
+      return;
+
+    cnnlCreateTensorDescriptor(&x_desc);
+    cnnlCreateTensorDescriptor(&w_desc);
+    cnnlCreateTensorDescriptor(&mid_desc);
+    cnnlCreateTensorDescriptor(&y_desc);
+    cnnlCreateConvolutionDescriptor(&conv_desc);
+    cnnlCreateTransposeDescriptor(&trans_desc);
+
+    const int n = static_cast<int>(x.size(0));
+    const int c = static_cast<int>(x.size(1));
+    const int h = static_cast<int>(x.size(2));
+    const int w = static_cast<int>(x.size(3));
+
+    const int oh = (h + 2 * p - k) / s + 1;
+    const int ow = (w + 2 * p - k) / s + 1;
+    const int l = oh * ow;
+    const int block = c * k * k;
+
+    int xd[4] = {n, c, h, w};
+    int wd[4] = {block, c, k, k};
+    int md[3] = {n, l, block};
+    int yd[3] = {n, block, l};
+
+    cnnlSetTensorDescriptor(x_desc, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4, xd);
+    cnnlSetTensorDescriptor(w_desc, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4, wd);
+    cnnlSetTensorDescriptor(mid_desc, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3,
+                            md);
+    cnnlSetTensorDescriptor(y_desc, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, yd);
+
+    int pad[4] = {p, p, p, p};
+    int st[2] = {s, s};
+    int dil[2] = {1, 1};
+
+    cnnlSetConvolutionDescriptor(conv_desc, 4, pad, st, dil, 1,
+                                 CNNL_DTYPE_HALF);
+
+    int perm[3] = {0, 2, 1};
+    cnnlSetTransposeDescriptor(trans_desc, 3, perm);
+
+    cnnlGetIm2ColWorkspaceSize(handle, x_desc, w_desc, conv_desc, mid_desc,
+                               &ws0);
+
+    cnnlGetTransposeWorkspaceSize(handle, mid_desc, trans_desc, &ws1);
+
+    ready = true;
+  }
+};
+
+OpCtx &ctx() {
+  static OpCtx c;
+  return c;
+}
+
+} // namespace
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
                         int padding) {
-
-  auto x_contig = x;
-
-  constexpr int N = 16;
-  constexpr int C = 3;
-  constexpr int H = 256;
-  constexpr int W = 256;
-  constexpr int K = 3;
-  constexpr int OH = 254;
-  constexpr int OW = 254;
-  constexpr int L = OH * OW;
-  constexpr int C_COL = C * K * K;
-
   cnnlHandle_t handle = torch_mlu::getCurrentHandle();
 
-  auto col_nlc = torch::empty({N, L, C_COL}, x.options());
-  auto out = torch::empty({N, C_COL, L}, x.options());
+  auto &c = ctx();
+  c.init(handle, x, kernel_size, stride, padding);
 
-  static bool inited = false;
-  static cnnlTensorDescriptor_t x_desc;
-  static cnnlTensorDescriptor_t w_desc;
-  static cnnlTensorDescriptor_t col_nlc_desc;
-  static cnnlTensorDescriptor_t out_desc;
-  static cnnlConvolutionDescriptor_t conv_desc;
-  static cnnlTransposeDescriptor_t trans_desc;
-  static size_t im2col_workspace_size = 0;
-  static size_t trans_workspace_size = 0;
+  const int n = static_cast<int>(x.size(0));
+  const int ch = static_cast<int>(x.size(1));
+  const int h = static_cast<int>(x.size(2));
+  const int w = static_cast<int>(x.size(3));
 
-  if (!inited) {
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&x_desc));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&w_desc));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&col_nlc_desc));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&out_desc));
-    CNNL_CHECK(cnnlCreateConvolutionDescriptor(&conv_desc));
-    CNNL_CHECK(cnnlCreateTransposeDescriptor(&trans_desc));
+  const int oh = (h + 2 * padding - kernel_size) / stride + 1;
+  const int ow = (w + 2 * padding - kernel_size) / stride + 1;
+  const int l = oh * ow;
+  const int block = ch * kernel_size * kernel_size;
 
-    int x_dims[4] = {N, C, H, W};
-    CNNL_CHECK(cnnlSetTensorDescriptor(x_desc, CNNL_LAYOUT_NCHW,
-                                       CNNL_DTYPE_HALF, 4, x_dims));
+  auto mid = torch::empty({n, l, block}, x.options());
+  auto y = torch::empty({n, block, l}, x.options());
 
-    // 如果 cnnlIm2Col BAD_PARAM，把这里改成 {1, C, K, K} 试。
-    int w_dims[4] = {C_COL, C, K, K};
-    CNNL_CHECK(cnnlSetTensorDescriptor(w_desc, CNNL_LAYOUT_NCHW,
-                                       CNNL_DTYPE_HALF, 4, w_dims));
-
-    int col_dims[3] = {N, L, C_COL};
-    CNNL_CHECK(cnnlSetTensorDescriptor(col_nlc_desc, CNNL_LAYOUT_ARRAY,
-                                       CNNL_DTYPE_HALF, 3, col_dims));
-
-    int out_dims[3] = {N, C_COL, L};
-    CNNL_CHECK(cnnlSetTensorDescriptor(out_desc, CNNL_LAYOUT_ARRAY,
-                                       CNNL_DTYPE_HALF, 3, out_dims));
-
-    int pad_arr[4] = {0, 0, 0, 0};
-    int stride_arr[2] = {1, 1};
-    int dilation_arr[2] = {1, 1};
-
-    CNNL_CHECK(cnnlSetConvolutionDescriptor(conv_desc, 4, pad_arr, stride_arr,
-                                            dilation_arr, 1, CNNL_DTYPE_HALF));
-
-    int permute[3] = {0, 2, 1};
-    CNNL_CHECK(cnnlSetTransposeDescriptor(trans_desc, 3, permute));
-
-    CNNL_CHECK(cnnlGetIm2ColWorkspaceSize(handle, x_desc, w_desc, conv_desc,
-                                          col_nlc_desc,
-                                          &im2col_workspace_size));
-
-    CNNL_CHECK(cnnlGetTransposeWorkspaceSize(handle, col_nlc_desc, trans_desc,
-                                             &trans_workspace_size));
-
-    inited = true;
+  torch::Tensor ws0;
+  void *ws0_ptr = nullptr;
+  if (c.ws0) {
+    ws0 = torch::empty({static_cast<int64_t>(c.ws0)},
+                       x.options().dtype(torch::kUInt8));
+    ws0_ptr = ws0.data_ptr();
   }
 
-  torch::Tensor im2col_workspace;
-  void *im2col_workspace_ptr = nullptr;
-  if (im2col_workspace_size > 0) {
-    im2col_workspace =
-        torch::empty({static_cast<int64_t>(im2col_workspace_size)},
-                     x.options().dtype(torch::kUInt8));
-    im2col_workspace_ptr = im2col_workspace.data_ptr();
+  cnnlIm2Col(handle, c.x_desc, x.data_ptr(), c.w_desc, c.conv_desc, nullptr,
+             nullptr, nullptr, ws0_ptr, c.ws0, c.mid_desc, mid.data_ptr());
+
+  torch::Tensor ws1;
+  void *ws1_ptr = nullptr;
+  if (c.ws1) {
+    ws1 = torch::empty({static_cast<int64_t>(c.ws1)},
+                       x.options().dtype(torch::kUInt8));
+    ws1_ptr = ws1.data_ptr();
   }
 
-  CNNL_CHECK(cnnlIm2Col(handle, x_desc, x_contig.data_ptr(), w_desc, conv_desc,
-                        nullptr, nullptr, nullptr, im2col_workspace_ptr,
-                        im2col_workspace_size, col_nlc_desc,
-                        col_nlc.data_ptr()));
+  cnnlTranspose_v2(handle, c.trans_desc, c.mid_desc, mid.data_ptr(), c.y_desc,
+                   y.data_ptr(), ws1_ptr, c.ws1);
 
-  torch::Tensor trans_workspace;
-  void *trans_workspace_ptr = nullptr;
-  if (trans_workspace_size > 0) {
-    trans_workspace = torch::empty({static_cast<int64_t>(trans_workspace_size)},
-                                   x.options().dtype(torch::kUInt8));
-    trans_workspace_ptr = trans_workspace.data_ptr();
-  }
-
-  CNNL_CHECK(cnnlTranspose_v2(handle, trans_desc, col_nlc_desc,
-                              col_nlc.data_ptr(), out_desc, out.data_ptr(),
-                              trans_workspace_ptr, trans_workspace_size));
-
-  return out;
+  return y;
 }
