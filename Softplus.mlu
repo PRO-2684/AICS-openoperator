@@ -1,47 +1,30 @@
-#include <bang.h>
-#include <cnrt.h>
-#include <framework/core/MLUStream.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-#define CHUNK_ELEMS 4096
-#define ELEMS_PER_TASK 8192
-
-__mlu_func__ void softplus_compute(half *x, half *tmp, uint32_t elems) {
-  __bang_active_exphp(tmp, x, elems);
-  __bang_add_scalar(tmp, tmp, (half)1.0f, elems);
-  __bang_active_loghp(x, tmp, elems);
-}
-
-__mlu_entry__ void softplus_half_kernel(half *__restrict__ input) {
-  __nram__ half buf0[CHUNK_ELEMS];
-  __nram__ half tmp0[CHUNK_ELEMS];
-  __nram__ half buf1[CHUNK_ELEMS];
-  __nram__ half tmp1[CHUNK_ELEMS];
-
-  const uint32_t base = taskId * ELEMS_PER_TASK;
-  half *ptr0 = (half *)__builtin_assume_aligned(input + base, 512);
-  half *ptr1 =
-      (half *)__builtin_assume_aligned(input + base + CHUNK_ELEMS, 512);
-
-  __memcpy(buf0, ptr0, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  __sync_io();
-
-  __memcpy(buf1, ptr1, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  softplus_compute(buf0, tmp0, CHUNK_ELEMS);
-  __sync_io_move_compute();
-
-  __memcpy(ptr0, buf0, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
-  softplus_compute(buf1, tmp1, CHUNK_ELEMS);
-  __sync_io_move_compute();
-
-  __memcpy(ptr1, buf1, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
-  __sync_io();
-}
+#define CNNL_CHECK(expr)                                                       \
+  do {                                                                         \
+    cnnlStatus_t status__ = (expr);                                            \
+    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ",         \
+                (int)status__);                                                \
+  } while (0)
 
 torch::Tensor bang_func(torch::Tensor x) {
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {16, 2, 1};
-  softplus_half_kernel<<<dim, cnrtFuncTypeUnion4, queue>>>(
-      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
-  return x;
+  static cnnlTensorDescriptor_t desc;
+  static bool inited = false;
+  if (!inited) {
+    int32_t dims[2] = {16, 16384};
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&desc));
+    CNNL_CHECK(cnnlSetTensorDescriptor(desc, CNNL_LAYOUT_ARRAY,
+                                       CNNL_DTYPE_HALF, 2, dims));
+    inited = true;
+  }
+
+  auto out = torch::empty_like(x);
+  float beta = 1.0f;
+  float threshold = 20.0f;
+  CNNL_CHECK(cnnlSoftplusForward_v2(torch_mlu::getCurrentHandle(), &beta,
+                                    &threshold, desc, x.data_ptr(), desc,
+                                    out.data_ptr()));
+  return out;
 }
