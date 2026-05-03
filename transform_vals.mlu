@@ -104,7 +104,7 @@ transform_vals_add_half_32task_kernel(half *__restrict__ a,
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {8, 8, 1};
+  cnrtDim3_t dim = {8, 4, 1};
   transform_vals_add_half_32task_kernel<<<dim, cnrtFuncTypeUnion2, queue>>>(
       reinterpret_cast<half *>(a.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(b.data_ptr<at::Half>()));
