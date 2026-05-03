@@ -12,7 +12,7 @@
 #define R (N0 * N1 * N2)
 
 #define TASKS 32
-#define TILE 512
+#define TILE 2048
 
 __mlu_entry__ void kernel_main(const half *__restrict__ input,
                                half *__restrict__ output) {
