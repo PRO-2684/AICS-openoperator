@@ -7,7 +7,7 @@
 #define ELEMS_PER_TASK 8192
 
 __mlu_func__ void softplus_compute(half *x, half *tmp, uint32_t elems) {
-  __bang_active_exp(tmp, x, elems);
+  __bang_active_exphp(tmp, x, elems);
   __bang_add_scalar(tmp, tmp, (half)1.0f, elems);
   __bang_active_loghp(x, tmp, elems);
 }
