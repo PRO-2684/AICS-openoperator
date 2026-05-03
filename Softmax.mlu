@@ -16,8 +16,9 @@ __mlu_entry__ void kernel(const half *__restrict__ input,
   __nram__ half xbuf[B];
   __nram__ half tmp[D];
 
-  const half *row_in = input + row * B;
-  half *row_out = output + row * B;
+  const half *row_in =
+      (const half *)__builtin_assume_aligned(input + row * B, 512);
+  half *row_out = (half *)__builtin_assume_aligned(output + row * B, 512);
 
   __memcpy(xbuf, row_in, B * sizeof(half), GDRAM2NRAM);
 
@@ -46,7 +47,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   auto y = torch::empty_like(x);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t kdim = {A, 1, 1};
-  kernel<<<kdim, cnrtFuncTypeUnion2, queue>>>(
+  kernel<<<kdim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
