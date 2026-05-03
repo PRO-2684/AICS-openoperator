@@ -1,14 +1,66 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
+#include <math.h>
 #include <torch/extension.h>
 
-// Task: 046 046_InstanceNorm
-// Category: fused
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，对四维输入张量执行实例归一化（Instance Normalization）处理。输入为形状为 `[batch_size, num_features, height, width]` 的张量 `x`，该算子在每个样本的每个通道内独立计算均值和方差进行归一化；输出张量的形状与输入 `x` 相同。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x, int num_features);
+#define LOCAL_ELEMS 65536
+
+__mlu_entry__ void inst_norm_kernel(const half *__restrict__ x,
+                                    half *__restrict__ y, int outer, int inner,
+                                    float eps) {
+  int idx = taskId;
+  if (idx >= outer)
+    return;
+
+  const half *px = x + (int64_t)idx * inner;
+  half *py = y + (int64_t)idx * inner;
+
+  float sum = 0.0f;
+  float sq_sum = 0.0f;
+
+  for (int i = 0; i < inner; ++i) {
+    float v = (float)px[i];
+    sum += v;
+    sq_sum += v * v;
+  }
+
+  float inv_n = 1.0f / (float)inner;
+  float mean = sum * inv_n;
+  float var = sq_sum * inv_n - mean * mean;
+
+  if (var < 0.0f)
+    var = 0.0f;
+
+  float inv_std = 1.0f / sqrtf(var + eps);
+
+  for (int i = 0; i < inner; ++i) {
+    float v = (float)px[i];
+    py[i] = (half)((v - mean) * inv_std);
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
-  TORCH_CHECK(false, "TODO: implement InstanceNorm");
+  auto y = torch::empty_like(x);
+
+  int n = (int)x.size(0);
+  int c = (int)x.size(1);
+  int h = (int)x.size(2);
+  int w = (int)x.size(3);
+
+  int outer = n * c;
+  int inner = h * w;
+
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+
+  cnrtDim3_t dim;
+  dim.x = 32;
+  dim.y = 1;
+  dim.z = 1;
+
+  inst_norm_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      (const half *)x.data_ptr<at::Half>(), (half *)y.data_ptr<at::Half>(),
+      outer, inner, 1.0e-5f);
+
+  return y;
 }

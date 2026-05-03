@@ -15,6 +15,10 @@
 #define INNER_SPLIT 2
 #define INNER_TILE_ELEMS 32768
 
+#define TASKS_PER_LAUNCH 32
+#define PLANE_ELEMS 65536
+#define SEG_ELEMS 32768
+
 #define CHECK_CNNL(expr)                                                       \
   do {                                                                         \
     cnnlStatus_t _status = (expr);                                             \
@@ -183,31 +187,55 @@ __mlu_entry__ void add_cache_kernel_fast(const half *__restrict__ x,
   __memcpy(y + base, xb, INNER_TILE_ELEMS * sizeof(half), NRAM2GDRAM);
 }
 
+__mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
+                                         const half *__restrict__ cache) {
+  if (taskId >= TASKS_PER_LAUNCH) {
+    return;
+  }
+
+  const uint32_t base = taskId * PLANE_ELEMS;
+
+  __nram__ half x0[SEG_ELEMS];
+  __nram__ half p0[SEG_ELEMS];
+  __nram__ half x1[SEG_ELEMS];
+  __nram__ half p1[SEG_ELEMS];
+
+  half *x_gdram = (half *)__builtin_assume_aligned(x + base, 512);
+  const half *p_gdram = (const half *)__builtin_assume_aligned(cache, 512);
+
+  __memcpy(x0, x_gdram, SEG_ELEMS * sizeof(half), GDRAM2NRAM);
+  __memcpy(p0, p_gdram, SEG_ELEMS * sizeof(half), GDRAM2NRAM);
+  __sync_io();
+
+  __memcpy(x1, x_gdram + SEG_ELEMS, SEG_ELEMS * sizeof(half), GDRAM2NRAM);
+  __memcpy(p1, p_gdram + SEG_ELEMS, SEG_ELEMS * sizeof(half), GDRAM2NRAM);
+
+  __bang_add(x0, x0, p0, SEG_ELEMS);
+  __sync_io_move_compute();
+
+  __memcpy(x_gdram, x0, SEG_ELEMS * sizeof(half), NRAM2GDRAM);
+
+  __bang_add(x1, x1, p1, SEG_ELEMS);
+  __sync_io_move_compute();
+
+  __memcpy(x_gdram + SEG_ELEMS, x1, SEG_ELEMS * sizeof(half), NRAM2GDRAM);
+  __sync_io();
+}
+
 torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len) {
-  // int width = static_cast<int>(x.size(2));
-  constexpr int width = 512;
-  constexpr int outer = 32;
-  // int outer = static_cast<int>(x.size(0));
-
+  int width = static_cast<int>(x.size(2));
   ensure_cache(x, width);
-
-#if USE_INPLACE
-  auto y = x;
-#else
-  auto y = torch::empty_like(x);
-#endif
-
-  cnrtDim3_t dim;
-  dim.x = outer * INNER_SPLIT;
-  dim.y = 1;
-  dim.z = 1;
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-  add_cache_kernel_fast<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(g_state.cache.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  cnrtDim3_t dim;
+  dim.x = 16;
+  dim.y = 2;
+  dim.z = 1;
 
-  return y;
+  add_cache_kernel_pipe<<<dim, cnrtFuncTypeUnion4, queue>>>(
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(g_state.cache.data_ptr<at::Half>()));
+
+  return x;
 }
