@@ -14,12 +14,12 @@
 __mlu_entry__ void kernel_main(const half *__restrict__ input,
                                half *__restrict__ output) {
   __nram__ half buf[W];
+  __bang_write_zero(buf, W);
 
   for (int row = taskId; row < R; row += taskDim) {
-    const half *in =
-        (const half *)__builtin_assume_aligned(input + row * N3, 512);
+    half *out = (half *)__builtin_assume_aligned(output + row * N3, 512);
 
-    __memcpy(buf, in, W * sizeof(half), GDRAM2NRAM);
+    __memcpy(out, buf, W * sizeof(half), NRAM2GDRAM);
   }
 }
 
