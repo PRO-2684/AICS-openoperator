@@ -64,6 +64,11 @@ struct OpCtx {
 
     cnnlGetTransposeWorkspaceSize(handle, mid_desc, trans_desc, &ws1);
 
+    fprintf(stderr,
+            "[unfold] im2col_workspace_size=%zu transpose_workspace_size=%zu\n",
+            ws0, ws1);
+    fflush(stderr);
+
     ready = true;
   }
 };
