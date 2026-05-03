@@ -19,9 +19,8 @@ __mlu_entry__ void trace_half_addtree_kernel(const half *__restrict__ a,
 
   __nram__ half buf[TRACE_N];
 
-  __memcpy_async(buf, a + base, sizeof(half), GDRAM2NRAM, sizeof(half),
-                 (n + 1) * sizeof(half), n - 1);
-  __asm__ volatile("sync;");
+  __memcpy(buf, a + base, sizeof(half), GDRAM2NRAM, sizeof(half),
+           (n + 1) * sizeof(half), n - 1);
 
   // 512 -> 256 -> 128 -> 64
   __bang_add(buf, buf, buf + 256, 256);
@@ -49,7 +48,7 @@ torch::Tensor bang_func(torch::Tensor A) {
   cnrtDim3_t dim = {FIXED_TASK_X, FIXED_TASK_Y, FIXED_TASK_Z};
   cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
 
-  trace_half_reduce_kernel<<<dim, ktype, queue>>>(
+  trace_half_addtree_kernel<<<dim, ktype, queue>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()), batch, n);
 
