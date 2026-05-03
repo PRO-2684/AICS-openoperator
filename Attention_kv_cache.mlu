@@ -12,8 +12,8 @@
 // Description: 实现一个 BangC 算子，将新生成的键值数据与历史 KV Cache 拼接后，对查询向量执行缩放点积注意力（Scaled Dot-Product Attention）计算。输入包括形状为 `[batch, heads, new_len, dim]` 的 `q`、`k_new` 和 `v_new`，以及形状为 `[batch, heads, cache_len, dim]` 的 `k_cache` 和 `v_cache`；算子返回形状为 `[batch, heads, new_len, dim]` 的注意力加权结果。
 // Wrapper: torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_cache, torch::Tensor k_new, torch::Tensor v_new);
 
-__mlu_entry__ void kv_cache_kernel(const half* q, const half* k_cache, const half* v_cache,
-                                   const half* k_new, const half* v_new, half* out) {
+__mlu_entry__ void kv_cache_probs_kernel(const half* q, const half* k_cache, const half* k_new,
+                                         float* probs) {
   const int head = taskId;
   const int heads = 8;
   const int dim = 64;
@@ -42,29 +42,43 @@ __mlu_entry__ void kv_cache_kernel(const half* q, const half* k_cache, const hal
     denom += e;
   }
   float inv = 1.0f / denom;
+  float* ph = probs + head * total_len;
+  for (int t = 0; t < total_len; ++t) ph[t] = scores[t] * inv;
+}
 
-  half* oh = out + head * dim;
-  for (int d = 0; d < dim; ++d) {
-    float acc = 0.0f;
-    for (int t = 0; t < total_len; ++t) {
-      const half* vh = (t < cache_len)
-                           ? (v_cache + (head * cache_len + t) * dim)
-                           : (v_new + head * dim);
-      acc += scores[t] * inv * (float)vh[d];
-    }
-    oh[d] = (half)acc;
+__mlu_entry__ void kv_cache_out_kernel(const float* probs, const half* v_cache,
+                                       const half* v_new, half* out) {
+  const int idx = taskId;
+  const int total = 8 * 64;
+  const int dim = 64;
+  const int cache_len = 512;
+  const int total_len = 513;
+  if (idx >= total) return;
+  const int head = idx / dim;
+  const int d = idx % dim;
+  const float* ph = probs + head * total_len;
+  float acc = 0.0f;
+  for (int t = 0; t < cache_len; ++t) {
+    acc += ph[t] * (float)v_cache[(head * cache_len + t) * dim + d];
   }
+  acc += ph[cache_len] * (float)v_new[head * dim + d];
+  out[idx] = (half)acc;
 }
 
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_cache, torch::Tensor k_new, torch::Tensor v_new) {
   auto out = torch::empty_like(q);
+  auto probs = torch::empty({8, 513}, q.options().dtype(torch::kFloat));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {8, 1, 1};
-  kv_cache_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+  cnrtDim3_t score_dim = {8, 1, 1};
+  kv_cache_probs_kernel<<<score_dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half*>(q.data_ptr<at::Half>()),
       reinterpret_cast<const half*>(k_cache.data_ptr<at::Half>()),
-      reinterpret_cast<const half*>(v_cache.data_ptr<at::Half>()),
       reinterpret_cast<const half*>(k_new.data_ptr<at::Half>()),
+      reinterpret_cast<float*>(probs.data_ptr<float>()));
+  cnrtDim3_t out_dim = {512, 1, 1};
+  kv_cache_out_kernel<<<out_dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const float*>(probs.data_ptr<float>()),
+      reinterpret_cast<const half*>(v_cache.data_ptr<at::Half>()),
       reinterpret_cast<const half*>(v_new.data_ptr<at::Half>()),
       reinterpret_cast<half*>(out.data_ptr<at::Half>()));
   return out;

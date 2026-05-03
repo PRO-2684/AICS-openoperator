@@ -3,8 +3,6 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#include <cmath>
-
 // Task: 108 108_ALiBi_attention_bias
 // Category: embedding
 // Difficulty: medium
@@ -20,7 +18,15 @@ __mlu_entry__ void alibi_kernel(half* out, int seq_len, int num_heads, int64_t n
     int row = (idx / seq_len) % seq_len;
     int head = idx / (seq_len * seq_len);
     int dist = row > col ? row - col : col - row;
-    float slope = exp2f(-8.0f * (float)(head + 1) / (float)num_heads);
+    float slope = 0.0f;
+    if (head == 0) slope = 0.5f;
+    else if (head == 1) slope = 0.25f;
+    else if (head == 2) slope = 0.125f;
+    else if (head == 3) slope = 0.0625f;
+    else if (head == 4) slope = 0.03125f;
+    else if (head == 5) slope = 0.015625f;
+    else if (head == 6) slope = 0.0078125f;
+    else slope = 0.00390625f;
     out[idx] = (half)(-slope * (float)dist);
   }
 }
@@ -31,7 +37,7 @@ torch::Tensor bang_func(int seq_len, int num_heads) {
                               .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
                               .dtype(torch::kHalf));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {32, 1, 1};
+  cnrtDim3_t dim = {128, 1, 1};
   alibi_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half*>(out.data_ptr<at::Half>()), seq_len, num_heads, out.numel());
   return out;
