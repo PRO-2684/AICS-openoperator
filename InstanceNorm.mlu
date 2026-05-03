@@ -7,12 +7,40 @@
 #define LOCAL_ELEMS 65536
 #define TASK_COUNT 32
 
+__mlu_func__ float reduce_sum_float(float *buf, float *tmp, int n) {
+  // n * sizeof(float) 必须 128B 对齐；当前 65536/2048/64 都满足。
+  int cur = n;
+  float *src = buf;
+  float *dst = tmp;
+
+  while (cur > 32) {
+    __bang_reduce_sum(dst, src, cur);
+
+    int groups = cur / 32;
+
+    // __bang_reduce_sum 的结果在每 32 个 float 的第 0 个：
+    // dst[0], dst[32], dst[64], ...
+    // pack 到 src[0..groups-1] 便于下一轮 reduce。
+    for (int i = 0; i < groups; ++i) {
+      src[i] = dst[i * 32];
+    }
+
+    cur = groups;
+  }
+
+  float s = 0.0f;
+  for (int i = 0; i < cur; ++i) {
+    s += src[i];
+  }
+  return s;
+}
+
 __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
                                         half *__restrict__ y, int outer,
                                         int inner, float eps) {
   __nram__ half hbuf[LOCAL_ELEMS];
   __nram__ float fbuf[LOCAL_ELEMS];
-  __nram__ float stat[64];
+  __nram__ float tbuf[LOCAL_ELEMS];
 
   for (int idx = taskId; idx < outer; idx += taskDim) {
     const half *px = x + (int64_t)idx * inner;
@@ -22,13 +50,12 @@ __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
 
     // sum(x)
     __bang_half2float(fbuf, hbuf, inner);
-    __bang_sum(stat, fbuf, inner);
-    float sum = stat[0];
+    float sum = reduce_sum_float(fbuf, tbuf, inner);
 
     // sum(x*x)
+    __bang_half2float(fbuf, hbuf, inner);
     __bang_square(fbuf, fbuf, inner);
-    __bang_sum(stat, fbuf, inner);
-    float sq_sum = stat[0];
+    float sq_sum = reduce_sum_float(fbuf, tbuf, inner);
 
     float inv_n = 1.0f / (float)inner;
     float mean = sum * inv_n;
