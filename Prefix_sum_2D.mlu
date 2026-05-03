@@ -1,50 +1,46 @@
+#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
+#include <cnnl.h>
 #include <cnrt.h>
-#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void stage0(const half *__restrict__ x, half *__restrict__ tmp) {
-  __nram__ half a[256];
-  __nram__ half s[256];
-
-  for (int t = taskId; t < 16; t += taskDim) {
-    const int p = t << 16;
-
-    __bang_write_value(s, 256, (half)0.0f);
-
-    for (int i = 0; i < 256; ++i) {
-      const int q = p + (i << 8);
-
-      __memcpy(a, x + q, 512, GDRAM2NRAM);
-      __bang_add(s, s, a, 256);
-      __memcpy(tmp + q, s, 512, NRAM2GDRAM);
-    }
-  }
-}
-
-__mlu_entry__ void stage1(const half *__restrict__ tmp,
-                          half *__restrict__ out) {
-  __nram__ half a[256];
-
-  for (int t = taskId; t < 4096; t += taskDim) {
-    const int p = t << 8;
-
-    __memcpy(a, tmp + p, 512, GDRAM2NRAM);
-
-    half s = (half)0.0f;
-#pragma unroll
-    for (int i = 0; i < 256; ++i) {
-      s = (half)((float)s + (float)a[i]);
-      a[i] = s;
-    }
-
-    __memcpy(out + p, a, 512, NRAM2GDRAM);
-  }
-}
-
-using namespace at;
-
 torch::Tensor bang_func(torch::Tensor x) {
-  auto y = cumsum(x, 1);
-  return cumsum(y, 2);
+  static cnnlTensorDescriptor_t d;
+  static size_t ws0 = 0;
+  static size_t ws1 = 0;
+  static bool inited = false;
+
+  auto handle = torch_mlu::getCurrentHandle();
+
+  if (!inited) {
+    int dims[3] = {16, 256, 256};
+
+    cnnlCreateTensorDescriptor(&d);
+    cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, dims);
+
+    cnnlGetCumsumWorkspaceSize(handle, d, 1, &ws0);
+    cnnlGetCumsumWorkspaceSize(handle, d, 2, &ws1);
+
+    inited = true;
+  }
+
+  auto tmp = torch::empty_like(x);
+  auto out = torch::empty_like(x);
+
+  size_t ws = ws0 > ws1 ? ws0 : ws1;
+  torch::Tensor workspace;
+  void *workspace_ptr = nullptr;
+
+  if (ws) {
+    workspace = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
+    workspace_ptr = workspace.data_ptr();
+  }
+
+  cnnlCumsum_v2(handle, d, x.data_ptr(), 1, false, false,
+                CNNL_NOT_PROPAGATE_NAN, d, tmp.data_ptr(), workspace_ptr, ws0);
+
+  cnnlCumsum_v2(handle, d, tmp.data_ptr(), 2, false, false,
+                CNNL_NOT_PROPAGATE_NAN, d, out.data_ptr(), workspace_ptr, ws1);
+
+  return out;
 }
