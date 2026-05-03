@@ -50,7 +50,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   auto y = torch::empty_like(x);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t kdim = {BATCH, 1, 1};
-  softmax_16x16384_half_kernel<<<kdim, cnrtFuncTypeBlock, queue>>>(
+  softmax_16x16384_half_kernel<<<kdim, cnrtFuncTypeUnion4, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
