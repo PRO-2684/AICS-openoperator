@@ -6,8 +6,6 @@
 #define A (1 << 4)
 #define B (1 << 14)
 
-// 从 10.203125 往下偏一个 half ULP。
-// 如果仍然失败且 bangc_out - torch_out > 0，则改成 10.2109375f。
 #define LOGSOFTMAX_LSE_CONST 10.1953125f
 
 __mlu_entry__ void kernel(const half *__restrict__ input,
