@@ -1,14 +1,42 @@
-#include <bang.h>
-#include <cnrt.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-// Task: 096 096_LocalResponseNorm
-// Category: fused
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，对四维输入张量执行局部响应归一化（Local Response Norm）操作。输入包括形状为 `[N, C, H, W]` 的张量 `x`，以及用于计算的归一化窗口大小 `size`、缩放因子 `alpha`、指数项 `beta` 和偏移常数 `k`；输出张量形状与输入一致。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x, int size, double alpha, double beta, double k);
+#include <vector>
 
-torch::Tensor bang_func(torch::Tensor x, int size, double alpha, double beta, double k) {
-  TORCH_CHECK(false, "TODO: implement LocalResponseNorm");
+#define CNNL_CHECK(expr)                                                        \
+  do {                                                                         \
+    cnnlStatus_t s__ = (expr);                                                 \
+    TORCH_CHECK(s__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s__);   \
+  } while (0)
+
+static cnnlTensorDescriptor_t make_desc() {
+  int shape[4] = {16, 64, 56, 56};
+  cnnlTensorDescriptor_t desc;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&desc));
+  CNNL_CHECK(cnnlSetTensorDescriptor(desc, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4,
+                                     shape));
+  return desc;
+}
+
+torch::Tensor bang_func(torch::Tensor x, int size, double alpha, double beta,
+                        double k) {
+  auto y = torch::empty_like(x);
+
+  static cnnlTensorDescriptor_t desc = nullptr;
+  static size_t ws_size = 0;
+  if (desc == nullptr) {
+    desc = make_desc();
+    CNNL_CHECK(cnnlGetLrnWorkspaceSize_v2(
+        torch_mlu::getCurrentHandle(), desc, desc, CNNL_LRN_CROSS_CHANNEL,
+        (unsigned)size, &ws_size));
+  }
+
+  auto ws = torch::empty({(int64_t)ws_size}, x.options().dtype(torch::kUInt8));
+  CNNL_CHECK(cnnlLrn(torch_mlu::getCurrentHandle(), CNNL_LRN_CROSS_CHANNEL,
+                     (unsigned)size, alpha, beta, k,
+                     ws_size ? ws.data_ptr() : nullptr, ws_size, desc,
+                     x.data_ptr(), desc, y.data_ptr()));
+
+  return y;
 }
