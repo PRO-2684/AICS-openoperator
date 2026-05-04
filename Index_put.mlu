@@ -33,23 +33,21 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor values,
     a_desc = make_desc({4096, 512}, CNNL_DTYPE_HALF);
   }
 
+  cnnlTensorDescriptor_t b_desc = make_desc({k, 512}, CNNL_DTYPE_HALF);
   cnnlTensorDescriptor_t i_desc = make_desc({k}, CNNL_DTYPE_INT64);
-  cnnlTensorDescriptor_t v_desc = make_desc({k, 512}, CNNL_DTYPE_HALF);
-  const cnnlTensorDescriptor_t indices_desc[] = {i_desc};
-  const void *indices[] = {index.data_ptr()};
 
   size_t ws_size = 0;
   cnnlHandle_t handle = torch_mlu::getCurrentHandle();
-  CNNL_CHECK(cnnlGetIndexPutWorkspaceSize(handle, a_desc, indices_desc, 1,
-                                          v_desc, false, &ws_size));
+  CNNL_CHECK(cnnlGetIndexCopyWorkspaceSize_v2(handle, 0, a_desc, b_desc,
+                                              i_desc, a_desc, &ws_size));
   auto ws = torch::empty({(int64_t)ws_size}, input.options().dtype(torch::kUInt8));
 
-  CNNL_CHECK(cnnlIndexPut(handle, a_desc, input.data_ptr(), indices_desc, indices,
-                          1, v_desc, values.data_ptr(),
-                          ws_size ? ws.data_ptr() : nullptr, ws_size, false,
-                          true, a_desc, out.data_ptr()));
+  CNNL_CHECK(cnnlIndexCopy(handle, 0, false, a_desc, input.data_ptr(), b_desc,
+                           values.data_ptr(), i_desc, index.data_ptr(),
+                           ws_size ? ws.data_ptr() : nullptr, ws_size, a_desc,
+                           out.data_ptr()));
 
-  free_desc(v_desc);
   free_desc(i_desc);
+  free_desc(b_desc);
   return out;
 }
