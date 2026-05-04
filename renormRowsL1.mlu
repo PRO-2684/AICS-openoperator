@@ -10,17 +10,19 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   int p = taskId;
   const half *r = x + p * E0;
   half *o = y + p * E0;
-  __nram__ half a[64];
-  __nram__ half b[E0];
+  __nram__ half a[E0];
+  __nram__ float b[E0];
+  __nram__ float c[E0];
   __memcpy(a, r, E0 * sizeof(half), GDRAM2NRAM);
-  __memcpy(b, a, E0 * sizeof(half), NRAM2NRAM);
-  __bang_write_zero(a + E0, E0);
-  __bang_reduce_sum(a, a, 64);
-  float s = (float)a[0];
+  __bang_half2float(b, a, E0);
+  __memcpy(c, b, E0 * sizeof(float), NRAM2NRAM);
+  __bang_reduce_sum(c, c, E0);
+  float s = c[0];
   if (s > 0.0f) {
-    half inv = (half)(1.0f / s);
+    float inv = 1.0f / s;
     __bang_mul_scalar(b, b, inv, E0);
-    __memcpy(o, b, E0 * sizeof(half), NRAM2GDRAM);
+    __bang_float2half(a, b, E0);
+    __memcpy(o, a, E0 * sizeof(half), NRAM2GDRAM);
   }
 }
 
