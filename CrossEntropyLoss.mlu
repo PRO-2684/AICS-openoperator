@@ -7,35 +7,40 @@
 
 #define ROWS 4096
 #define COLS 10
-#define TASKS 32
-#define ROWS_PER_TASK (ROWS / TASKS)
+#define REDUCE_TASKS 32
+#define ROWS_PER_REDUCE (ROWS / REDUCE_TASKS)
 
-__mlu_entry__ void cross_entropy_partial_kernel(
+__mlu_entry__ void cross_entropy_row_kernel(
     const half *__restrict__ predictions, const int64_t *__restrict__ targets,
-    float *__restrict__ partial) {
-  int row0 = taskId * ROWS_PER_TASK;
+    float *__restrict__ losses) {
+  int row = taskId;
+  const half *p = predictions + row * COLS;
+  int64_t label = targets[row];
+
+  float mx = (float)p[0];
+#pragma unroll
+  for (int c = 1; c < COLS; ++c) {
+    float v = (float)p[c];
+    mx = v > mx ? v : mx;
+  }
+
+  float sum = 0.0f;
+#pragma unroll
+  for (int c = 0; c < COLS; ++c) {
+    sum += expf((float)p[c] - mx);
+  }
+
+  losses[row] = logf(sum) + mx - (float)p[label];
+}
+
+__mlu_entry__ void cross_entropy_partial_kernel(const float *__restrict__ losses,
+                                                float *__restrict__ partial) {
+  int base = taskId * ROWS_PER_REDUCE;
   float acc = 0.0f;
 
 #pragma unroll 1
-  for (int r = 0; r < ROWS_PER_TASK; ++r) {
-    int row = row0 + r;
-    const half *p = predictions + row * COLS;
-    int64_t label = targets[row];
-
-    float mx = (float)p[0];
-#pragma unroll
-    for (int c = 1; c < COLS; ++c) {
-      float v = (float)p[c];
-      mx = v > mx ? v : mx;
-    }
-
-    float sum = 0.0f;
-#pragma unroll
-    for (int c = 0; c < COLS; ++c) {
-      sum += expf((float)p[c] - mx);
-    }
-
-    acc += logf(sum) + mx - (float)p[label];
+  for (int i = 0; i < ROWS_PER_REDUCE; ++i) {
+    acc += losses[base + i];
   }
 
   partial[taskId] = acc;
@@ -46,7 +51,7 @@ __mlu_entry__ void cross_entropy_finish_kernel(const float *__restrict__ partial
   float acc = 0.0f;
 
 #pragma unroll
-  for (int i = 0; i < TASKS; ++i) {
+  for (int i = 0; i < REDUCE_TASKS; ++i) {
     acc += partial[i];
   }
 
@@ -55,15 +60,20 @@ __mlu_entry__ void cross_entropy_finish_kernel(const float *__restrict__ partial
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   auto out = torch::empty({}, predictions.options());
-  auto partial = torch::empty({TASKS}, predictions.options().dtype(torch::kFloat32));
+  auto losses = torch::empty({ROWS}, predictions.options().dtype(torch::kFloat32));
+  auto partial = torch::empty({REDUCE_TASKS}, predictions.options().dtype(torch::kFloat32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {TASKS, 1, 1};
+  cnrtDim3_t rows = {ROWS, 1, 1};
+  cnrtDim3_t parts = {REDUCE_TASKS, 1, 1};
   cnrtDim3_t one = {1, 1, 1};
 
-  cross_entropy_partial_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+  cross_entropy_row_kernel<<<rows, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(targets.data_ptr<int64_t>()),
+      reinterpret_cast<float *>(losses.data_ptr<float>()));
+  cross_entropy_partial_kernel<<<parts, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const float *>(losses.data_ptr<float>()),
       reinterpret_cast<float *>(partial.data_ptr<float>()));
   cross_entropy_finish_kernel<<<one, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const float *>(partial.data_ptr<float>()),
