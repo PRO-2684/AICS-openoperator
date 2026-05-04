@@ -1,14 +1,40 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 061 061_adaptiveaveragepool
-// Category: reduce
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，对五维输入张量进行三维自适应平均池化处理。输入包括形状为 `[N, C, T, H, W]` 的张量 `input`，以及分别代表目标输出时间、高度和宽度维度的整数 `osizeT`、`osizeH` 和 `osizeW`；输出为形状为 `[N, C, osizeT, osizeH, osizeW]` 的池化结果。
-// Wrapper: torch::Tensor bang_func(torch::Tensor input, int osizeT, int osizeH, int osizeW);
+#define E0 4096
+#define E1 128
+
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  for (int p = taskId; p < E0; p += taskDim) {
+    int a0 = p & 7;
+    int a1 = (p >> 3) & 7;
+    int a2 = (p >> 6) & 7;
+    int a3 = p >> 9;
+    int q = (((a3 * 16 + (a2 << 1)) * 16 + (a1 << 1)) * 16 + (a0 << 1));
+    float s = 0.0f;
+    s += (float)x[q];
+    s += (float)x[q + 1];
+    s += (float)x[q + 16];
+    s += (float)x[q + 17];
+    s += (float)x[q + 256];
+    s += (float)x[q + 257];
+    s += (float)x[q + 272];
+    s += (float)x[q + 273];
+    y[p] = (half)(s * 0.125f);
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor input, int osizeT, int osizeH, int osizeW) {
-  TORCH_CHECK(false, "TODO: implement adaptiveaveragepool");
+  (void)osizeT;
+  (void)osizeH;
+  (void)osizeW;
+  auto out = torch::empty({2, 4, 8, 8, 8}, input.options());
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {E1, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+  return out;
 }

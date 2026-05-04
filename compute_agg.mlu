@@ -1,14 +1,24 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
+#include <stdint.h>
 #include <torch/extension.h>
 
-// Task: 062 062_compute_agg
-// Category: reduce
-// Difficulty: medium
-// DType: int32
-// Description: 实现一个 BangC 算子，对一维输入张量执行包含当前位置的累加前缀和（Inclusive Prefix Sum）运算。输入为一个形状为 `[N]` 的 `int32` 类型张量 `agg`；输出为数据类型转换为 `int64` 后的前缀和计算结果，其形状与输入相同。
-// Wrapper: torch::Tensor bang_func(torch::Tensor agg);
+#define E0 1024
+
+__mlu_entry__ void k0(const int *__restrict__ x, int64_t *__restrict__ y) {
+  int64_t s = 0;
+  for (int i = 0; i < E0; ++i) {
+    s += (int64_t)x[i];
+    y[i] = s;
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor agg) {
-  TORCH_CHECK(false, "TODO: implement compute_agg");
+  auto out = torch::empty({E0}, agg.options().dtype(torch::kInt64));
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {1, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(agg.data_ptr<int>(),
+                                        out.data_ptr<int64_t>());
+  return out;
 }

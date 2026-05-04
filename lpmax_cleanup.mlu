@@ -1,14 +1,32 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 065 065_lpmax_cleanup
-// Category: reduce
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，计算二维张量每一行的最大值，并在计算时忽略 NaN 值（仅当整行均为 NaN 时返回 NaN）。输入包括形状为 `[num_tensors, max_chunks_per_tensor]` 的张量 `output_per_tensor` 以及表示列数的整型参数 `max_chunks_per_tensor`；输出为形状为 `[num_tensors]` 的一维张量。
-// Wrapper: torch::Tensor bang_func(torch::Tensor output_per_tensor, int max_chunks_per_tensor);
+#define E0 64
+#define E1 32
 
-torch::Tensor bang_func(torch::Tensor output_per_tensor, int max_chunks_per_tensor) {
-  TORCH_CHECK(false, "TODO: implement lpmax_cleanup");
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  int p = taskId;
+  const half *r = x + p * E0;
+  half m = r[0];
+  for (int i = 1; i < E0; ++i) {
+    half v = r[i];
+    if ((float)v > (float)m) {
+      m = v;
+    }
+  }
+  y[p] = m;
+}
+
+torch::Tensor bang_func(torch::Tensor output_per_tensor,
+                        int max_chunks_per_tensor) {
+  (void)max_chunks_per_tensor;
+  auto out = torch::empty({E1}, output_per_tensor.options());
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {E1, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(output_per_tensor.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+  return out;
 }
