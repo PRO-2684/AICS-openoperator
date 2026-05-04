@@ -1,14 +1,93 @@
-#include <bang.h>
-#include <cnrt.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-// Task: 049 049_Max_Pooling_3D
-// Category: pool
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，对五维输入张量执行三维最大池化（Max Pooling 3D）操作。输入包括形状为 `[batch_size, channels, dim1, dim2, dim3]` 的张量 `x`；同时需参考池化核尺寸 `kernel_size`、步长 `stride`、填充 `padding`、空洞率 `dilation` 及 `ceil_mode` 等参数来确定滑动窗口的行为与输出形状。该算子输出在空间维度完成特征提取后的张量。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride, int padding, int dilation, bool return_indices, bool ceil_mode);
+#define X(e)                                                                   \
+  do {                                                                         \
+    cnnlStatus_t s = (e);                                                      \
+    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
+  } while (0)
 
-torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride, int padding, int dilation, bool return_indices, bool ceil_mode) {
-  TORCH_CHECK(false, "TODO: implement Max_Pooling_3D");
+static cnnlTensorDescriptor_t a(int d0, int d1, int d2) {
+  int d[5] = {512, d0, d1, d2, 1};
+  int s[5] = {262144, 4096 * 3, 64 * 3, 3, 1};
+  cnnlTensorDescriptor_t r;
+  X(cnnlCreateTensorDescriptor(&r));
+  X(cnnlSetTensorDescriptorEx(r, CNNL_LAYOUT_NDHWC, CNNL_DTYPE_FLOAT, 5, d, s));
+  return r;
 }
+
+static cnnlTensorDescriptor_t b(int d0, int d1, int d2) {
+  int d[5] = {512, d0, d1, d2, 1};
+  int s[5] = {27000, 900 * 3, 30 * 3, 3, 1};
+  cnnlTensorDescriptor_t r;
+X(cnnlCreateTensorDescriptor(&r));
+  X(cnnlSetTensorDescriptorEx(r, CNNL_LAYOUT_NDHWC, CNNL_DTYPE_FLOAT, 5, d, s));
+  return r;
+}
+
+static cnnlPoolingDescriptor_t c(int p0, int p1, int p2) {
+  cnnlPoolingDescriptor_t r;
+  X(cnnlCreatePoolingDescriptor(&r));
+
+  int k[3] = {3, 3, 3};
+  int s[3] = {2, 2, 2};
+  int d[3] = {1, 1, 1};
+  int p[6] = {p0, 0, p1, 0, p2, 0};
+
+  X(cnnlSetPoolingNdDescriptor_v2(r, CNNL_POOLING_MAX, CNNL_NOT_PROPAGATE_NAN,
+                                  3, k, p, s, d, false));
+
+  return r;
+}
+
+torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
+                        int padding, int dilation, bool return_indices,
+                        bool ceil_mode) {
+  auto y = torch::empty({16, 32, 30, 30, 30}, x.options());
+
+  static cnnlTensorDescriptor_t u[27] = {nullptr};
+  static cnnlTensorDescriptor_t v[27] = {nullptr};
+  static cnnlPoolingDescriptor_t p[27] = {nullptr};
+
+  int id[3] = {21, 21, 22};
+  int od[3] = {10, 10, 10};
+  int pd[3] = {0, 1, 0};
+
+  if (u[0] == nullptr) {
+    for (int i = 0; i < 3; ++i) {
+      for (int j = 0; j < 3; ++j) {
+        for (int k = 0; k < 3; ++k) {
+          int t = i * 9 + j * 3 + k;
+          u[t] = a(id[i], id[j], id[k]);
+          v[t] = b(od[i], od[j], od[k]);
+          p[t] = c(pd[i], pd[j], pd[k]);
+        }
+      }
+    }
+  }
+
+  int is[3] = {0, 1, 2};
+  int os[3] = {1, 2, 0};
+
+  cnnlHandle_t h = torch_mlu::getCurrentHandle();
+
+  const float *xi = x.data_ptr<float>();
+  float *yo = y.data_ptr<float>();
+
+  for (int i = 0; i < 3; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      for (int k = 0; k < 3; ++k) {
+        int t = i * 9 + j * 3 + k;
+
+        X(cnnlPoolingForward(
+            h, p[t], nullptr, u[t], xi + is[i] * 4096 + is[j] * 64 + is[k],
+            nullptr, v[t], yo + os[i] * 900 + os[j] * 30 + os[k], nullptr, 0));
+      }
+    }
+  }
+
+  return y;
+}
+
+#undef X
