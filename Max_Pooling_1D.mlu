@@ -16,6 +16,11 @@ __mlu_entry__ void kernel(const half *__restrict__ x, half *__restrict__ y) {
   int in_base = row * IN_L;
   int out_base = row * OUT_L;
 
+  __nram__ half ibuf[IN_L];
+  __nram__ half obuf[OUT_L];
+
+  __memcpy(ibuf, x + in_base, IN_L * sizeof(half), GDRAM2NRAM);
+
 #pragma unroll 1
   for (int o = 0; o < OUT_L; ++o) {
     int start = o * 2 - 2;
@@ -24,12 +29,14 @@ __mlu_entry__ void kernel(const half *__restrict__ x, half *__restrict__ y) {
     for (int k = 0; k < 4; ++k) {
       int pos = start + k * 3;
       if (pos >= 0 && pos < IN_L) {
-        half v = x[in_base + pos];
+        half v = ibuf[pos];
         best = v > best ? v : best;
       }
     }
-    y[out_base + o] = best;
+    obuf[o] = best;
   }
+
+  __memcpy(y + out_base, obuf, OUT_L * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
