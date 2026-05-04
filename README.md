@@ -94,9 +94,9 @@ python scripts/update_problems.py
 | 043 | [GroupNorm_](GroupNorm_.mlu) | N/A | 🔴 |
 | 044 | [HingeLoss](HingeLoss.mlu) | N/A | 🔴 |
 | 045 | [HuberLoss](HuberLoss.mlu) | N/A | 🔴 |
-| 046 | [InstanceNorm](InstanceNorm.mlu) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/31e0f2284b472e870d2cd68210da7fb8c6429716) |
-| 047 | [Max_Pooling_1D](Max_Pooling_1D.mlu) | N/A | 🔴 |
-| 048 | [Max_Pooling_2D](Max_Pooling_2D.mlu) | N/A | 🔴 |
+| 046 | [InstanceNorm](InstanceNorm.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/31e0f22) |
+| 047 | [Max_Pooling_1D](Max_Pooling_1D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/b9fa5be) |
+| 048 | [Max_Pooling_2D](Max_Pooling_2D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/8de7f21) |
 | 049 | [Max_Pooling_3D](Max_Pooling_3D.mlu) | N/A | 🔴 |
 | 050 | [cumprod](cumprod.mlu) | N/A | 🔴 |
 | 051 | [cumsum](cumsum.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/f5a0c30bb76cd4ecb84ed5a1cc4dd7ec69443cca) |
