@@ -5,27 +5,32 @@
 
 #define TOTAL (4 * 64 * 64 * 64)
 #define TASKS 32
+#define CHUNK 8192
 
 __mlu_entry__ void pixel_shuffle_kernel(const half *__restrict__ x,
                                         half *__restrict__ y) {
   int stride = taskDim;
+  __nram__ half buf[CHUNK];
 
-  for (int idx = taskId; idx < TOTAL; idx += stride) {
-    int w2 = idx & 63;
-    int t0 = idx >> 6;
-    int h2 = t0 & 63;
-    int t1 = t0 >> 6;
-    int c = t1 & 63;
-    int n = t1 >> 6;
+  for (int base = taskId * CHUNK; base < TOTAL; base += stride * CHUNK) {
+    __memcpy(buf, x + base, CHUNK * sizeof(half), GDRAM2NRAM);
 
-    int rh = h2 & 1;
-    int rw = w2 & 1;
-    int h = h2 >> 1;
-    int w = w2 >> 1;
-    int ci = ((c << 2) + (rh << 1) + rw);
-    int src = (((n * 256 + ci) * 32 + h) * 32 + w);
+    for (int i = 0; i < CHUNK; ++i) {
+      int src = base + i;
+      int w = src & 31;
+      int t0 = src >> 5;
+      int h = t0 & 31;
+      int t1 = t0 >> 5;
+      int ci = t1 & 255;
+      int n = t1 >> 8;
 
-    y[idx] = x[src];
+      int c = ci >> 2;
+      int rr = ci & 3;
+      int h2 = (h << 1) + (rr >> 1);
+      int w2 = (w << 1) + (rr & 1);
+      int dst = (((n * 64 + c) * 64 + h2) * 64 + w2);
+      y[dst] = buf[i];
+    }
   }
 }
 
