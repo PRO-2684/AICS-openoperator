@@ -139,7 +139,7 @@ torch::Tensor bang_func(torch::Tensor x, int num_groups, int num_features) {
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t work = {32, 1, 1};
-  cnrtDim3_t groups = {outer, 1, 1};
+  cnrtDim3_t groups = {(unsigned int)outer, 1, 1};
 
   group_norm_partial_kernel<<<work, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
