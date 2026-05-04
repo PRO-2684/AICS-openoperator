@@ -31,9 +31,12 @@ __mlu_entry__ void triplet_seq_kernel(const half *anchor, const half *positive,
     float dneg = sqrtf(an);
 
     float v = dpos - dneg + margin;
-    if (v > 0.0f) {
-      total += v;
-    }
+    if (v < 0.0f)
+      v = 0.0f;
+
+    // 关键变体：sample loss 先落 half
+    half vh = (half)v;
+    total += (float)vh;
   }
 
   out[0] = (half)(total * 0.0078125f);
