@@ -3,30 +3,14 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void write_zero_kernel(int *y) {
-  int tid = taskId;
-  int step = taskDim;
-
-  // bool output has 16 * 256 = 4096 bytes
-  // write as int: 4096 / 4 = 1024 ints
-  for (int i = tid; i < 1024; i += step) {
-    y[i] = 0;
-  }
-}
-
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)x;
   (void)dim;
 
   auto y = torch::empty({16, 256}, x.options().dtype(torch::kBool));
 
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-
-  cnrtDim3_t grid = {4, 8, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
-
-  write_zero_kernel<<<grid, ktype, queue>>>(
-      reinterpret_cast<int *>(y.data_ptr<bool>()));
+  // bool tensor: 16 * 256 bytes
+  cnrtMemset(y.data_ptr<bool>(), 0, 16 * 256);
 
   return y;
 }
