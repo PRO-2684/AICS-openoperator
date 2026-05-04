@@ -5,16 +5,20 @@
 
 __mlu_global__ void k(const half *a, const half *b, half *c) {
   __nram__ half x[256];
-  __nram__ half y[65536];
+  __nram__ half y[16384];
 
   for (int p = taskId; p < 64; p += taskDim) {
     __memcpy(x, b + p * 256, 512, GDRAM2NRAM);
 
-    for (int q = 0; q < 256; ++q) {
-      __bang_mul_scalar(y + q * 256, x, a[p * 256 + q], 256);
-    }
+    for (int q = 0; q < 256; q += 64) {
+      int r = p * 256 + q;
 
-    __memcpy(c + p * 65536, y, 131072, NRAM2GDRAM);
+      for (int s = 0; s < 64; ++s) {
+        __bang_mul_scalar(y + s * 256, x, a[r + s], 256);
+      }
+
+      __memcpy(c + p * 65536 + q * 256, y, 32768, NRAM2GDRAM);
+    }
   }
 }
 
