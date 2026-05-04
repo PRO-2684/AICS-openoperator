@@ -11,25 +11,16 @@ __mlu_entry__ void k(const half *a, half *b) {
   __memcpy(x, a + p * 64, 1024, GDRAM2NRAM);
 
   for (int r = 0; r < 8; ++r) {
-    half m = (half)-65504.0f;
-    int n = 0;
+    half m = x[r * 64];
 
-    for (int i = 0; i < 64; ++i) {
+    for (int i = 1; i < 64; ++i) {
       half v = x[r * 64 + i];
-      float f = (float)v;
-      if (f == f) {
-        n = 1;
-        if (v > m) {
-          m = v;
-        }
+      if (v > m) {
+        m = v;
       }
     }
 
-    if (n) {
-      b[p + r] = m;
-    } else {
-      b[p + r] = (half)NAN;
-    }
+    b[p + r] = m;
   }
 }
 
