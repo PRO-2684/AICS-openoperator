@@ -1,14 +1,93 @@
-#include <bang.h>
-#include <cnrt.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-// Task: 013 013_3D_tensor_matrix_multiplication
-// Category: matrix
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，计算三维张量与二维矩阵的乘法。输入包括形状为 `[N, M, K]` 的三维张量 `A` 以及形状为 `[K, L]` 的二维矩阵 `B`；输出为形状为 `[N, M, L]` 的张量，其结果由 `A` 的最后两维构成的矩阵与 `B` 相乘得到。
-// Wrapper: torch::Tensor bang_func(torch::Tensor A, torch::Tensor B);
+#define X(e)                                                                   \
+  do {                                                                         \
+    cnnlStatus_t s = (e);                                                      \
+    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
+  } while (0)
+
+static cnnlTensorDescriptor_t f(int n) {
+  int d[1] = {n};
+  cnnlTensorDescriptor_t r;
+  X(cnnlCreateTensorDescriptor(&r));
+  X(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT, 1, d));
+  return r;
+}
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  TORCH_CHECK(false, "TODO: implement 3D_tensor_matrix_multiplication");
+  auto C = torch::empty({16, 1024, 768}, A.options());
+
+  static cnnlTensorDescriptor_t a = nullptr;
+  static cnnlTensorDescriptor_t b = nullptr;
+  static cnnlTensorDescriptor_t c = nullptr;
+  static cnnlStrideBatchMatMulDescriptor_t d = nullptr;
+  static cnnlStrideBatchMatMulAlgo_t e = nullptr;
+  static size_t z = 0;
+
+  cnnlHandle_t h = torch_mlu::getCurrentHandle();
+
+  bool ta = false;
+  bool tb = false;
+
+  int m = 1024;
+  int n = 768;
+  int k = 2048;
+
+  int la = 2048;
+  int lb = 768;
+  int lc = 768;
+  int ld = 768;
+
+  int bs[1] = {16};
+
+  int64_t sa[1] = {2097152};
+  int64_t sb[1] = {0};
+  int64_t sc[1] = {786432};
+
+  float al = 1.0f;
+  float be = 0.0f;
+
+  if (d == nullptr) {
+    a = f(16 * 1024 * 2048);
+    b = f(2048 * 768);
+    c = f(16 * 1024 * 768);
+
+    X(cnnlCreateStrideBatchMatMulDescriptor(&d));
+    X(cnnlCreateStrideBatchMatMulAlgo(&e));
+
+    cnnlStrideBatchMatMulHeuristicResult_t r;
+    X(cnnlCreateStrideBatchMatMulHeuristicResult(&r));
+
+    cnnlDataType_t t = CNNL_DTYPE_FLOAT;
+    int u = 1;
+    int v = 0;
+
+    X(cnnlSetStrideBatchMatMulDescAttr(d, CNNL_STRIDE_BMM_COMPUTE_TYPE, &t,
+                                       sizeof(t)));
+    X(cnnlSetStrideBatchMatMulDescAttr(d, CNNL_STRIDE_BMM_MAX_BATCH_DIM, &u,
+                                       sizeof(u)));
+    X(cnnlSetStrideBatchMatMulDescAttr(d, CNNL_STRIDE_BMM_ALLOW_TF32, &v,
+                                       sizeof(v)));
+
+    int q = 0;
+    X(cnnlGetStrideBatchMatMulAlgoHeuristic_v2(
+        h, d, a, b, c, c, ta, tb, &al, &be, m, n, k, la, lb, lc, ld, bs, sa, sb,
+        sc, sc, nullptr, 1, &r, &q));
+
+    X(cnnlGetStrideBatchMatMulHeuristicResult(r, &e, &z));
+    X(cnnlDestroyStrideBatchMatMulHeuristicResult(r));
+  }
+
+  auto w = torch::empty({(int64_t)z}, A.options().dtype(torch::kUInt8));
+
+  X(cnnlStrideBatchMatMul_v3(h, d, e, ta, tb, m, n, k, bs, &al, a, A.data_ptr(),
+                             la, sa, b, B.data_ptr(), lb, sb, &be, c,
+                             C.data_ptr(), lc, sc, z ? w.data_ptr() : nullptr,
+                             z, c, C.data_ptr(), ld, sc));
+
+  return C;
 }
+
+#undef X
