@@ -1,14 +1,73 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
+#include <math.h>
+#include <stdint.h>
 #include <torch/extension.h>
 
-// Task: 041 041_CrossEntropyLoss
-// Category: fused
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，计算多分类任务中的交叉熵损失（Cross Entropy Loss）。输入包括形状为 `[batch_size, num_classes]` 的预测对数几率张量 `predictions`，以及形状为 `[batch_size]` 的真实类别索引张量 `targets`；输出为计算得到的标量损失值。
-// Wrapper: torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets);
+#define ROWS 4096
+#define COLS 10
+#define TASKS 32
+#define ROWS_PER_TASK (ROWS / TASKS)
+
+__mlu_entry__ void cross_entropy_partial_kernel(
+    const half *__restrict__ predictions, const int64_t *__restrict__ targets,
+    float *__restrict__ partial) {
+  int row0 = taskId * ROWS_PER_TASK;
+  float acc = 0.0f;
+
+#pragma unroll 1
+  for (int r = 0; r < ROWS_PER_TASK; ++r) {
+    int row = row0 + r;
+    const half *p = predictions + row * COLS;
+    int64_t label = targets[row];
+
+    float mx = (float)p[0];
+#pragma unroll
+    for (int c = 1; c < COLS; ++c) {
+      float v = (float)p[c];
+      mx = v > mx ? v : mx;
+    }
+
+    float sum = 0.0f;
+#pragma unroll
+    for (int c = 0; c < COLS; ++c) {
+      sum += expf((float)p[c] - mx);
+    }
+
+    acc += logf(sum) + mx - (float)p[label];
+  }
+
+  partial[taskId] = acc;
+}
+
+__mlu_entry__ void cross_entropy_finish_kernel(const float *__restrict__ partial,
+                                               half *__restrict__ out) {
+  float acc = 0.0f;
+
+#pragma unroll
+  for (int i = 0; i < TASKS; ++i) {
+    acc += partial[i];
+  }
+
+  out[0] = (half)(acc * (1.0f / (float)ROWS));
+}
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
-  TORCH_CHECK(false, "TODO: implement CrossEntropyLoss");
+  auto out = torch::empty({}, predictions.options());
+  auto partial = torch::empty({TASKS}, predictions.options().dtype(torch::kFloat32));
+
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {TASKS, 1, 1};
+  cnrtDim3_t one = {1, 1, 1};
+
+  cross_entropy_partial_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
+      reinterpret_cast<const int64_t *>(targets.data_ptr<int64_t>()),
+      reinterpret_cast<float *>(partial.data_ptr<float>()));
+  cross_entropy_finish_kernel<<<one, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const float *>(partial.data_ptr<float>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+
+  return out;
 }
