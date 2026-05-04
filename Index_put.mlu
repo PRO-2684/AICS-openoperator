@@ -1,40 +1,55 @@
-#include <bang.h>
-#include <cnrt.h>
-#include <framework/core/MLUStream.h>
-#include <stdint.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-#define E0 2097152
-#define E1 512
-#define T0 32
+#include <vector>
 
-__mlu_entry__ void put_rows_kernel(const half *__restrict__ values,
-                                   const int64_t *__restrict__ index,
-                                   half *__restrict__ out, int k) {
-  int stride = taskDim;
-  __nram__ half buf[E1];
+#define CNNL_CHECK(expr)                                                        \
+  do {                                                                         \
+    cnnlStatus_t s__ = (expr);                                                 \
+    TORCH_CHECK(s__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s__);   \
+  } while (0)
 
-  for (int row = taskId; row < k; row += stride) {
-    int64_t dst_row = index[row];
-    const half *src = values + row * E1;
-    half *dst = out + dst_row * E1;
-    __memcpy(buf, src, E1 * sizeof(half), GDRAM2NRAM);
-    __memcpy(dst, buf, E1 * sizeof(half), NRAM2GDRAM);
-  }
+static cnnlTensorDescriptor_t make_desc(const std::vector<int> &shape,
+                                        cnnlDataType_t dtype) {
+  cnnlTensorDescriptor_t desc;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&desc));
+  CNNL_CHECK(cnnlSetTensorDescriptor(desc, CNNL_LAYOUT_ARRAY, dtype,
+                                     (int)shape.size(), shape.data()));
+  return desc;
 }
 
-torch::Tensor bang_func(torch::Tensor input, torch::Tensor values, torch::Tensor index) {
+static void free_desc(cnnlTensorDescriptor_t desc) {
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(desc));
+}
+
+torch::Tensor bang_func(torch::Tensor input, torch::Tensor values,
+                        torch::Tensor index) {
   auto out = torch::empty_like(input);
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtMemcpyAsync(out.data_ptr(), input.data_ptr(), E0 * sizeof(half),
-                  queue, cnrtMemcpyDevToDev);
-
   int k = (int)index.size(0);
-  cnrtDim3_t dim = {T0, 1, 1};
-  put_rows_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(values.data_ptr<at::Half>()),
-      reinterpret_cast<const int64_t *>(index.data_ptr<int64_t>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()), k);
 
+  static cnnlTensorDescriptor_t a_desc = nullptr;
+  if (a_desc == nullptr) {
+    a_desc = make_desc({4096, 512}, CNNL_DTYPE_HALF);
+  }
+
+  cnnlTensorDescriptor_t i_desc = make_desc({k}, CNNL_DTYPE_INT64);
+  cnnlTensorDescriptor_t v_desc = make_desc({k, 512}, CNNL_DTYPE_HALF);
+  const cnnlTensorDescriptor_t indices_desc[] = {i_desc};
+  const void *indices[] = {index.data_ptr()};
+
+  size_t ws_size = 0;
+  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
+  CNNL_CHECK(cnnlGetIndexPutWorkspaceSize(handle, a_desc, indices_desc, 1,
+                                          v_desc, false, &ws_size));
+  auto ws = torch::empty({(int64_t)ws_size}, input.options().dtype(torch::kUInt8));
+
+  CNNL_CHECK(cnnlIndexPut(handle, a_desc, input.data_ptr(), indices_desc, indices,
+                          1, v_desc, values.data_ptr(),
+                          ws_size ? ws.data_ptr() : nullptr, ws_size, false,
+                          true, a_desc, out.data_ptr()));
+
+  free_desc(v_desc);
+  free_desc(i_desc);
   return out;
 }

@@ -1,14 +1,63 @@
-#include <bang.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 111 111_Masked_select
-// Category: io
-// Difficulty: basic
-// DType: float16
-// Description: 实现一个 BangC 算子，根据给定的阈值筛选输入张量中的元素。输入包括形状为 `[M, N]` 的张量 `input` 以及浮点数标量 `threshold`；算子将 `input` 中所有大于 `threshold` 的元素提取并展平为一维张量输出。
-// Wrapper: torch::Tensor bang_func(torch::Tensor input, double threshold);
+#include <vector>
 
-torch::Tensor bang_func(torch::Tensor input, double threshold) {
-  TORCH_CHECK(false, "TODO: implement Masked_select");
+#define CNNL_CHECK(expr)                                                        \
+  do {                                                                         \
+    cnnlStatus_t s__ = (expr);                                                 \
+    TORCH_CHECK(s__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s__);   \
+  } while (0)
+
+static cnnlTensorDescriptor_t make_desc(const std::vector<int> &shape,
+                                        cnnlDataType_t dtype) {
+  cnnlTensorDescriptor_t desc;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&desc));
+  CNNL_CHECK(cnnlSetTensorDescriptor(desc, CNNL_LAYOUT_ARRAY, dtype,
+                                     (int)shape.size(), shape.data()));
+  return desc;
+}
+
+torch::Tensor bang_func(torch::Tensor input, double v) {
+  auto mask = torch::empty({1048576}, input.options().dtype(torch::kBool));
+  auto out = torch::empty({1048576}, input.options());
+
+  static cnnlTensorDescriptor_t a_desc = nullptr;
+  static cnnlTensorDescriptor_t b_desc = nullptr;
+  static cnnlTensorDescriptor_t c_desc = nullptr;
+  static cnnlTensorDescriptor_t out_desc = nullptr;
+  static size_t ws0_size = 0;
+  static size_t ws1_size = 0;
+  if (a_desc == nullptr) {
+    a_desc = make_desc({1048576}, CNNL_DTYPE_HALF);
+    b_desc = make_desc({1}, CNNL_DTYPE_HALF);
+    c_desc = make_desc({1048576}, CNNL_DTYPE_BOOL);
+    out_desc = make_desc({1048576}, CNNL_DTYPE_HALF);
+    CNNL_CHECK(cnnlGetLogicOpWorkspaceSize(torch_mlu::getCurrentHandle(),
+                                           a_desc, b_desc, c_desc, &ws0_size));
+    CNNL_CHECK(cnnlGetMaskedWorkspaceSize(
+        torch_mlu::getCurrentHandle(), CNNL_MASKED_SELECT, a_desc, c_desc,
+        nullptr, out_desc, &ws1_size));
+  }
+
+  auto ws0 = torch::empty({(int64_t)ws0_size}, input.options().dtype(torch::kUInt8));
+  auto ws1 = torch::empty({(int64_t)ws1_size}, input.options().dtype(torch::kUInt8));
+  c10::Half hv((float)v);
+
+  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
+  CNNL_CHECK(cnnlLogicOp(handle, CNNL_LOGIC_OP_GT, a_desc, input.data_ptr(),
+                         b_desc, &hv, ws0_size ? ws0.data_ptr() : nullptr,
+                         ws0_size, c_desc, mask.data_ptr()));
+
+  uint32_t n = 0;
+  CNNL_CHECK(cnnlMasked_v5(handle, CNNL_MASKED_SELECT, a_desc, input.data_ptr(),
+                           c_desc, mask.data_ptr(), nullptr, nullptr,
+                           ws1_size ? ws1.data_ptr() : nullptr, ws1_size,
+                           out_desc, out.data_ptr(), &n));
+  cnrtQueueSync(torch_mlu::getCurMLUStream());
+  out.resize_({(int64_t)n});
+  return out;
 }
