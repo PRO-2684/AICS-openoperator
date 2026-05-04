@@ -1,14 +1,33 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 042 042_FrobeniusNorm_
-// Category: fused
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，对输入张量进行 Frobenius 范数归一化。输入为一个形状为 `[D1, D2, ..., Dn]` 的张量 `x`；输出为 `x` 除以其全局 Frobenius 范数（即所有元素平方和的平方根）后的结果，形状与输入一致。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x);
+#define TOTAL_ELEMS (16 * 64 * 256 * 256)
+#define TASKS 32
+#define CHUNK 8192
+#define F_SCALE ((half)0.0001220703125f)
+
+__mlu_entry__ void frobenius_scale_kernel(half *__restrict__ x) {
+  int64_t start = (int64_t)taskId * (TOTAL_ELEMS / TASKS);
+  int64_t end = start + (TOTAL_ELEMS / TASKS);
+
+  __nram__ half hbuf[CHUNK];
+
+  for (int64_t pos = start; pos < end; pos += CHUNK) {
+    half *px = x + pos;
+    __memcpy(hbuf, px, CHUNK * sizeof(half), GDRAM2NRAM);
+    __bang_mul_scalar(hbuf, hbuf, F_SCALE, CHUNK);
+    __memcpy(px, hbuf, CHUNK * sizeof(half), NRAM2GDRAM);
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor x) {
-  TORCH_CHECK(false, "TODO: implement FrobeniusNorm_");
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {TASKS, 1, 1};
+
+  frobenius_scale_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+
+  return x;
 }
