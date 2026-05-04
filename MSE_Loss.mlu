@@ -19,50 +19,12 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
   __bang_half2float(d, b, E1);
   __bang_sub(c, c, d, E1);
   __bang_mul(c, c, c, E1);
-  __memcpy(d + 1, c, (E1 - 1) * sizeof(float), NRAM2NRAM);
-  d[0] = 0.0f;
-  __bang_add(c, c, d, E1);
-  __memcpy(d + 2, c, (E1 - 2) * sizeof(float), NRAM2NRAM);
-  d[0] = 0.0f;
-  d[1] = 0.0f;
-  __bang_add(c, c, d, E1);
-  __memcpy(d + 4, c, (E1 - 4) * sizeof(float), NRAM2NRAM);
-  for (int i = 0; i < 4; ++i) d[i] = 0.0f;
-  __bang_add(c, c, d, E1);
-  __memcpy(d + 8, c, (E1 - 8) * sizeof(float), NRAM2NRAM);
-  for (int i = 0; i < 8; ++i) d[i] = 0.0f;
-  __bang_add(c, c, d, E1);
-  __memcpy(d + 16, c, (E1 - 16) * sizeof(float), NRAM2NRAM);
-  for (int i = 0; i < 16; ++i) d[i] = 0.0f;
-  __bang_add(c, c, d, E1);
-  __memcpy(d + 32, c, (E1 - 32) * sizeof(float), NRAM2NRAM);
-  for (int i = 0; i < 32; ++i) d[i] = 0.0f;
-  __bang_add(c, c, d, E1);
-  __memcpy(d + 64, c, (E1 - 64) * sizeof(float), NRAM2NRAM);
-  for (int i = 0; i < 64; ++i) d[i] = 0.0f;
-  __bang_add(c, c, d, E1);
-  __memcpy(d + 128, c, (E1 - 128) * sizeof(float), NRAM2NRAM);
-  for (int i = 0; i < 128; ++i) d[i] = 0.0f;
-  __bang_add(c, c, d, E1);
-  __memcpy(d + 256, c, (E1 - 256) * sizeof(float), NRAM2NRAM);
-  for (int i = 0; i < 256; ++i) d[i] = 0.0f;
-  __bang_add(c, c, d, E1);
-  __memcpy(d + 512, c, (E1 - 512) * sizeof(float), NRAM2NRAM);
-  for (int i = 0; i < 512; ++i) d[i] = 0.0f;
-  __bang_add(c, c, d, E1);
-  __memcpy(d + 1024, c, (E1 - 1024) * sizeof(float), NRAM2NRAM);
-  for (int i = 0; i < 1024; ++i) d[i] = 0.0f;
-  __bang_add(c, c, d, E1);
-  __memcpy(d + 2048, c, (E1 - 2048) * sizeof(float), NRAM2NRAM);
-  for (int i = 0; i < 2048; ++i) d[i] = 0.0f;
-  __bang_add(c, c, d, E1);
-  __memcpy(d + 4096, c, (E1 - 4096) * sizeof(float), NRAM2NRAM);
-  for (int i = 0; i < 4096; ++i) d[i] = 0.0f;
-  __bang_add(c, c, d, E1);
-  __memcpy(d + 8192, c, (E1 - 8192) * sizeof(float), NRAM2NRAM);
-  for (int i = 0; i < 8192; ++i) d[i] = 0.0f;
-  __bang_add(c, c, d, E1);
-  z[taskId] = c[E1 - 1];
+  __bang_reduce_sum(c, c, E1);
+  float s = 0.0f;
+  for (int i = 0; i < 512; ++i) {
+    s += c[i * 32];
+  }
+  z[taskId] = s;
 }
 
 __mlu_entry__ void k1(const float *__restrict__ x, float *__restrict__ y) {
