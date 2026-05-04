@@ -9,33 +9,35 @@
 #define COLS 10
 #define TASKS 64
 #define ROWS_PER_TASK (ROWS / TASKS)
+#define LOCAL_ELEMS (ROWS_PER_TASK * COLS)
 
 __mlu_entry__ void cross_entropy_partial_kernel(
     const half *__restrict__ predictions, const int64_t *__restrict__ targets,
     float *__restrict__ partial) {
   int row0 = taskId * ROWS_PER_TASK;
+  int base = row0 * COLS;
+
+  __nram__ half hbuf[LOCAL_ELEMS];
+  __nram__ float fbuf[LOCAL_ELEMS];
+
+  __memcpy(hbuf, predictions + base, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(fbuf, hbuf, LOCAL_ELEMS);
+  __bang_active_exp(fbuf, fbuf, LOCAL_ELEMS);
+
   float acc = 0.0f;
 
 #pragma unroll 1
   for (int r = 0; r < ROWS_PER_TASK; ++r) {
-    int row = row0 + r;
-    const half *p = predictions + row * COLS;
-    int64_t label = targets[row];
-
-    float mx = (float)p[0];
-#pragma unroll
-    for (int c = 1; c < COLS; ++c) {
-      float v = (float)p[c];
-      mx = v > mx ? v : mx;
-    }
-
+    int off = r * COLS;
     float sum = 0.0f;
+
 #pragma unroll
     for (int c = 0; c < COLS; ++c) {
-      sum += expf((float)p[c] - mx);
+      sum += fbuf[off + c];
     }
 
-    acc += logf(sum) + mx - (float)p[label];
+    int64_t label = targets[row0 + r];
+    acc += logf(sum) - (float)hbuf[off + label];
   }
 
   partial[taskId] = acc;
