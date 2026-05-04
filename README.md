@@ -181,7 +181,7 @@ python scripts/update_problems.py
 | 130 | [Attention_kv_cache](Attention_kv_cache.mlu) | N/A | 🔴 |
 | 131 | [Relative_position_encoding](Relative_position_encoding.mlu) | N/A | 🔴 |
 | 132 | [Sparse_embedding](Sparse_embedding.mlu) | N/A | 🔴 |
-| 133 | [Triplet_loss](Triplet_loss.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/cb2bbc6) |
+| 133 | [Triplet_loss](Triplet_loss.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/99356a7) |
 | 134 | [Depthwise_conv_2D](Depthwise_conv_2D.mlu) | N/A | 🔴 |
 | 135 | [Dilated_conv_2D](Dilated_conv_2D.mlu) | N/A | 🔴 |
 | 136 | [Grouped_conv_2D](Grouped_conv_2D.mlu) | N/A | 🔴 |
