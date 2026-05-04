@@ -33,35 +33,34 @@ __mlu_func__ float reduce_sum_float_small(float *buf, float *tmp, int n) {
 __mlu_entry__ void group_norm_partial_kernel(const half *__restrict__ x,
                                              float *__restrict__ partial,
                                              int outer, int inner) {
-  int gid = taskId;
   int total = outer * PARTS;
-  if (gid >= total) {
-    return;
+  int stride = taskDim;
+
+  for (int gid = taskId; gid < total; gid += stride) {
+    int idx = gid / PARTS;
+    int part = gid - idx * PARTS;
+    int chunk = inner / PARTS;
+    int offset = part * chunk;
+
+    const half *px = x + (int64_t)idx * inner + offset;
+
+    __nram__ half hbuf[LOCAL_ELEMS];
+    __nram__ float fbuf[LOCAL_ELEMS];
+    __nram__ float tbuf[LOCAL_ELEMS];
+
+    __memcpy(hbuf, px, chunk * sizeof(half), GDRAM2NRAM);
+
+    __bang_half2float(fbuf, hbuf, chunk);
+    float sum = reduce_sum_float_small(fbuf, tbuf, chunk);
+
+    __bang_half2float(fbuf, hbuf, chunk);
+    __bang_square(fbuf, fbuf, chunk);
+    float sq_sum = reduce_sum_float_small(fbuf, tbuf, chunk);
+
+    int base = idx * (PARTS * 2) + part;
+    partial[base] = sum;
+    partial[base + PARTS] = sq_sum;
   }
-
-  int idx = gid / PARTS;
-  int part = gid - idx * PARTS;
-  int chunk = inner / PARTS;
-  int offset = part * chunk;
-
-  const half *px = x + (int64_t)idx * inner + offset;
-
-  __nram__ half hbuf[LOCAL_ELEMS];
-  __nram__ float fbuf[LOCAL_ELEMS];
-  __nram__ float tbuf[LOCAL_ELEMS];
-
-  __memcpy(hbuf, px, chunk * sizeof(half), GDRAM2NRAM);
-
-  __bang_half2float(fbuf, hbuf, chunk);
-  float sum = reduce_sum_float_small(fbuf, tbuf, chunk);
-
-  __bang_half2float(fbuf, hbuf, chunk);
-  __bang_square(fbuf, fbuf, chunk);
-  float sq_sum = reduce_sum_float_small(fbuf, tbuf, chunk);
-
-  int base = idx * (PARTS * 2) + part;
-  partial[base] = sum;
-  partial[base + PARTS] = sq_sum;
 }
 
 __mlu_entry__ void group_norm_stat_kernel(const float *__restrict__ partial,
@@ -97,31 +96,30 @@ __mlu_entry__ void group_norm_apply_kernel(const half *__restrict__ x,
                                            half *__restrict__ y,
                                            const float *__restrict__ stat,
                                            int outer, int inner) {
-  int gid = taskId;
   int total = outer * PARTS;
-  if (gid >= total) {
-    return;
+  int stride = taskDim;
+
+  for (int gid = taskId; gid < total; gid += stride) {
+    int idx = gid / PARTS;
+    int part = gid - idx * PARTS;
+    int chunk = inner / PARTS;
+    int offset = part * chunk;
+
+    const half *px = x + (int64_t)idx * inner + offset;
+    half *py = y + (int64_t)idx * inner + offset;
+    float mean = stat[idx * 2 + 0];
+    float inv_std = stat[idx * 2 + 1];
+
+    __nram__ half hbuf[LOCAL_ELEMS];
+    __nram__ float fbuf[LOCAL_ELEMS];
+
+    __memcpy(hbuf, px, chunk * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(fbuf, hbuf, chunk);
+    __bang_sub_scalar(fbuf, fbuf, mean, chunk);
+    __bang_mul_scalar(fbuf, fbuf, inv_std, chunk);
+    __bang_float2half_rn(hbuf, fbuf, chunk);
+    __memcpy(py, hbuf, chunk * sizeof(half), NRAM2GDRAM);
   }
-
-  int idx = gid / PARTS;
-  int part = gid - idx * PARTS;
-  int chunk = inner / PARTS;
-  int offset = part * chunk;
-
-  const half *px = x + (int64_t)idx * inner + offset;
-  half *py = y + (int64_t)idx * inner + offset;
-  float mean = stat[idx * 2 + 0];
-  float inv_std = stat[idx * 2 + 1];
-
-  __nram__ half hbuf[LOCAL_ELEMS];
-  __nram__ float fbuf[LOCAL_ELEMS];
-
-  __memcpy(hbuf, px, chunk * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(fbuf, hbuf, chunk);
-  __bang_sub_scalar(fbuf, fbuf, mean, chunk);
-  __bang_mul_scalar(fbuf, fbuf, inv_std, chunk);
-  __bang_float2half_rn(hbuf, fbuf, chunk);
-  __memcpy(py, hbuf, chunk * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int num_groups, int num_features) {
@@ -140,7 +138,7 @@ torch::Tensor bang_func(torch::Tensor x, int num_groups, int num_features) {
   auto stat = torch::empty({outer, 2}, fopt);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t work = {outer * PARTS, 1, 1};
+  cnrtDim3_t work = {32, 1, 1};
   cnrtDim3_t groups = {outer, 1, 1};
 
   group_norm_partial_kernel<<<work, cnrtFuncTypeBlock, queue>>>(
