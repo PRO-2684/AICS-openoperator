@@ -3,32 +3,38 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define A(o)                                                                   \
-  __memcpy(x, a + s + (o), 262144, GDRAM2NRAM);                                \
-  __bang_mul_scalar(x, x, (half)0.0001220703125f, 131072);                     \
-  __memcpy(a + s + (o), x, 262144, NRAM2GDRAM);
-
 __mlu_entry__ void k(half *a) {
-  __nram__ half x[131072];
+  __nram__ half x[327680];
 
   int64_t s = (int64_t)taskId * 2097152;
 
-  A(0)
-  A(131072)
-  A(262144)
-  A(393216)
-  A(524288)
-  A(655360)
-  A(786432)
-  A(917504)
-  A(1048576)
-  A(1179648)
-  A(1310720)
-  A(1441792)
-  A(1572864)
-  A(1703936)
-  A(1835008)
-  A(1966080)
+  __memcpy(x, a + s, 655360, GDRAM2NRAM);
+  __bang_mul_scalar(x, x, (half)0.0001220703125f, 327680);
+  __memcpy(a + s, x, 655360, NRAM2GDRAM);
+
+  __memcpy(x, a + s + 327680, 655360, GDRAM2NRAM);
+  __bang_mul_scalar(x, x, (half)0.0001220703125f, 327680);
+  __memcpy(a + s + 327680, x, 655360, NRAM2GDRAM);
+
+  __memcpy(x, a + s + 655360, 655360, GDRAM2NRAM);
+  __bang_mul_scalar(x, x, (half)0.0001220703125f, 327680);
+  __memcpy(a + s + 655360, x, 655360, NRAM2GDRAM);
+
+  __memcpy(x, a + s + 983040, 655360, GDRAM2NRAM);
+  __bang_mul_scalar(x, x, (half)0.0001220703125f, 327680);
+  __memcpy(a + s + 983040, x, 655360, NRAM2GDRAM);
+
+  __memcpy(x, a + s + 1310720, 655360, GDRAM2NRAM);
+  __bang_mul_scalar(x, x, (half)0.0001220703125f, 327680);
+  __memcpy(a + s + 1310720, x, 655360, NRAM2GDRAM);
+
+  __memcpy(x, a + s + 1638400, 655360, GDRAM2NRAM);
+  __bang_mul_scalar(x, x, (half)0.0001220703125f, 327680);
+  __memcpy(a + s + 1638400, x, 655360, NRAM2GDRAM);
+
+  __memcpy(x, a + s + 1966080, 262144, GDRAM2NRAM);
+  __bang_mul_scalar(x, x, (half)0.0001220703125f, 131072);
+  __memcpy(a + s + 1966080, x, 262144, NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
@@ -42,5 +48,3 @@ torch::Tensor bang_func(torch::Tensor x) {
 
   return x;
 }
-
-#undef A
