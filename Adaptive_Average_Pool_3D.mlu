@@ -12,24 +12,51 @@
 #define E6 32
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  int n = E0 * E1 * E2 * E3;
+  int n = E0 * E1 * E2;
   for (int t = taskId; t < n; t += taskDim) {
-    int w = t & 7;
-    int h = (t >> 3) & 7;
-    int d = (t >> 6) & 3;
-    int bc = t >> 8;
-    int p = bc * (E4 * E5 * E6) + d * 8 * (E5 * E6) + h * 4 * E6 + w * 4;
-    float s = 0.0f;
+    int h = t & 7;
+    int d = (t >> 3) & 3;
+    int bc = t >> 5;
+    int p = bc * (E4 * E5 * E6) + d * 8 * (E5 * E6) + h * 4 * E6;
+    float s0 = 0.0f;
+    float s1 = 0.0f;
+    float s2 = 0.0f;
+    float s3 = 0.0f;
+    float s4 = 0.0f;
+    float s5 = 0.0f;
+    float s6 = 0.0f;
+    float s7 = 0.0f;
     for (int z = 0; z < 8; ++z) {
       int q = p + z * E5 * E6;
       for (int r = 0; r < 4; ++r) {
+        const half *u = x + q + r * E6;
 #pragma unroll 4
-        for (int c = 0; c < 4; ++c) {
-          s += (float)x[q + r * E6 + c];
-        }
+        for (int c = 0; c < 4; ++c) s0 += (float)u[c];
+#pragma unroll 4
+        for (int c = 4; c < 8; ++c) s1 += (float)u[c];
+#pragma unroll 4
+        for (int c = 8; c < 12; ++c) s2 += (float)u[c];
+#pragma unroll 4
+        for (int c = 12; c < 16; ++c) s3 += (float)u[c];
+#pragma unroll 4
+        for (int c = 16; c < 20; ++c) s4 += (float)u[c];
+#pragma unroll 4
+        for (int c = 20; c < 24; ++c) s5 += (float)u[c];
+#pragma unroll 4
+        for (int c = 24; c < 28; ++c) s6 += (float)u[c];
+#pragma unroll 4
+        for (int c = 28; c < 32; ++c) s7 += (float)u[c];
       }
     }
-    y[t] = (half)(s * 0.0078125f);
+    int o = ((bc * E1 + d) * E2 + h) * E3;
+    y[o + 0] = (half)(s0 * 0.0078125f);
+    y[o + 1] = (half)(s1 * 0.0078125f);
+    y[o + 2] = (half)(s2 * 0.0078125f);
+    y[o + 3] = (half)(s3 * 0.0078125f);
+    y[o + 4] = (half)(s4 * 0.0078125f);
+    y[o + 5] = (half)(s5 * 0.0078125f);
+    y[o + 6] = (half)(s6 * 0.0078125f);
+    y[o + 7] = (half)(s7 * 0.0078125f);
   }
 }
 
