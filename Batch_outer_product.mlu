@@ -5,11 +5,11 @@
 
 __mlu_global__ void k(const half *a, const half *b, half *c) {
   __nram__ half x[256];
-  __nram__ half y[8192];
+  __nram__ half y[4096];
 
-  for (int i = taskId; i < 512; i += taskDim) {
-    int p = i >> 3;
-    int q = (i & 7) << 5;
+  for (int i = taskId; i < 1024; i += taskDim) {
+    int p = i >> 4;
+    int q = (i & 15) << 4;
     int r = p * 256 + q;
     int o = p * 65536 + q * 256;
 
@@ -31,29 +31,14 @@ __mlu_global__ void k(const half *a, const half *b, half *c) {
     __bang_mul_scalar(y + 3328, x, a[r + 13], 256);
     __bang_mul_scalar(y + 3584, x, a[r + 14], 256);
     __bang_mul_scalar(y + 3840, x, a[r + 15], 256);
-    __bang_mul_scalar(y + 4096, x, a[r + 16], 256);
-    __bang_mul_scalar(y + 4352, x, a[r + 17], 256);
-    __bang_mul_scalar(y + 4608, x, a[r + 18], 256);
-    __bang_mul_scalar(y + 4864, x, a[r + 19], 256);
-    __bang_mul_scalar(y + 5120, x, a[r + 20], 256);
-    __bang_mul_scalar(y + 5376, x, a[r + 21], 256);
-    __bang_mul_scalar(y + 5632, x, a[r + 22], 256);
-    __bang_mul_scalar(y + 5888, x, a[r + 23], 256);
-    __bang_mul_scalar(y + 6144, x, a[r + 24], 256);
-    __bang_mul_scalar(y + 6400, x, a[r + 25], 256);
-    __bang_mul_scalar(y + 6656, x, a[r + 26], 256);
-    __bang_mul_scalar(y + 6912, x, a[r + 27], 256);
-    __bang_mul_scalar(y + 7168, x, a[r + 28], 256);
-    __bang_mul_scalar(y + 7424, x, a[r + 29], 256);
-    __bang_mul_scalar(y + 7680, x, a[r + 30], 256);
-    __bang_mul_scalar(y + 7936, x, a[r + 31], 256);
 
-    __memcpy(c + o, y, 16384, NRAM2GDRAM);
+    __memcpy(c + o, y, 8192, NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
   auto c = torch::empty({64, 256, 256}, a.options());
+
   cnrtDim3_t d;
   d.x = 4;
   d.y = 8;
