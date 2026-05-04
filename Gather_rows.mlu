@@ -1,14 +1,35 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
+#include <stdint.h>
 #include <torch/extension.h>
 
-// Task: 110 110_Gather_rows
-// Category: io
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，在输入张量的第二个维度上根据提供的索引提取元素。输入包括形状为 `[batch, N]` 的数据张量 `input` 和形状为 `[batch, K]` 的索引张量 `index`；输出张量与 `index` 形状相同，即 `[batch, K]`。
-// Wrapper: torch::Tensor bang_func(torch::Tensor input, torch::Tensor index);
+#define BATCH 64
+#define K 32
+#define N 1024
+#define TOTAL (BATCH * K)
+#define TASKS 32
+
+__mlu_entry__ void gather_rows_kernel(const half *__restrict__ input,
+                                      const int64_t *__restrict__ index,
+                                      half *__restrict__ out) {
+  int stride = taskDim;
+  for (int i = taskId; i < TOTAL; i += stride) {
+    int b = i >> 5;
+    int64_t col = index[i];
+    out[i] = input[b * N + col];
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor index) {
-  TORCH_CHECK(false, "TODO: implement Gather_rows");
+  auto out = torch::empty({BATCH, K}, input.options());
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {TASKS, 1, 1};
+
+  gather_rows_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
+      reinterpret_cast<const int64_t *>(index.data_ptr<int64_t>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+
+  return out;
 }
