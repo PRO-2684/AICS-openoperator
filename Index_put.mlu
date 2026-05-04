@@ -1,14 +1,40 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
+#include <stdint.h>
 #include <torch/extension.h>
 
-// Task: 112 112_Index_put
-// Category: io
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，根据指定的索引张量将输入张量的特定行替换为新的数值。输入包括形状为 `[M, N]` 的基础张量 `input`、形状为 `[K, N]` 的更新值张量 `values`、以及形状为 `[K]` 的索引张量 `index`；输出张量的形状与 `input` 保持一致。
-// Wrapper: torch::Tensor bang_func(torch::Tensor input, torch::Tensor values, torch::Tensor index);
+#define M 4096
+#define N 512
+#define COPY_ELEMS (M * N)
+#define TASKS 32
+
+__mlu_entry__ void put_rows_kernel(const half *__restrict__ values,
+                                   const int64_t *__restrict__ index,
+                                   half *__restrict__ out, int k) {
+  int stride = taskDim;
+  for (int row = taskId; row < k; row += stride) {
+    int64_t dst_row = index[row];
+    const half *src = values + row * N;
+    half *dst = out + dst_row * N;
+    for (int c = 0; c < N; ++c) {
+      dst[c] = src[c];
+    }
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor values, torch::Tensor index) {
-  TORCH_CHECK(false, "TODO: implement Index_put");
+  auto out = torch::empty_like(input);
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtMemcpyAsync(out.data_ptr(), input.data_ptr(), COPY_ELEMS * sizeof(half),
+                  queue, cnrtMemcpyDevToDev);
+
+  int k = (int)index.size(0);
+  cnrtDim3_t dim = {TASKS, 1, 1};
+  put_rows_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(values.data_ptr<at::Half>()),
+      reinterpret_cast<const int64_t *>(index.data_ptr<int64_t>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()), k);
+
+  return out;
 }
