@@ -7,12 +7,8 @@
 #define E1 256
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
-                      const half *__restrict__ n, float *__restrict__ y,
+                      const half *__restrict__ n, float *__restrict__ t,
                       float m) {
-  if (taskId == 0) {
-    y[0] = 0.0f;
-  }
-  __sync_all_ipu();
   float s = 0.0f;
   for (int r = taskId; r < E0; r += taskDim) {
     int q = r * E1;
@@ -21,9 +17,9 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
 #pragma unroll 4
     for (int i = 0; i < E1; ++i) {
       float x = (float)a[q + i];
-      float h = (float)p[q + i];
+      float y = (float)p[q + i];
       float z = (float)n[q + i];
-      float d0 = x - h + 1.0e-6f;
+      float d0 = x - y + 1.0e-6f;
       float d1 = x - z + 1.0e-6f;
       u += d0 * d0;
       v += d1 * d1;
@@ -33,24 +29,30 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
       s += e;
     }
   }
-  __nram__ float b[1];
-  b[0] = s;
-  __bang_atomic_reduce_add_async(y, b, 1);
-  __sync_all_ipu();
-  if (taskId == 0) {
-    y[0] = y[0] * 0.0078125f;
+  t[taskId] = s;
+}
+
+__mlu_entry__ void k1(const float *__restrict__ t, float *__restrict__ y) {
+  float s = 0.0f;
+#pragma unroll 32
+  for (int i = 0; i < 32; ++i) {
+    s += t[i];
   }
+  y[0] = s * 0.0078125f;
 }
 
 torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive,
                         torch::Tensor negative, double margin) {
   auto out = torch::empty({}, anchor.options().dtype(torch::kFloat32));
+  auto tmp = torch::empty({32}, anchor.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {32, 1, 1};
-  k0<<<g, cnrtFuncTypeBlock, queue>>>(
+  cnrtDim3_t g0 = {32, 1, 1};
+  k0<<<g0, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(anchor.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(positive.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(negative.data_ptr<at::Half>()),
-      out.data_ptr<float>(), static_cast<float>(margin));
+      tmp.data_ptr<float>(), static_cast<float>(margin));
+  cnrtDim3_t g1 = {1, 1, 1};
+  k1<<<g1, cnrtFuncTypeBlock, queue>>>(tmp.data_ptr<float>(), out.data_ptr<float>());
   return out;
 }
