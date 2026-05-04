@@ -3,90 +3,56 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void triplet_partial_kernel(const half *anchor,
-                                          const half *positive,
-                                          const half *negative, half *partial,
-                                          half margin_h) {
-  int tid = taskId;
-  int step = taskDim;
+__mlu_entry__ void triplet_seq_kernel(const half *anchor, const half *positive,
+                                      const half *negative, half *out,
+                                      float margin) {
+  float total = 0.0f;
 
-  half local_h = (half)0.0f;
-  half eps_h = (half)1.0e-6f;
-  half zero_h = (half)0.0f;
-
-  for (int b = tid; b < 128; b += step) {
+  for (int b = 0; b < 128; ++b) {
     int base = b << 8;
 
-    half ap_h = (half)0.0f;
-    half an_h = (half)0.0f;
+    float ap = 0.0f;
+    float an = 0.0f;
 
 #pragma unroll 4
     for (int j = 0; j < 256; ++j) {
-      half av = anchor[base + j];
-      half pv = positive[base + j];
-      half nv = negative[base + j];
+      float av = (float)anchor[base + j];
+      float pv = (float)positive[base + j];
+      float nv = (float)negative[base + j];
 
-      // PairwiseDistance-style: x - y + eps
-      half dp_h = (half)((float)av - (float)pv + (float)eps_h);
-      half dn_h = (half)((float)av - (float)nv + (float)eps_h);
+      float dp = av - pv + 1.0e-6f;
+      float dn = av - nv + 1.0e-6f;
 
-      half sp_h = (half)((float)dp_h * (float)dp_h);
-      half sn_h = (half)((float)dn_h * (float)dn_h);
-
-      // half accumulation
-      ap_h = (half)((float)ap_h + (float)sp_h);
-      an_h = (half)((float)an_h + (float)sn_h);
+      ap += dp * dp;
+      an += dn * dn;
     }
 
-    half dpos_h = (half)sqrtf((float)ap_h);
-    half dneg_h = (half)sqrtf((float)an_h);
+    float dpos = sqrtf(ap);
+    float dneg = sqrtf(an);
 
-    half v_h = (half)((float)dpos_h - (float)dneg_h + (float)margin_h);
-
-    if ((float)v_h > 0.0f) {
-      local_h = (half)((float)local_h + (float)v_h);
-    } else {
-      local_h = (half)((float)local_h + (float)zero_h);
+    float v = dpos - dneg + margin;
+    if (v > 0.0f) {
+      total += v;
     }
   }
 
-  partial[tid] = local_h;
-}
-
-__mlu_entry__ void triplet_final_kernel(const half *partial, half *out) {
-  half sum_h = (half)0.0f;
-
-#pragma unroll 32
-  for (int i = 0; i < 32; ++i) {
-    sum_h = (half)((float)sum_h + (float)partial[i]);
-  }
-
-  half inv_n_h = (half)0.0078125f; // 1 / 128
-  out[0] = (half)((float)sum_h * (float)inv_n_h);
+  out[0] = (half)(total * 0.0078125f);
 }
 
 torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive,
                         torch::Tensor negative, double margin) {
   auto out = torch::empty({}, anchor.options().dtype(torch::kHalf));
-  auto partial = torch::empty({32}, anchor.options().dtype(torch::kHalf));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t grid = {1, 1, 1};
   cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
 
-  cnrtDim3_t grid1 = {4, 8, 1};
-
-  triplet_partial_kernel<<<grid1, ktype, queue>>>(
+  triplet_seq_kernel<<<grid, ktype, queue>>>(
       reinterpret_cast<const half *>(anchor.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(positive.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(negative.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(partial.data_ptr<at::Half>()),
-      (half) static_cast<float>(margin));
-
-  cnrtDim3_t grid2 = {1, 1, 1};
-
-  triplet_final_kernel<<<grid2, ktype, queue>>>(
-      reinterpret_cast<const half *>(partial.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()),
+      static_cast<float>(margin));
 
   return out;
 }
