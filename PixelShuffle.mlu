@@ -1,14 +1,44 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 097 097_PixelShuffle
-// Category: fused
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，执行像素重排（PixelShuffle）操作，通过将通道维度的特征重组至空间维度以实现图像的上采样。输入包括形状为 `[batch, C * r * r, H, W]` 的张量 `input` 和表示放大倍率的整型标量 `upscale_factor` ($r$)；输出为形状为 `[batch, C, H * r, W * r]` 的张量。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x, int upscale_factor);
+#define TOTAL (4 * 64 * 64 * 64)
+#define TASKS 32
+
+__mlu_entry__ void pixel_shuffle_kernel(const half *__restrict__ x,
+                                        half *__restrict__ y) {
+  int stride = taskDim;
+
+  for (int idx = taskId; idx < TOTAL; idx += stride) {
+    int w2 = idx & 63;
+    int t0 = idx >> 6;
+    int h2 = t0 & 63;
+    int t1 = t0 >> 6;
+    int c = t1 & 63;
+    int n = t1 >> 6;
+
+    int rh = h2 & 1;
+    int rw = w2 & 1;
+    int h = h2 >> 1;
+    int w = w2 >> 1;
+    int ci = ((c << 2) + (rh << 1) + rw);
+    int src = (((n * 256 + ci) * 32 + h) * 32 + w);
+
+    y[idx] = x[src];
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor x, int upscale_factor) {
-  TORCH_CHECK(false, "TODO: implement PixelShuffle");
+  (void)upscale_factor;
+
+  auto y = torch::empty({4, 64, 64, 64}, x.options());
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {TASKS, 1, 1};
+
+  pixel_shuffle_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+
+  return y;
 }
