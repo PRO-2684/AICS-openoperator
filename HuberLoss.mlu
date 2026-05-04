@@ -8,19 +8,52 @@
 #define TASKS 32
 #define ELEMS_PER_TASK (TOTAL_ELEMS / TASKS)
 
+__mlu_func__ float reduce_sum_float(float *buf, float *tmp, int n) {
+  int cur = n;
+  float *src = buf;
+  float *dst = tmp;
+
+  while (cur > 32) {
+    __bang_reduce_sum(dst, src, cur);
+    int groups = cur / 32;
+
+    for (int i = 0; i < groups; ++i) {
+      src[i] = dst[i * 32];
+    }
+
+    cur = groups;
+  }
+
+  float s = 0.0f;
+  for (int i = 0; i < cur; ++i) {
+    s += src[i];
+  }
+  return s;
+}
+
 __mlu_entry__ void huber_partial_kernel(const half *__restrict__ predictions,
                                         const half *__restrict__ targets,
                                         float *__restrict__ partial) {
   int base = taskId * ELEMS_PER_TASK;
-  float acc = 0.0f;
+
+  __nram__ half pbuf[ELEMS_PER_TASK];
+  __nram__ half tbuf[ELEMS_PER_TASK];
+  __nram__ float fbuf[ELEMS_PER_TASK];
+  __nram__ float rbuf[ELEMS_PER_TASK];
+
+  __memcpy(pbuf, predictions + base, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
+  __memcpy(tbuf, targets + base, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
+  __bang_sub(pbuf, pbuf, tbuf, ELEMS_PER_TASK);
+  __bang_half2float(fbuf, pbuf, ELEMS_PER_TASK);
+  __bang_active_abs(fbuf, fbuf, ELEMS_PER_TASK);
 
 #pragma unroll 1
   for (int i = 0; i < ELEMS_PER_TASK; ++i) {
-    float d = fabsf((float)predictions[base + i] - (float)targets[base + i]);
-    acc += d < 1.0f ? 0.5f * d * d : d - 0.5f;
+    float d = fbuf[i];
+    fbuf[i] = d < 1.0f ? 0.5f * d * d : d - 0.5f;
   }
 
-  partial[taskId] = acc;
+  partial[taskId] = reduce_sum_float(fbuf, rbuf, ELEMS_PER_TASK);
 }
 
 __mlu_entry__ void huber_finish_kernel(const float *__restrict__ partial,
