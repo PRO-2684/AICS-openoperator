@@ -9,22 +9,102 @@
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
                       const half *__restrict__ n, float *__restrict__ t,
                       float m) {
+  __nram__ half h0[E1];
+  __nram__ half h1[E1];
+  __nram__ half h2[E1];
+  __nram__ float x[E1];
+  __nram__ float y[E1];
+  __nram__ float z[E1];
   float s = 0.0f;
   for (int r = taskId; r < E0; r += taskDim) {
     int q = r * E1;
-    float u = 0.0f;
-    float v = 0.0f;
-#pragma unroll 4
-    for (int i = 0; i < E1; ++i) {
-      float x = (float)a[q + i];
-      float y = (float)p[q + i];
-      float z = (float)n[q + i];
-      float d0 = x - y + 1.0e-6f;
-      float d1 = x - z + 1.0e-6f;
-      u += d0 * d0;
-      v += d1 * d1;
+    __memcpy(h0, a + q, E1 * sizeof(half), GDRAM2NRAM);
+    __memcpy(h1, p + q, E1 * sizeof(half), GDRAM2NRAM);
+    __memcpy(h2, n + q, E1 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(x, h0, E1);
+    __bang_half2float(y, h1, E1);
+    __bang_half2float(z, h2, E1);
+    __bang_sub(y, x, y, E1);
+    __bang_sub(z, x, z, E1);
+    __bang_mul(y, y, y, E1);
+    __bang_mul(z, z, z, E1);
+    __memcpy(x + 1, y, (E1 - 1) * sizeof(float), NRAM2NRAM);
+    x[0] = 0.0f;
+    __bang_add(y, y, x, E1);
+    __memcpy(x + 2, y, (E1 - 2) * sizeof(float), NRAM2NRAM);
+    x[0] = 0.0f;
+    x[1] = 0.0f;
+    __bang_add(y, y, x, E1);
+    __memcpy(x + 4, y, (E1 - 4) * sizeof(float), NRAM2NRAM);
+    for (int i = 0; i < 4; ++i) {
+      x[i] = 0.0f;
     }
-    float e = sqrtf(u) - sqrtf(v) + m;
+    __bang_add(y, y, x, E1);
+    __memcpy(x + 8, y, (E1 - 8) * sizeof(float), NRAM2NRAM);
+    for (int i = 0; i < 8; ++i) {
+      x[i] = 0.0f;
+    }
+    __bang_add(y, y, x, E1);
+    __memcpy(x + 16, y, (E1 - 16) * sizeof(float), NRAM2NRAM);
+    for (int i = 0; i < 16; ++i) {
+      x[i] = 0.0f;
+    }
+    __bang_add(y, y, x, E1);
+    __memcpy(x + 32, y, (E1 - 32) * sizeof(float), NRAM2NRAM);
+    for (int i = 0; i < 32; ++i) {
+      x[i] = 0.0f;
+    }
+    __bang_add(y, y, x, E1);
+    __memcpy(x + 64, y, (E1 - 64) * sizeof(float), NRAM2NRAM);
+    for (int i = 0; i < 64; ++i) {
+      x[i] = 0.0f;
+    }
+    __bang_add(y, y, x, E1);
+    __memcpy(x + 128, y, (E1 - 128) * sizeof(float), NRAM2NRAM);
+    for (int i = 0; i < 128; ++i) {
+      x[i] = 0.0f;
+    }
+    __bang_add(y, y, x, E1);
+
+    __memcpy(x + 1, z, (E1 - 1) * sizeof(float), NRAM2NRAM);
+    x[0] = 0.0f;
+    __bang_add(z, z, x, E1);
+    __memcpy(x + 2, z, (E1 - 2) * sizeof(float), NRAM2NRAM);
+    x[0] = 0.0f;
+    x[1] = 0.0f;
+    __bang_add(z, z, x, E1);
+    __memcpy(x + 4, z, (E1 - 4) * sizeof(float), NRAM2NRAM);
+    for (int i = 0; i < 4; ++i) {
+      x[i] = 0.0f;
+    }
+    __bang_add(z, z, x, E1);
+    __memcpy(x + 8, z, (E1 - 8) * sizeof(float), NRAM2NRAM);
+    for (int i = 0; i < 8; ++i) {
+      x[i] = 0.0f;
+    }
+    __bang_add(z, z, x, E1);
+    __memcpy(x + 16, z, (E1 - 16) * sizeof(float), NRAM2NRAM);
+    for (int i = 0; i < 16; ++i) {
+      x[i] = 0.0f;
+    }
+    __bang_add(z, z, x, E1);
+    __memcpy(x + 32, z, (E1 - 32) * sizeof(float), NRAM2NRAM);
+    for (int i = 0; i < 32; ++i) {
+      x[i] = 0.0f;
+    }
+    __bang_add(z, z, x, E1);
+    __memcpy(x + 64, z, (E1 - 64) * sizeof(float), NRAM2NRAM);
+    for (int i = 0; i < 64; ++i) {
+      x[i] = 0.0f;
+    }
+    __bang_add(z, z, x, E1);
+    __memcpy(x + 128, z, (E1 - 128) * sizeof(float), NRAM2NRAM);
+    for (int i = 0; i < 128; ++i) {
+      x[i] = 0.0f;
+    }
+    __bang_add(z, z, x, E1);
+
+    float e = sqrtf(y[E1 - 1]) - sqrtf(z[E1 - 1]) + m;
     if (e > 0.0f) {
       s += e;
     }
