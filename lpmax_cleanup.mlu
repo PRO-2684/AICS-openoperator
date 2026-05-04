@@ -1,40 +1,60 @@
-#include <bang.h>
-#include <cnrt.h>
-#include <framework/core/MLUStream.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void k(const half *a, half *b) {
-  int p = taskId << 3;
+#define X(e)                                                                   \
+  do {                                                                         \
+    cnnlStatus_t s = (e);                                                      \
+    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
+  } while (0)
 
-  __nram__ half x[512];
+static cnnlTensorDescriptor_t a() {
+  int d[2] = {32, 64};
+  cnnlTensorDescriptor_t r;
+  X(cnnlCreateTensorDescriptor(&r));
+  X(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, d));
+  return r;
+}
 
-  __memcpy(x, a + p * 64, 1024, GDRAM2NRAM);
+static cnnlTensorDescriptor_t b() {
+  int d[2] = {32, 1};
+  cnnlTensorDescriptor_t r;
+  X(cnnlCreateTensorDescriptor(&r));
+  X(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, d));
+  return r;
+}
 
-  for (int r = 0; r < 8; ++r) {
-    half m = x[r * 64];
+torch::Tensor bang_func(torch::Tensor x, int n) {
+  auto y = torch::empty({32, 1}, x.options());
 
-    for (int i = 1; i < 64; ++i) {
-      half v = x[r * 64 + i];
-      if (v > m) {
-        m = v;
-      }
-    }
+  static cnnlTensorDescriptor_t xd = nullptr;
+  static cnnlTensorDescriptor_t yd = nullptr;
+  static cnnlReduceDescriptor_t rd = nullptr;
+  static size_t ws = 0;
 
-    b[p + r] = m;
+  cnnlHandle_t h = torch_mlu::getCurrentHandle();
+
+  if (xd == nullptr) {
+    xd = a();
+    yd = b();
+
+    X(cnnlCreateReduceDescriptor(&rd));
+
+    int axis[1] = {1};
+    X(cnnlSetReduceDescriptor_v2(rd, axis, 1, CNNL_REDUCE_MAX, CNNL_DTYPE_HALF,
+                                 CNNL_NOT_PROPAGATE_NAN, CNNL_REDUCE_NO_INDICES,
+                                 CNNL_32BIT_INDICES, 0.0f));
+
+    X(cnnlGetReduceOpWorkspaceSize(h, xd, yd, rd, &ws));
   }
+
+  auto w = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
+
+  X(cnnlReduce_v2(h, rd, xd, x.data_ptr(), nullptr, nullptr,
+                  ws ? w.data_ptr() : nullptr, ws, yd, y.data_ptr(), nullptr,
+                  nullptr));
+
+  return y.view({32});
 }
 
-torch::Tensor bang_func(torch::Tensor x, int y) {
-  auto z = torch::empty({32}, x.options());
-
-  cnrtDim3_t d;
-  d.x = 4;
-  d.y = 1;
-  d.z = 1;
-
-  k<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(z.data_ptr<at::Half>()));
-
-  return z;
-}
+#undef X
