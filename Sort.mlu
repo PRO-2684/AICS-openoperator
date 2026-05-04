@@ -3,53 +3,23 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void kf(const float *a, float *b) {
+__mlu_entry__ void k(const half *a, half *b) {
   int r = taskId;
-  if (r >= 16)
-    return;
-
-  __nram__ float x[1024];
-
-  __memcpy(x, a + r * 1024, 4096, GDRAM2NRAM);
-
-  for (int p = 2; p <= 1024; p <<= 1) {
-    for (int q = p >> 1; q > 0; q >>= 1) {
-      for (int i = 0; i < 1024; ++i) {
-        int j = i ^ q;
-        if (j > i) {
-          float u = x[i];
-          float v = x[j];
-          if (((i & p) == 0 && u > v) || ((i & p) != 0 && u < v)) {
-            x[i] = v;
-            x[j] = u;
-          }
-        }
-      }
-    }
-  }
-
-  __memcpy(b + r * 1024, x, 4096, NRAM2GDRAM);
-}
-
-__mlu_entry__ void kh(const half *a, half *b) {
-  int r = taskId;
-  if (r >= 16)
-    return;
-
   __nram__ half x[1024];
 
   __memcpy(x, a + r * 1024, 2048, GDRAM2NRAM);
 
-  for (int p = 2; p <= 1024; p <<= 1) {
-    for (int q = p >> 1; q > 0; q >>= 1) {
-      for (int i = 0; i < 1024; ++i) {
-        int j = i ^ q;
-        if (j > i) {
+  for (int m = 2; m <= 1024; m <<= 1) {
+    for (int n = m >> 1; n > 0; n >>= 1) {
+      for (int p = 0; p < 1024; p += n << 1) {
+        for (int q = 0; q < n; ++q) {
+          int i = p + q;
+          int j = i + n;
+
           half u = x[i];
           half v = x[j];
-          float fu = (float)u;
-          float fv = (float)v;
-          if (((i & p) == 0 && fu > fv) || ((i & p) != 0 && fu < fv)) {
+
+          if (((i & m) == 0 && u > v) || ((i & m) != 0 && u < v)) {
             x[i] = v;
             x[j] = u;
           }
@@ -69,15 +39,9 @@ torch::Tensor bang_func(torch::Tensor x, int dim, bool descending) {
   d.y = 4;
   d.z = 1;
 
-  cnrtQueue_t q = torch_mlu::getCurMLUStream();
-
-  if (x.scalar_type() == at::kHalf) {
-    kh<<<d, cnrtFuncTypeUnion1, q>>>(
-        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-  } else {
-    kf<<<d, cnrtFuncTypeUnion1, q>>>(x.data_ptr<float>(), y.data_ptr<float>());
-  }
+  k<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
 
   return y;
 }
