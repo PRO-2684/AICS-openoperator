@@ -2,13 +2,13 @@
 #include <cnnl.h>
 #include <torch/extension.h>
 
-#define CNNL_CHECK(x)                                                          \
+#define CNNL_CHECK(expr)                                                       \
   do {                                                                         \
-    cnnlStatus_t s = (x);                                                      \
-    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL failed");                      \
+    cnnlStatus_t s__ = (expr);                                                 \
+    TORCH_CHECK(s__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s__);   \
   } while (0)
 
-static cnnlTensorDescriptor_t d2() {
+static cnnlTensorDescriptor_t h() {
   int s[2] = {16, 1024};
   cnnlTensorDescriptor_t d;
   CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
@@ -17,7 +17,7 @@ static cnnlTensorDescriptor_t d2() {
   return d;
 }
 
-static cnnlTensorDescriptor_t i2() {
+static cnnlTensorDescriptor_t i() {
   int s[2] = {16, 1024};
   cnnlTensorDescriptor_t d;
   CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
@@ -35,21 +35,21 @@ torch::Tensor bang_func(torch::Tensor x, int dim, bool descending) {
   static cnnlTensorDescriptor_t c = nullptr;
   static size_t w = 0;
 
-  cnnlHandle_t h = torch_mlu::getCurrentHandle();
+  cnnlHandle_t e = torch_mlu::getCurrentHandle();
 
   if (a == nullptr) {
-    a = d2();
-    b = d2();
-    c = i2();
+    a = h();
+    b = h();
+    c = i();
 
-    CNNL_CHECK(cnnlGetTopKTensorWorkspaceSize(h, a, 1024, 1, false, b, c, &w));
+    CNNL_CHECK(cnnlGetTopKTensorWorkspaceSize(e, a, 1024, 1, false, b, c, &w));
   }
 
   auto t = torch::empty({(int64_t)w}, x.options().dtype(torch::kUInt8));
 
-  CNNL_CHECK(cnnlTopKTensor_v3(h, a, x.data_ptr(), 1024, 1, false, true, false,
-                               b, y.data_ptr(), c, z.data_ptr(),
-                               w ? t.data_ptr() : nullptr, w));
+  CNNL_CHECK(cnnlTopKTensor_v3(e, a, x.data_ptr(), 1024, 1, false, true, false,
+                               w ? t.data_ptr() : nullptr, w, b, y.data_ptr(),
+                               c, z.data_ptr()));
 
   return y;
 }
