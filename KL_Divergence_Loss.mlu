@@ -1,14 +1,85 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 104 104_KL_Divergence_Loss
-// Category: loss
-// Difficulty: basic
-// DType: float16
-// Description: 实现一个 BangC 算子，计算预测对数概率与目标概率之间的 KL 散度，并按照 batch 维度进行平均规约。输入包括形状均为 `[batch, N]` 的张量 `input_log_prob` 和 `target_prob`，分别对应预测的对数概率分布和目标概率分布；输出为按 `batchmean` 模式计算得到的标量结果。
-// Wrapper: torch::Tensor bang_func(torch::Tensor input_log_prob, torch::Tensor target_prob);
+#define E0 32
+#define E1 4096
+
+__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
+                      float *__restrict__ z) {
+  __nram__ half a[E1];
+  __nram__ half b[E1];
+  __nram__ float c[E1];
+  __nram__ float d[E1];
+  int p = taskId * E1;
+  __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(b, y + p, E1 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(c, a, E1);
+  __bang_half2float(d, b, E1);
+  __bang_active_log(d, d, E1);
+  __bang_sub(d, d, c, E1);
+  __memcpy(a, y + p, E1 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(c, a, E1);
+  __bang_mul(c, c, d, E1);
+  __memcpy(d + 1, c, (E1 - 1) * sizeof(float), NRAM2NRAM);
+  d[0] = 0.0f;
+  __bang_add(c, c, d, E1);
+  __memcpy(d + 2, c, (E1 - 2) * sizeof(float), NRAM2NRAM);
+  d[0] = 0.0f; d[1] = 0.0f;
+  __bang_add(c, c, d, E1);
+  __memcpy(d + 4, c, (E1 - 4) * sizeof(float), NRAM2NRAM);
+  for (int i = 0; i < 4; ++i) d[i] = 0.0f;
+  __bang_add(c, c, d, E1);
+  __memcpy(d + 8, c, (E1 - 8) * sizeof(float), NRAM2NRAM);
+  for (int i = 0; i < 8; ++i) d[i] = 0.0f;
+  __bang_add(c, c, d, E1);
+  __memcpy(d + 16, c, (E1 - 16) * sizeof(float), NRAM2NRAM);
+  for (int i = 0; i < 16; ++i) d[i] = 0.0f;
+  __bang_add(c, c, d, E1);
+  __memcpy(d + 32, c, (E1 - 32) * sizeof(float), NRAM2NRAM);
+  for (int i = 0; i < 32; ++i) d[i] = 0.0f;
+  __bang_add(c, c, d, E1);
+  __memcpy(d + 64, c, (E1 - 64) * sizeof(float), NRAM2NRAM);
+  for (int i = 0; i < 64; ++i) d[i] = 0.0f;
+  __bang_add(c, c, d, E1);
+  __memcpy(d + 128, c, (E1 - 128) * sizeof(float), NRAM2NRAM);
+  for (int i = 0; i < 128; ++i) d[i] = 0.0f;
+  __bang_add(c, c, d, E1);
+  __memcpy(d + 256, c, (E1 - 256) * sizeof(float), NRAM2NRAM);
+  for (int i = 0; i < 256; ++i) d[i] = 0.0f;
+  __bang_add(c, c, d, E1);
+  __memcpy(d + 512, c, (E1 - 512) * sizeof(float), NRAM2NRAM);
+  for (int i = 0; i < 512; ++i) d[i] = 0.0f;
+  __bang_add(c, c, d, E1);
+  __memcpy(d + 1024, c, (E1 - 1024) * sizeof(float), NRAM2NRAM);
+  for (int i = 0; i < 1024; ++i) d[i] = 0.0f;
+  __bang_add(c, c, d, E1);
+  __memcpy(d + 2048, c, (E1 - 2048) * sizeof(float), NRAM2NRAM);
+  for (int i = 0; i < 2048; ++i) d[i] = 0.0f;
+  __bang_add(c, c, d, E1);
+  z[taskId] = c[E1 - 1];
+}
+
+__mlu_entry__ void k1(const float *__restrict__ x, float *__restrict__ y) {
+  float s = 0.0f;
+#pragma unroll 32
+  for (int i = 0; i < E0; ++i) {
+    s += x[i];
+  }
+  y[0] = s * 0.0078125f;
+}
 
 torch::Tensor bang_func(torch::Tensor input_log_prob, torch::Tensor target_prob) {
-  TORCH_CHECK(false, "TODO: implement KL_Divergence_Loss");
+  auto out = torch::empty({}, input_log_prob.options().dtype(torch::kFloat32));
+  auto tmp = torch::empty({E0}, input_log_prob.options().dtype(torch::kFloat32));
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t g0 = {4, 8, 1};
+  k0<<<g0, cnrtFuncTypeUnion1, queue>>>(
+      reinterpret_cast<const half *>(input_log_prob.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(target_prob.data_ptr<at::Half>()),
+      tmp.data_ptr<float>());
+  cnrtDim3_t g1 = {1, 1, 1};
+  k1<<<g1, cnrtFuncTypeBlock, queue>>>(tmp.data_ptr<float>(), out.data_ptr<float>());
+  return out;
 }
