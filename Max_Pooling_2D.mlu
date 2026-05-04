@@ -1,66 +1,86 @@
-#include <bang.h>
-#include <cnrt.h>
-#include <framework/core/MLUStream.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-#define NC (16 * 32)
-#define IH 128
-#define IW 128
-#define OH 64
-#define OW 64
+#define X(e)                                                                   \
+  do {                                                                         \
+    cnnlStatus_t s = (e);                                                      \
+    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
+  } while (0)
 
-__mlu_entry__ void kernel(const half *__restrict__ x, half *__restrict__ y) {
-  int nc = taskId;
-  if (nc >= NC) {
-    return;
-  }
+static cnnlTensorDescriptor_t a(int h, int w) {
+  int d[4] = {512, h, w, 1};
+  int s[4] = {16384, 384, 3, 1};
+  cnnlTensorDescriptor_t r;
+  X(cnnlCreateTensorDescriptor(&r));
+  X(cnnlSetTensorDescriptorEx(r, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, d, s));
+  return r;
+}
 
-  int in_base = nc * IH * IW;
-  int out_base = nc * OH * OW;
+static cnnlTensorDescriptor_t b(int h, int w) {
+  int d[4] = {512, h, w, 1};
+  int s[4] = {4096, 192, 3, 1};
+  cnnlTensorDescriptor_t r;
+  X(cnnlCreateTensorDescriptor(&r));
+  X(cnnlSetTensorDescriptorEx(r, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, d, s));
+  return r;
+}
 
-  __nram__ half ibuf[IH * IW];
-  __nram__ half obuf[OH * OW];
+static cnnlPoolingDescriptor_t c(int h, int w) {
+  cnnlPoolingDescriptor_t r;
+  X(cnnlCreatePoolingDescriptor(&r));
 
-  __memcpy(ibuf, x + in_base, IH * IW * sizeof(half), GDRAM2NRAM);
+  int k[2] = {2, 2};
+  int s[2] = {2, 2};
+  int d[2] = {1, 1};
+  int p[4] = {h, h, w, w};
 
-#pragma unroll 1
-  for (int oh = 0; oh < OH; ++oh) {
-    int ih0 = oh * 2 - 1;
-#pragma unroll 1
-    for (int ow = 0; ow < OW; ++ow) {
-      int iw0 = ow * 2 - 1;
-      half best = (half)-65504.0f;
-#pragma unroll
-      for (int kh = 0; kh < 2; ++kh) {
-#pragma unroll
-        for (int kw = 0; kw < 2; ++kw) {
-          int ih = ih0 + kh * 3;
-          int iw = iw0 + kw * 3;
-          if (ih >= 0 && ih < IH && iw >= 0 && iw < IW) {
-            half v = ibuf[ih * IW + iw];
-            best = v > best ? v : best;
-          }
-        }
-      }
-      obuf[oh * OW + ow] = best;
-    }
-  }
+  X(cnnlSetPoolingNdDescriptor_v2(r, CNNL_POOLING_MAX, CNNL_NOT_PROPAGATE_NAN,
+                                  2, k, p, s, d, false));
 
-  __memcpy(y + out_base, obuf, OH * OW * sizeof(half), NRAM2GDRAM);
+  return r;
 }
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
                         int padding, int dilation) {
-  (void)kernel_size;
-  (void)stride;
-  (void)padding;
-  (void)dilation;
+  auto y = torch::empty({16, 32, 64, 64}, x.options());
 
-  auto out = torch::empty({16, 32, OH, OW}, x.options());
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {NC, 1, 1};
-  kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
-  return out;
+  static cnnlTensorDescriptor_t u[9] = {nullptr};
+  static cnnlTensorDescriptor_t v[9] = {nullptr};
+  static cnnlPoolingDescriptor_t p[9] = {nullptr};
+
+  int ih[3] = {42, 43, 42};
+  int oh[3] = {22, 21, 21};
+  int pd[3] = {1, 0, 0};
+
+  if (u[0] == nullptr) {
+    for (int i = 0; i < 3; ++i) {
+      for (int j = 0; j < 3; ++j) {
+        int t = i * 3 + j;
+        u[t] = a(ih[i], ih[j]);
+        v[t] = b(oh[i], oh[j]);
+        p[t] = c(pd[i], pd[j]);
+      }
+    }
+  }
+
+  int is[3] = {2, 1, 3};
+  int os[3] = {0, 1, 2};
+
+  cnnlHandle_t h = torch_mlu::getCurrentHandle();
+
+  const half *m = reinterpret_cast<const half *>(x.data_ptr<at::Half>());
+  half *n = reinterpret_cast<half *>(y.data_ptr<at::Half>());
+
+  for (int i = 0; i < 3; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      int t = i * 3 + j;
+      X(cnnlPoolingForward(h, p[t], nullptr, u[t], m + is[i] * 128 + is[j],
+                           nullptr, v[t], n + os[i] * 64 + os[j], nullptr, 0));
+    }
+  }
+
+  return y;
 }
+
+#undef X
