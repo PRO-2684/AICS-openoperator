@@ -4,46 +4,47 @@
 #include <torch/extension.h>
 
 #define S(D)                                                                   \
+  __bang_minimum(b + (D), a + (D), a, 16384 - (D));                            \
   __memcpy(b, a, (D)*2, NRAM2NRAM);                                            \
-  __bang_minimum(b + (D), a + (D), a, 4000 - (D));                             \
+  __memcpy(b + 4096, a + 4096, (D)*2, NRAM2NRAM);                              \
+  __memcpy(b + 8192, a + 8192, (D)*2, NRAM2NRAM);                              \
+  __memcpy(b + 12288, a + 12288, (D)*2, NRAM2NRAM);                            \
   t = a;                                                                       \
   a = b;                                                                       \
   b = t;
 
-#define R()                                                                    \
-  S(1) S(2) S(4) S(8) S(16) S(32) S(64) S(128) S(256) S(512) S(1024) S(2048)
-
 __mlu_entry__ void k(const half *x, half *y) {
-  int q = taskId << 3;
+  int q = taskId << 2;
 
-  __nram__ half u[12288];
-  __nram__ half v[12288];
+  __nram__ half u[16384];
+  __nram__ half v[16384];
 
-  for (int i = 0; i < 10; ++i) {
-    if (i >= 2) {
-      int r = i - 2;
-      int s = r % 3;
-      __memcpy_async(y + (q + r) * 4000, u + s * 4096, 8000, NRAM2GDRAM);
-    }
+  __memcpy(u, x + q * 4000, 8000, GDRAM2NRAM);
+  __memcpy(u + 4096, x + (q + 1) * 4000, 8000, GDRAM2NRAM);
+  __memcpy(u + 8192, x + (q + 2) * 4000, 8000, GDRAM2NRAM);
+  __memcpy(u + 12288, x + (q + 3) * 4000, 8000, GDRAM2NRAM);
 
-    if (i >= 1 && i < 9) {
-      int r = i - 1;
-      int s = r % 3;
+  half *a = u;
+  half *b = v;
+  half *t;
 
-      half *a = u + s * 4096;
-      half *b = v + s * 4096;
-      half *t;
+  S(1)
+  S(2)
+  S(4)
+  S(8)
+  S(16)
+  S(32)
+  S(64)
+  S(128)
+  S(256)
+  S(512)
+  S(1024)
+  S(2048)
 
-      R()
-    }
-
-    if (i < 8) {
-      int s = i % 3;
-      __memcpy_async(u + s * 4096, x + (q + i) * 4000, 8000, GDRAM2NRAM);
-    }
-
-    __sync_all_ipu();
-  }
+  __memcpy(y + q * 4000, a, 8000, NRAM2GDRAM);
+  __memcpy(y + (q + 1) * 4000, a + 4096, 8000, NRAM2GDRAM);
+  __memcpy(y + (q + 2) * 4000, a + 8192, 8000, NRAM2GDRAM);
+  __memcpy(y + (q + 3) * 4000, a + 12288, 8000, NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
@@ -51,7 +52,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
 
   cnrtDim3_t d;
   d.x = 4;
-  d.y = 4;
+  d.y = 8;
   d.z = 1;
 
   k<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
@@ -61,5 +62,4 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   return y;
 }
 
-#undef R
 #undef S
