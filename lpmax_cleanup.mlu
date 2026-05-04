@@ -1,60 +1,30 @@
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define X(e)                                                                   \
-  do {                                                                         \
-    cnnlStatus_t s = (e);                                                      \
-    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
-  } while (0)
+__mlu_entry__ void k(const half *a, half *b) {
+  int p = taskId;
 
-static cnnlTensorDescriptor_t a() {
-  int d[2] = {32, 64};
-  cnnlTensorDescriptor_t r;
-  X(cnnlCreateTensorDescriptor(&r));
-  X(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, d));
-  return r;
-}
+  __nram__ half x[64];
+  __nram__ half y[64];
 
-static cnnlTensorDescriptor_t b() {
-  int d[2] = {32, 1};
-  cnnlTensorDescriptor_t r;
-  X(cnnlCreateTensorDescriptor(&r));
-  X(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, d));
-  return r;
+  __memcpy(x, a + p * 64, 128, GDRAM2NRAM);
+  __bang_max(y, x, 64);
+  __memcpy(b + p, y, 2, NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int n) {
-  auto y = torch::empty({32, 1}, x.options());
+  auto y = torch::empty({32}, x.options());
 
-  static cnnlTensorDescriptor_t xd = nullptr;
-  static cnnlTensorDescriptor_t yd = nullptr;
-  static cnnlReduceDescriptor_t rd = nullptr;
-  static size_t ws = 0;
+  cnrtDim3_t d;
+  d.x = 32;
+  d.y = 1;
+  d.z = 1;
 
-  cnnlHandle_t h = torch_mlu::getCurrentHandle();
+  k<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
 
-  if (xd == nullptr) {
-    xd = a();
-    yd = b();
-
-    X(cnnlCreateReduceDescriptor(&rd));
-
-    int axis[1] = {1};
-    X(cnnlSetReduceDescriptor_v2(rd, axis, 1, CNNL_REDUCE_MAX, CNNL_DTYPE_HALF,
-                                 CNNL_NOT_PROPAGATE_NAN, CNNL_REDUCE_NO_INDICES,
-                                 CNNL_32BIT_INDICES, 0.0f));
-
-    X(cnnlGetReduceOpWorkspaceSize(h, xd, yd, rd, &ws));
-  }
-
-  auto w = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
-
-  X(cnnlReduce_v2(h, rd, xd, x.data_ptr(), nullptr, nullptr,
-                  ws ? w.data_ptr() : nullptr, ws, yd, y.data_ptr(), nullptr,
-                  nullptr));
-
-  return y.view({32});
+  return y;
 }
-
-#undef X
