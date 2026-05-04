@@ -1,4 +1,5 @@
 #include <aten/cnnl/cnnlHandle.h>
+#include <bang.h>
 #include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
@@ -12,6 +13,20 @@
     TORCH_CHECK(s__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s__);   \
   } while (0)
 
+#define E0 1048576
+#define E1 8192
+#define E2 128
+
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[E1];
+  __nram__ half b[E1];
+  half v = (half)0.0f;
+  int p = taskId * E1;
+  __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
+  __bang_gt_scalar(b, a, v, E1);
+  __memcpy(y + p, b, E1 * sizeof(half), NRAM2GDRAM);
+}
+
 static cnnlTensorDescriptor_t make_desc(const std::vector<int> &shape,
                                         cnnlDataType_t dtype) {
   cnnlTensorDescriptor_t desc;
@@ -22,42 +37,38 @@ static cnnlTensorDescriptor_t make_desc(const std::vector<int> &shape,
 }
 
 torch::Tensor bang_func(torch::Tensor input, double v) {
-  auto mask = torch::empty({1048576}, input.options().dtype(torch::kBool));
-  auto out = torch::empty({1048576}, input.options());
+  (void)v;
+  auto mask = torch::empty({E0}, input.options());
+  auto out = torch::empty({E0}, input.options());
+  auto ndev = torch::empty({1}, input.options().dtype(torch::kInt32));
+
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {E2, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(mask.data_ptr<at::Half>()));
 
   static cnnlTensorDescriptor_t a_desc = nullptr;
-  static cnnlTensorDescriptor_t b_desc = nullptr;
   static cnnlTensorDescriptor_t c_desc = nullptr;
-  static cnnlTensorDescriptor_t out_desc = nullptr;
-  static size_t ws0_size = 0;
-  static size_t ws1_size = 0;
+  static size_t ws_size = 0;
   if (a_desc == nullptr) {
-    a_desc = make_desc({1048576}, CNNL_DTYPE_HALF);
-    b_desc = make_desc({1}, CNNL_DTYPE_HALF);
-    c_desc = make_desc({1048576}, CNNL_DTYPE_BOOL);
-    out_desc = make_desc({1048576}, CNNL_DTYPE_HALF);
-    CNNL_CHECK(cnnlGetLogicOpWorkspaceSize(torch_mlu::getCurrentHandle(),
-                                           a_desc, b_desc, c_desc, &ws0_size));
+    a_desc = make_desc({E0}, CNNL_DTYPE_HALF);
+    c_desc = make_desc({E0}, CNNL_DTYPE_HALF);
     CNNL_CHECK(cnnlGetMaskedWorkspaceSize(
         torch_mlu::getCurrentHandle(), CNNL_MASKED_SELECT, a_desc, c_desc,
-        nullptr, out_desc, &ws1_size));
+        nullptr, a_desc, &ws_size));
   }
 
-  auto ws0 = torch::empty({(int64_t)ws0_size}, input.options().dtype(torch::kUInt8));
-  auto ws1 = torch::empty({(int64_t)ws1_size}, input.options().dtype(torch::kUInt8));
-  c10::Half hv((float)v);
-
-  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
-  CNNL_CHECK(cnnlLogicOp(handle, CNNL_LOGIC_OP_GT, a_desc, input.data_ptr(),
-                         b_desc, &hv, ws0_size ? ws0.data_ptr() : nullptr,
-                         ws0_size, c_desc, mask.data_ptr()));
-
+  auto ws = torch::empty({(int64_t)ws_size}, input.options().dtype(torch::kUInt8));
   uint32_t n = 0;
-  CNNL_CHECK(cnnlMasked_v5(handle, CNNL_MASKED_SELECT, a_desc, input.data_ptr(),
-                           c_desc, mask.data_ptr(), nullptr, nullptr,
-                           ws1_size ? ws1.data_ptr() : nullptr, ws1_size,
-                           out_desc, out.data_ptr(), &n));
-  cnrtQueueSync(torch_mlu::getCurMLUStream());
+  CNNL_CHECK(cnnlMasked_v5(torch_mlu::getCurrentHandle(), CNNL_MASKED_SELECT,
+                           a_desc, input.data_ptr(), c_desc, mask.data_ptr(),
+                           nullptr, nullptr, ws_size ? ws.data_ptr() : nullptr,
+                           ws_size, a_desc, out.data_ptr(),
+                           reinterpret_cast<uint32_t *>(ndev.data_ptr<int>())));
+  cnrtMemcpyAsync(&n, ndev.data_ptr<int>(), sizeof(uint32_t), queue,
+                  cnrtMemcpyDevToHost);
+  cnrtQueueSync(queue);
   out.resize_({(int64_t)n});
   return out;
 }
