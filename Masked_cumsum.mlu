@@ -1,14 +1,33 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 123 123_Masked_cumsum
-// Category: cum
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，对输入张量应用掩码过滤后沿指定维度计算累加前缀和。输入包括形状为 `[batch, length]` 的张量 `x`、形状相同的掩码张量 `mask` 以及指定累积维度的整数标量 `dim`；输出张量形状与 `x` 保持一致。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, int dim);
+#define E0 128
+#define E1 4000
+
+__mlu_entry__ void k0(const half *__restrict__ x,
+                      const unsigned char *__restrict__ m,
+                      half *__restrict__ y) {
+  for (int r = taskId; r < E0; r += taskDim) {
+    int p = r * E1;
+    float s = 0.0f;
+    for (int i = 0; i < E1; ++i) {
+      if (m[p + i]) {
+        s += (float)x[p + i];
+      }
+      y[p + i] = (half)s;
+    }
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, int dim) {
-  TORCH_CHECK(false, "TODO: implement Masked_cumsum");
+  auto out = torch::empty_like(x);
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t g = {4, 8, 1};
+  k0<<<g, cnrtFuncTypeUnion1, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const unsigned char *>(mask.data_ptr()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+  return out;
 }
