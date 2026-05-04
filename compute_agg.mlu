@@ -7,12 +7,38 @@
 
 __mlu_entry__ void k0(const int *__restrict__ x, int *__restrict__ y) {
   __nram__ int a[E0];
+  __nram__ int b[E0];
   __memcpy(a, x, E0 * sizeof(int), GDRAM2NRAM);
-  int s = 0;
-  for (int i = 0; i < E0; ++i) {
-    s += a[i];
-    a[i] = s;
-  }
+  __bang_write_value(b, 1, 0);
+  __memcpy(b + 1, a, (E0 - 1) * sizeof(int), NRAM2NRAM);
+  __bang_add(a, a, b, E0);
+  __bang_write_value(b, 2, 0);
+  __memcpy(b + 2, a, (E0 - 2) * sizeof(int), NRAM2NRAM);
+  __bang_add(a, a, b, E0);
+  __bang_write_value(b, 4, 0);
+  __memcpy(b + 4, a, (E0 - 4) * sizeof(int), NRAM2NRAM);
+  __bang_add(a, a, b, E0);
+  __bang_write_value(b, 8, 0);
+  __memcpy(b + 8, a, (E0 - 8) * sizeof(int), NRAM2NRAM);
+  __bang_add(a, a, b, E0);
+  __bang_write_value(b, 16, 0);
+  __memcpy(b + 16, a, (E0 - 16) * sizeof(int), NRAM2NRAM);
+  __bang_add(a, a, b, E0);
+  __bang_write_value(b, 32, 0);
+  __memcpy(b + 32, a, (E0 - 32) * sizeof(int), NRAM2NRAM);
+  __bang_add(a, a, b, E0);
+  __bang_write_value(b, 64, 0);
+  __memcpy(b + 64, a, (E0 - 64) * sizeof(int), NRAM2NRAM);
+  __bang_add(a, a, b, E0);
+  __bang_write_value(b, 128, 0);
+  __memcpy(b + 128, a, (E0 - 128) * sizeof(int), NRAM2NRAM);
+  __bang_add(a, a, b, E0);
+  __bang_write_value(b, 256, 0);
+  __memcpy(b + 256, a, (E0 - 256) * sizeof(int), NRAM2NRAM);
+  __bang_add(a, a, b, E0);
+  __bang_write_value(b, 512, 0);
+  __memcpy(b + 512, a, (E0 - 512) * sizeof(int), NRAM2NRAM);
+  __bang_add(a, a, b, E0);
   __memcpy(y, a, E0 * sizeof(int), NRAM2GDRAM);
 }
 
