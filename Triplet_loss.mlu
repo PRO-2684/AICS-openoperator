@@ -3,94 +3,108 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void triplet_each_kernel(const half *anchor, const half *positive,
-                                       const half *negative, half *loss,
-                                       half margin_h) {
+__mlu_entry__ void triplet_partial_kernel(const half *anchor,
+                                          const half *positive,
+                                          const half *negative, float *partial,
+                                          float margin) {
   int tid = taskId;
   int step = taskDim;
 
-  __nram__ half a_buf[256];
-  __nram__ half p_buf[256];
-  __nram__ half n_buf[256];
+  __nram__ half ah[256];
+  __nram__ half ph[256];
+  __nram__ half nh[256];
 
-  __nram__ half dp_buf[256];
-  __nram__ half dn_buf[256];
+  __nram__ float af[256];
+  __nram__ float pf[256];
+  __nram__ float nf[256];
 
-  __nram__ half sp_buf[256];
-  __nram__ half sn_buf[256];
+  __nram__ float dp[256];
+  __nram__ float dn[256];
 
-  // sumpool 输出只用第 0 个，但 elem_count/地址保持 64B 对齐
-  __nram__ half sum_p[64];
-  __nram__ half sum_n[64];
+  __nram__ float sp[256];
+  __nram__ float sn[256];
+
+  // reduce helper: 256 floats -> 32 floats -> 1 float
+  __nram__ float tp[32];
+  __nram__ float tn[32];
+  __nram__ float rp[32];
+  __nram__ float rn[32];
+
+  float local = 0.0f;
 
   for (int b = tid; b < 128; b += step) {
     int base = b << 8;
 
-    __memcpy(a_buf, anchor + base, 256 * sizeof(half), GDRAM2NRAM);
-    __memcpy(p_buf, positive + base, 256 * sizeof(half), GDRAM2NRAM);
-    __memcpy(n_buf, negative + base, 256 * sizeof(half), GDRAM2NRAM);
+    __memcpy(ah, anchor + base, 256 * sizeof(half), GDRAM2NRAM);
+    __memcpy(ph, positive + base, 256 * sizeof(half), GDRAM2NRAM);
+    __memcpy(nh, negative + base, 256 * sizeof(half), GDRAM2NRAM);
 
-    // dp = anchor - positive
-    // dn = anchor - negative
-    __bang_sub(dp_buf, a_buf, p_buf, 256);
-    __bang_sub(dn_buf, a_buf, n_buf, 256);
+    __bang_half2float(af, ah, 256);
+    __bang_half2float(pf, ph, 256);
+    __bang_half2float(nf, nh, 256);
 
-    // eps = 1e-6 对 half 基本不可表示，CNNL half 路径大概率等价于吞掉。
-    // 如果这个版本 diff 更差，再测下面的 eps_const 变体。
+    // PairwiseDistance: ||anchor - positive + eps||_2
+    __bang_sub(dp, af, pf, 256);
+    __bang_sub(dn, af, nf, 256);
 
-    // square
-    __bang_mul(sp_buf, dp_buf, dp_buf, 256);
-    __bang_mul(sn_buf, dn_buf, dn_buf, 256);
+    __bang_add_const(dp, dp, 1.0e-6f, 256);
+    __bang_add_const(dn, dn, 1.0e-6f, 256);
 
-    // sum over 256
-    // HWC: channel=1, height=1, width=256, kernel=1x256
-    __bang_sumpool(sum_p, sp_buf, 1, 1, 256, 1, 256);
-    __bang_sumpool(sum_n, sn_buf, 1, 1, 256, 1, 256);
+    __bang_mul(sp, dp, dp, 256);
+    __bang_mul(sn, dn, dn, 256);
 
-    // sqrt，使用 BANG 内建路径，而不是 sqrtf
-    __bang_active_sqrt(sum_p, sum_p, 64);
-    __bang_active_sqrt(sum_n, sum_n, 64);
+    // 256 float elements.
+    // align_len = 128 / sizeof(float) = 32
+    // repeat = 256 / 32 = 8
+    __bang_sumpool(tp, sp, 32, 8, 1, 8, 1, 1, 1);
+    __bang_sumpool(tn, sn, 32, 8, 1, 8, 1, 1, 1);
 
-    float v = (float)sum_p[0] - (float)sum_n[0] + (float)margin_h;
-    if (v < 0.0f)
-      v = 0.0f;
+    __bang_reduce_sum(rp, tp, 32);
+    __bang_reduce_sum(rn, tn, 32);
 
-    loss[b] = (half)v;
+    float dpos = sqrtf(rp[0]);
+    float dneg = sqrtf(rn[0]);
+
+    float v = dpos - dneg + margin;
+    if (v > 0.0f) {
+      local += v;
+    }
   }
+
+  partial[tid] = local;
 }
 
-__mlu_entry__ void triplet_mean_kernel(const half *loss, half *out) {
-  float s = 0.0f;
+__mlu_entry__ void triplet_final_kernel(const float *partial, half *out) {
+  float sum = 0.0f;
 
-#pragma unroll 4
-  for (int i = 0; i < 128; ++i) {
-    s += (float)loss[i];
+#pragma unroll 32
+  for (int i = 0; i < 32; ++i) {
+    sum += partial[i];
   }
 
-  out[0] = (half)(s * 0.0078125f);
+  out[0] = (half)(sum * 0.0078125f);
 }
 
 torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive,
                         torch::Tensor negative, double margin) {
-  auto loss = torch::empty({128}, anchor.options().dtype(torch::kHalf));
   auto out = torch::empty({}, anchor.options().dtype(torch::kHalf));
+  auto partial = torch::empty({32}, anchor.options().dtype(torch::kFloat32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
 
   cnrtDim3_t grid1 = {4, 8, 1};
 
-  triplet_each_kernel<<<grid1, ktype, queue>>>(
+  triplet_partial_kernel<<<grid1, ktype, queue>>>(
       reinterpret_cast<const half *>(anchor.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(positive.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(negative.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(loss.data_ptr<at::Half>()),
-      (half) static_cast<float>(margin));
+      partial.data_ptr<float>(), static_cast<float>(margin));
 
   cnrtDim3_t grid2 = {1, 1, 1};
 
-  triplet_mean_kernel<<<grid2, ktype, queue>>>(
-      reinterpret_cast<const half *>(loss.data_ptr<at::Half>()),
+  triplet_final_kernel<<<grid2, ktype, queue>>>(
+      partial.data_ptr<float>(),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
 
   return out;
