@@ -26,6 +26,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ s,
   }
   __memcpy(s + taskId * E1, a, E1 * sizeof(float), NRAM2GDRAM);
   __memcpy(q + taskId * E1, b, E1 * sizeof(float), NRAM2GDRAM);
+  __asm__ volatile("sync;");
   __sync_all_ipu();
   if (taskId == 0) {
     __bang_write_value(a, E1, 0.0f);
@@ -47,6 +48,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ s,
     __memcpy(u, d, E1 * sizeof(float), NRAM2GDRAM);
     __memcpy(v, c, E1 * sizeof(float), NRAM2GDRAM);
   }
+  __asm__ volatile("sync;");
   __sync_all_ipu();
   __memcpy(b, u, E1 * sizeof(float), GDRAM2NRAM);
   __memcpy(c, v, E1 * sizeof(float), GDRAM2NRAM);
