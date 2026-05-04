@@ -7,37 +7,59 @@ __mlu_entry__ void reduce_check_kernel(const half *x, bool *y) {
   int tid = taskId;
   int step = taskDim;
 
-  // output: 16 * 256
   for (int p = tid; p < 4096; p += step) {
     int n = p >> 8;
     int k = p & 255;
-
     int base = (n << 16) + k;
+
+    half v0 = x[base];
+    if (!((float)v0 > 0.0f)) {
+      y[p] = false;
+      continue;
+    }
+
+    half v1 = x[base + 256];
+    if (!((float)v1 > 0.0f)) {
+      y[p] = false;
+      continue;
+    }
+
+    half v2 = x[base + 512];
+    if (!((float)v2 > 0.0f)) {
+      y[p] = false;
+      continue;
+    }
+
+    half v3 = x[base + 768];
+    if (!((float)v3 > 0.0f)) {
+      y[p] = false;
+      continue;
+    }
 
     bool ok = true;
 
 #pragma unroll 4
-    for (int r = 0; r < 256; r += 4) {
-      half v0 = x[base + ((r + 0) << 8)];
-      if (!((float)v0 > 0.0f)) {
+    for (int r = 4; r < 256; r += 4) {
+      half a = x[base + ((r + 0) << 8)];
+      if (!((float)a > 0.0f)) {
         ok = false;
         break;
       }
 
-      half v1 = x[base + ((r + 1) << 8)];
-      if (!((float)v1 > 0.0f)) {
+      half b = x[base + ((r + 1) << 8)];
+      if (!((float)b > 0.0f)) {
         ok = false;
         break;
       }
 
-      half v2 = x[base + ((r + 2) << 8)];
-      if (!((float)v2 > 0.0f)) {
+      half c = x[base + ((r + 2) << 8)];
+      if (!((float)c > 0.0f)) {
         ok = false;
         break;
       }
 
-      half v3 = x[base + ((r + 3) << 8)];
-      if (!((float)v3 > 0.0f)) {
+      half d = x[base + ((r + 3) << 8)];
+      if (!((float)d > 0.0f)) {
         ok = false;
         break;
       }
