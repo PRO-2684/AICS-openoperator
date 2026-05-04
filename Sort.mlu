@@ -3,66 +3,81 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void sort_float_kernel(const float* x, float* out) {
-  int row = taskId;
-  if (row >= 16) return;
-  __nram__ float buf[1024];
-  __memcpy(buf, x + row * 1024, 1024 * sizeof(float), GDRAM2NRAM);
-  for (int i = 0; i < 1023; ++i) {
-    int min_i = i;
-    float min_v = buf[i];
-    for (int j = i + 1; j < 1024; ++j) {
-      if (buf[j] < min_v) {
-        min_v = buf[j];
-        min_i = j;
+__mlu_entry__ void kf(const float *a, float *b) {
+  int r = taskId;
+  if (r >= 16)
+    return;
+
+  __nram__ float x[1024];
+
+  __memcpy(x, a + r * 1024, 4096, GDRAM2NRAM);
+
+  for (int p = 2; p <= 1024; p <<= 1) {
+    for (int q = p >> 1; q > 0; q >>= 1) {
+      for (int i = 0; i < 1024; ++i) {
+        int j = i ^ q;
+        if (j > i) {
+          float u = x[i];
+          float v = x[j];
+          if (((i & p) == 0 && u > v) || ((i & p) != 0 && u < v)) {
+            x[i] = v;
+            x[j] = u;
+          }
+        }
       }
     }
-    if (min_i != i) {
-      float t = buf[i];
-      buf[i] = buf[min_i];
-      buf[min_i] = t;
-    }
   }
-  __memcpy(out + row * 1024, buf, 1024 * sizeof(float), NRAM2GDRAM);
+
+  __memcpy(b + r * 1024, x, 4096, NRAM2GDRAM);
 }
 
-__mlu_entry__ void sort_half_kernel(const half* x, half* out) {
-  int row = taskId;
-  if (row >= 16) return;
-  __nram__ half buf[1024];
-  __memcpy(buf, x + row * 1024, 1024 * sizeof(half), GDRAM2NRAM);
-  for (int i = 0; i < 1023; ++i) {
-    int min_i = i;
-    float min_v = (float)buf[i];
-    for (int j = i + 1; j < 1024; ++j) {
-      float v = (float)buf[j];
-      if (v < min_v) {
-        min_v = v;
-        min_i = j;
+__mlu_entry__ void kh(const half *a, half *b) {
+  int r = taskId;
+  if (r >= 16)
+    return;
+
+  __nram__ half x[1024];
+
+  __memcpy(x, a + r * 1024, 2048, GDRAM2NRAM);
+
+  for (int p = 2; p <= 1024; p <<= 1) {
+    for (int q = p >> 1; q > 0; q >>= 1) {
+      for (int i = 0; i < 1024; ++i) {
+        int j = i ^ q;
+        if (j > i) {
+          half u = x[i];
+          half v = x[j];
+          float fu = (float)u;
+          float fv = (float)v;
+          if (((i & p) == 0 && fu > fv) || ((i & p) != 0 && fu < fv)) {
+            x[i] = v;
+            x[j] = u;
+          }
+        }
       }
     }
-    if (min_i != i) {
-      half t = buf[i];
-      buf[i] = buf[min_i];
-      buf[min_i] = t;
-    }
   }
-  __memcpy(out + row * 1024, buf, 1024 * sizeof(half), NRAM2GDRAM);
+
+  __memcpy(b + r * 1024, x, 2048, NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim, bool descending) {
-  (void)dim;
-  (void)descending;
-  auto out = torch::empty_like(x);
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t grid = {16, 1, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
+  auto y = torch::empty_like(x);
+
+  cnrtDim3_t d;
+  d.x = 4;
+  d.y = 4;
+  d.z = 1;
+
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+
   if (x.scalar_type() == at::kHalf) {
-    sort_half_kernel<<<grid, ktype, queue>>>(
-        reinterpret_cast<const half*>(x.data_ptr<at::Half>()),
-        reinterpret_cast<half*>(out.data_ptr<at::Half>()));
+    kh<<<d, cnrtFuncTypeUnion1, q>>>(
+        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   } else {
-    sort_float_kernel<<<grid, ktype, queue>>>(x.data_ptr<float>(), out.data_ptr<float>());
+    kf<<<d, cnrtFuncTypeUnion1, q>>>(x.data_ptr<float>(), y.data_ptr<float>());
   }
-  return out;
+
+  return y;
 }
