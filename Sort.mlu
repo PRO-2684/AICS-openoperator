@@ -3,30 +3,90 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
+#define C(M, N)                                                                \
+  for (int p = 0; p < 1024; p += ((N) << 1)) {                                 \
+    for (int q = 0; q < (N); ++q) {                                            \
+      int i = p + q;                                                           \
+      int j = i + (N);                                                         \
+      half u = x[i];                                                           \
+      half v = x[j];                                                           \
+      if (((i & (M)) == 0 && u > v) || ((i & (M)) != 0 && u < v)) {            \
+        x[i] = v;                                                              \
+        x[j] = u;                                                              \
+      }                                                                        \
+    }                                                                          \
+  }
+
 __mlu_entry__ void k(const half *a, half *b) {
   int r = taskId;
   __nram__ half x[1024];
 
   __memcpy(x, a + r * 1024, 2048, GDRAM2NRAM);
 
-  for (int m = 2; m <= 1024; m <<= 1) {
-    for (int n = m >> 1; n > 0; n >>= 1) {
-      for (int p = 0; p < 1024; p += n << 1) {
-        for (int q = 0; q < n; ++q) {
-          int i = p + q;
-          int j = i + n;
+  C(2, 1)
 
-          half u = x[i];
-          half v = x[j];
+  C(4, 2)
+  C(4, 1)
 
-          if (((i & m) == 0 && u > v) || ((i & m) != 0 && u < v)) {
-            x[i] = v;
-            x[j] = u;
-          }
-        }
-      }
-    }
-  }
+  C(8, 4)
+  C(8, 2)
+  C(8, 1)
+
+  C(16, 8)
+  C(16, 4)
+  C(16, 2)
+  C(16, 1)
+
+  C(32, 16)
+  C(32, 8)
+  C(32, 4)
+  C(32, 2)
+  C(32, 1)
+
+  C(64, 32)
+  C(64, 16)
+  C(64, 8)
+  C(64, 4)
+  C(64, 2)
+  C(64, 1)
+
+  C(128, 64)
+  C(128, 32)
+  C(128, 16)
+  C(128, 8)
+  C(128, 4)
+  C(128, 2)
+  C(128, 1)
+
+  C(256, 128)
+  C(256, 64)
+  C(256, 32)
+  C(256, 16)
+  C(256, 8)
+  C(256, 4)
+  C(256, 2)
+  C(256, 1)
+
+  C(512, 256)
+  C(512, 128)
+  C(512, 64)
+  C(512, 32)
+  C(512, 16)
+  C(512, 8)
+  C(512, 4)
+  C(512, 2)
+  C(512, 1)
+
+  C(1024, 512)
+  C(1024, 256)
+  C(1024, 128)
+  C(1024, 64)
+  C(1024, 32)
+  C(1024, 16)
+  C(1024, 8)
+  C(1024, 4)
+  C(1024, 2)
+  C(1024, 1)
 
   __memcpy(b + r * 1024, x, 2048, NRAM2GDRAM);
 }
@@ -45,3 +105,5 @@ torch::Tensor bang_func(torch::Tensor x, int dim, bool descending) {
 
   return y;
 }
+
+#undef C
