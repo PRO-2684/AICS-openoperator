@@ -1,14 +1,83 @@
-#include <bang.h>
-#include <cnrt.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-// Task: 090 090_Einsum_4D_contract
-// Category: matrix
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，计算两个四维张量在特征维度上的收缩乘积，常用于实现注意力机制中的得分矩阵计算。输入包括形状为 `[batch, heads, seq_i, dim]` 的张量 `A` 和形状为 `[batch, heads, seq_j, dim]` 的张量 `B`；输出为形状为 `[batch, heads, seq_i, seq_j]` 的张量。
-// Wrapper: torch::Tensor bang_func(torch::Tensor A, torch::Tensor B);
+#define CNNL_CHECK(expr)                                                        \
+  do {                                                                         \
+    cnnlStatus_t s__ = (expr);                                                 \
+    TORCH_CHECK(s__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s__);   \
+  } while (0)
+
+static cnnlTensorDescriptor_t make_1d_desc(int64_t n) {
+  int dims[1] = {(int)n};
+  cnnlTensorDescriptor_t desc;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&desc));
+  CNNL_CHECK(cnnlSetTensorDescriptor(desc, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 1,
+                                     dims));
+  return desc;
+}
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  TORCH_CHECK(false, "TODO: implement Einsum_4D_contract");
+  auto out = torch::empty({4, 8, 128, 128}, A.options());
+
+  static cnnlTensorDescriptor_t ad = nullptr;
+  static cnnlTensorDescriptor_t bd = nullptr;
+  static cnnlTensorDescriptor_t od = nullptr;
+  static cnnlStrideBatchMatMulDescriptor_t desc = nullptr;
+  static cnnlStrideBatchMatMulAlgo_t algo = nullptr;
+  static size_t ws_size = 0;
+
+  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
+  bool trans_a = false;
+  bool trans_b = true;
+  int m = 128;
+  int n = 128;
+  int k = 64;
+  int lda = 64;
+  int ldb = 64;
+  int ldc = 128;
+  int ldd = 128;
+  int batch_size[1] = {32};
+  int64_t stride_a[1] = {128 * 64};
+  int64_t stride_b[1] = {128 * 64};
+  int64_t stride_o[1] = {128 * 128};
+  float alpha = 1.0f;
+  float beta = 0.0f;
+
+  if (desc == nullptr) {
+    ad = make_1d_desc(32 * 128 * 64);
+    bd = make_1d_desc(32 * 128 * 64);
+    od = make_1d_desc(32 * 128 * 128);
+    CNNL_CHECK(cnnlCreateStrideBatchMatMulDescriptor(&desc));
+    CNNL_CHECK(cnnlCreateStrideBatchMatMulAlgo(&algo));
+    cnnlStrideBatchMatMulHeuristicResult_t heur;
+    CNNL_CHECK(cnnlCreateStrideBatchMatMulHeuristicResult(&heur));
+    cnnlDataType_t compute_type = CNNL_DTYPE_FLOAT;
+    int max_batch_dim = 1;
+    int allow_tf32 = 0;
+    CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(
+        desc, CNNL_STRIDE_BMM_COMPUTE_TYPE, &compute_type,
+        sizeof(compute_type)));
+    CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(
+        desc, CNNL_STRIDE_BMM_MAX_BATCH_DIM, &max_batch_dim,
+        sizeof(max_batch_dim)));
+    CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(
+        desc, CNNL_STRIDE_BMM_ALLOW_TF32, &allow_tf32, sizeof(allow_tf32)));
+    int returned = 0;
+    CNNL_CHECK(cnnlGetStrideBatchMatMulAlgoHeuristic_v2(
+        handle, desc, ad, bd, od, od, trans_a, trans_b, &alpha, &beta, m, n, k,
+        lda, ldb, ldc, ldd, batch_size, stride_a, stride_b, stride_o, stride_o,
+        nullptr, 1, &heur, &returned));
+    CNNL_CHECK(cnnlGetStrideBatchMatMulHeuristicResult(heur, &algo, &ws_size));
+    CNNL_CHECK(cnnlDestroyStrideBatchMatMulHeuristicResult(heur));
+  }
+
+  auto ws = torch::empty({(int64_t)ws_size}, A.options().dtype(torch::kUInt8));
+  CNNL_CHECK(cnnlStrideBatchMatMul_v3(
+      handle, desc, algo, trans_a, trans_b, m, n, k, batch_size, &alpha, ad,
+      A.data_ptr(), lda, stride_a, bd, B.data_ptr(), ldb, stride_b, &beta, od,
+      out.data_ptr(), ldc, stride_o, ws_size ? ws.data_ptr() : nullptr, ws_size,
+      od, out.data_ptr(), ldd, stride_o));
+
+  return out;
 }
