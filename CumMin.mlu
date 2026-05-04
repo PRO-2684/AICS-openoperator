@@ -3,22 +3,12 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define S(D)                                                                   \
-  __memcpy(b, a, 8000, NRAM2NRAM);                                             \
-  __bang_minimum(b + (D), a + (D), a, 4000 - (D));                             \
-  t = a;                                                                       \
-  a = b;                                                                       \
-  b = t;
+#define S(D) __bang_minimum(a + (D), a + (D), a, 4000 - (D));
 
 __mlu_entry__ void k(const half *x, half *y) {
   int p = taskId;
 
-  __nram__ half u[4096];
-  __nram__ half v[4096];
-
-  half *a = u;
-  half *b = v;
-  half *t;
+  __nram__ half a[4000];
 
   __memcpy(a, x + p * 4000, 8000, GDRAM2NRAM);
 
