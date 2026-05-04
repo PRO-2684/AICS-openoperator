@@ -1,71 +1,41 @@
-#include <cnnl.h>
-#include <torch/extension.h>
+#include <bang.h>
+#include <cnrt.h>
 #include <framework/core/MLUStream.h>
-#include <climits>
-#include <vector>
+#include <torch/extension.h>
 
-// Task: 051 051_cumsum
-// Category: cum
-// Difficulty: basic
-// DType: float16
-// Description: 实现一个 BangC 算子，对输入张量沿指定维度计算累加前缀和（Cumulative Sum）。输入包括形状为 `[d0, d1, ..., dn]` 的张量 `x` 以及表示操作维度的整数 `dim`；输出张量的形状与 `x` 保持一致。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x, int dim);
+__mlu_entry__ void k(const half *a, half *b) {
+  int p = taskId << 2;
 
-#define CNNL_CHECK(expr)                                                     \
-  do {                                                                       \
-    cnnlStatus_t status = (expr);                                            \
-    TORCH_CHECK(status == CNNL_STATUS_SUCCESS, "CNNL call failed: ", status); \
-  } while (0)
+  __nram__ half x[4000];
+
+  for (int r = 0; r < 4; ++r) {
+    int q = p + r;
+
+    __memcpy(x, a + q * 4000, 8000, GDRAM2NRAM);
+
+    half s = x[0];
+    x[0] = s;
+
+    for (int i = 1; i < 4000; ++i) {
+      s = s + x[i];
+      x[i] = s;
+    }
+
+    __memcpy(b + q * 4000, x, 8000, NRAM2GDRAM);
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
-  TORCH_CHECK(x.scalar_type() == at::kHalf, "x must be float16");
-  TORCH_CHECK(x.dim() > 0, "cumsum requires at least one dimension");
+  auto y = torch::empty_like(x);
 
-  int64_t ndim = x.dim();
-  int64_t axis64 = dim < 0 ? dim + ndim : dim;
-  TORCH_CHECK(axis64 >= 0 && axis64 < ndim, "dim out of range");
+  cnrtDim3_t d;
+  d.x = 32;
+  d.y = 1;
+  d.z = 1;
 
-  auto x_contiguous = x.contiguous();
-  auto output = torch::empty_like(x_contiguous);
-  if (x_contiguous.numel() == 0) {
-    return output;
-  }
+  k<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
 
-  std::vector<int> dims(ndim);
-  for (int64_t i = 0; i < ndim; ++i) {
-    TORCH_CHECK(x_contiguous.size(i) <= INT_MAX, "tensor dimension too large");
-    dims[i] = static_cast<int>(x_contiguous.size(i));
-  }
-
-  cnnlTensorDescriptor_t input_desc;
-  cnnlTensorDescriptor_t output_desc;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&input_desc));
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&output_desc));
-  CNNL_CHECK(cnnlSetTensorDescriptor(input_desc, CNNL_LAYOUT_ARRAY,
-                                     CNNL_DTYPE_HALF, static_cast<int>(ndim),
-                                     dims.data()));
-  CNNL_CHECK(cnnlSetTensorDescriptor(output_desc, CNNL_LAYOUT_ARRAY,
-                                     CNNL_DTYPE_HALF, static_cast<int>(ndim),
-                                     dims.data()));
-
-  cnnlHandle_t handle;
-  CNNL_CHECK(cnnlCreate(&handle));
-  CNNL_CHECK(cnnlSetQueue(handle, torch_mlu::getCurMLUStream()));
-
-  size_t workspace_size = 0;
-  int axis = static_cast<int>(axis64);
-  CNNL_CHECK(cnnlGetCumsumWorkspaceSize(handle, input_desc, axis,
-                                        &workspace_size));
-  auto workspace = torch::empty({static_cast<int64_t>(workspace_size)},
-                                x.options().dtype(torch::kUInt8));
-
-  CNNL_CHECK(cnnlCumsum_v2(
-      handle, input_desc, x_contiguous.data_ptr(), axis, false, false,
-      CNNL_NOT_PROPAGATE_NAN, output_desc, output.data_ptr(),
-      workspace.data_ptr(), workspace_size));
-
-  CNNL_CHECK(cnnlDestroy(handle));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(output_desc));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(input_desc));
-  return output;
+  return y;
 }
