@@ -1,7 +1,129 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
+#define PARTS 16
+#define LOCAL_ELEMS 32768
+
+__mlu_func__ float reduce_sum_float_small(float *buf, float *tmp, int n) {
+  int cur = n;
+  float *src = buf;
+  float *dst = tmp;
+
+  while (cur > 32) {
+    __bang_reduce_sum(dst, src, cur);
+    int groups = cur / 32;
+
+    for (int i = 0; i < groups; ++i) {
+      src[i] = dst[i * 32];
+    }
+
+    cur = groups;
+  }
+
+  float s = 0.0f;
+  for (int i = 0; i < cur; ++i) {
+    s += src[i];
+  }
+  return s;
+}
+
+__mlu_entry__ void group_norm_mean_partial_kernel(const half *__restrict__ x,
+                                                  float *__restrict__ partial,
+                                                  int outer, int inner) {
+  int total = outer * PARTS;
+  int stride = taskDim;
+
+  for (int gid = taskId; gid < total; gid += stride) {
+    int idx = gid / PARTS;
+    int part = gid - idx * PARTS;
+    int chunk = inner / PARTS;
+    int offset = part * chunk;
+
+    __nram__ half hbuf[LOCAL_ELEMS];
+    __nram__ float fbuf[LOCAL_ELEMS];
+    __nram__ float tbuf[LOCAL_ELEMS];
+
+    __memcpy(hbuf, x + (int64_t)idx * inner + offset,
+             chunk * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(fbuf, hbuf, chunk);
+    partial[idx * PARTS + part] = reduce_sum_float_small(fbuf, tbuf, chunk);
+  }
+}
+
+__mlu_entry__ void group_norm_mean_kernel(const float *__restrict__ partial,
+                                          float *__restrict__ mean, int outer,
+                                          int inner) {
+  int idx = taskId;
+  if (idx >= outer) {
+    return;
+  }
+
+  float sum = 0.0f;
+#pragma unroll
+  for (int i = 0; i < PARTS; ++i) {
+    sum += partial[idx * PARTS + i];
+  }
+  mean[idx] = sum * (1.0f / (float)inner);
+}
+
+__mlu_entry__ void group_norm_apply_kernel(const half *__restrict__ x,
+                                           half *__restrict__ y,
+                                           const float *__restrict__ mean,
+                                           int outer, int inner) {
+  int total = outer * PARTS;
+  int stride = taskDim;
+
+  for (int gid = taskId; gid < total; gid += stride) {
+    int idx = gid / PARTS;
+    int part = gid - idx * PARTS;
+    int chunk = inner / PARTS;
+    int offset = part * chunk;
+
+    const half *px = x + (int64_t)idx * inner + offset;
+    half *py = y + (int64_t)idx * inner + offset;
+
+    __nram__ half hbuf[LOCAL_ELEMS];
+    __nram__ float fbuf[LOCAL_ELEMS];
+
+    __memcpy(hbuf, px, chunk * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(fbuf, hbuf, chunk);
+    __bang_sub_scalar(fbuf, fbuf, mean[idx], chunk);
+    __bang_float2half_rn(hbuf, fbuf, chunk);
+    __memcpy(py, hbuf, chunk * sizeof(half), NRAM2GDRAM);
+  }
+}
+
 torch::Tensor bang_func(torch::Tensor x, int num_groups, int num_features) {
-  (void)num_groups;
   (void)num_features;
-  return x;
+
+  int n = (int)x.size(0);
+  int c = (int)x.size(1);
+  int h = (int)x.size(2);
+  int w = (int)x.size(3);
+  int outer = n * num_groups;
+  int inner = (c / num_groups) * h * w;
+
+  auto y = torch::empty_like(x);
+  auto fopt = x.options().dtype(torch::kFloat32);
+  auto partial = torch::empty({outer, PARTS}, fopt);
+  auto mean = torch::empty({outer}, fopt);
+
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t work = {32, 1, 1};
+  cnrtDim3_t groups = {(unsigned int)outer, 1, 1};
+
+  group_norm_mean_partial_kernel<<<work, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<float *>(partial.data_ptr<float>()), outer, inner);
+  group_norm_mean_kernel<<<groups, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const float *>(partial.data_ptr<float>()),
+      reinterpret_cast<float *>(mean.data_ptr<float>()), outer, inner);
+  group_norm_apply_kernel<<<work, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()),
+      reinterpret_cast<const float *>(mean.data_ptr<float>()), outer, inner);
+
+  return y;
 }
