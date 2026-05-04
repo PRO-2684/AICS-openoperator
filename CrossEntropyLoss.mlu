@@ -7,7 +7,7 @@
 
 #define ROWS 4096
 #define COLS 10
-#define TASKS 128
+#define TASKS 32
 #define ROWS_PER_TASK (ROWS / TASKS)
 
 __mlu_entry__ void cross_entropy_partial_kernel(

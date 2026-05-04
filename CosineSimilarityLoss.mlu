@@ -6,9 +6,6 @@
 
 #define ROWS 128
 #define COLS 4096
-#define PARTS 2
-#define CHUNK (COLS / PARTS)
-#define TASKS (ROWS * PARTS)
 
 __mlu_func__ float reduce_sum_float_small(float *buf, float *tmp, int n) {
   int cur = n;
@@ -33,60 +30,45 @@ __mlu_func__ float reduce_sum_float_small(float *buf, float *tmp, int n) {
   return s;
 }
 
-__mlu_entry__ void cosine_part_kernel(const half *__restrict__ predictions,
-                                      const half *__restrict__ targets,
-                                      float *__restrict__ partial) {
-  int gid = taskId;
-  int row = gid / PARTS;
-  int part = gid - row * PARTS;
-  int base = row * COLS + part * CHUNK;
+__mlu_entry__ void cosine_row_kernel(const half *__restrict__ predictions,
+                                     const half *__restrict__ targets,
+                                     float *__restrict__ partial) {
+  int row = taskId;
+  const half *p = predictions + row * COLS;
+  const half *t = targets + row * COLS;
 
-  __nram__ half ph[CHUNK];
-  __nram__ half th[CHUNK];
-  __nram__ float pf[CHUNK];
-  __nram__ float tf[CHUNK];
-  __nram__ float work[CHUNK];
+  __nram__ half ph[COLS];
+  __nram__ half th[COLS];
+  __nram__ float pf[COLS];
+  __nram__ float tf[COLS];
+  __nram__ float work[COLS];
 
-  __memcpy(ph, predictions + base, CHUNK * sizeof(half), GDRAM2NRAM);
-  __memcpy(th, targets + base, CHUNK * sizeof(half), GDRAM2NRAM);
+  __memcpy(ph, p, COLS * sizeof(half), GDRAM2NRAM);
+  __memcpy(th, t, COLS * sizeof(half), GDRAM2NRAM);
 
-  __bang_half2float(pf, ph, CHUNK);
-  __bang_half2float(tf, th, CHUNK);
-  __bang_mul(work, pf, tf, CHUNK);
-  float dot = reduce_sum_float_small(work, tf, CHUNK);
+  __bang_half2float(pf, ph, COLS);
+  __bang_half2float(tf, th, COLS);
 
-  __bang_square(pf, pf, CHUNK);
-  float ps = reduce_sum_float_small(pf, tf, CHUNK);
+  __bang_mul(work, pf, tf, COLS);
+  float dot = reduce_sum_float_small(work, tf, COLS);
 
-  __bang_half2float(tf, th, CHUNK);
-  __bang_square(tf, tf, CHUNK);
-  float ts = reduce_sum_float_small(tf, pf, CHUNK);
+  __bang_square(pf, pf, COLS);
+  float ps = reduce_sum_float_small(pf, tf, COLS);
 
-  int out = gid * 3;
-  partial[out + 0] = dot;
-  partial[out + 1] = ps;
-  partial[out + 2] = ts;
+  __bang_half2float(tf, th, COLS);
+  __bang_square(tf, tf, COLS);
+  float ts = reduce_sum_float_small(tf, pf, COLS);
+
+  partial[row] = 1.0f - dot / sqrtf(ps * ts);
 }
 
-__mlu_entry__ void cosine_loss_finish_kernel(const float *__restrict__ partial,
-                                             half *__restrict__ out) {
+__mlu_entry__ void cosine_finish_kernel(const float *__restrict__ partial,
+                                        half *__restrict__ out) {
   float acc = 0.0f;
 
 #pragma unroll 1
-  for (int row = 0; row < ROWS; ++row) {
-    float dot = 0.0f;
-    float ps = 0.0f;
-    float ts = 0.0f;
-
-#pragma unroll
-    for (int part = 0; part < PARTS; ++part) {
-      int base = (row * PARTS + part) * 3;
-      dot += partial[base + 0];
-      ps += partial[base + 1];
-      ts += partial[base + 2];
-    }
-
-    acc += 1.0f - dot / sqrtf(ps * ts);
+  for (int i = 0; i < ROWS; ++i) {
+    acc += partial[i];
   }
 
   out[0] = (half)(acc * (1.0f / (float)ROWS));
@@ -94,17 +76,17 @@ __mlu_entry__ void cosine_loss_finish_kernel(const float *__restrict__ partial,
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   auto out = torch::empty({}, predictions.options());
-  auto partial = torch::empty({TASKS * 3}, predictions.options().dtype(torch::kFloat32));
+  auto partial = torch::empty({ROWS}, predictions.options().dtype(torch::kFloat32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t tasks = {TASKS, 1, 1};
+  cnrtDim3_t rows = {ROWS, 1, 1};
   cnrtDim3_t one = {1, 1, 1};
 
-  cosine_part_kernel<<<tasks, cnrtFuncTypeBlock, queue>>>(
+  cosine_row_kernel<<<rows, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(targets.data_ptr<at::Half>()),
       reinterpret_cast<float *>(partial.data_ptr<float>()));
-  cosine_loss_finish_kernel<<<one, cnrtFuncTypeBlock, queue>>>(
+  cosine_finish_kernel<<<one, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const float *>(partial.data_ptr<float>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
 
