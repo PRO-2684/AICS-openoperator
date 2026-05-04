@@ -10,16 +10,15 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       const half *__restrict__ b, half *__restrict__ y) {
   for (int f = taskId; f < E1; f += taskDim) {
     float s = 0.0f;
+    float q = 0.0f;
     for (int i = 0; i < E0; ++i) {
-      s += (float)x[i * E1 + f];
+      float t = (float)x[i * E1 + f];
+      s += t;
+      q += t * t;
     }
     float mean = s * 0.00390625f;
-    float e = 0.0f;
-    for (int i = 0; i < E0; ++i) {
-      float t = (float)x[i * E1 + f] - mean;
-      e += t * t;
-    }
-    float r = 1.0f / sqrtf(e * 0.00390625f + 1.0e-5f);
+    float e = q * 0.00390625f - mean * mean;
+    float r = 1.0f / sqrtf(e + 1.0e-5f);
     float h = (float)w[f] * r;
     float c = (float)b[f] - mean * h;
     for (int i = 0; i < E0; ++i) {
