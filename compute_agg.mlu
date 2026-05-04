@@ -6,11 +6,12 @@
 
 #define E0 1024
 
-__mlu_entry__ void k0(const int *__restrict__ x, int64_t *__restrict__ y) {
-  int64_t s = 0;
+__mlu_entry__ void k0(const int *__restrict__ x, int *__restrict__ y) {
+  int s = 0;
   for (int i = 0; i < E0; ++i) {
-    s += (int64_t)x[i];
-    y[i] = s;
+    s += x[i];
+    y[(i << 1) + 0] = s;
+    y[(i << 1) + 1] = s < 0 ? -1 : 0;
   }
 }
 
@@ -19,6 +20,6 @@ torch::Tensor bang_func(torch::Tensor agg) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {1, 1, 1};
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(agg.data_ptr<int>(),
-                                        out.data_ptr<int64_t>());
+                                        reinterpret_cast<int *>(out.data_ptr<int64_t>()));
   return out;
 }
