@@ -6,24 +6,24 @@
 #define N 128
 
 __mlu_entry__ void hinge_loss_kernel(const half *__restrict__ p,
-                                     const half *__restrict__ t,
-                                     half *__restrict__ out) {
+                                     const float *__restrict__ t,
+                                     float *__restrict__ out) {
   float acc = 0.0f;
 #pragma unroll 1
   for (int i = 0; i < N; ++i) {
-    float v = 1.0f - (float)p[i] * (float)t[i];
+    float v = 1.0f - (float)p[i] * t[i];
     acc += v > 0.0f ? v : 0.0f;
   }
-  out[0] = (half)(acc * (1.0f / (float)N));
+  out[0] = acc * (1.0f / (float)N);
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
-  auto out = torch::empty({}, predictions.options());
+  auto out = torch::empty({}, predictions.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {1, 1, 1};
   hinge_loss_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(targets.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+      reinterpret_cast<const float *>(targets.data_ptr<float>()),
+      reinterpret_cast<float *>(out.data_ptr<float>()));
   return out;
 }
