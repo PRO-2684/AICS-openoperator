@@ -1,47 +1,26 @@
 #include <aten/cnnl/cnnlHandle.h>
-#include <bang.h>
 #include <cnnl.h>
-#include <cnrt.h>
-#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define C(e)                                                                   \
+#define Z(e)                                                                   \
   do {                                                                         \
     cnnlStatus_t s = (e);                                                      \
     TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
   } while (0)
 
-static cnnlTensorDescriptor_t h(int64_t n) {
-  int d[1] = {(int)n};
+static cnnlTensorDescriptor_t h(int n) {
+  int d[1] = {n};
   cnnlTensorDescriptor_t r;
-  C(cnnlCreateTensorDescriptor(&r));
-  C(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 1, d));
+  Z(cnnlCreateTensorDescriptor(&r));
+  Z(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 1, d));
   return r;
-}
-
-__mlu_global__ void k(const half *a, half *b) {
-  __nram__ half x[1024];
-
-  __memcpy(x, a, 2048, GDRAM2NRAM);
-
-  for (int i = taskId; i < 256; i += taskDim) {
-    __memcpy(b + i * 1024, x, 2048, NRAM2GDRAM);
-  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, torch::Tensor b) {
   auto y = torch::empty({256, 1024}, x.options());
 
-  cnrtDim3_t d;
-  d.x = 4;
-  d.y = 8;
-  d.z = 1;
-
-  k<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(b.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-
   static cnnlTensorDescriptor_t a = nullptr;
+  static cnnlTensorDescriptor_t c = nullptr;
   static cnnlTensorDescriptor_t e = nullptr;
   static cnnlTensorDescriptor_t f = nullptr;
   static cnnlStrideBatchMatMulDescriptor_t g = nullptr;
@@ -54,57 +33,59 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, torch::Tensor b) {
   bool tb = false;
   int m = 256;
   int n = 1024;
-  int kk = 512;
+  int k = 512;
   int la = 512;
   int lb = 1024;
-  int lc = 1024;
+  int lc = 0;
   int ld = 1024;
   int bs[1] = {1};
   int64_t sa[1] = {131072};
   int64_t sb[1] = {524288};
-  int64_t sc[1] = {262144};
-  float alpha = 1.0f;
-  float beta = 1.0f;
+  int64_t sc[1] = {0};
+  int64_t sd[1] = {262144};
+  float aa = 1.0f;
+  float bb = 1.0f;
 
   if (g == nullptr) {
     a = h(131072);
-    e = h(524288);
+    c = h(524288);
+    e = h(1024);
     f = h(262144);
 
-    C(cnnlCreateStrideBatchMatMulDescriptor(&g));
-    C(cnnlCreateStrideBatchMatMulAlgo(&l));
+    Z(cnnlCreateStrideBatchMatMulDescriptor(&g));
+    Z(cnnlCreateStrideBatchMatMulAlgo(&l));
 
     cnnlStrideBatchMatMulHeuristicResult_t r;
-    C(cnnlCreateStrideBatchMatMulHeuristicResult(&r));
+    Z(cnnlCreateStrideBatchMatMulHeuristicResult(&r));
 
-    cnnlDataType_t ct = CNNL_DTYPE_FLOAT;
-    int md = 1;
-    int tf = 0;
+    cnnlDataType_t t = CNNL_DTYPE_FLOAT;
+    int u = 1;
+    int v = 0;
 
-    C(cnnlSetStrideBatchMatMulDescAttr(g, CNNL_STRIDE_BMM_COMPUTE_TYPE, &ct,
-                                       sizeof(ct)));
-    C(cnnlSetStrideBatchMatMulDescAttr(g, CNNL_STRIDE_BMM_MAX_BATCH_DIM, &md,
-                                       sizeof(md)));
-    C(cnnlSetStrideBatchMatMulDescAttr(g, CNNL_STRIDE_BMM_ALLOW_TF32, &tf,
-                                       sizeof(tf)));
+    Z(cnnlSetStrideBatchMatMulDescAttr(g, CNNL_STRIDE_BMM_COMPUTE_TYPE, &t,
+                                       sizeof(t)));
+    Z(cnnlSetStrideBatchMatMulDescAttr(g, CNNL_STRIDE_BMM_MAX_BATCH_DIM, &u,
+                                       sizeof(u)));
+    Z(cnnlSetStrideBatchMatMulDescAttr(g, CNNL_STRIDE_BMM_ALLOW_TF32, &v,
+                                       sizeof(v)));
 
-    int ret = 0;
-    C(cnnlGetStrideBatchMatMulAlgoHeuristic_v2(
-        q, g, a, e, f, f, ta, tb, &alpha, &beta, m, n, kk, la, lb, lc, ld, bs,
-        sa, sb, sc, sc, nullptr, 1, &r, &ret));
+    int rr = 0;
+    Z(cnnlGetStrideBatchMatMulAlgoHeuristic_v2(
+        q, g, a, c, e, f, ta, tb, &aa, &bb, m, n, k, la, lb, lc, ld, bs, sa, sb,
+        sc, sd, nullptr, 1, &r, &rr));
 
-    C(cnnlGetStrideBatchMatMulHeuristicResult(r, &l, &z));
-    C(cnnlDestroyStrideBatchMatMulHeuristicResult(r));
+    Z(cnnlGetStrideBatchMatMulHeuristicResult(r, &l, &z));
+    Z(cnnlDestroyStrideBatchMatMulHeuristicResult(r));
   }
 
-  auto t = torch::empty({(int64_t)z}, x.options().dtype(torch::kUInt8));
+  auto p = torch::empty({(int64_t)z}, x.options().dtype(torch::kUInt8));
 
-  C(cnnlStrideBatchMatMul_v3(
-      q, g, l, ta, tb, m, n, kk, bs, &alpha, a, x.data_ptr(), la, sa, e,
-      w.data_ptr(), lb, sb, &beta, f, y.data_ptr(), lc, sc,
-      z ? t.data_ptr() : nullptr, z, f, y.data_ptr(), ld, sc));
+  Z(cnnlStrideBatchMatMul_v3(q, g, l, ta, tb, m, n, k, bs, &aa, a, x.data_ptr(),
+                             la, sa, c, w.data_ptr(), lb, sb, &bb, e,
+                             b.data_ptr(), lc, sc, z ? p.data_ptr() : nullptr,
+                             z, f, y.data_ptr(), ld, sd));
 
   return y;
 }
 
-#undef C
+#undef Z
