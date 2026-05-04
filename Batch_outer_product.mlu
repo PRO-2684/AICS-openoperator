@@ -55,7 +55,7 @@ __mlu_global__ void k(const half *a, const half *b, half *c) {
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
   auto c = torch::empty({64, 256, 256}, a.options());
   std::printf("MLU:%zu, %zu, %zu, %zu\n", __MLU_NRAM_SIZE__, __MLU_WRAM_SIZE__,
-              __MLU_SRAM_SIZE__, __MLU_CLUSTER_SIZE__);
+              __MLU_SRAM_SIZE__, 1);
   cnrtDim3_t d;
   d.x = 4;
   d.y = 8;
