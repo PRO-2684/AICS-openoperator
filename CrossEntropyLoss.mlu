@@ -1,72 +1,105 @@
+#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
+#include <cnnl.h>
+#include <cnnl_extra.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
-#include <math.h>
 #include <stdint.h>
 #include <torch/extension.h>
+
+#include <vector>
 
 #define ROWS 4096
 #define COLS 10
 #define TASKS 32
 #define ROWS_PER_TASK (ROWS / TASKS)
 
-__mlu_entry__ void cross_entropy_partial_kernel(
-    const half *__restrict__ predictions, const int64_t *__restrict__ targets,
-    float *__restrict__ partial) {
-  int row0 = taskId * ROWS_PER_TASK;
+#define CNNL_CHECK(expr)                                                        \
+  do {                                                                         \
+    cnnlStatus_t status__ = (expr);                                            \
+    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ",         \
+                (int)status__);                                                \
+  } while (0)
+
+inline cnnlTensorDescriptor_t make_desc(const std::vector<int> &shape,
+                                        cnnlDataType_t dtype) {
+  cnnlTensorDescriptor_t desc;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&desc));
+  CNNL_CHECK(cnnlSetTensorDescriptor(desc, CNNL_LAYOUT_ARRAY, dtype,
+                                     (int)shape.size(), shape.data()));
+  return desc;
+}
+
+__mlu_entry__ void labels_i32_kernel(const int64_t *__restrict__ src,
+                                     int *__restrict__ dst) {
+  int base = taskId * ROWS_PER_TASK;
+
+#pragma unroll 1
+  for (int i = 0; i < ROWS_PER_TASK; ++i) {
+    dst[base + i] = (int)src[base + i];
+  }
+}
+
+__mlu_entry__ void ce_mean_kernel(const float *__restrict__ losses,
+                                  half *__restrict__ out) {
+  int base = taskId * ROWS_PER_TASK;
   float acc = 0.0f;
 
 #pragma unroll 1
-  for (int r = 0; r < ROWS_PER_TASK; ++r) {
-    int row = row0 + r;
-    const half *p = predictions + row * COLS;
-    int64_t label = targets[row];
+  for (int i = 0; i < ROWS_PER_TASK; ++i) {
+    acc += losses[base + i];
+  }
 
-    float mx = (float)p[0];
-#pragma unroll
-    for (int c = 1; c < COLS; ++c) {
-      float v = (float)p[c];
-      mx = v > mx ? v : mx;
-    }
+  __mlu_shared__ float part[TASKS];
+  part[taskId] = acc;
+  __sync_all();
 
+  if (taskId == 0) {
     float sum = 0.0f;
 #pragma unroll
-    for (int c = 0; c < COLS; ++c) {
-      sum += expf((float)p[c] - mx);
+    for (int i = 0; i < TASKS; ++i) {
+      sum += part[i];
     }
-
-    acc += logf(sum) + mx - (float)p[label];
+    out[0] = (half)(sum * (1.0f / (float)ROWS));
   }
-
-  partial[taskId] = acc;
-}
-
-__mlu_entry__ void cross_entropy_finish_kernel(const float *__restrict__ partial,
-                                               half *__restrict__ out) {
-  float acc = 0.0f;
-
-#pragma unroll
-  for (int i = 0; i < TASKS; ++i) {
-    acc += partial[i];
-  }
-
-  out[0] = (half)(acc * (1.0f / (float)ROWS));
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   auto out = torch::empty({}, predictions.options());
-  auto partial = torch::empty({TASKS}, predictions.options().dtype(torch::kFloat32));
+  auto labels = torch::empty({ROWS}, targets.options().dtype(torch::kInt32));
+  auto losses = torch::empty({ROWS}, predictions.options().dtype(torch::kFloat32));
+  auto lse = torch::empty({ROWS}, predictions.options().dtype(torch::kFloat32));
+
+  static cnnlTensorDescriptor_t logits_desc = nullptr;
+  static cnnlTensorDescriptor_t labels_desc = nullptr;
+  static cnnlTensorDescriptor_t vec_desc = nullptr;
+  static size_t workspace_size = 0;
+  if (logits_desc == nullptr) {
+    logits_desc = make_desc({ROWS, COLS}, CNNL_DTYPE_HALF);
+    labels_desc = make_desc({ROWS}, CNNL_DTYPE_INT32);
+    vec_desc = make_desc({ROWS}, CNNL_DTYPE_FLOAT);
+    CNNL_CHECK(cnnlGetCrossEntropyForwardWorkspaceSize(
+        torch_mlu::getCurrentHandle(), false, 0.0f, -100, logits_desc,
+        labels_desc, &workspace_size));
+  }
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {TASKS, 1, 1};
-  cnrtDim3_t one = {1, 1, 1};
-
-  cross_entropy_partial_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
+  labels_i32_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const int64_t *>(targets.data_ptr<int64_t>()),
-      reinterpret_cast<float *>(partial.data_ptr<float>()));
-  cross_entropy_finish_kernel<<<one, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const float *>(partial.data_ptr<float>()),
+      reinterpret_cast<int *>(labels.data_ptr<int>()));
+
+  auto workspace =
+      torch::empty({(int64_t)workspace_size}, predictions.options().dtype(torch::kUInt8));
+
+  CNNL_CHECK(cnnlCrossEntropyForward(
+      torch_mlu::getCurrentHandle(), false, 0.0f, 0.0f, logits_desc,
+      predictions.data_ptr(), -100, 0, COLS, workspace.data_ptr(),
+      workspace_size, labels_desc, labels.data_ptr(), vec_desc, losses.data_ptr(),
+      vec_desc, lse.data_ptr()));
+
+  ce_mean_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const float *>(losses.data_ptr<float>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
 
   return out;
