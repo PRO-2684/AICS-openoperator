@@ -54,14 +54,14 @@ torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive,
   auto out = torch::empty({}, anchor.options().dtype(torch::kFloat32));
   auto tmp = torch::empty({32}, anchor.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g0 = {4, 8, 1};
-  k0<<<g0, cnrtFuncTypeUnion1, queue>>>(
+  cnrtDim3_t g0 = {32, 1, 1};
+  k0<<<g0, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(anchor.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(positive.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(negative.data_ptr<at::Half>()),
       tmp.data_ptr<float>(), static_cast<float>(margin));
   cnrtDim3_t g1 = {1, 1, 1};
-  k1<<<g1, cnrtFuncTypeUnion1, queue>>>(
+  k1<<<g1, cnrtFuncTypeBlock, queue>>>(
       tmp.data_ptr<float>(), out.data_ptr<float>());
   return out;
 }
