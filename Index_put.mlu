@@ -5,7 +5,7 @@
 #include <torch/extension.h>
 
 #define E0 512
-#define E1 16
+#define E1 32
 
 __mlu_entry__ void k0(const half *__restrict__ values,
                       const int64_t *__restrict__ index,
