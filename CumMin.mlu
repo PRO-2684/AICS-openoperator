@@ -5,12 +5,7 @@
 
 #define S(D)                                                                   \
   __memcpy(b, a, 8000, NRAM2NRAM);                                             \
-  for (int i = (D); i < 4000; ++i) {                                           \
-    half u = a[i];                                                             \
-    half v = a[i - (D)];                                                       \
-    if ((float)v != (float)v || (float)u != (float)u || v < u)                 \
-      b[i] = v;                                                                \
-  }                                                                            \
+  __bang_minimum(b + (D), a + (D), a, 4000 - (D));                             \
   t = a;                                                                       \
   a = b;                                                                       \
   b = t;
