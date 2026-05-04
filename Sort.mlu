@@ -1,109 +1,55 @@
-#include <bang.h>
-#include <cnrt.h>
-#include <framework/core/MLUStream.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-#define C(M, N)                                                                \
-  for (int p = 0; p < 1024; p += ((N) << 1)) {                                 \
-    for (int q = 0; q < (N); ++q) {                                            \
-      int i = p + q;                                                           \
-      int j = i + (N);                                                         \
-      half u = x[i];                                                           \
-      half v = x[j];                                                           \
-      if (((i & (M)) == 0 && u > v) || ((i & (M)) != 0 && u < v)) {            \
-        x[i] = v;                                                              \
-        x[j] = u;                                                              \
-      }                                                                        \
-    }                                                                          \
-  }
+#define CNNL_CHECK(x)                                                          \
+  do {                                                                         \
+    cnnlStatus_t s = (x);                                                      \
+    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL failed");                      \
+  } while (0)
 
-__mlu_entry__ void k(const half *a, half *b) {
-  int r = taskId;
-  __nram__ half x[1024];
+static cnnlTensorDescriptor_t d2() {
+  int s[2] = {16, 1024};
+  cnnlTensorDescriptor_t d;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+  CNNL_CHECK(
+      cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, s));
+  return d;
+}
 
-  __memcpy(x, a + r * 1024, 2048, GDRAM2NRAM);
-
-  C(2, 1)
-
-  C(4, 2)
-  C(4, 1)
-
-  C(8, 4)
-  C(8, 2)
-  C(8, 1)
-
-  C(16, 8)
-  C(16, 4)
-  C(16, 2)
-  C(16, 1)
-
-  C(32, 16)
-  C(32, 8)
-  C(32, 4)
-  C(32, 2)
-  C(32, 1)
-
-  C(64, 32)
-  C(64, 16)
-  C(64, 8)
-  C(64, 4)
-  C(64, 2)
-  C(64, 1)
-
-  C(128, 64)
-  C(128, 32)
-  C(128, 16)
-  C(128, 8)
-  C(128, 4)
-  C(128, 2)
-  C(128, 1)
-
-  C(256, 128)
-  C(256, 64)
-  C(256, 32)
-  C(256, 16)
-  C(256, 8)
-  C(256, 4)
-  C(256, 2)
-  C(256, 1)
-
-  C(512, 256)
-  C(512, 128)
-  C(512, 64)
-  C(512, 32)
-  C(512, 16)
-  C(512, 8)
-  C(512, 4)
-  C(512, 2)
-  C(512, 1)
-
-  C(1024, 512)
-  C(1024, 256)
-  C(1024, 128)
-  C(1024, 64)
-  C(1024, 32)
-  C(1024, 16)
-  C(1024, 8)
-  C(1024, 4)
-  C(1024, 2)
-  C(1024, 1)
-
-  __memcpy(b + r * 1024, x, 2048, NRAM2GDRAM);
+static cnnlTensorDescriptor_t i2() {
+  int s[2] = {16, 1024};
+  cnnlTensorDescriptor_t d;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+  CNNL_CHECK(
+      cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_INT32, 2, s));
+  return d;
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim, bool descending) {
   auto y = torch::empty_like(x);
+  auto z = torch::empty({16, 1024}, x.options().dtype(torch::kInt32));
 
-  cnrtDim3_t d;
-  d.x = 4;
-  d.y = 4;
-  d.z = 1;
+  static cnnlTensorDescriptor_t a = nullptr;
+  static cnnlTensorDescriptor_t b = nullptr;
+  static cnnlTensorDescriptor_t c = nullptr;
+  static size_t w = 0;
 
-  k<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  cnnlHandle_t h = torch_mlu::getCurrentHandle();
+
+  if (a == nullptr) {
+    a = d2();
+    b = d2();
+    c = i2();
+
+    CNNL_CHECK(cnnlGetTopKTensorWorkspaceSize(h, a, 1024, 1, false, b, c, &w));
+  }
+
+  auto t = torch::empty({(int64_t)w}, x.options().dtype(torch::kUInt8));
+
+  CNNL_CHECK(cnnlTopKTensor_v3(h, a, x.data_ptr(), 1024, 1, false, true, false,
+                               b, y.data_ptr(), c, z.data_ptr(),
+                               w ? t.data_ptr() : nullptr, w));
 
   return y;
 }
-
-#undef C
