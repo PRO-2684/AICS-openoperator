@@ -8,24 +8,35 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       const half *__restrict__ b, half *__restrict__ y) {
-  for (int f = taskId; f < E1; f += taskDim) {
+  if (taskId != 0) {
+    return;
+  }
+  __nram__ half a[E0 * E1];
+  __nram__ half o[E0 * E1];
+  __nram__ half u[E1];
+  __nram__ half z[E1];
+  __memcpy(a, x, E0 * E1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(u, w, E1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(z, b, E1 * sizeof(half), GDRAM2NRAM);
+  for (int f = 0; f < E1; ++f) {
     float s = 0.0f;
     for (int i = 0; i < E0; ++i) {
-      s += (float)x[i * E1 + f];
+      s += (float)a[i * E1 + f];
     }
     float mean = s * 0.00390625f;
-    float v = 0.0f;
+    float e = 0.0f;
     for (int i = 0; i < E0; ++i) {
-      float t = (float)x[i * E1 + f] - mean;
-      v += t * t;
+      float t = (float)a[i * E1 + f] - mean;
+      e += t * t;
     }
-    float r = 1.0f / sqrtf(v * 0.00390625f + 1.0e-5f);
-    float a = (float)w[f] * r;
-    float c = (float)b[f] - mean * a;
+    float r = 1.0f / sqrtf(e * 0.00390625f + 1.0e-5f);
+    float h = (float)u[f] * r;
+    float c = (float)z[f] - mean * h;
     for (int i = 0; i < E0; ++i) {
-      y[i * E1 + f] = (half)((float)x[i * E1 + f] * a + c);
+      o[i * E1 + f] = (half)((float)a[i * E1 + f] * h + c);
     }
   }
+  __memcpy(y, o, E0 * E1 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bias,
