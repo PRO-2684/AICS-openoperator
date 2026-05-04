@@ -10,59 +10,43 @@
 #define OW 64
 
 __mlu_entry__ void kernel(const half *__restrict__ x, half *__restrict__ y) {
-  int gid = taskId;
-  int nc = gid >> 6;
-  int oh = gid & (OH - 1);
+  int nc = taskId;
   if (nc >= NC) {
     return;
   }
 
-  int ih0 = oh * 2 - 1;
   int in_base = nc * IH * IW;
-  int out_base = (nc * OH + oh) * OW;
+  int out_base = nc * OH * OW;
 
-  __nram__ half r0[IW];
-  __nram__ half r1[IW];
+  __nram__ half ibuf[IH * IW];
+  __nram__ half obuf[OH * OW];
 
-  bool valid0 = ih0 >= 0 && ih0 < IH;
-  bool valid1 = ih0 + 3 >= 0 && ih0 + 3 < IH;
-  if (valid0) {
-    __memcpy(r0, x + in_base + ih0 * IW, IW * sizeof(half), GDRAM2NRAM);
-  }
-  if (valid1) {
-    __memcpy(r1, x + in_base + (ih0 + 3) * IW, IW * sizeof(half), GDRAM2NRAM);
-  }
+  __memcpy(ibuf, x + in_base, IH * IW * sizeof(half), GDRAM2NRAM);
 
-  __nram__ half obuf[OW];
 #pragma unroll 1
-  for (int ow = 0; ow < OW; ++ow) {
-    int iw0 = ow * 2 - 1;
-    half best = (half)-65504.0f;
-    if (iw0 >= 0 && iw0 < IW) {
-      if (valid0) {
-        half v = r0[iw0];
-        best = v > best ? v : best;
+  for (int oh = 0; oh < OH; ++oh) {
+    int ih0 = oh * 2 - 1;
+#pragma unroll 1
+    for (int ow = 0; ow < OW; ++ow) {
+      int iw0 = ow * 2 - 1;
+      half best = (half)-65504.0f;
+#pragma unroll
+      for (int kh = 0; kh < 2; ++kh) {
+#pragma unroll
+        for (int kw = 0; kw < 2; ++kw) {
+          int ih = ih0 + kh * 3;
+          int iw = iw0 + kw * 3;
+          if (ih >= 0 && ih < IH && iw >= 0 && iw < IW) {
+            half v = ibuf[ih * IW + iw];
+            best = v > best ? v : best;
+          }
+        }
       }
-      if (valid1) {
-        half v = r1[iw0];
-        best = v > best ? v : best;
-      }
+      obuf[oh * OW + ow] = best;
     }
-    int iw1 = iw0 + 3;
-    if (iw1 >= 0 && iw1 < IW) {
-      if (valid0) {
-        half v = r0[iw1];
-        best = v > best ? v : best;
-      }
-      if (valid1) {
-        half v = r1[iw1];
-        best = v > best ? v : best;
-      }
-    }
-    obuf[ow] = best;
   }
 
-  __memcpy(y + out_base, obuf, OW * sizeof(half), NRAM2GDRAM);
+  __memcpy(y + out_base, obuf, OH * OW * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
@@ -74,7 +58,7 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
 
   auto out = torch::empty({16, 32, OH, OW}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {OH, NC, 1};
+  cnrtDim3_t dim = {NC, 1, 1};
   kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
