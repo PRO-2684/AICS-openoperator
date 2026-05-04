@@ -12,6 +12,8 @@
 #define E6 32
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[1024];
+  __nram__ float b[1024];
   int n = E0 * E1 * E2;
   for (int t = taskId; t < n; t += taskDim) {
     int h = t & 7;
@@ -28,24 +30,29 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     float s7 = 0.0f;
     for (int z = 0; z < 8; ++z) {
       int q = p + z * E5 * E6;
+      __memcpy(a + z * 128, x + q, 128 * sizeof(half), GDRAM2NRAM);
+    }
+    __bang_half2float(b, a, 1024);
+    for (int z = 0; z < 8; ++z) {
+      int q = z * 128;
       for (int r = 0; r < 4; ++r) {
-        const half *u = x + q + r * E6;
+        float *u = b + q + r * E6;
 #pragma unroll 4
-        for (int c = 0; c < 4; ++c) s0 += (float)u[c];
+        for (int c = 0; c < 4; ++c) s0 += u[c];
 #pragma unroll 4
-        for (int c = 4; c < 8; ++c) s1 += (float)u[c];
+        for (int c = 4; c < 8; ++c) s1 += u[c];
 #pragma unroll 4
-        for (int c = 8; c < 12; ++c) s2 += (float)u[c];
+        for (int c = 8; c < 12; ++c) s2 += u[c];
 #pragma unroll 4
-        for (int c = 12; c < 16; ++c) s3 += (float)u[c];
+        for (int c = 12; c < 16; ++c) s3 += u[c];
 #pragma unroll 4
-        for (int c = 16; c < 20; ++c) s4 += (float)u[c];
+        for (int c = 16; c < 20; ++c) s4 += u[c];
 #pragma unroll 4
-        for (int c = 20; c < 24; ++c) s5 += (float)u[c];
+        for (int c = 20; c < 24; ++c) s5 += u[c];
 #pragma unroll 4
-        for (int c = 24; c < 28; ++c) s6 += (float)u[c];
+        for (int c = 24; c < 28; ++c) s6 += u[c];
 #pragma unroll 4
-        for (int c = 28; c < 32; ++c) s7 += (float)u[c];
+        for (int c = 28; c < 32; ++c) s7 += u[c];
       }
     }
     int o = ((bc * E1 + d) * E2 + h) * E3;
