@@ -1,25 +1,39 @@
-#include <bang.h>
-#include <cnrt.h>
-#include <framework/core/MLUStream.h>
-#include <stdint.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
+
+#include <vector>
 
 #define E0 1024
 
-__mlu_entry__ void k0(const int *__restrict__ x, int *__restrict__ y) {
-  int s = 0;
-  for (int i = 0; i < E0; ++i) {
-    s += x[i];
-    y[(i << 1) + 0] = s;
-    y[(i << 1) + 1] = s < 0 ? -1 : 0;
-  }
+#define CNNL_CHECK(expr)                                                        \
+  do {                                                                         \
+    cnnlStatus_t s__ = (expr);                                                 \
+    TORCH_CHECK(s__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s__);   \
+  } while (0)
+
+static cnnlTensorDescriptor_t d0(cnnlDataType_t t) {
+  cnnlTensorDescriptor_t d;
+  int s[1] = {E0};
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, t, 1, s));
+  return d;
 }
 
 torch::Tensor bang_func(torch::Tensor agg) {
   auto out = torch::empty({E0}, agg.options().dtype(torch::kInt64));
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {1, 1, 1};
-  k0<<<dim, cnrtFuncTypeBlock, queue>>>(agg.data_ptr<int>(),
-                                        reinterpret_cast<int *>(out.data_ptr<int64_t>()));
+  static cnnlTensorDescriptor_t a = nullptr;
+  static cnnlTensorDescriptor_t b = nullptr;
+  static size_t z = 0;
+  if (a == nullptr) {
+    a = d0(CNNL_DTYPE_INT32);
+    b = d0(CNNL_DTYPE_INT64);
+    CNNL_CHECK(cnnlGetCumsumWorkspaceSize(torch_mlu::getCurrentHandle(), a, 0,
+                                          &z));
+  }
+  auto w = torch::empty({(int64_t)z}, agg.options().dtype(torch::kUInt8));
+  CNNL_CHECK(cnnlCumsum_v2(torch_mlu::getCurrentHandle(), a, agg.data_ptr(), 0,
+                           false, false, CNNL_NOT_PROPAGATE_NAN, b,
+                           out.data_ptr(), z ? w.data_ptr() : nullptr, z));
   return out;
 }
