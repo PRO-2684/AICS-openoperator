@@ -3,87 +3,57 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void triplet_partial_kernel(const half *anchor,
-                                          const half *positive,
-                                          const half *negative, float *partial,
-                                          float margin) {
-  int tid = taskId;
-  int step = taskDim;
+#define E0 128
+#define E1 256
 
-  float local_sum = 0.0f;
-
-  for (int b = tid; b < 128; b += step) {
-    int base = b << 8;
-
-    float ap = 0.0f;
-    float an = 0.0f;
-    float pn = 0.0f;
-
+__mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
+                      const half *__restrict__ n, float *__restrict__ t,
+                      float m) {
+  float s = 0.0f;
+  for (int r = taskId; r < E0; r += taskDim) {
+    int q = r * E1;
+    float u = 0.0f;
+    float v = 0.0f;
 #pragma unroll 4
-    for (int j = 0; j < 256; ++j) {
-      float av = (float)anchor[base + j];
-      float pv = (float)positive[base + j];
-      float nv = (float)negative[base + j];
-
-      float dap = av - pv + 1.0e-6f;
-      float dan = av - nv + 1.0e-6f;
-      float dpn = pv - nv + 1.0e-6f;
-
-      ap += dap * dap;
-      an += dan * dan;
-      pn += dpn * dpn;
+    for (int i = 0; i < E1; ++i) {
+      float x = (float)a[q + i];
+      float y = (float)p[q + i];
+      float z = (float)n[q + i];
+      float d0 = x - y + 1.0e-6f;
+      float d1 = x - z + 1.0e-6f;
+      u += d0 * d0;
+      v += d1 * d1;
     }
-
-    float dpos = sqrtf(ap);
-    float dneg = sqrtf(an);
-    float dswap = sqrtf(pn);
-
-    // swap=True: dneg = min(d(a,n), d(p,n))
-    if (dswap < dneg) {
-      dneg = dswap;
-    }
-
-    float v = dpos - dneg + margin;
-    if (v > 0.0f) {
-      local_sum += v;
+    float e = sqrtf(u) - sqrtf(v) + m;
+    if (e > 0.0f) {
+      s += e;
     }
   }
-
-  partial[tid] = local_sum;
+  t[taskId] = s;
 }
 
-__mlu_entry__ void triplet_final_kernel(const float *partial, half *out) {
-  float sum = 0.0f;
-
+__mlu_entry__ void k1(const float *__restrict__ t, half *__restrict__ y) {
+  float s = 0.0f;
 #pragma unroll 32
   for (int i = 0; i < 32; ++i) {
-    sum += partial[i];
+    s += t[i];
   }
-
-  out[0] = (half)(sum * 0.0078125f);
+  y[0] = (half)(s * 0.0078125f);
 }
 
 torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive,
                         torch::Tensor negative, double margin) {
-  auto out = torch::empty({}, anchor.options().dtype(torch::kHalf));
-  auto partial = torch::empty({32}, anchor.options().dtype(torch::kFloat32));
-
+  auto out = torch::empty({}, anchor.options());
+  auto tmp = torch::empty({32}, anchor.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
-
-  cnrtDim3_t grid1 = {4, 8, 1};
-
-  triplet_partial_kernel<<<grid1, ktype, queue>>>(
+  cnrtDim3_t g0 = {4, 8, 1};
+  k0<<<g0, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(anchor.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(positive.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(negative.data_ptr<at::Half>()),
-      partial.data_ptr<float>(), static_cast<float>(margin));
-
-  cnrtDim3_t grid2 = {1, 1, 1};
-
-  triplet_final_kernel<<<grid2, ktype, queue>>>(
-      partial.data_ptr<float>(),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
-
+      tmp.data_ptr<float>(), static_cast<float>(margin));
+  cnrtDim3_t g1 = {1, 1, 1};
+  k1<<<g1, cnrtFuncTypeUnion1, queue>>>(
+      tmp.data_ptr<float>(), reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
 }
