@@ -3,19 +3,23 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 32768
+#define E0 2048
 #define E1 128
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[16];
   for (int p = taskId; p < E0; p += taskDim) {
     int a0 = p & 15;
     int a1 = (p >> 4) & 15;
-    int a2 = (p >> 8) & 15;
-    int a3 = p >> 12;
-    int q = (((a3 * 32 + (a2 << 1)) * 32 + (a1 << 1)) * 16 + a0);
-    float s = (float)x[q] + (float)x[q + 16] + (float)x[q + 512] +
-              (float)x[q + 528];
-    y[p] = (half)(s * 0.25f);
+    int a2 = p >> 8;
+    int q = ((a2 * 32 + (a1 << 1)) * 32 + (a0 << 1)) * 16;
+#pragma unroll
+    for (int i = 0; i < 16; ++i) {
+      float s = (float)x[q + i] + (float)x[q + 16 + i] +
+                (float)x[q + 512 + i] + (float)x[q + 528 + i];
+      a[i] = (half)(s * 0.25f);
+    }
+    __memcpy(y + (p << 4), a, 32, NRAM2GDRAM);
   }
 }
 
