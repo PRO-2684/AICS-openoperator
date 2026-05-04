@@ -3,27 +3,38 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void k(const half *x, half *y) {
+__mlu_entry__ void k(const half *a, half *b) {
   int p = taskId << 3;
 
-  __nram__ half a[512];
+  __nram__ half x[512];
 
-  __memcpy(a, x + p * 64, 1024, GDRAM2NRAM);
+  __memcpy(x, a + p * 64, 1024, GDRAM2NRAM);
 
   for (int r = 0; r < 8; ++r) {
-    half m = a[r * 64];
-    for (int i = 1; i < 64; ++i) {
-      half v = a[r * 64 + i];
-      if ((float)v > (float)m) {
-        m = v;
+    half m = (half)-65504.0f;
+    int n = 0;
+
+    for (int i = 0; i < 64; ++i) {
+      half v = x[r * 64 + i];
+      float f = (float)v;
+      if (f == f) {
+        n = 1;
+        if (v > m) {
+          m = v;
+        }
       }
     }
-    y[p + r] = m;
+
+    if (n) {
+      b[p + r] = m;
+    } else {
+      b[p + r] = (half)NAN;
+    }
   }
 }
 
-torch::Tensor bang_func(torch::Tensor x, int n) {
-  auto y = torch::empty({32}, x.options());
+torch::Tensor bang_func(torch::Tensor x, int y) {
+  auto z = torch::empty({32}, x.options());
 
   cnrtDim3_t d;
   d.x = 4;
@@ -32,7 +43,7 @@ torch::Tensor bang_func(torch::Tensor x, int n) {
 
   k<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+      reinterpret_cast<half *>(z.data_ptr<at::Half>()));
 
-  return y;
+  return z;
 }
