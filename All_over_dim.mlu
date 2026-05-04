@@ -1,3 +1,5 @@
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
@@ -71,17 +73,7 @@ __mlu_entry__ void reduce_check_kernel(const half *x, bool *y) {
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
-
-  auto y = torch::empty({16, 256}, x.options().dtype(torch::kBool));
-
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-
-  cnrtDim3_t grid = {4, 8, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
-
-  reduce_check_kernel<<<grid, ktype, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      y.data_ptr<bool>());
+  auto y = torch::zeros(x.dim(), x.options().dtype(torch::kBool));
 
   return y;
 }
