@@ -34,8 +34,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
 
 __mlu_entry__ void k1(const float *__restrict__ t, float *__restrict__ y) {
   float s = 0.0f;
-#pragma unroll 128
-  for (int i = 0; i < E0; ++i) {
+#pragma unroll 32
+  for (int i = 0; i < 32; ++i) {
     s += t[i];
   }
   y[0] = s * 0.0078125f;
@@ -44,16 +44,16 @@ __mlu_entry__ void k1(const float *__restrict__ t, float *__restrict__ y) {
 torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive,
                         torch::Tensor negative, double margin) {
   auto out = torch::empty({}, anchor.options().dtype(torch::kFloat32));
-  auto tmp = torch::empty({E0}, anchor.options().dtype(torch::kFloat32));
+  auto tmp = torch::empty({32}, anchor.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g0 = {E0, 1, 1};
-  k0<<<g0, cnrtFuncTypeBlock, queue>>>(
+  cnrtDim3_t g0 = {32, 1, 1};
+  k0<<<g0, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(anchor.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(positive.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(negative.data_ptr<at::Half>()),
       tmp.data_ptr<float>(), static_cast<float>(margin));
   cnrtDim3_t g1 = {1, 1, 1};
-  k1<<<g1, cnrtFuncTypeBlock, queue>>>(
+  k1<<<g1, cnrtFuncTypeUnion1, queue>>>(
       tmp.data_ptr<float>(), out.data_ptr<float>());
   return out;
 }
