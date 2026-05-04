@@ -1,14 +1,62 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
+#include <math.h>
 #include <torch/extension.h>
 
-// Task: 040 040_CosineSimilarityLoss
-// Category: fused
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，计算预测张量与目标张量之间的平均余弦相似度损失。输入包括形状均为 `[batch_size, dim]` 的张量 `predictions` 和 `targets`；该算子在特征维度上计算两组向量的余弦相似度，并返回 $1$ 减去该相似度后的算术平均值。
-// Wrapper: torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets);
+#define ROWS 128
+#define COLS 4096
+
+__mlu_entry__ void cosine_row_kernel(const half *__restrict__ predictions,
+                                     const half *__restrict__ targets,
+                                     float *__restrict__ partial) {
+  int row = taskId;
+  const half *p = predictions + row * COLS;
+  const half *t = targets + row * COLS;
+
+  float dot = 0.0f;
+  float ps = 0.0f;
+  float ts = 0.0f;
+
+#pragma unroll 1
+  for (int i = 0; i < COLS; ++i) {
+    float a = (float)p[i];
+    float b = (float)t[i];
+    dot += a * b;
+    ps += a * a;
+    ts += b * b;
+  }
+
+  partial[row] = 1.0f - dot / sqrtf(ps * ts);
+}
+
+__mlu_entry__ void cosine_finish_kernel(const float *__restrict__ partial,
+                                        half *__restrict__ out) {
+  float acc = 0.0f;
+
+#pragma unroll 1
+  for (int i = 0; i < ROWS; ++i) {
+    acc += partial[i];
+  }
+
+  out[0] = (half)(acc * (1.0f / (float)ROWS));
+}
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
-  TORCH_CHECK(false, "TODO: implement CosineSimilarityLoss");
+  auto out = torch::empty({}, predictions.options());
+  auto partial = torch::empty({ROWS}, predictions.options().dtype(torch::kFloat32));
+
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t rows = {ROWS, 1, 1};
+  cnrtDim3_t one = {1, 1, 1};
+
+  cosine_row_kernel<<<rows, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(targets.data_ptr<at::Half>()),
+      reinterpret_cast<float *>(partial.data_ptr<float>()));
+  cosine_finish_kernel<<<one, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const float *>(partial.data_ptr<float>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+
+  return out;
 }
