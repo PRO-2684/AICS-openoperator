@@ -32,18 +32,18 @@ __mlu_entry__ void k0(const half *__restrict__ x,
     for (int i = E1; i < E2; ++i) {
       a[i] = 0.0f;
     }
-    __bang_add(a + 1, a + 1, a, E2 - 1);
-    __bang_add(a + 2, a + 2, a, E2 - 2);
-    __bang_add(a + 4, a + 4, a, E2 - 4);
-    __bang_add(a + 8, a + 8, a, E2 - 8);
-    __bang_add(a + 16, a + 16, a, E2 - 16);
-    __bang_add(a + 32, a + 32, a, E2 - 32);
-    __bang_add(a + 64, a + 64, a, E2 - 64);
-    __bang_add(a + 128, a + 128, a, E2 - 128);
-    __bang_add(a + 256, a + 256, a, E2 - 256);
-    __bang_add(a + 512, a + 512, a, E2 - 512);
-    __bang_add(a + 1024, a + 1024, a, E2 - 1024);
-    __bang_add(a + 2048, a + 2048, a, E2 - 2048);
+    __bang_add(a + 1, a + 1, a, 4000);
+    __bang_add(a + 2, a + 2, a, 4000);
+    __bang_add(a + 4, a + 4, a, 4000);
+    __bang_add(a + 8, a + 8, a, 4000);
+    __bang_add(a + 16, a + 16, a, 4000);
+    __bang_add(a + 32, a + 32, a, 3968);
+    __bang_add(a + 64, a + 64, a, 3936);
+    __bang_add(a + 128, a + 128, a, 3872);
+    __bang_add(a + 256, a + 256, a, 3744);
+    __bang_add(a + 512, a + 512, a, 3488);
+    __bang_add(a + 1024, a + 1024, a, 2976);
+    __bang_add(a + 2048, a + 2048, a, 1952);
     __memcpy(y + p, a, E1 * sizeof(float), NRAM2GDRAM);
   }
 }
