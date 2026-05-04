@@ -39,11 +39,11 @@ __mlu_entry__ void k(half *a) {
 
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtDim3_t d;
-  d.x = 32;
-  d.y = 1;
+  d.x = 4;
+  d.y = 8;
   d.z = 1;
 
-  k<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  k<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
 
   return x;
