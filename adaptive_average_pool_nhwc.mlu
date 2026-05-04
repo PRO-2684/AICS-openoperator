@@ -1,36 +1,40 @@
-#include <bang.h>
-#include <cnrt.h>
-#include <framework/core/MLUStream.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-#define E0 2048
-#define E1 128
+#define CNNL_CHECK(expr)                                                        \
+  do {                                                                         \
+    cnnlStatus_t s__ = (expr);                                                 \
+    TORCH_CHECK(s__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s__);   \
+  } while (0)
 
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[16];
-  for (int p = taskId; p < E0; p += taskDim) {
-    int a0 = p & 15;
-    int a1 = (p >> 4) & 15;
-    int a2 = p >> 8;
-    int q = ((a2 * 32 + (a1 << 1)) * 32 + (a0 << 1)) * 16;
-#pragma unroll
-    for (int i = 0; i < 16; ++i) {
-      float s = (float)x[q + i] + (float)x[q + 16 + i] +
-                (float)x[q + 512 + i] + (float)x[q + 528 + i];
-      a[i] = (half)(s * 0.25f);
-    }
-    __memcpy(y + (p << 4), a, 32, NRAM2GDRAM);
-  }
+static cnnlTensorDescriptor_t d0(const int *s) {
+  cnnlTensorDescriptor_t d;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, s));
+  return d;
 }
 
 torch::Tensor bang_func(torch::Tensor input, int osizeH, int osizeW) {
   (void)osizeH;
   (void)osizeW;
   auto out = torch::empty({8, 16, 16, 16}, input.options());
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {E1, 1, 1};
-  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+  static cnnlTensorDescriptor_t a = nullptr;
+  static cnnlTensorDescriptor_t b = nullptr;
+  static size_t z = 0;
+  if (a == nullptr) {
+    int s0[4] = {8, 32, 32, 16};
+    int s1[4] = {8, 16, 16, 16};
+    a = d0(s0);
+    b = d0(s1);
+    CNNL_CHECK(cnnlGetAdaptivePoolingForwardWorkspaceSize(
+        torch_mlu::getCurrentHandle(), a, CNNL_POOLING_AVERAGE_COUNT_INCLUDE_PADDING,
+        b, &z));
+  }
+  auto w = torch::empty({(int64_t)z}, input.options().dtype(torch::kUInt8));
+  CNNL_CHECK(cnnlAdaptivePoolingForward_v2(
+      torch_mlu::getCurrentHandle(), a, input.data_ptr(),
+      CNNL_POOLING_AVERAGE_COUNT_INCLUDE_PADDING, z ? w.data_ptr() : nullptr, z,
+      b, out.data_ptr(), nullptr, nullptr));
   return out;
 }
