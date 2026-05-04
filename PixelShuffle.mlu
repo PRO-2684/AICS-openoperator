@@ -3,34 +3,35 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define TOTAL (4 * 64 * 64 * 64)
-#define TASKS 32
-#define CHUNK 8192
+#define ROWS (4 * 64 * 64)
+#define OUT_W 64
+#define IN_W 32
+#define TASKS 128
+#define ROWS_PER_TASK (ROWS / TASKS)
 
 __mlu_entry__ void pixel_shuffle_kernel(const half *__restrict__ x,
                                         half *__restrict__ y) {
-  int stride = taskDim;
-  __nram__ half buf[CHUNK];
+  __nram__ half row[OUT_W];
 
-  for (int base = taskId * CHUNK; base < TOTAL; base += stride * CHUNK) {
-    __memcpy(buf, x + base, CHUNK * sizeof(half), GDRAM2NRAM);
+  int row0 = taskId * ROWS_PER_TASK;
+  for (int r = 0; r < ROWS_PER_TASK; ++r) {
+    int oid = row0 + r;
+    int h2 = oid & 63;
+    int t0 = oid >> 6;
+    int c = t0 & 63;
+    int n = t0 >> 6;
+    int h = h2 >> 1;
+    int rh = h2 & 1;
+    int base0 = (((n * 256 + (c * 4 + rh * 2)) * 32 + h) * 32);
+    int base1 = base0 + 32 * 32;
 
-    for (int i = 0; i < CHUNK; ++i) {
-      int src = base + i;
-      int w = src & 31;
-      int t0 = src >> 5;
-      int h = t0 & 31;
-      int t1 = t0 >> 5;
-      int ci = t1 & 255;
-      int n = t1 >> 8;
-
-      int c = ci >> 2;
-      int rr = ci & 3;
-      int h2 = (h << 1) + (rr >> 1);
-      int w2 = (w << 1) + (rr & 1);
-      int dst = (((n * 64 + c) * 64 + h2) * 64 + w2);
-      y[dst] = buf[i];
+#pragma unroll
+    for (int w = 0; w < IN_W; ++w) {
+      row[w * 2 + 0] = x[base0 + w];
+      row[w * 2 + 1] = x[base1 + w];
     }
+
+    __memcpy(y + oid * OUT_W, row, OUT_W * sizeof(half), NRAM2GDRAM);
   }
 }
 
