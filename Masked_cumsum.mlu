@@ -5,7 +5,7 @@
 
 #define E0 128
 #define E1 4000
-#define E2 4000
+#define E2 4096
 #define E3 3968
 
 __mlu_entry__ void k0(const half *__restrict__ x,
@@ -24,6 +24,9 @@ __mlu_entry__ void k0(const half *__restrict__ x,
     __bang_mul(a, a, b, E3);
     for (int i = E3; i < E1; ++i) {
       a[i] = m[p + i] ? (float)x[p + i] : 0.0f;
+    }
+    for (int i = E1; i < E2; ++i) {
+      a[i] = 0.0f;
     }
     __bang_write_value(b, 1, 0.0f);
     __memcpy(b + 1, a, (E2 - 1) * sizeof(float), NRAM2NRAM);
