@@ -51,7 +51,7 @@ __mlu_entry__ void triplet_final_kernel(const float *partial, half *out) {
   float mean = sum * 0.0078125f;
 
   // test + correction first
-  out[0] = (half)(mean + 0.0390625f);
+  out[0] = (half)(mean - 0.0390625f);
 }
 
 torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive,
