@@ -27,11 +27,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 }
 
 torch::Tensor bang_func(torch::Tensor input_tensor) {
-  auto out = torch::empty_like(input_tensor);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {E1, 1, 1};
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(input_tensor.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
-  return out;
+      reinterpret_cast<half *>(input_tensor.data_ptr<at::Half>()));
+  return input_tensor;
 }
