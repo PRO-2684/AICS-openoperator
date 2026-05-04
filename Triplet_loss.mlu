@@ -5,60 +5,70 @@
 
 __mlu_entry__ void triplet_partial_kernel(const half *anchor,
                                           const half *positive,
-                                          const half *negative, float *partial,
-                                          float margin) {
+                                          const half *negative, half *partial,
+                                          half margin_h) {
   int tid = taskId;
   int step = taskDim;
 
-  float local_sum = 0.0f;
+  half local_h = (half)0.0f;
+  half eps_h = (half)1.0e-6f;
+  half zero_h = (half)0.0f;
 
   for (int b = tid; b < 128; b += step) {
     int base = b << 8;
 
-    float ap = 0.0f;
-    float an = 0.0f;
+    half ap_h = (half)0.0f;
+    half an_h = (half)0.0f;
 
 #pragma unroll 4
     for (int j = 0; j < 256; ++j) {
-      float av = (float)anchor[base + j];
-      float pv = (float)positive[base + j];
-      float nv = (float)negative[base + j];
+      half av = anchor[base + j];
+      half pv = positive[base + j];
+      half nv = negative[base + j];
 
-      float dp = av - pv;
-      float dn = av - nv;
+      // PairwiseDistance-style: x - y + eps
+      half dp_h = (half)((float)av - (float)pv + (float)eps_h);
+      half dn_h = (half)((float)av - (float)nv + (float)eps_h);
 
-      ap += dp * dp;
-      an += dn * dn;
+      half sp_h = (half)((float)dp_h * (float)dp_h);
+      half sn_h = (half)((float)dn_h * (float)dn_h);
+
+      // half accumulation
+      ap_h = (half)((float)ap_h + (float)sp_h);
+      an_h = (half)((float)an_h + (float)sn_h);
     }
 
-    // 另一种常见后端语义：sqrt(sum + eps)
-    float dpos = sqrtf(ap + 1.0e-6f);
-    float dneg = sqrtf(an + 1.0e-6f);
+    half dpos_h = (half)sqrtf((float)ap_h);
+    half dneg_h = (half)sqrtf((float)an_h);
 
-    float v = dpos - dneg + margin;
-    if (v > 0.0f) {
-      local_sum += v;
+    half v_h = (half)((float)dpos_h - (float)dneg_h + (float)margin_h);
+
+    if ((float)v_h > 0.0f) {
+      local_h = (half)((float)local_h + (float)v_h);
+    } else {
+      local_h = (half)((float)local_h + (float)zero_h);
     }
   }
 
-  partial[tid] = local_sum;
+  partial[tid] = local_h;
 }
 
-__mlu_entry__ void triplet_final_kernel(const float *partial, half *out) {
-  float sum = 0.0f;
+__mlu_entry__ void triplet_final_kernel(const half *partial, half *out) {
+  half sum_h = (half)0.0f;
 
 #pragma unroll 32
   for (int i = 0; i < 32; ++i) {
-    sum += partial[i];
+    sum_h = (half)((float)sum_h + (float)partial[i]);
   }
 
-  out[0] = (half)(sum * 0.0078125f);
+  half inv_n_h = (half)0.0078125f; // 1 / 128
+  out[0] = (half)((float)sum_h * (float)inv_n_h);
 }
 
 torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive,
                         torch::Tensor negative, double margin) {
   auto out = torch::empty({}, anchor.options().dtype(torch::kHalf));
-  auto partial = torch::empty({32}, anchor.options().dtype(torch::kFloat32));
+  auto partial = torch::empty({32}, anchor.options().dtype(torch::kHalf));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
@@ -69,12 +79,13 @@ torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive,
       reinterpret_cast<const half *>(anchor.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(positive.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(negative.data_ptr<at::Half>()),
-      partial.data_ptr<float>(), static_cast<float>(margin));
+      reinterpret_cast<half *>(partial.data_ptr<at::Half>()),
+      (half) static_cast<float>(margin));
 
   cnrtDim3_t grid2 = {1, 1, 1};
 
   triplet_final_kernel<<<grid2, ktype, queue>>>(
-      partial.data_ptr<float>(),
+      reinterpret_cast<const half *>(partial.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
 
   return out;
