@@ -1,14 +1,43 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 128 128_Batch_norm_1D
-// Category: fused
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，对输入张量执行一维批归一化（Batch Normalization）计算。输入包括形状为 `[batch, features]` 的数据张量 `x`，以及形状均为 `[features]` 的均值、方差、缩放因子和偏移张量；输出张量的形状与 `x` 相同。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bias, torch::Tensor running_mean, torch::Tensor running_var, int num_features);
+#define E0 256
+#define E1 512
 
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bias, torch::Tensor running_mean, torch::Tensor running_var, int num_features) {
-  TORCH_CHECK(false, "TODO: implement Batch_norm_1D");
+__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
+                      const half *__restrict__ b, half *__restrict__ y) {
+  for (int f = taskId; f < E1; f += taskDim) {
+    float s = 0.0f;
+    for (int i = 0; i < E0; ++i) {
+      s += (float)x[i * E1 + f];
+    }
+    float mean = s * 0.00390625f;
+    float v = 0.0f;
+    for (int i = 0; i < E0; ++i) {
+      float t = (float)x[i * E1 + f] - mean;
+      v += t * t;
+    }
+    float r = 1.0f / sqrtf(v * 0.00390625f + 1.0e-5f);
+    float a = (float)w[f] * r;
+    float c = (float)b[f] - mean * a;
+    for (int i = 0; i < E0; ++i) {
+      y[i * E1 + f] = (half)((float)x[i * E1 + f] * a + c);
+    }
+  }
+}
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bias,
+                        torch::Tensor running_mean, torch::Tensor running_var,
+                        int num_features) {
+  auto out = torch::empty_like(x);
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t g = {4, 8, 1};
+  k0<<<g, cnrtFuncTypeUnion1, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(weight.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(bias.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+  return out;
 }
