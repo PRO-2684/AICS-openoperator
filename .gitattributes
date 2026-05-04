@@ -1,0 +1,2 @@
+*.mlu linguist-language=C++
+*.mlu diff=cpp
