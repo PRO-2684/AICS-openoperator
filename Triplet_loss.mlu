@@ -3,30 +3,36 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void triplet_partial_kernel(const half *anchor,
-                                          const half *positive,
-                                          const half *negative, float *partial,
-                                          float margin) {
+__mlu_entry__ void triplet_stage1_kernel(const half *anchor,
+                                         const half *positive,
+                                         const half *negative, float *partial,
+                                         float margin) {
   int tid = taskId;
   int step = taskDim;
 
-  float local_sum = 0.0f;
+  __nram__ half a_buf[256];
+  __nram__ half p_buf[256];
+  __nram__ half n_buf[256];
 
-  // batch = 128, dim = 256
+  float local = 0.0f;
+
   for (int b = tid; b < 128; b += step) {
-    int base = b << 8; // b * 256
+    int base = b << 8;
+
+    __memcpy(a_buf, anchor + base, 256 * sizeof(half), GDRAM2NRAM);
+    __memcpy(p_buf, positive + base, 256 * sizeof(half), GDRAM2NRAM);
+    __memcpy(n_buf, negative + base, 256 * sizeof(half), GDRAM2NRAM);
 
     float ap = 0.0f;
     float an = 0.0f;
 
 #pragma unroll 4
     for (int j = 0; j < 256; ++j) {
-      float av = (float)anchor[base + j];
-      float pv = (float)positive[base + j];
-      float nv = (float)negative[base + j];
+      float av = (float)a_buf[j];
+      float pv = (float)p_buf[j];
+      float nv = (float)n_buf[j];
 
-      // PyTorch PairwiseDistance has eps=1e-6 by default.
-      // For fp16 inputs this is tiny, but keep it for semantic alignment.
+      // PyTorch PairwiseDistance: ||x - y + eps||_2
       float dp = av - pv + 1.0e-6f;
       float dn = av - nv + 1.0e-6f;
 
@@ -34,19 +40,19 @@ __mlu_entry__ void triplet_partial_kernel(const half *anchor,
       an += dn * dn;
     }
 
-    float dpos = sqrtf(ap);
-    float dneg = sqrtf(an);
+    float d_ap = sqrtf(ap);
+    float d_an = sqrtf(an);
 
-    float v = dpos - dneg + margin;
+    float v = d_ap - d_an + margin;
     if (v > 0.0f) {
-      local_sum += v;
+      local += v;
     }
   }
 
-  partial[tid] = local_sum;
+  partial[tid] = local;
 }
 
-__mlu_entry__ void triplet_final_kernel(const float *partial, half *out) {
+__mlu_entry__ void triplet_stage2_kernel(const float *partial, float *out) {
   float sum = 0.0f;
 
 #pragma unroll 32
@@ -54,21 +60,21 @@ __mlu_entry__ void triplet_final_kernel(const float *partial, half *out) {
     sum += partial[i];
   }
 
-  float mean = sum * 0.0078125f; // / 128
-  out[0] = (half)mean;
+  out[0] = sum * 0.0078125f; // / 128
 }
 
 torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive,
                         torch::Tensor negative, double margin) {
-  auto out = torch::empty({}, anchor.options().dtype(torch::kHalf));
+  // 先用 float32 输出对齐 PyTorch loss reduction
+  auto out = torch::empty({}, anchor.options().dtype(torch::kFloat32));
   auto partial = torch::empty({32}, anchor.options().dtype(torch::kFloat32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-
-  cnrtDim3_t grid1 = {4, 8, 1}; // 32 tasks
   cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
 
-  triplet_partial_kernel<<<grid1, ktype, queue>>>(
+  cnrtDim3_t grid1 = {4, 8, 1};
+
+  triplet_stage1_kernel<<<grid1, ktype, queue>>>(
       reinterpret_cast<const half *>(anchor.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(positive.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(negative.data_ptr<at::Half>()),
@@ -76,9 +82,8 @@ torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive,
 
   cnrtDim3_t grid2 = {1, 1, 1};
 
-  triplet_final_kernel<<<grid2, ktype, queue>>>(
-      partial.data_ptr<float>(),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+  triplet_stage2_kernel<<<grid2, ktype, queue>>>(partial.data_ptr<float>(),
+                                                 out.data_ptr<float>());
 
   return out;
 }
