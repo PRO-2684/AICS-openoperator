@@ -4,26 +4,26 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k(half *a) {
-  __nram__ half x[196608];
+  __nram__ half x[98304];
 
   int64_t s = (int64_t)taskId * 2097152;
 
-  for (int i = 0; i < 34; ++i) {
+  for (int i = 0; i < 66; ++i) {
     if (i >= 2) {
       int u = i - 2;
-      int v = (u % 3) * 65536;
-      __memcpy_async(a + s + (int64_t)u * 65536, x + v, 131072, NRAM2GDRAM);
+      int v = (u % 3) * 32768;
+      __memcpy_async(a + s + (int64_t)u * 32768, x + v, 65536, NRAM2GDRAM);
     }
 
-    if (i >= 1 && i < 33) {
+    if (i >= 1 && i < 65) {
       int u = i - 1;
-      int v = (u % 3) * 65536;
-      __bang_mul_scalar(x + v, x + v, (half)0.0001220703125f, 65536);
+      int v = (u % 3) * 32768;
+      __bang_mul_scalar(x + v, x + v, (half)0.0001220703125f, 32768);
     }
 
-    if (i < 32) {
-      int v = (i % 3) * 65536;
-      __memcpy_async(x + v, a + s + (int64_t)i * 65536, 131072, GDRAM2NRAM);
+    if (i < 64) {
+      int v = (i % 3) * 32768;
+      __memcpy_async(x + v, a + s + (int64_t)i * 32768, 65536, GDRAM2NRAM);
     }
 
     __sync_all_ipu();
