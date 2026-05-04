@@ -176,7 +176,7 @@ python scripts/update_problems.py
 | 125 | [Conditional_LayerNorm](Conditional_LayerNorm.mlu) | N/A | 🔴 |
 | 126 | [QR_decomposition](QR_decomposition.mlu) | N/A | 🔴 |
 | 127 | [Cholesky_decomposition](Cholesky_decomposition.mlu) | N/A | 🔴 |
-| 128 | [Batch_norm_1D](Batch_norm_1D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/85346fb) |
+| 128 | [Batch_norm_1D](Batch_norm_1D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/1325e01) |
 | 129 | [Attention_score_with_bias](Attention_score_with_bias.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/e75ce60ab51fc881aa0b5945af39e76104a1a355) |
 | 130 | [Attention_kv_cache](Attention_kv_cache.mlu) | N/A | 🔴 |
 | 131 | [Relative_position_encoding](Relative_position_encoding.mlu) | N/A | 🔴 |
