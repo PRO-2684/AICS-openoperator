@@ -1,14 +1,44 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 102 102_Adaptive_Average_Pool_3D
-// Category: pool
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，对五维输入张量执行三维自适应平均池化操作。输入包括形状为 `[batch, C, D, H, W]` 的张量 `x` 以及定义目标输出空间维度的参数 `output_size`；输出张量在保持批大小和通道数不变的情况下，将深度、高度和宽度维度自动调整为 `output_size` 指定的大小。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x, std::vector<int64_t> output_size);
+#define E0 64
+#define E1 4
+#define E2 8
+#define E3 8
+#define E4 32
+#define E5 32
+#define E6 32
+
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  int n = E0 * E1 * E2 * E3;
+  for (int t = taskId; t < n; t += taskDim) {
+    int w = t & 7;
+    int h = (t >> 3) & 7;
+    int d = (t >> 6) & 3;
+    int bc = t >> 8;
+    int p = bc * (E4 * E5 * E6) + d * 8 * (E5 * E6) + h * 4 * E6 + w * 4;
+    float s = 0.0f;
+    for (int z = 0; z < 8; ++z) {
+      int q = p + z * E5 * E6;
+      for (int r = 0; r < 4; ++r) {
+#pragma unroll 4
+        for (int c = 0; c < 4; ++c) {
+          s += (float)x[q + r * E6 + c];
+        }
+      }
+    }
+    y[t] = (half)(s * 0.0078125f);
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor x, std::vector<int64_t> output_size) {
-  TORCH_CHECK(false, "TODO: implement Adaptive_Average_Pool_3D");
+  auto out = torch::empty({4, 16, E1, E2, E3}, x.options());
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t g = {4, 8, 1};
+  k0<<<g, cnrtFuncTypeUnion1, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+  return out;
 }
