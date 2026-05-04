@@ -26,6 +26,7 @@ torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   static cnnlTensorDescriptor_t x_desc = nullptr;
   static cnnlTensorDescriptor_t y_desc = nullptr;
   static size_t workspace_size = 0;
+  static torch::Tensor workspace;
   if (x_desc == nullptr) {
     std::vector<int> x_shape = {128, 4096};
     std::vector<int> y_shape = {1};
@@ -34,10 +35,9 @@ torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
     CNNL_CHECK(cnnlGetSmoothL1LossForwardWorkspaceSize(
         torch_mlu::getCurrentHandle(), x_desc, CNNL_SMOOTHL1LOSS_REDUCTION_MEAN,
         &workspace_size));
+    workspace =
+        torch::empty({(int64_t)workspace_size}, predictions.options().dtype(torch::kUInt8));
   }
-
-  auto workspace =
-      torch::empty({(int64_t)workspace_size}, predictions.options().dtype(torch::kUInt8));
 
   CNNL_CHECK(cnnlSmoothL1LossForward_v2(
       torch_mlu::getCurrentHandle(), x_desc, predictions.data_ptr(), x_desc,
