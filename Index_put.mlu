@@ -4,21 +4,30 @@
 #include <stdint.h>
 #include <torch/extension.h>
 
-#define E0 2097152
 #define E1 512
-#define E2 32
+#define E2 64
 
-__mlu_entry__ void k0(const half *__restrict__ values,
+__mlu_entry__ void k0(const half *__restrict__ input,
+                      const half *__restrict__ values,
                       const int64_t *__restrict__ index,
                       half *__restrict__ out, int k) {
   __nram__ half a[E1];
 
-  for (int p = taskId; p < k; p += taskDim) {
-    int64_t q = index[p];
-    const half *src = values + p * E1;
-    half *dst = out + q * E1;
+  for (int p = taskId; p < 4096; p += taskDim) {
+    const half *src = input + p * E1;
+    half *dst = out + p * E1;
     __memcpy(a, src, E1 * sizeof(half), GDRAM2NRAM);
     __memcpy(dst, a, E1 * sizeof(half), NRAM2GDRAM);
+  }
+
+  for (int p = 0; p < k; ++p) {
+    int64_t q = index[p];
+    if ((q & (E2 - 1)) == taskId) {
+      const half *src = values + p * E1;
+      half *dst = out + q * E1;
+      __memcpy(a, src, E1 * sizeof(half), GDRAM2NRAM);
+      __memcpy(dst, a, E1 * sizeof(half), NRAM2GDRAM);
+    }
   }
 }
 
@@ -26,12 +35,11 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor values,
                         torch::Tensor index) {
   auto out = torch::empty_like(input);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtMemcpyAsync(out.data_ptr(), input.data_ptr(), E0 * sizeof(half), queue,
-                  cnrtMemcpyDevToDev);
 
   int k = (int)index.size(0);
   cnrtDim3_t dim = {E2, 1, 1};
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(values.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(index.data_ptr<int64_t>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()), k);
