@@ -1,70 +1,112 @@
-#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
-#include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <math.h>
 #include <torch/extension.h>
-
-#include <vector>
 
 #define ROWS 128
 #define COLS 4096
+#define PARTS 2
+#define CHUNK (COLS / PARTS)
+#define TASKS (ROWS * PARTS)
 
-#define CNNL_CHECK(expr)                                                        \
-  do {                                                                         \
-    cnnlStatus_t status__ = (expr);                                            \
-    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ",         \
-                (int)status__);                                                \
-  } while (0)
+__mlu_func__ float reduce_sum_float_small(float *buf, float *tmp, int n) {
+  int cur = n;
+  float *src = buf;
+  float *dst = tmp;
 
-inline cnnlTensorDescriptor_t make_desc(const std::vector<int> &shape) {
-  cnnlTensorDescriptor_t desc;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&desc));
-  CNNL_CHECK(cnnlSetTensorDescriptor(desc, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF,
-                                     (int)shape.size(), shape.data()));
-  return desc;
+  while (cur > 32) {
+    __bang_reduce_sum(dst, src, cur);
+    int groups = cur / 32;
+
+    for (int i = 0; i < groups; ++i) {
+      src[i] = dst[i * 32];
+    }
+
+    cur = groups;
+  }
+
+  float s = 0.0f;
+  for (int i = 0; i < cur; ++i) {
+    s += src[i];
+  }
+  return s;
 }
 
-__mlu_entry__ void cosine_loss_finish_kernel(const half *__restrict__ vals,
+__mlu_entry__ void cosine_part_kernel(const half *__restrict__ predictions,
+                                      const half *__restrict__ targets,
+                                      float *__restrict__ partial) {
+  int gid = taskId;
+  int row = gid / PARTS;
+  int part = gid - row * PARTS;
+  int base = row * COLS + part * CHUNK;
+
+  __nram__ half ph[CHUNK];
+  __nram__ half th[CHUNK];
+  __nram__ float pf[CHUNK];
+  __nram__ float tf[CHUNK];
+  __nram__ float work[CHUNK];
+
+  __memcpy(ph, predictions + base, CHUNK * sizeof(half), GDRAM2NRAM);
+  __memcpy(th, targets + base, CHUNK * sizeof(half), GDRAM2NRAM);
+
+  __bang_half2float(pf, ph, CHUNK);
+  __bang_half2float(tf, th, CHUNK);
+  __bang_mul(work, pf, tf, CHUNK);
+  float dot = reduce_sum_float_small(work, tf, CHUNK);
+
+  __bang_square(pf, pf, CHUNK);
+  float ps = reduce_sum_float_small(pf, tf, CHUNK);
+
+  __bang_half2float(tf, th, CHUNK);
+  __bang_square(tf, tf, CHUNK);
+  float ts = reduce_sum_float_small(tf, pf, CHUNK);
+
+  int out = gid * 3;
+  partial[out + 0] = dot;
+  partial[out + 1] = ps;
+  partial[out + 2] = ts;
+}
+
+__mlu_entry__ void cosine_loss_finish_kernel(const float *__restrict__ partial,
                                              half *__restrict__ out) {
   float acc = 0.0f;
 
 #pragma unroll 1
-  for (int i = 0; i < ROWS; ++i) {
-    acc += (float)vals[i];
+  for (int row = 0; row < ROWS; ++row) {
+    float dot = 0.0f;
+    float ps = 0.0f;
+    float ts = 0.0f;
+
+#pragma unroll
+    for (int part = 0; part < PARTS; ++part) {
+      int base = (row * PARTS + part) * 3;
+      dot += partial[base + 0];
+      ps += partial[base + 1];
+      ts += partial[base + 2];
+    }
+
+    acc += 1.0f - dot / sqrtf(ps * ts);
   }
 
-  out[0] = (half)(1.0f - acc * (1.0f / (float)ROWS));
+  out[0] = (half)(acc * (1.0f / (float)ROWS));
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
-  auto vals = torch::empty({ROWS}, predictions.options());
   auto out = torch::empty({}, predictions.options());
-
-  std::vector<int> x_shape = {ROWS, COLS};
-  std::vector<int> y_shape = {ROWS};
-  auto x_desc = make_desc(x_shape);
-  auto y_desc = make_desc(y_shape);
-
-  size_t workspace_size = 0;
-  CNNL_CHECK(cnnlGetCosineSimilarityWorkspaceSize(
-      torch_mlu::getCurrentHandle(), 1, x_desc, x_desc, y_desc, &workspace_size));
-  auto workspace =
-      torch::empty({(int64_t)workspace_size}, predictions.options().dtype(torch::kUInt8));
-
-  CNNL_CHECK(cnnlCosineSimilarity(
-      torch_mlu::getCurrentHandle(), 1, 1.0e-8f, x_desc, predictions.data_ptr(),
-      x_desc, targets.data_ptr(), workspace.data_ptr(), workspace_size, y_desc,
-      vals.data_ptr()));
+  auto partial = torch::empty({TASKS * 3}, predictions.options().dtype(torch::kFloat32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t tasks = {TASKS, 1, 1};
   cnrtDim3_t one = {1, 1, 1};
-  cosine_loss_finish_kernel<<<one, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(vals.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
 
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(y_desc));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(x_desc));
+  cosine_part_kernel<<<tasks, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(targets.data_ptr<at::Half>()),
+      reinterpret_cast<float *>(partial.data_ptr<float>()));
+  cosine_loss_finish_kernel<<<one, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const float *>(partial.data_ptr<float>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
 
   return out;
 }
