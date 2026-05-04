@@ -4,19 +4,18 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k(half *a) {
-  __nram__ half x[196608];
+  __nram__ half x[131072];
 
   int64_t s = (int64_t)taskId * 2097152;
-  int64_t e = s + 2097152;
 
-  for (int64_t p = s; p < e; p += 196608) {
-    int n = e - p;
-    if (n > 196608)
-      n = 196608;
+  for (int64_t p = s; p < s + 2097152; p += 262144) {
+    __memcpy(x, a + p, 262144, GDRAM2NRAM);
+    __bang_mul_scalar(x, x, (half)0.0001220703125f, 131072);
+    __memcpy(a + p, x, 262144, NRAM2GDRAM);
 
-    __memcpy(x, a + p, n * 2, GDRAM2NRAM);
-    __bang_mul_scalar(x, x, (half)0.0001220703125f, n);
-    __memcpy(a + p, x, n * 2, NRAM2GDRAM);
+    __memcpy(x, a + p + 131072, 262144, GDRAM2NRAM);
+    __bang_mul_scalar(x, x, (half)0.0001220703125f, 131072);
+    __memcpy(a + p + 131072, x, 262144, NRAM2GDRAM);
   }
 }
 
