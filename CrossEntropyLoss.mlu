@@ -1,7 +1,6 @@
 #include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
 #include <cnnl.h>
-#include <cnnl_extra.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <stdint.h>
@@ -40,14 +39,14 @@ __mlu_entry__ void labels_i32_kernel(const int64_t *__restrict__ src,
   }
 }
 
-__mlu_entry__ void ce_mean_kernel(const float *__restrict__ losses,
+__mlu_entry__ void ce_mean_kernel(const half *__restrict__ losses,
                                   half *__restrict__ out) {
   int base = taskId * ROWS_PER_TASK;
   float acc = 0.0f;
 
 #pragma unroll 1
   for (int i = 0; i < ROWS_PER_TASK; ++i) {
-    acc += losses[base + i];
+    acc += (float)losses[base + i];
   }
 
   __mlu_shared__ float part[TASKS];
@@ -67,20 +66,16 @@ __mlu_entry__ void ce_mean_kernel(const float *__restrict__ losses,
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   auto out = torch::empty({}, predictions.options());
   auto labels = torch::empty({ROWS}, targets.options().dtype(torch::kInt32));
-  auto losses = torch::empty({ROWS}, predictions.options().dtype(torch::kFloat32));
-  auto lse = torch::empty({ROWS}, predictions.options().dtype(torch::kFloat32));
+  auto losses = torch::empty({ROWS}, predictions.options());
+  auto diff = torch::empty({ROWS, COLS}, predictions.options());
 
   static cnnlTensorDescriptor_t logits_desc = nullptr;
   static cnnlTensorDescriptor_t labels_desc = nullptr;
-  static cnnlTensorDescriptor_t vec_desc = nullptr;
-  static size_t workspace_size = 0;
+  static cnnlTensorDescriptor_t loss_desc = nullptr;
   if (logits_desc == nullptr) {
     logits_desc = make_desc({ROWS, COLS}, CNNL_DTYPE_HALF);
     labels_desc = make_desc({ROWS}, CNNL_DTYPE_INT32);
-    vec_desc = make_desc({ROWS}, CNNL_DTYPE_FLOAT);
-    CNNL_CHECK(cnnlGetCrossEntropyForwardWorkspaceSize(
-        torch_mlu::getCurrentHandle(), false, 0.0f, -100, logits_desc,
-        labels_desc, &workspace_size));
+    loss_desc = make_desc({ROWS}, CNNL_DTYPE_HALF);
   }
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
@@ -89,17 +84,13 @@ torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
       reinterpret_cast<const int64_t *>(targets.data_ptr<int64_t>()),
       reinterpret_cast<int *>(labels.data_ptr<int>()));
 
-  auto workspace =
-      torch::empty({(int64_t)workspace_size}, predictions.options().dtype(torch::kUInt8));
-
-  CNNL_CHECK(cnnlCrossEntropyForward(
-      torch_mlu::getCurrentHandle(), false, 0.0f, 0.0f, logits_desc,
-      predictions.data_ptr(), -100, 0, COLS, workspace.data_ptr(),
-      workspace_size, labels_desc, labels.data_ptr(), vec_desc, losses.data_ptr(),
-      vec_desc, lse.data_ptr()));
+  CNNL_CHECK(cnnlSparseSoftmaxCrossEntropyWithLogits(
+      torch_mlu::getCurrentHandle(), CNNL_SOFTMAX_MODE_LOW_DIMENSION,
+      logits_desc, predictions.data_ptr(), labels_desc, labels.data_ptr(),
+      loss_desc, losses.data_ptr(), logits_desc, diff.data_ptr()));
 
   ce_mean_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const float *>(losses.data_ptr<float>()),
+      reinterpret_cast<const half *>(losses.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
 
   return out;
