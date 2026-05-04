@@ -6,7 +6,7 @@
 
 #define E0 2097152
 #define E1 512
-#define E2 64
+#define E2 128
 
 __mlu_entry__ void k0(const half *__restrict__ values,
                       const int64_t *__restrict__ index,
