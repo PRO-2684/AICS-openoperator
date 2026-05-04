@@ -3,53 +3,48 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void upsample2_float_kernel(const float* x, float* out, int total,
-                                          int c, int h, int w) {
-  int idx = taskId;
-  int task_num = taskDim;
-  int oh = h * 2, ow = w * 2;
-  for (int p = idx; p < total; p += task_num) {
-    int t = p;
-    int ow_i = t % ow; t /= ow;
-    int oh_i = t % oh; t /= oh;
-    int c_i = t % c; t /= c;
-    int n_i = t;
-    int in_idx = ((n_i * c + c_i) * h + (oh_i >> 1)) * w + (ow_i >> 1);
-    out[p] = x[in_idx];
-  }
-}
+#define N 4
+#define C 64
+#define H 64
+#define W 64
+#define OW 128
+#define ROWS (N * C * H)
+#define TASKS 128
+#define ROWS_PER_TASK (ROWS / TASKS)
 
-__mlu_entry__ void upsample2_half_kernel(const half* x, half* out, int total,
-                                         int c, int h, int w) {
-  int idx = taskId;
-  int task_num = taskDim;
-  int oh = h * 2, ow = w * 2;
-  for (int p = idx; p < total; p += task_num) {
-    int t = p;
-    int ow_i = t % ow; t /= ow;
-    int oh_i = t % oh; t /= oh;
-    int c_i = t % c; t /= c;
-    int n_i = t;
-    int in_idx = ((n_i * c + c_i) * h + (oh_i >> 1)) * w + (ow_i >> 1);
-    out[p] = x[in_idx];
+__mlu_entry__ void upsample2_kernel(const half *__restrict__ x,
+                                    half *__restrict__ out) {
+  __nram__ half inrow[W];
+  __nram__ half outrow[OW];
+
+  int row0 = taskId * ROWS_PER_TASK;
+  for (int r = 0; r < ROWS_PER_TASK; ++r) {
+    int row = row0 + r;
+    const half *src = x + row * W;
+    int oc_row = row << 1;
+    half *dst0 = out + oc_row * OW;
+    half *dst1 = dst0 + OW;
+
+    __memcpy(inrow, src, W * sizeof(half), GDRAM2NRAM);
+#pragma unroll
+    for (int i = 0; i < W; ++i) {
+      outrow[(i << 1) + 0] = inrow[i];
+      outrow[(i << 1) + 1] = inrow[i];
+    }
+    __memcpy(dst0, outrow, OW * sizeof(half), NRAM2GDRAM);
+    __memcpy(dst1, outrow, OW * sizeof(half), NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int scale_factor) {
   (void)scale_factor;
-  int n = (int)x.size(0), c = (int)x.size(1), h = (int)x.size(2), w = (int)x.size(3);
-  auto out = torch::empty({n, c, h * 2, w * 2}, x.options());
-  int total = out.numel();
+  auto out = torch::empty({N, C, H * 2, W * 2}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {4, 8, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
-  if (x.scalar_type() == at::kHalf) {
-    upsample2_half_kernel<<<dim, ktype, queue>>>(
-        reinterpret_cast<const half*>(x.data_ptr<at::Half>()),
-        reinterpret_cast<half*>(out.data_ptr<at::Half>()), total, c, h, w);
-  } else {
-    upsample2_float_kernel<<<dim, ktype, queue>>>(x.data_ptr<float>(), out.data_ptr<float>(),
-                                                 total, c, h, w);
-  }
+  cnrtDim3_t dim = {TASKS, 1, 1};
+
+  upsample2_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+
   return out;
 }
