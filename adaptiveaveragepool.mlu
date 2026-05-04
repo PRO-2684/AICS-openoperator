@@ -3,26 +3,31 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 4096
-#define E1 64
+#define E0 512
+#define E1 128
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[8];
   for (int p = taskId; p < E0; p += taskDim) {
     int a0 = p & 7;
     int a1 = (p >> 3) & 7;
-    int a2 = (p >> 6) & 7;
-    int a3 = p >> 9;
-    int q = (((a3 * 16 + (a2 << 1)) * 16 + (a1 << 1)) * 16 + (a0 << 1));
-    float s = 0.0f;
-    s += (float)x[q];
-    s += (float)x[q + 1];
-    s += (float)x[q + 16];
-    s += (float)x[q + 17];
-    s += (float)x[q + 256];
-    s += (float)x[q + 257];
-    s += (float)x[q + 272];
-    s += (float)x[q + 273];
-    y[p] = (half)(s * 0.125f);
+    int a2 = p >> 6;
+    int q = ((a2 * 16 + (a1 << 1)) * 16 + (a0 << 1)) * 16;
+#pragma unroll
+    for (int i = 0; i < 8; ++i) {
+      int r = i << 1;
+      float s = 0.0f;
+      s += (float)x[q + r];
+      s += (float)x[q + r + 1];
+      s += (float)x[q + r + 16];
+      s += (float)x[q + r + 17];
+      s += (float)x[q + r + 256];
+      s += (float)x[q + r + 257];
+      s += (float)x[q + r + 272];
+      s += (float)x[q + r + 273];
+      a[i] = (half)(s * 0.125f);
+    }
+    __memcpy(y + (p << 3), a, 16, NRAM2GDRAM);
   }
 }
 
