@@ -17,6 +17,7 @@ __mlu_entry__ void triplet_partial_kernel(const half *anchor,
 
     float ap = 0.0f;
     float an = 0.0f;
+    float pn = 0.0f;
 
 #pragma unroll 4
     for (int j = 0; j < 256; ++j) {
@@ -24,14 +25,25 @@ __mlu_entry__ void triplet_partial_kernel(const half *anchor,
       float pv = (float)positive[base + j];
       float nv = (float)negative[base + j];
 
-      float dp = av - pv + 1.0e-6f;
-      float dn = av - nv + 1.0e-6f;
+      float dap = av - pv + 1.0e-6f;
+      float dan = av - nv + 1.0e-6f;
+      float dpn = pv - nv + 1.0e-6f;
 
-      ap += dp * dp;
-      an += dn * dn;
+      ap += dap * dap;
+      an += dan * dan;
+      pn += dpn * dpn;
     }
 
-    float v = sqrtf(ap) - sqrtf(an) + margin;
+    float dpos = sqrtf(ap);
+    float dneg = sqrtf(an);
+    float dswap = sqrtf(pn);
+
+    // swap=True: dneg = min(d(a,n), d(p,n))
+    if (dswap < dneg) {
+      dneg = dswap;
+    }
+
+    float v = dpos - dneg + margin;
     if (v > 0.0f) {
       local_sum += v;
     }
@@ -48,10 +60,7 @@ __mlu_entry__ void triplet_final_kernel(const float *partial, half *out) {
     sum += partial[i];
   }
 
-  float mean = sum * 0.0078125f;
-
-  // test + correction first
-  out[0] = (half)(mean - 0.0390625f);
+  out[0] = (half)(sum * 0.0078125f);
 }
 
 torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive,
