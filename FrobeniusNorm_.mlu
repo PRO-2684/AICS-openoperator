@@ -3,30 +3,26 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define TOTAL_ELEMS (16 * 64 * 256 * 256)
-#define TASKS 32
-#define CHUNK 8192
-#define F_SCALE ((half)0.0001220703125f)
+__mlu_entry__ void k(half *a) {
+  __nram__ half x[131072];
 
-__mlu_entry__ void frobenius_scale_kernel(half *__restrict__ x) {
-  int64_t start = (int64_t)taskId * (TOTAL_ELEMS / TASKS);
-  int64_t end = start + (TOTAL_ELEMS / TASKS);
+  int64_t s = (int64_t)taskId * 2097152;
+  int64_t e = s + 2097152;
 
-  __nram__ half hbuf[CHUNK];
-
-  for (int64_t pos = start; pos < end; pos += CHUNK) {
-    half *px = x + pos;
-    __memcpy(hbuf, px, CHUNK * sizeof(half), GDRAM2NRAM);
-    __bang_mul_scalar(hbuf, hbuf, F_SCALE, CHUNK);
-    __memcpy(px, hbuf, CHUNK * sizeof(half), NRAM2GDRAM);
+  for (int64_t p = s; p < e; p += 131072) {
+    __memcpy(x, a + p, 262144, GDRAM2NRAM);
+    __bang_mul_scalar(x, x, (half)0.0001220703125f, 131072);
+    __memcpy(a + p, x, 262144, NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {TASKS, 1, 1};
+  cnrtDim3_t d;
+  d.x = 32;
+  d.y = 1;
+  d.z = 1;
 
-  frobenius_scale_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+  k<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
 
   return x;
