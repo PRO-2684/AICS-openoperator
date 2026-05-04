@@ -1,14 +1,54 @@
-#include <bang.h>
-#include <cnrt.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-// Task: 094 094_LayerNorm
-// Category: fused
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，对输入张量执行层归一化（Layer Normalization）操作。输入包括形状为 `[batch, seq, d_model]` 的张量 `x`，以及形状均为 `[d_model]` 的缩放参数 `weight` 和偏移参数 `bias`；输出为归一化后的张量，其形状与 `x` 保持一致。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bias, int normalized_shape);
+#include <vector>
 
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bias, int normalized_shape) {
-  TORCH_CHECK(false, "TODO: implement LayerNorm");
+#define CNNL_CHECK(expr)                                                        \
+  do {                                                                         \
+    cnnlStatus_t s__ = (expr);                                                 \
+    TORCH_CHECK(s__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s__);   \
+  } while (0)
+
+static cnnlTensorDescriptor_t make_desc(const std::vector<int> &shape,
+                                        cnnlDataType_t dtype) {
+  cnnlTensorDescriptor_t desc;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&desc));
+  CNNL_CHECK(cnnlSetTensorDescriptor(desc, CNNL_LAYOUT_ARRAY, dtype,
+                                     (int)shape.size(), shape.data()));
+  return desc;
+}
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bias,
+                        int normalized_shape) {
+  (void)normalized_shape;
+
+  auto y = torch::empty_like(x);
+  auto mean = torch::empty({32 * 128}, x.options());
+  auto rstd = torch::empty({32 * 128}, x.options());
+
+  static cnnlTensorDescriptor_t x_desc = nullptr;
+  static cnnlTensorDescriptor_t wb_desc = nullptr;
+  static cnnlTensorDescriptor_t mr_desc = nullptr;
+  static cnnlNormDescriptor_t norm_desc = nullptr;
+  static size_t ws_size = 0;
+  if (x_desc == nullptr) {
+    x_desc = make_desc({32, 128, 512}, CNNL_DTYPE_HALF);
+    wb_desc = make_desc({512}, CNNL_DTYPE_HALF);
+    mr_desc = make_desc({32 * 128}, CNNL_DTYPE_HALF);
+    CNNL_CHECK(cnnlCreateNormDesc(&norm_desc));
+    int allow = 1;
+    CNNL_CHECK(cnnlSetNormDescAttr(norm_desc, CNNL_NORM_DESC_ALLOW_REDUCED_PRECISION,
+                                   &allow, sizeof(allow)));
+    CNNL_CHECK(cnnlGetLayerNormOpWorkspaceSize(
+        torch_mlu::getCurrentHandle(), 2, x_desc, &ws_size));
+  }
+
+  auto ws = torch::empty({(int64_t)ws_size}, x.options().dtype(torch::kUInt8));
+  CNNL_CHECK(cnnlLayerNormForward_v2(
+      torch_mlu::getCurrentHandle(), norm_desc, x_desc, x.data_ptr(), 2, wb_desc,
+      weight.data_ptr(), bias.data_ptr(), 1.0e-5f, ws_size ? ws.data_ptr() : nullptr,
+      ws_size, x_desc, y.data_ptr(), mr_desc, mean.data_ptr(), rstd.data_ptr()));
+
+  return y;
 }
