@@ -7,22 +7,19 @@
 
 __mlu_entry__ void k0(const int *__restrict__ x, int *__restrict__ y) {
   __nram__ int a[E0];
-  __nram__ int b[E0 * 2];
   __memcpy(a, x, E0 * sizeof(int), GDRAM2NRAM);
   int s = 0;
   for (int i = 0; i < E0; ++i) {
     s += a[i];
-    b[(i << 1) + 0] = s;
-    b[(i << 1) + 1] = s < 0 ? -1 : 0;
+    a[i] = s;
   }
-  __memcpy(y, b, E0 * 2 * sizeof(int), NRAM2GDRAM);
+  __memcpy(y, a, E0 * sizeof(int), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor agg) {
-  auto out = torch::empty({E0}, agg.options().dtype(torch::kInt64));
+  auto out = torch::empty({E0}, agg.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {1, 1, 1};
-  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
-      agg.data_ptr<int>(), reinterpret_cast<int *>(out.data_ptr<int64_t>()));
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(agg.data_ptr<int>(), out.data_ptr<int>());
   return out;
 }
