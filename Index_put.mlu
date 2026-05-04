@@ -4,33 +4,33 @@
 #include <stdint.h>
 #include <torch/extension.h>
 
-#define M 4096
-#define N 512
-#define COPY_ELEMS (M * N)
-#define TASKS 32
+#define E0 2097152
+#define E1 512
+#define T0 32
 
 __mlu_entry__ void put_rows_kernel(const half *__restrict__ values,
                                    const int64_t *__restrict__ index,
                                    half *__restrict__ out, int k) {
   int stride = taskDim;
+  __nram__ half buf[E1];
+
   for (int row = taskId; row < k; row += stride) {
     int64_t dst_row = index[row];
-    const half *src = values + row * N;
-    half *dst = out + dst_row * N;
-    for (int c = 0; c < N; ++c) {
-      dst[c] = src[c];
-    }
+    const half *src = values + row * E1;
+    half *dst = out + dst_row * E1;
+    __memcpy(buf, src, E1 * sizeof(half), GDRAM2NRAM);
+    __memcpy(dst, buf, E1 * sizeof(half), NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor values, torch::Tensor index) {
   auto out = torch::empty_like(input);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtMemcpyAsync(out.data_ptr(), input.data_ptr(), COPY_ELEMS * sizeof(half),
+  cnrtMemcpyAsync(out.data_ptr(), input.data_ptr(), E0 * sizeof(half),
                   queue, cnrtMemcpyDevToDev);
 
   int k = (int)index.size(0);
-  cnrtDim3_t dim = {TASKS, 1, 1};
+  cnrtDim3_t dim = {T0, 1, 1};
   put_rows_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(values.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(index.data_ptr<int64_t>()),
