@@ -4,7 +4,7 @@
 #include <torch/extension.h>
 
 #define E0 128
-#define E1 32
+#define E1 128
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ out) {
   __nram__ half a[64];
