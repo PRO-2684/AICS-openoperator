@@ -5,9 +5,9 @@
 
 #define N 128
 
-__mlu_entry__ void kernel(const half *__restrict__ p,
-                          const half *__restrict__ t,
-                          half *__restrict__ out) {
+__mlu_entry__ void hinge_loss_kernel(const half *__restrict__ p,
+                                     const half *__restrict__ t,
+                                     half *__restrict__ out) {
   float acc = 0.0f;
 #pragma unroll 1
   for (int i = 0; i < N; ++i) {
@@ -21,7 +21,7 @@ torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   auto out = torch::empty({}, predictions.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {1, 1, 1};
-  kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+  hinge_loss_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(targets.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
