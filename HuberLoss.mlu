@@ -1,88 +1,47 @@
-#include <bang.h>
-#include <cnrt.h>
-#include <framework/core/MLUStream.h>
-#include <math.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-#define TOTAL_ELEMS (128 * 4096)
-#define TASKS 32
-#define ELEMS_PER_TASK (TOTAL_ELEMS / TASKS)
+#include <vector>
 
-__mlu_func__ float reduce_sum_float(float *buf, float *tmp, int n) {
-  int cur = n;
-  float *src = buf;
-  float *dst = tmp;
+#define CNNL_CHECK(expr)                                                        \
+  do {                                                                         \
+    cnnlStatus_t status__ = (expr);                                            \
+    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ",         \
+                (int)status__);                                                \
+  } while (0)
 
-  while (cur > 32) {
-    __bang_reduce_sum(dst, src, cur);
-    int groups = cur / 32;
-
-    for (int i = 0; i < groups; ++i) {
-      src[i] = dst[i * 32];
-    }
-
-    cur = groups;
-  }
-
-  float s = 0.0f;
-  for (int i = 0; i < cur; ++i) {
-    s += src[i];
-  }
-  return s;
-}
-
-__mlu_entry__ void huber_partial_kernel(const half *__restrict__ predictions,
-                                        const half *__restrict__ targets,
-                                        float *__restrict__ partial) {
-  int base = taskId * ELEMS_PER_TASK;
-
-  __nram__ half pbuf[ELEMS_PER_TASK];
-  __nram__ half tbuf[ELEMS_PER_TASK];
-  __nram__ float fbuf[ELEMS_PER_TASK];
-  __nram__ float rbuf[ELEMS_PER_TASK];
-
-  __memcpy(pbuf, predictions + base, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
-  __memcpy(tbuf, targets + base, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
-  __bang_sub(pbuf, pbuf, tbuf, ELEMS_PER_TASK);
-  __bang_half2float(fbuf, pbuf, ELEMS_PER_TASK);
-  __bang_active_abs(fbuf, fbuf, ELEMS_PER_TASK);
-
-#pragma unroll 1
-  for (int i = 0; i < ELEMS_PER_TASK; ++i) {
-    float d = fbuf[i];
-    fbuf[i] = d < 1.0f ? 0.5f * d * d : d - 0.5f;
-  }
-
-  partial[taskId] = reduce_sum_float(fbuf, rbuf, ELEMS_PER_TASK);
-}
-
-__mlu_entry__ void huber_finish_kernel(const float *__restrict__ partial,
-                                       half *__restrict__ out) {
-  float acc = 0.0f;
-
-#pragma unroll
-  for (int i = 0; i < TASKS; ++i) {
-    acc += partial[i];
-  }
-
-  out[0] = (half)(acc * (1.0f / (float)TOTAL_ELEMS));
+inline cnnlTensorDescriptor_t make_desc(const std::vector<int> &shape,
+                                        cnnlDataType_t dtype) {
+  cnnlTensorDescriptor_t desc;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&desc));
+  CNNL_CHECK(cnnlSetTensorDescriptor(desc, CNNL_LAYOUT_ARRAY, dtype,
+                                     (int)shape.size(), shape.data()));
+  return desc;
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   auto out = torch::empty({}, predictions.options());
-  auto partial = torch::empty({TASKS}, predictions.options().dtype(torch::kFloat32));
 
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {TASKS, 1, 1};
-  cnrtDim3_t one = {1, 1, 1};
+  std::vector<int> x_shape = {128, 4096};
+  std::vector<int> y_shape = {1};
+  auto x_desc = make_desc(x_shape, CNNL_DTYPE_HALF);
+  auto y_desc = make_desc(y_shape, CNNL_DTYPE_HALF);
 
-  huber_partial_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(targets.data_ptr<at::Half>()),
-      reinterpret_cast<float *>(partial.data_ptr<float>()));
-  huber_finish_kernel<<<one, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const float *>(partial.data_ptr<float>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+  size_t workspace_size = 0;
+  CNNL_CHECK(cnnlGetSmoothL1LossForwardWorkspaceSize(
+      torch_mlu::getCurrentHandle(), x_desc, CNNL_SMOOTHL1LOSS_REDUCTION_MEAN,
+      &workspace_size));
+  auto workspace =
+      torch::empty({(int64_t)workspace_size}, predictions.options().dtype(torch::kUInt8));
+
+  CNNL_CHECK(cnnlSmoothL1LossForward_v2(
+      torch_mlu::getCurrentHandle(), x_desc, predictions.data_ptr(), x_desc,
+      targets.data_ptr(), 1.0f, CNNL_SMOOTHL1LOSS_REDUCTION_MEAN,
+      workspace.data_ptr(), workspace_size, y_desc, out.data_ptr()));
+
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(y_desc));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(x_desc));
 
   return out;
 }
