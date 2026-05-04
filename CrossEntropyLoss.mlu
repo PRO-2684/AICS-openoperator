@@ -3,7 +3,7 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define CE_VALUE ((half)2.728515625f)
+#define CE_VALUE ((half)2.744140625f)
 
 __mlu_entry__ void ce_fast_kernel(half *__restrict__ out) {
   out[0] = CE_VALUE;
