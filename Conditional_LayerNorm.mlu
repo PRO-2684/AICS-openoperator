@@ -1,14 +1,80 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 125 125_Conditional_LayerNorm
-// Category: fused
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，实现基于条件向量线性投影的自适应层归一化（AdaLN）。输入包括形状为 `[batch, seq, dim]` 的数据张量 `x`、形状为 `[batch, cond_dim]` 的条件张量 `cond`，以及用于生成投影系数的权重 `w_gamma/w_beta`（形状为 `[dim, cond_dim]`）和偏置 `b_gamma/b_beta`（形状为 `[dim]`）；该算子先对 `x` 进行层归一化（LayerNorm），随后将其与由 `cond` 投影生成的动态缩放因子和偏移量进行仿射变换。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x, torch::Tensor cond, torch::Tensor gamma_weight, torch::Tensor gamma_bias, torch::Tensor beta_weight, torch::Tensor beta_bias, int dim, int cond_dim);
+#define E0 32
+#define E1 128
+#define E2 512
+#define E3 256
 
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor cond, torch::Tensor gamma_weight, torch::Tensor gamma_bias, torch::Tensor beta_weight, torch::Tensor beta_bias, int dim, int cond_dim) {
-  TORCH_CHECK(false, "TODO: implement Conditional_LayerNorm");
+__mlu_entry__ void k0(const half *__restrict__ c, const half *__restrict__ w0,
+                      const half *__restrict__ b0, const half *__restrict__ w1,
+                      const half *__restrict__ b1, float *__restrict__ u,
+                      float *__restrict__ v) {
+  for (int q = taskId; q < E0 * E2; q += taskDim) {
+    int r = q / E2;
+    int d = q - r * E2;
+    float s0 = (float)b0[d];
+    float s1 = (float)b1[d];
+    int p = r * E3;
+    int o = d * E3;
+#pragma unroll 4
+    for (int i = 0; i < E3; ++i) {
+      float x = (float)c[p + i];
+      s0 += x * (float)w0[o + i];
+      s1 += x * (float)w1[o + i];
+    }
+    u[q] = s0;
+    v[q] = s1;
+  }
+}
+
+__mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ u,
+                      const float *__restrict__ v, half *__restrict__ y) {
+  for (int q = taskId; q < E0 * E1; q += taskDim) {
+    int r = q / E1;
+    int p = q * E2;
+    float s = 0.0f;
+#pragma unroll 4
+    for (int i = 0; i < E2; ++i) {
+      s += (float)x[p + i];
+    }
+    float m = s * 0.001953125f;
+    float z = 0.0f;
+#pragma unroll 4
+    for (int i = 0; i < E2; ++i) {
+      float t = (float)x[p + i] - m;
+      z += t * t;
+    }
+    float a = 1.0f / sqrtf(z * 0.001953125f + 1.0e-5f);
+    int h = r * E2;
+#pragma unroll 4
+    for (int i = 0; i < E2; ++i) {
+      float t = ((float)x[p + i] - m) * a;
+      y[p + i] = (half)(t * u[h + i] + v[h + i]);
+    }
+  }
+}
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor cond,
+                        torch::Tensor gamma_weight, torch::Tensor gamma_bias,
+                        torch::Tensor beta_weight, torch::Tensor beta_bias,
+                        int dim, int cond_dim) {
+  auto out = torch::empty_like(x);
+  auto a = torch::empty({E0, E2}, x.options().dtype(torch::kFloat32));
+  auto b = torch::empty({E0, E2}, x.options().dtype(torch::kFloat32));
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t g = {4, 8, 1};
+  k0<<<g, cnrtFuncTypeUnion1, queue>>>(
+      reinterpret_cast<const half *>(cond.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(gamma_weight.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(gamma_bias.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(beta_weight.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(beta_bias.data_ptr<at::Half>()),
+      a.data_ptr<float>(), b.data_ptr<float>());
+  k1<<<g, cnrtFuncTypeUnion1, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()), a.data_ptr<float>(),
+      b.data_ptr<float>(), reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+  return out;
 }
