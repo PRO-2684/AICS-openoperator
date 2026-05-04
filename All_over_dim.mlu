@@ -7,25 +7,43 @@ __mlu_entry__ void reduce_check_kernel(const half *x, bool *y) {
   int tid = taskId;
   int step = taskDim;
 
-  // output numel = 16 * 256
+  // output: 16 * 256
   for (int p = tid; p < 4096; p += step) {
-    int n = p >> 8;  // p / 256
-    int k = p & 255; // p % 256
+    int n = p >> 8;
+    int k = p & 255;
 
-    int base = (n << 16) + k; // n * 256 * 256 + k
+    int base = (n << 16) + k;
 
-    bool v = true;
+    bool ok = true;
 
-    // reduce over middle dimension
-    for (int r = 0; r < 256; ++r) {
-      half t = x[base + (r << 8)];
-      if (!((float)t > 0.0f)) {
-        v = false;
+#pragma unroll 4
+    for (int r = 0; r < 256; r += 4) {
+      half v0 = x[base + ((r + 0) << 8)];
+      if (!((float)v0 > 0.0f)) {
+        ok = false;
+        break;
+      }
+
+      half v1 = x[base + ((r + 1) << 8)];
+      if (!((float)v1 > 0.0f)) {
+        ok = false;
+        break;
+      }
+
+      half v2 = x[base + ((r + 2) << 8)];
+      if (!((float)v2 > 0.0f)) {
+        ok = false;
+        break;
+      }
+
+      half v3 = x[base + ((r + 3) << 8)];
+      if (!((float)v3 > 0.0f)) {
+        ok = false;
         break;
       }
     }
 
-    y[p] = v;
+    y[p] = ok;
   }
 }
 
@@ -36,7 +54,6 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-  // 4 cores, 8 clusters => 32 tasks
   cnrtDim3_t grid = {4, 8, 1};
   cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
 
