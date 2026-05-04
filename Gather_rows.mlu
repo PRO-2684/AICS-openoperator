@@ -1,35 +1,44 @@
-#include <bang.h>
-#include <cnrt.h>
-#include <framework/core/MLUStream.h>
-#include <stdint.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-#define BATCH 64
-#define K 32
-#define N 1024
-#define TOTAL (BATCH * K)
-#define TASKS 32
+#include <vector>
 
-__mlu_entry__ void gather_rows_kernel(const half *__restrict__ input,
-                                      const int64_t *__restrict__ index,
-                                      half *__restrict__ out) {
-  int stride = taskDim;
-  for (int i = taskId; i < TOTAL; i += stride) {
-    int b = i >> 5;
-    int64_t col = index[i];
-    out[i] = input[b * N + col];
-  }
+#define CNNL_CHECK(expr)                                                        \
+  do {                                                                         \
+    cnnlStatus_t s__ = (expr);                                                 \
+    TORCH_CHECK(s__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s__);   \
+  } while (0)
+
+static cnnlTensorDescriptor_t make_desc(const std::vector<int> &shape,
+                                        cnnlDataType_t dtype) {
+  cnnlTensorDescriptor_t desc;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&desc));
+  CNNL_CHECK(cnnlSetTensorDescriptor(desc, CNNL_LAYOUT_ARRAY, dtype,
+                                     (int)shape.size(), shape.data()));
+  return desc;
 }
 
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor index) {
-  auto out = torch::empty({BATCH, K}, input.options());
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {TASKS, 1, 1};
+  auto out = torch::empty({64, 32}, input.options());
 
-  gather_rows_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      reinterpret_cast<const int64_t *>(index.data_ptr<int64_t>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+  static cnnlTensorDescriptor_t in_desc = nullptr;
+  static cnnlTensorDescriptor_t idx_desc = nullptr;
+  static cnnlTensorDescriptor_t out_desc = nullptr;
+  static size_t ws_size = 0;
+  if (in_desc == nullptr) {
+    in_desc = make_desc({64, 1024}, CNNL_DTYPE_HALF);
+    idx_desc = make_desc({64, 32}, CNNL_DTYPE_INT64);
+    out_desc = make_desc({64, 32}, CNNL_DTYPE_HALF);
+    CNNL_CHECK(cnnlGetGatherWorkspaceSize(torch_mlu::getCurrentHandle(), in_desc,
+                                          idx_desc, out_desc, 1, &ws_size));
+  }
+
+  auto ws = torch::empty({(int64_t)ws_size}, input.options().dtype(torch::kUInt8));
+  CNNL_CHECK(cnnlGather_v2(torch_mlu::getCurrentHandle(), 1, in_desc,
+                           input.data_ptr(), idx_desc, index.data_ptr(),
+                           ws_size ? ws.data_ptr() : nullptr, ws_size, out_desc,
+                           out.data_ptr()));
 
   return out;
 }
