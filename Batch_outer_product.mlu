@@ -7,13 +7,13 @@ __mlu_global__ void k(const half *a, const half *b, half *c) {
   __nram__ half x[256];
   __nram__ half y[256];
 
-  for (int i = taskId; i < 16384; i += taskDim) {
-    int p = i >> 8;
-    int q = i & 255;
+  for (int p = taskId; p < 64; p += taskDim) {
+    __memcpy(x, b + p * 256, 512, GDRAM2NRAM);
 
-    // __memcpy(x, b + p * 256, 512, GDRAM2NRAM);
-    __bang_mul_scalar(y, x, a[p * 256 + q], 256);
-    __memcpy(c + i * 256, y, 512, NRAM2GDRAM);
+    for (int q = 0; q < 256; ++q) {
+      __bang_mul_scalar(y, x, a[p * 256 + q], 256);
+      __memcpy(c + (p * 65536 + q * 256), y, 512, NRAM2GDRAM);
+    }
   }
 }
 
