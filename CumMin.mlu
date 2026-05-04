@@ -3,49 +3,57 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define S0(D)                                                                  \
-  __memcpy(b, a, 8000, NRAM2NRAM);                                             \
-  __bang_minimum(b + (D), a + (D), a, 4000 - (D));                             \
-  t = a;                                                                       \
-  a = b;                                                                       \
-  b = t;
-
-#define S1(D)                                                                  \
+#define S(D)                                                                   \
   __memcpy(b, a, (D)*2, NRAM2NRAM);                                            \
   __bang_minimum(b + (D), a + (D), a, 4000 - (D));                             \
   t = a;                                                                       \
   a = b;                                                                       \
   b = t;
 
+#define R()                                                                    \
+  S(1)                                                                         \
+  S(2)                                                                         \
+  S(4)                                                                         \
+  S(8)                                                                         \
+  S(16)                                                                        \
+  S(32)                                                                        \
+  S(64)                                                                        \
+  S(128)                                                                       \
+  S(256)                                                                       \
+  S(512)                                                                       \
+  S(1024)                                                                      \
+  S(2048)
+
 __mlu_entry__ void k(const half *x, half *y) {
-  int q = taskId << 1;
+  int q = taskId << 2;
 
-  __nram__ half u[4096];
-  __nram__ half v[4096];
+  __nram__ half u[12288];
+  __nram__ half v[12288];
 
-  for (int r = 0; r < 2; ++r) {
-    int p = q + r;
+  for (int i = 0; i < 6; ++i) {
+    if (i >= 2) {
+      int r = i - 2;
+      int s = r % 3;
+      __memcpy_async(y + (q + r) * 4000, u + s * 4096, 8000, NRAM2GDRAM);
+    }
 
-    half *a = u;
-    half *b = v;
-    half *t;
+    if (i >= 1 && i < 5) {
+      int r = i - 1;
+      int s = r % 3;
 
-    __memcpy(a, x + p * 4000, 8000, GDRAM2NRAM);
+      half *a = u + s * 4096;
+      half *b = v + s * 4096;
+      half *t;
 
-    S0(1)
-    S0(2)
-    S0(4)
-    S0(8)
-    S0(16)
-    S0(32)
-    S1(64)
-    S1(128)
-    S1(256)
-    S1(512)
-    S1(1024)
-    S1(2048)
+      R()
+    }
 
-    __memcpy(y + p * 4000, a, 8000, NRAM2GDRAM);
+    if (i < 4) {
+      int s = i % 3;
+      __memcpy_async(u + s * 4096, x + (q + i) * 4000, 8000, GDRAM2NRAM);
+    }
+
+    __sync_all_ipu();
   }
 }
 
@@ -54,7 +62,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
 
   cnrtDim3_t d;
   d.x = 4;
-  d.y = 16;
+  d.y = 8;
   d.z = 1;
 
   k<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
@@ -64,5 +72,5 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   return y;
 }
 
-#undef S1
-#undef S0
+#undef R
+#undef S
