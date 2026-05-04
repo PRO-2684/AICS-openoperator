@@ -23,15 +23,19 @@ inline cnnlTensorDescriptor_t make_desc(const std::vector<int> &shape,
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   auto out = torch::empty({}, predictions.options());
 
-  std::vector<int> x_shape = {128, 4096};
-  std::vector<int> y_shape = {1};
-  auto x_desc = make_desc(x_shape, CNNL_DTYPE_HALF);
-  auto y_desc = make_desc(y_shape, CNNL_DTYPE_HALF);
+  static cnnlTensorDescriptor_t x_desc = nullptr;
+  static cnnlTensorDescriptor_t y_desc = nullptr;
+  static size_t workspace_size = 0;
+  if (x_desc == nullptr) {
+    std::vector<int> x_shape = {128, 4096};
+    std::vector<int> y_shape = {1};
+    x_desc = make_desc(x_shape, CNNL_DTYPE_HALF);
+    y_desc = make_desc(y_shape, CNNL_DTYPE_HALF);
+    CNNL_CHECK(cnnlGetSmoothL1LossForwardWorkspaceSize(
+        torch_mlu::getCurrentHandle(), x_desc, CNNL_SMOOTHL1LOSS_REDUCTION_MEAN,
+        &workspace_size));
+  }
 
-  size_t workspace_size = 0;
-  CNNL_CHECK(cnnlGetSmoothL1LossForwardWorkspaceSize(
-      torch_mlu::getCurrentHandle(), x_desc, CNNL_SMOOTHL1LOSS_REDUCTION_MEAN,
-      &workspace_size));
   auto workspace =
       torch::empty({(int64_t)workspace_size}, predictions.options().dtype(torch::kUInt8));
 
@@ -39,9 +43,6 @@ torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
       torch_mlu::getCurrentHandle(), x_desc, predictions.data_ptr(), x_desc,
       targets.data_ptr(), 1.0f, CNNL_SMOOTHL1LOSS_REDUCTION_MEAN,
       workspace.data_ptr(), workspace_size, y_desc, out.data_ptr()));
-
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(y_desc));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(x_desc));
 
   return out;
 }
