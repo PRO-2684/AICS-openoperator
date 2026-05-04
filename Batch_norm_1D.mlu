@@ -5,25 +5,60 @@
 
 #define E0 256
 #define E1 512
+#define E2 32
 
-__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
-                      const half *__restrict__ b, half *__restrict__ y) {
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ s,
+                      float *__restrict__ q) {
+  __nram__ half h[E1];
+  __nram__ float a[E1];
+  __nram__ float b[E1];
+  __nram__ float c[E1];
+  __bang_write_value(a, E1, 0.0f);
+  __bang_write_value(b, E1, 0.0f);
+  for (int r = taskId; r < E0; r += taskDim) {
+    __memcpy(h, x + r * E1, E1 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(c, h, E1);
+    __bang_add(a, a, c, E1);
+    __bang_mul(c, c, c, E1);
+    __bang_add(b, b, c, E1);
+  }
+  __memcpy(s + taskId * E1, a, E1 * sizeof(float), NRAM2GDRAM);
+  __memcpy(q + taskId * E1, b, E1 * sizeof(float), NRAM2GDRAM);
+}
+
+__mlu_entry__ void k1(const float *__restrict__ s, const float *__restrict__ q,
+                      const half *__restrict__ w, const half *__restrict__ b,
+                      float *__restrict__ u, float *__restrict__ v) {
   for (int f = taskId; f < E1; f += taskDim) {
-    float s = 0.0f;
-    float q = 0.0f;
-    for (int i = 0; i < E0; ++i) {
-      float t = (float)x[i * E1 + f];
-      s += t;
-      q += t * t;
+    float x = 0.0f;
+    float y = 0.0f;
+    for (int i = 0; i < E2; ++i) {
+      x += s[i * E1 + f];
+      y += q[i * E1 + f];
     }
-    float mean = s * 0.00390625f;
-    float e = q * 0.00390625f - mean * mean;
-    float r = 1.0f / sqrtf(e + 1.0e-5f);
-    float h = (float)w[f] * r;
-    float c = (float)b[f] - mean * h;
-    for (int i = 0; i < E0; ++i) {
-      y[i * E1 + f] = (half)((float)x[i * E1 + f] * h + c);
-    }
+    float m = x * 0.00390625f;
+    float e = y * 0.00390625f - m * m;
+    float a = (float)w[f] / sqrtf(e + 1.0e-5f);
+    u[f] = a;
+    v[f] = (float)b[f] - m * a;
+  }
+}
+
+__mlu_entry__ void k2(const half *__restrict__ x, const float *__restrict__ u,
+                      const float *__restrict__ v, half *__restrict__ y) {
+  __nram__ half h[E1];
+  __nram__ float a[E1];
+  __nram__ float b[E1];
+  __nram__ float c[E1];
+  __memcpy(b, u, E1 * sizeof(float), GDRAM2NRAM);
+  __memcpy(c, v, E1 * sizeof(float), GDRAM2NRAM);
+  for (int r = taskId; r < E0; r += taskDim) {
+    __memcpy(h, x + r * E1, E1 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(a, h, E1);
+    __bang_mul(a, a, b, E1);
+    __bang_add(a, a, c, E1);
+    __bang_float2half_rn(h, a, E1);
+    __memcpy(y + r * E1, h, E1 * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -31,12 +66,22 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bia
                         torch::Tensor running_mean, torch::Tensor running_var,
                         int num_features) {
   auto out = torch::empty_like(x);
+  auto s = torch::empty({E2, E1}, x.options().dtype(torch::kFloat32));
+  auto q = torch::empty({E2, E1}, x.options().dtype(torch::kFloat32));
+  auto u = torch::empty({E1}, x.options().dtype(torch::kFloat32));
+  auto v = torch::empty({E1}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {32, 1, 1};
+  cnrtDim3_t g = {E2, 1, 1};
   k0<<<g, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()), s.data_ptr<float>(),
+      q.data_ptr<float>());
+  k1<<<g, cnrtFuncTypeBlock, queue>>>(
+      s.data_ptr<float>(), q.data_ptr<float>(),
       reinterpret_cast<const half *>(weight.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(bias.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+      reinterpret_cast<const half *>(bias.data_ptr<at::Half>()), u.data_ptr<float>(),
+      v.data_ptr<float>());
+  k2<<<g, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()), u.data_ptr<float>(),
+      v.data_ptr<float>(), reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
 }
