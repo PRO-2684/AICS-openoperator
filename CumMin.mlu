@@ -3,7 +3,14 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define S(D)                                                                   \
+#define S0(D)                                                                  \
+  __memcpy(b, a, 8000, NRAM2NRAM);                                             \
+  __bang_minimum(b + (D), a + (D), a, 4000 - (D));                             \
+  t = a;                                                                       \
+  a = b;                                                                       \
+  b = t;
+
+#define S1(D)                                                                  \
   __memcpy(b, a, (D)*2, NRAM2NRAM);                                            \
   __bang_minimum(b + (D), a + (D), a, 4000 - (D));                             \
   t = a;                                                                       \
@@ -25,18 +32,18 @@ __mlu_entry__ void k(const half *x, half *y) {
 
     __memcpy(a, x + p * 4000, 8000, GDRAM2NRAM);
 
-    S(1)
-    S(2)
-    S(4)
-    S(8)
-    S(16)
-    S(32)
-    S(64)
-    S(128)
-    S(256)
-    S(512)
-    S(1024)
-    S(2048)
+    S0(1)
+    S0(2)
+    S0(4)
+    S0(8)
+    S0(16)
+    S0(32)
+    S1(64)
+    S1(128)
+    S1(256)
+    S1(512)
+    S1(1024)
+    S1(2048)
 
     __memcpy(y + p * 4000, a, 8000, NRAM2GDRAM);
   }
@@ -57,4 +64,5 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   return y;
 }
 
-#undef S
+#undef S1
+#undef S0
