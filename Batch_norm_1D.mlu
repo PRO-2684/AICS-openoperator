@@ -38,9 +38,9 @@ __mlu_entry__ void k1(const float *__restrict__ s, const float *__restrict__ q,
     }
     float m = x * 0.00390625f;
     float e = y * 0.00390625f - m * m;
-    float a = (float)w[f] / sqrtf(e + 1.0e-5f);
+    float a = 1.0f / sqrtf(e + 1.0e-5f);
     u[f] = a;
-    v[f] = (float)b[f] - m * a;
+    v[f] = -m * a;
   }
 }
 
