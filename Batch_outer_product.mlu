@@ -13,7 +13,7 @@ __mlu_global__ void k(const half *a, const half *b, half *c) {
 
     __memcpy(x, b + p * 256, 512, GDRAM2NRAM);
     __bang_mul_scalar(y, x, a[p * 256 + q], 256);
-    __memcpy(c + i * 256, y, 512, NRAM2GDRAM);
+    // __memcpy(c + i * 256, y, 512, NRAM2GDRAM);
   }
 }
 
