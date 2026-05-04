@@ -11,38 +11,42 @@
   b = t;
 
 __mlu_entry__ void k(const half *x, half *y) {
-  int p = taskId;
+  int q = taskId << 2;
 
   __nram__ half u[4096];
   __nram__ half v[4096];
 
-  half *a = u;
-  half *b = v;
-  half *t;
+  for (int r = 0; r < 4; ++r) {
+    int p = q + r;
 
-  __memcpy(a, x + p * 4000, 8000, GDRAM2NRAM);
+    half *a = u;
+    half *b = v;
+    half *t;
 
-  S(1)
-  S(2)
-  S(4)
-  S(8)
-  S(16)
-  S(32)
-  S(64)
-  S(128)
-  S(256)
-  S(512)
-  S(1024)
-  S(2048)
+    __memcpy(a, x + p * 4000, 8000, GDRAM2NRAM);
 
-  __memcpy(y + p * 4000, a, 8000, NRAM2GDRAM);
+    S(1)
+    S(2)
+    S(4)
+    S(8)
+    S(16)
+    S(32)
+    S(64)
+    S(128)
+    S(256)
+    S(512)
+    S(1024)
+    S(2048)
+
+    __memcpy(y + p * 4000, a, 8000, NRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   auto y = torch::empty_like(x);
 
   cnrtDim3_t d;
-  d.x = 128;
+  d.x = 32;
   d.y = 1;
   d.z = 1;
 
