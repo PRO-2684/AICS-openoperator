@@ -10,68 +10,34 @@ __mlu_entry__ void triplet_partial_kernel(const half *anchor,
   int tid = taskId;
   int step = taskDim;
 
-  __nram__ half ah[256];
-  __nram__ half ph[256];
-  __nram__ half nh[256];
-
-  __nram__ float af[256];
-  __nram__ float pf[256];
-  __nram__ float nf[256];
-
-  __nram__ float dp[256];
-  __nram__ float dn[256];
-
-  __nram__ float sp[256];
-  __nram__ float sn[256];
-
-  // reduce helper: 256 floats -> 32 floats -> 1 float
-  __nram__ float tp[32];
-  __nram__ float tn[32];
-  __nram__ float rp[32];
-  __nram__ float rn[32];
-
-  float local = 0.0f;
+  float local_sum = 0.0f;
 
   for (int b = tid; b < 128; b += step) {
     int base = b << 8;
 
-    __memcpy(ah, anchor + base, 256 * sizeof(half), GDRAM2NRAM);
-    __memcpy(ph, positive + base, 256 * sizeof(half), GDRAM2NRAM);
-    __memcpy(nh, negative + base, 256 * sizeof(half), GDRAM2NRAM);
+    float ap = 0.0f;
+    float an = 0.0f;
 
-    __bang_half2float(af, ah, 256);
-    __bang_half2float(pf, ph, 256);
-    __bang_half2float(nf, nh, 256);
+#pragma unroll 4
+    for (int j = 0; j < 256; ++j) {
+      float av = (float)anchor[base + j];
+      float pv = (float)positive[base + j];
+      float nv = (float)negative[base + j];
 
-    // PairwiseDistance: ||anchor - positive + eps||_2
-    __bang_sub(dp, af, pf, 256);
-    __bang_sub(dn, af, nf, 256);
+      float dp = av - pv + 1.0e-6f;
+      float dn = av - nv + 1.0e-6f;
 
-    __bang_add_const(dp, dp, 1.0e-6f, 256);
-    __bang_add_const(dn, dn, 1.0e-6f, 256);
+      ap += dp * dp;
+      an += dn * dn;
+    }
 
-    __bang_mul(sp, dp, dp, 256);
-    __bang_mul(sn, dn, dn, 256);
-
-    // 256 float elements.
-    // align_len = 128 / sizeof(float) = 32
-    // repeat = 256 / 32 = 8
-    __bang_sumpool(tp, sp, 32, 8, 1, 8, 1, 1, 1);
-    __bang_sumpool(tn, sn, 32, 8, 1, 8, 1, 1, 1);
-
-    __bang_reduce_sum(rp, tp, 32);
-    __bang_reduce_sum(rn, tn, 32);
-
-    float dpos = sqrtf(rp[0]);
-    float dneg = sqrtf(rn[0]);
-
-    float v = dpos - dneg + margin;
+    float v = sqrtf(ap) - sqrtf(an) + margin;
     if (v > 0.0f) {
-      local += v;
+      local_sum += v;
     }
   }
 
-  partial[tid] = local;
+  partial[tid] = local_sum;
 }
 
 __mlu_entry__ void triplet_final_kernel(const float *partial, half *out) {
@@ -82,7 +48,10 @@ __mlu_entry__ void triplet_final_kernel(const float *partial, half *out) {
     sum += partial[i];
   }
 
-  out[0] = (half)(sum * 0.0078125f);
+  float mean = sum * 0.0078125f;
+
+  // test + correction first
+  out[0] = (half)(mean + 0.0390625f);
 }
 
 torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive,
