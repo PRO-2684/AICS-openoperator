@@ -20,21 +20,26 @@ __mlu_entry__ void triplet_partial_kernel(const half *anchor,
 
 #pragma unroll 4
     for (int j = 0; j < 256; ++j) {
-      float av = (float)anchor[base + j];
-      float pv = (float)positive[base + j];
-      float nv = (float)negative[base + j];
+      half ah = anchor[base + j];
+      half ph = positive[base + j];
+      half nh = negative[base + j];
 
-      float dp = av - pv + 1.0e-6f;
-      float dn = av - nv + 1.0e-6f;
+      // 模拟 half 后端：差值先回到 half
+      half dp_h = (half)((float)ah - (float)ph + 1.0e-6f);
+      half dn_h = (half)((float)ah - (float)nh + 1.0e-6f);
 
-      ap += dp * dp;
-      an += dn * dn;
+      // square 也先回 half，模拟 CNNL half tensor kernel
+      half sp_h = (half)((float)dp_h * (float)dp_h);
+      half sn_h = (half)((float)dn_h * (float)dn_h);
+
+      ap += (float)sp_h;
+      an += (float)sn_h;
     }
 
-    half hp = (half)sqrtf(ap);
-    half hn = (half)sqrtf(an);
+    float dpos = sqrtf(ap);
+    float dneg = sqrtf(an);
 
-    float v = (float)hp - (float)hn + margin;
+    float v = dpos - dneg + margin;
     if (v > 0.0f) {
       local_sum += v;
     }
