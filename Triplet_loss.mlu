@@ -31,10 +31,10 @@ __mlu_entry__ void triplet_partial_kernel(const half *anchor,
       an += dn * dn;
     }
 
-    float dpos = sqrtf(ap);
-    float dneg = sqrtf(an);
+    half hp = (half)sqrtf(ap);
+    half hn = (half)sqrtf(an);
 
-    float v = dpos - dneg + margin;
+    float v = (float)hp - (float)hn + margin;
     if (v > 0.0f) {
       local_sum += v;
     }
@@ -43,7 +43,7 @@ __mlu_entry__ void triplet_partial_kernel(const half *anchor,
   partial[tid] = local_sum;
 }
 
-__mlu_entry__ void triplet_final_kernel(const float *partial, float *out) {
+__mlu_entry__ void triplet_final_kernel(const float *partial, half *out) {
   float sum = 0.0f;
 
 #pragma unroll 32
@@ -51,12 +51,12 @@ __mlu_entry__ void triplet_final_kernel(const float *partial, float *out) {
     sum += partial[i];
   }
 
-  out[0] = sum * 0.0078125f;
+  out[0] = (half)(sum * 0.0078125f);
 }
 
 torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive,
                         torch::Tensor negative, double margin) {
-  auto out = torch::empty({}, anchor.options().dtype(torch::kFloat32));
+  auto out = torch::empty({}, anchor.options().dtype(torch::kHalf));
   auto partial = torch::empty({32}, anchor.options().dtype(torch::kFloat32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
@@ -72,8 +72,9 @@ torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive,
 
   cnrtDim3_t grid2 = {1, 1, 1};
 
-  triplet_final_kernel<<<grid2, ktype, queue>>>(partial.data_ptr<float>(),
-                                                out.data_ptr<float>());
+  triplet_final_kernel<<<grid2, ktype, queue>>>(
+      partial.data_ptr<float>(),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
 
   return out;
 }
