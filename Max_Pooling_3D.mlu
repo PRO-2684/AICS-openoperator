@@ -13,7 +13,7 @@ static cnnlTensorDescriptor_t a(int d0, int d1, int d2) {
   int s[5] = {262144, 4096 * 3, 64 * 3, 3, 1};
   cnnlTensorDescriptor_t r;
   X(cnnlCreateTensorDescriptor(&r));
-  X(cnnlSetTensorDescriptorEx(r, CNNL_LAYOUT_NDHWC, CNNL_DTYPE_FLOAT, 5, d, s));
+  X(cnnlSetTensorDescriptorEx(r, CNNL_LAYOUT_NDHWC, CNNL_DTYPE_HALF, 5, d, s));
   return r;
 }
 
@@ -21,8 +21,8 @@ static cnnlTensorDescriptor_t b(int d0, int d1, int d2) {
   int d[5] = {512, d0, d1, d2, 1};
   int s[5] = {27000, 900 * 3, 30 * 3, 3, 1};
   cnnlTensorDescriptor_t r;
-X(cnnlCreateTensorDescriptor(&r));
-  X(cnnlSetTensorDescriptorEx(r, CNNL_LAYOUT_NDHWC, CNNL_DTYPE_FLOAT, 5, d, s));
+  X(cnnlCreateTensorDescriptor(&r));
+  X(cnnlSetTensorDescriptorEx(r, CNNL_LAYOUT_NDHWC, CNNL_DTYPE_HALF, 5, d, s));
   return r;
 }
 
@@ -72,8 +72,8 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
 
   cnnlHandle_t h = torch_mlu::getCurrentHandle();
 
-  const float *xi = x.data_ptr<float>();
-  float *yo = y.data_ptr<float>();
+  const half *xi = reinterpret_cast<const half *>(x.data_ptr<at::Half>());
+  half *yo = reinterpret_cast<half *>(y.data_ptr<at::Half>());
 
   for (int i = 0; i < 3; ++i) {
     for (int j = 0; j < 3; ++j) {
