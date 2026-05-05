@@ -14,7 +14,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, int *__restrict__ y) {
   half v = (half)0.0f;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_gt_scalar(b, a, v, E1);
-  y[taskId] = (int)__bang_filter(a, a, b, E1);
+  __bang_count((unsigned int *)(y + taskId), b, E1);
 }
 
 __mlu_entry__ void k1(int *__restrict__ x) {
