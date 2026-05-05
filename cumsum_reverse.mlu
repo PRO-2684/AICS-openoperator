@@ -22,30 +22,37 @@ __mlu_entry__ void flip_kernel(const half *__restrict__ x,
 
   int base = row * COLS;
 
-  __nram__ half ibuf[COLS];
-  __nram__ half obuf[COLS];
-
-  __memcpy(ibuf, x + base, COLS * sizeof(half), GDRAM2NRAM);
-#define F(I)                                                                  \
-  obuf[I] = ibuf[3999 - (I)];                                                 \
-  obuf[(I) + 1] = ibuf[3998 - (I)];                                           \
-  obuf[(I) + 2] = ibuf[3997 - (I)];                                           \
-  obuf[(I) + 3] = ibuf[3996 - (I)];                                           \
-  obuf[(I) + 4] = ibuf[3995 - (I)];                                           \
-  obuf[(I) + 5] = ibuf[3994 - (I)];                                           \
-  obuf[(I) + 6] = ibuf[3993 - (I)];                                           \
-  obuf[(I) + 7] = ibuf[3992 - (I)];
-
-#define G(I) F(I) F((I) + 8) F((I) + 16) F((I) + 24)
-
-  for (int i = 0; i <= 3968; i += 32) {
-    G(i)
-  }
-  __memcpy(y + base, obuf, COLS * sizeof(half), NRAM2GDRAM);
+  __nram__ half u[4096];
+  __nram__ half v[4096];
+  half *a = u;
+  half *b = v;
+  half *t;
+  __bang_write_value(a, 96, (half)0.0f);
+  __memcpy(a + 96, x + base, COLS * sizeof(half), GDRAM2NRAM);
+#define S(D)                                                                  \
+  __memcpy(b, a + (D), (D)*sizeof(half), NRAM2NRAM, (D)*2 * sizeof(half),      \
+           (D)*2 * sizeof(half), 4096 / ((D)*2) - 1);                         \
+  __memcpy(b + (D), a, (D)*sizeof(half), NRAM2NRAM, (D)*2 * sizeof(half),      \
+           (D)*2 * sizeof(half), 4096 / ((D)*2) - 1);                         \
+  t = a;                                                                      \
+  a = b;                                                                      \
+  b = t;
+  S(2048)
+  S(1024)
+  S(512)
+  S(256)
+  S(128)
+  S(64)
+  S(32)
+  S(16)
+  S(8)
+  S(4)
+  S(2)
+  S(1)
+  __memcpy(y + base, a, COLS * sizeof(half), NRAM2GDRAM);
 }
 
-#undef F
-#undef G
+#undef S
 
 static void cumsum_dim1(torch::Tensor in, torch::Tensor out) {
   int dims[2] = {ROWS, COLS};
