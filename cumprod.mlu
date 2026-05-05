@@ -15,17 +15,17 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     int p = r * 4000;
     __memcpy(a, x + p, 8000, GDRAM2NRAM);
     half s = a[0];
-    for (int i = 1; i <= 249; i += 8) {
+    for (int i = 1; i <= 49; i += 8) {
       B(i)
     }
-    A(257)
-    A(258)
-    A(259)
-    A(260)
-    A(261)
-    A(262)
-    A(263)
-    __bang_write_value(a + 264, 3736, (half)0.0f);
+    A(57)
+    A(58)
+    A(59)
+    A(60)
+    A(61)
+    A(62)
+    A(63)
+    __bang_write_value(a + 64, 3936, (half)0.0f);
     __memcpy(y + p, a, 8000, NRAM2GDRAM);
   }
 }
