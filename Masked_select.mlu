@@ -16,8 +16,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_fcmpfilter(CMP_GT, b, a, (half)0.0f, E1);
   int n = *((int *)b);
-  y[taskId] = n;
-  __sync_all_ipu();
 
   int q = 0;
   for (int i = 0; i < taskId; ++i) {
@@ -69,9 +67,6 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
 
   ev.place(torch_mlu::getCurrentMLUStream());
   ev.wait(stream2);
-  k0<<<dim, cnrtFuncTypeUnion8, queue>>>(
-      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()), work.data_ptr<int>());
   k1<<<dim, cnrtFuncTypeUnion8, queue2>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       work2.data_ptr<int>());
@@ -80,6 +75,9 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   cnrtMemcpyAsync(&n, work2.data_ptr<int>() + 32, sizeof(int), queue2,
                   cnrtMemcpyDevToHost);
   cnrtQueueSync(queue2);
+  k0<<<dim, cnrtFuncTypeUnion8, queue>>>(
+      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
   out.resize_({(int64_t)n});
   return out;
 }
