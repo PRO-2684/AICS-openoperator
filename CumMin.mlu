@@ -3,16 +3,10 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define S(D)                                                                   \
-  __memcpy(b, a, (D)*2, NRAM2NRAM);                                            \
-  __bang_minimum(b + (D), a + (D), a, 4000 - (D));                             \
-  t = a;                                                                       \
-  a = b;                                                                       \
-  b = t;
+#define S(D) __bang_minimum(a + (D), a + (D), a, 4000 - (D));
 
 #define R(P)                                                                   \
   a = u;                                                                       \
-  b = v;                                                                       \
   __memcpy(a, x + (P)*4000, 8000, GDRAM2NRAM);                                 \
   S(1)                                                                         \
   S(2) S(4) S(8) S(16) S(32) S(64) S(128) S(256) S(512) S(1024) S(2048)        \
@@ -22,11 +16,8 @@ __mlu_entry__ void k(const half *x, half *y) {
   int q = taskId << 2;
 
   __nram__ half u[4096];
-  __nram__ half v[4096];
 
   half *a;
-  half *b;
-  half *t;
 
   R(q)
   R(q + 1)
