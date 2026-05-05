@@ -7,10 +7,21 @@
 #define E0 16
 #define E1 1024
 
+__mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y, int n) {
+  int q = n / 32;
+  int r = n - q * 32;
+  __bang_sumpool(y, x, 32, 1, q, 1, q, 1, q);
+  if (r > 0) {
+    __bang_add(y, y, x + q * 32, r);
+  }
+  __bang_reduce_sum(y, y, 32);
+  return y[0];
+}
+
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E1];
   __nram__ float b[E1];
-  __nram__ float c[8];
+  __nram__ float c[32];
   int p = taskId * E1;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_half2float(b, a, E1);
@@ -18,11 +29,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   float m = c[0];
   __bang_sub_scalar(b, b, m, E1);
   __bang_active_exp(b, b, E1);
-  __bang_reduce_sum(b, b, E1);
-  float s = 0.0f;
-  for (int i = 0; i < E1; i += 32) {
-    s += b[i];
-  }
+  float s = f0(b, c, E1);
   y[taskId] = (half)(logf(s) + m);
 }
 
