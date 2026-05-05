@@ -10,6 +10,7 @@
 #define E4 16
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[E2];
   int total = E4 * E3;
   for (int g = taskId; g < total; g += taskDim) {
     int n = g / E3;
@@ -19,8 +20,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     int c = b / 9;
     const half *src = x + ((n * 3 + c) * 256 + kh) * 256 + kw;
     half *dst = y + (n * E3 + b) * E2;
-    __memcpy(dst, src, E1 * sizeof(half), GDRAM2GDRAM, E1 * sizeof(half),
+    __memcpy(a, src, E1 * sizeof(half), GDRAM2NRAM, E1 * sizeof(half),
              256 * sizeof(half), E1 - 1);
+    __memcpy(dst, a, E2 * sizeof(half), NRAM2GDRAM);
   }
 }
 
