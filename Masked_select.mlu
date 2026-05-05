@@ -14,7 +14,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
   int p = taskId * E1;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_active_relu(b, a, E1);
-  int n = (int)__bang_filter(a, a, b, E1);
+  int n = (int)__bang_filter(a, b, b, E1);
   y[taskId] = n;
   __sync_all_ipu();
 
