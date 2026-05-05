@@ -7,31 +7,16 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half t[4096];
+  __nram__ half a[4224];
   __nram__ half b[2048];
+  __bang_write_value(a, 4224, (half)-65504.0f);
   for (int r = taskId; r < E0; r += taskDim) {
     int base = r << 5;
     __memcpy(t, x + base * 128, 4096 * sizeof(half), GDRAM2NRAM);
-    __bang_maxpool(b, t, 1, 32, 128, 1, 4, 2, 1, 1, 3, 1, 1);
-    __memcpy(y + base * 62 + 1, b, 60 * sizeof(half), NRAM2GDRAM,
-             62 * sizeof(half), 60 * sizeof(half), 31);
-    for (int i = 0; i < 32; ++i) {
-      int pi = i * 128;
-      int po = (base + i) * 62;
-      float v0 = (float)t[pi + 1];
-      float v1 = (float)t[pi + 4];
-      float v2 = (float)t[pi + 7];
-      float u0 = (float)t[pi + 120];
-      float u1 = (float)t[pi + 123];
-      float u2 = (float)t[pi + 126];
-      if (v1 > v0) v0 = v1;
-      if (v2 > v0) v0 = v2;
-      if (u1 > u0) u0 = u1;
-      if (u2 > u0) u0 = u2;
-      b[i] = (half)v0;
-      b[32 + i] = (half)u0;
-      __memcpy(y + po, b + i, sizeof(half), NRAM2GDRAM);
-      __memcpy(y + po + 61, b + 32 + i, sizeof(half), NRAM2GDRAM);
-    }
+    __memcpy(a + 2, t, 128 * sizeof(half), NRAM2NRAM, 132 * sizeof(half),
+             128 * sizeof(half), 31);
+    __bang_maxpool(b, a, 1, 32, 132, 1, 4, 2, 1, 1, 3, 1, 1);
+    __memcpy(y + base * 62, b, 1984 * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -40,7 +25,7 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
   auto y = torch::empty({16, 64, 62}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t g = {4, 8, 1};
-  k0<<<g, cnrtFuncTypeUnion1, queue>>>(
+  k0<<<g, cnrtFuncTypeUnion2, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
