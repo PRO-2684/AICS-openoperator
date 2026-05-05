@@ -3,28 +3,26 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 144
+#define E0 64
 #define E1 254
 #define E2 (E1 * E1)
-#define E3 256
-#define E4 (E1 * E3)
+#define E3 27
+#define E4 16
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[E4];
-  int g = taskId;
-  if (g < E0) {
-    int n = g / 9;
-    int r = g - n * 9;
-    int c = r / 3;
-    int kh = r - c * 3;
-    __memcpy(a, x + ((n * 3 + c) * E3 + kh) * E3, E3 * sizeof(half),
-             GDRAM2NRAM, E3 * sizeof(half), E3 * sizeof(half), E1 - 1);
-    int b = c * 9 + kh * 3;
-#pragma unroll
-    for (int kw = 0; kw < 3; ++kw) {
-      __memcpy(y + (n * 27 + b + kw) * E2, a + kw, E1 * sizeof(half),
-               NRAM2GDRAM, E1 * sizeof(half), E3 * sizeof(half), E1 - 1);
-    }
+  __nram__ half a[E2];
+  int total = E4 * E3;
+  for (int g = taskId; g < total; g += taskDim) {
+    int n = g / E3;
+    int b = g - n * E3;
+    int kw = b % 3;
+    int kh = (b / 3) % 3;
+    int c = b / 9;
+    const half *src = x + ((n * 3 + c) * 256 + kh) * 256 + kw;
+    half *dst = y + (n * E3 + b) * E2;
+    __memcpy(a, src, E1 * sizeof(half), GDRAM2NRAM, E1 * sizeof(half),
+             256 * sizeof(half), E1 - 1);
+    __memcpy(dst, a, E2 * sizeof(half), NRAM2GDRAM);
   }
 }
 
