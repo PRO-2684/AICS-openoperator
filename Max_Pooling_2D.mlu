@@ -9,9 +9,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half t[16384];
   __nram__ half a[17152];
   __nram__ half b[4096];
+  __bang_write_value(a, 17152, (half)-65504.0f);
   for (int r = taskId; r < E0; r += taskDim) {
     __memcpy(t, x + r * 16384, 16384 * sizeof(half), GDRAM2NRAM);
-    __bang_write_value(a, 17152, (half)-65504.0f);
     __memcpy(a + 131, t, 128 * sizeof(half), NRAM2NRAM,
              130 * sizeof(half), 128 * sizeof(half), 127);
     __bang_maxpool(b, a, 1, 130, 130, 2, 2, 2, 2, 3, 3, 1, 1);
