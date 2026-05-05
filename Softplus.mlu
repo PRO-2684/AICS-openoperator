@@ -1,108 +1,56 @@
-#include <bang.h>
-#include <bang_device_functions_decls.h>
-#include <cnrt.h>
-#include <framework/core/MLUStream.h>
+#pragma once
+
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-#define CHUNK_ELEMS 4096
-#define ELEMS_PER_TASK 8192
+#include <climits>
+#include <vector>
 
-__mlu_func__ void softplus_compute_plain(half *x, half *tmp, uint32_t elems) {
-  __bang_active_exphp(tmp, x, elems);
-  __bang_add_scalar(tmp, tmp, (half)1.0f, elems);
-  __bang_active_loghp(x, tmp, elems);
+#define CNNL_CHECK(expr) \
+  do { \
+    cnnlStatus_t status__ = (expr); \
+    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)status__); \
+  } while (0)
+
+inline cnnlDataType_t cnnl_dtype_from_torch(c10::ScalarType t) {
+  switch (t) {
+    case at::kHalf: return CNNL_DTYPE_HALF;
+    case at::kFloat: return CNNL_DTYPE_FLOAT;
+    case at::kBool: return CNNL_DTYPE_BOOL;
+    case at::kInt: return CNNL_DTYPE_INT32;
+    case at::kLong: return CNNL_DTYPE_INT64;
+    default: TORCH_CHECK(false, "unsupported dtype");
+  }
 }
 
-__mlu_func__ void softplus_compute_stable(half *x, half *tmp, half *pos,
-                                          uint32_t elems) {
-  // pos = max(x, 0)
-  __memcpy(pos, x, elems * sizeof(half), NRAM2NRAM);
-  __bang_active_relu(pos, pos, elems);
-
-  // x = abs(x)
-  __bang_abs(x, x, elems);
-
-  // x = -abs(x)
-  __bang_mul_scalar(x, x, (half)-1.0f, elems);
-
-  // tmp = exp(-abs(x))
-  __bang_active_exphp(tmp, x, elems);
-
-  // tmp = 1 + exp(-abs(x))
-  __bang_add_scalar(tmp, tmp, (half)1.0f, elems);
-
-  // x = log(1 + exp(-abs(x)))
-  __bang_active_loghp(x, tmp, elems);
-
-  // x = max(original_x, 0) + log(1 + exp(-abs(original_x)))
-  __bang_add(x, x, pos, elems);
+inline cnnlTensorDescriptor_t make_array_desc(const torch::Tensor& x) {
+  cnnlTensorDescriptor_t d;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+  std::vector<int> dims(x.dim());
+  for (int i = 0; i < x.dim(); ++i) {
+    TORCH_CHECK(x.size(i) <= INT_MAX, "dim too large");
+    dims[i] = (int)x.size(i);
+  }
+  CNNL_CHECK(cnnlSetTensorDescriptor(
+      d, CNNL_LAYOUT_ARRAY, cnnl_dtype_from_torch(x.scalar_type()), (int)x.dim(), dims.data()));
+  return d;
 }
 
-__mlu_func__ void softplus_compute_stable_no_relu(half *x, half *tmp, half *pos,
-                                                  uint32_t elems) {
-  // pos = original x
-  __memcpy(pos, x, elems * sizeof(half), NRAM2NRAM);
-
-  // x = abs(original x)
-  __bang_abs(x, x, elems);
-
-  // pos = original x + abs(original x)
-  __bang_add(pos, pos, x, elems);
-
-  // pos = 0.5 * (original x + abs(original x)) = max(x, 0)
-  __bang_mul_scalar(pos, pos, (half)0.5f, elems);
-
-  // x = -abs(original x)
-  __bang_mul_scalar(x, x, (half)-1.0f, elems);
-
-  // tmp = exp(-abs(x))
-  __bang_active_exp_less_0(tmp, x, elems);
-
-  // tmp = 1 + exp(-abs(x))
-  __bang_add_scalar(tmp, tmp, (half)1.0f, elems);
-
-  // x = log(1 + exp(-abs(x)))
-  __bang_active_loghp(x, tmp, elems);
-
-  // x += max(original x, 0)
-  __bang_add(x, x, pos, elems);
-}
-
-const auto softplus_compute = softplus_compute_stable_no_relu;
-
-__mlu_entry__ void softplus_half_kernel(half *__restrict__ input) {
-  __nram__ half buf0[CHUNK_ELEMS];
-  __nram__ half tmp0[CHUNK_ELEMS];
-  __nram__ half pos0[CHUNK_ELEMS];
-
-  __nram__ half buf1[CHUNK_ELEMS];
-  __nram__ half tmp1[CHUNK_ELEMS];
-  __nram__ half pos1[CHUNK_ELEMS];
-
-  const uint32_t base = taskId * ELEMS_PER_TASK;
-  half *ptr0 = (half *)__builtin_assume_aligned(input + base, 512);
-  half *ptr1 =
-      (half *)__builtin_assume_aligned(input + base + CHUNK_ELEMS, 512);
-
-  __memcpy(buf0, ptr0, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  __sync_io();
-
-  __memcpy(buf1, ptr1, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  softplus_compute(buf0, tmp0, pos0, CHUNK_ELEMS);
-  __sync_io_move_compute();
-
-  __memcpy(ptr0, buf0, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
-  softplus_compute(buf1, tmp1, pos1, CHUNK_ELEMS);
-  __sync_io_move_compute();
-
-  __memcpy(ptr1, buf1, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
-  __sync_io();
+inline void destroy_desc(cnnlTensorDescriptor_t d) {
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(d));
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {32, 1, 1};
-  softplus_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
-  return x;
+  auto in = x.contiguous();
+  auto out = torch::empty_like(in);
+  auto xd = make_array_desc(in);
+  auto yd = make_array_desc(out);
+  float beta = 1.0f;
+  float threshold = 20.0f;
+  CNNL_CHECK(cnnlSoftplusForward_v2(torch_mlu::getCurrentHandle(), &beta, &threshold,
+                                    xd, in.data_ptr(), yd, out.data_ptr()));
+  destroy_desc(yd);
+  destroy_desc(xd);
+  return out;
 }
