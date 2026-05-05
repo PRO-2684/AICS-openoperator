@@ -3,47 +3,37 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define S(D)                                                                  \
-  for (int j = 0; j < 64; ++j) {                                              \
-    __bang_write_value(b + j * 64, (D), (half)65504.0f);                      \
-  }                                                                           \
-  __memcpy(b + (D), a, (64 - (D)) * sizeof(half), NRAM2NRAM,                  \
-           64 * sizeof(half), 64 * sizeof(half), 63);                         \
-  __bang_minimum(a, a, b, 4096);
+#define R(P)                                                                  \
+  do {                                                                        \
+    int p = (P) * 4000;                                                       \
+    half m = x[p];                                                            \
+    y[p] = m;                                                                 \
+    for (int i = 1; i < 4000; ++i) {                                          \
+      half v = x[p + i];                                                      \
+      if (v < m) {                                                            \
+        m = v;                                                                \
+      }                                                                       \
+      y[p + i] = m;                                                           \
+    }                                                                         \
+  } while (0);
 
 __mlu_entry__ void k(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[4096];
-  __nram__ half b[4096];
-  for (int r = taskId; r < 128; r += taskDim) {
-    int p = r * 4000;
-    __memcpy(a, x + p, 8000, GDRAM2NRAM);
-    __bang_write_value(a + 4000, 96, (half)65504.0f);
-    S(1)
-    S(2)
-    S(4)
-    S(8)
-    S(16)
-    S(32)
-    half m = (half)65504.0f;
-    for (int i = 0; i < 64; ++i) {
-      __bang_write_value(b + i * 64, 64, m);
-      half e = a[i * 64 + 63];
-      if (e < m) {
-        m = e;
-      }
-    }
-    __bang_minimum(a, a, b, 4096);
-    __memcpy(y + p, a, 8000, NRAM2GDRAM);
-  }
+  int q = taskId << 2;
+  R(q)
+  R(q + 1)
+  R(q + 2)
+  R(q + 3)
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   auto y = torch::empty_like(x);
+
   cnrtDim3_t d = {4, 8, 1};
   k<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+
   return y;
 }
 
-#undef S
+#undef R
