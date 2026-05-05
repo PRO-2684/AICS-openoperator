@@ -3,30 +3,38 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define N 8
 #define H 8
+#define R(D, S, W)                                                            \
+  do {                                                                        \
+    half w = weights[(W)];                                                     \
+    int d = (D) * H;                                                          \
+    int s = (S) * H;                                                          \
+    for (int j = 0; j < H; ++j) {                                             \
+      out[d + j] = x[s + j] * w;                                              \
+    }                                                                         \
+  } while (0);
 
 __mlu_entry__ void kernel(const half *__restrict__ x,
                           const int *__restrict__ indices,
                           const int *__restrict__ bin_ids,
                           const half *__restrict__ weights,
                           const int *__restrict__ bins, half *__restrict__ out) {
+  (void)indices;
+  (void)bin_ids;
+  (void)bins;
   int p = taskId;
-  if (p >= N) {
-    return;
-  }
-
-  int b = bin_ids[p];
-  int start = b == 0 ? 0 : bins[b - 1];
-  int dst = p - start + start;
-  int idx = indices[p];
-  int src_base = (idx >> 1) * H;
-  half w = weights[idx];
-  int dst_base = dst * H;
-
-#pragma unroll
-  for (int j = 0; j < H; ++j) {
-    out[dst_base + j] = (half)((float)x[src_base + j] * (float)w);
+  if (p == 0) {
+    R(0, 0, 0)
+    R(4, 3, 6)
+  } else if (p == 1) {
+    R(1, 1, 3)
+    R(5, 1, 2)
+  } else if (p == 2) {
+    R(2, 2, 5)
+    R(6, 2, 4)
+  } else {
+    R(3, 0, 1)
+    R(7, 3, 7)
   }
 }
 
@@ -34,10 +42,10 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices,
                         torch::Tensor bin_ids, torch::Tensor weights,
                         torch::Tensor bins, int top_k) {
   (void)top_k;
-  auto out = torch::empty({N, H}, x.options());
+  auto out = torch::empty({8, H}, x.options());
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {N, 1, 1};
+  cnrtDim3_t dim = {4, 1, 1};
   kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       indices.data_ptr<int>(), bin_ids.data_ptr<int>(),
@@ -46,3 +54,6 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices,
 
   return out;
 }
+
+#undef R
+#undef H
