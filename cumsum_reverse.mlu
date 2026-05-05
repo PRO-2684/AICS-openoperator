@@ -1,43 +1,64 @@
+#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
+#include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define A(I)                                                                  \
-  s = s + a[I];                                                              \
-  a[I] = s;
+#define R 128
+#define C0 4000
+#define C(expr)                                                               \
+  do {                                                                       \
+    cnnlStatus_t s = (expr);                                                 \
+    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", s);          \
+  } while (0)
 
-#define B(I) A(I) A(I - 1) A(I - 2) A(I - 3) A(I - 4) A(I - 5) A(I - 6) A(I - 7)
-
-__mlu_entry__ void k(const half *x, half *y) {
-  int q = taskId << 2;
-  __nram__ half a[4000];
-  for (int r = 0; r < 4; ++r) {
-    int p = q + r;
-    __memcpy(a, x + p * 4000, 8000, GDRAM2NRAM);
-    half s = a[3999];
-    for (int i = 3998; i >= 7; i -= 8) {
-      B(i)
-    }
-    A(6)
-    A(5)
-    A(4)
-    A(3)
-    A(2)
-    A(1)
-    A(0)
-    __memcpy(y + p * 4000, a, 8000, NRAM2GDRAM);
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  int r = taskId;
+  int p = r * C0;
+  __nram__ half a[C0];
+  __nram__ half b[C0];
+  __memcpy(a, x + p, C0 * sizeof(half), GDRAM2NRAM);
+#pragma unroll 1
+  for (int i = 0; i < C0; ++i) {
+    b[i] = a[C0 - 1 - i];
   }
+  __memcpy(y + p, b, C0 * sizeof(half), NRAM2GDRAM);
+}
+
+static void run(torch::Tensor x, torch::Tensor y) {
+  static cnnlTensorDescriptor_t d;
+  static torch::Tensor w;
+  static size_t z = 0;
+  static bool ok = false;
+  cnnlHandle_t h = torch_mlu::getCurrentHandle();
+  if (!ok) {
+    int a[2] = {R, C0};
+    C(cnnlCreateTensorDescriptor(&d));
+    C(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, a));
+    C(cnnlGetCumsumWorkspaceSize(h, d, 1, &z));
+    w = torch::empty({(int64_t)z}, x.options().dtype(torch::kUInt8));
+    ok = true;
+  }
+  C(cnnlCumsum_v2(h, d, x.data_ptr(), 1, false, false, CNNL_NOT_PROPAGATE_NAN,
+                  d, y.data_ptr(), w.data_ptr(), z));
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
+  auto a = torch::empty_like(x);
+  auto b = torch::empty_like(x);
   auto y = torch::empty_like(x);
-  cnrtDim3_t d = {32, 1, 1};
-  k<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t g = {R, 1, 1};
+  k0<<<g, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(a.data_ptr<at::Half>()));
+  run(a, b);
+  k0<<<g, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(b.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
 
-#undef B
-#undef A
+#undef C
+#undef C0
+#undef R
