@@ -13,7 +13,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   half z = 0;
   for (int g = taskId; g < E2; g += taskDim) {
     half *p = y + g * E3;
-    __gdramset(p, E3, &z);
+    __gdramset(p, E1 * 2, &z);
+    __gdramset(p + E1 * 130, E1 * 2, &z);
+    __gdramset(p + E1 * 2, 2, &z, E1 * sizeof(half), E0 - 1);
+    __gdramset(p + E1 * 2 + 130, 2, &z, E1 * sizeof(half), E0 - 1);
     __memcpy(p + E1 * 2 + 2, x + g * E0 * E0, E0 * sizeof(half),
              GDRAM2GDRAM, E1 * sizeof(half), E0 * sizeof(half), E0 - 1);
   }
