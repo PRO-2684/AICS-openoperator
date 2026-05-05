@@ -6,81 +6,14 @@
 #define E0 512
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[16384];
-  __nram__ half v[8192];
-  __nram__ half b0[4096];
-  __nram__ half b1[4096];
+  __nram__ half a[17152];
+  __nram__ half b[4096];
   for (int r = taskId; r < E0; r += taskDim) {
-    __memcpy(a, x + r * 16384, 16384 * sizeof(half), GDRAM2NRAM);
-    __bang_write_value(b0, 4096, (half)-65504.0f);
-    __bang_write_value(b1, 4096, (half)-65504.0f);
-    __bang_maxpool(v, a + 128, 128, 127, 1, 2, 1, 1, 2, 3, 1, 1, 1);
-    for (int h = 0; h < 62; ++h) {
-      __memcpy(b0 + (h + 1) * 64 + 1, v + h * 128 + 1, sizeof(half),
-               NRAM2NRAM, sizeof(half), 2 * sizeof(half), 61);
-      __memcpy(b1 + (h + 1) * 64 + 1, v + h * 128 + 4, sizeof(half),
-               NRAM2NRAM, sizeof(half), 2 * sizeof(half), 61);
-    }
-    __bang_maximum(b0, b0, b1, 4096);
-    for (int oh = 0; oh < 64; ++oh) {
-      int ih0 = (oh << 1) - 1;
-      int ih1 = ih0 + 3;
-      for (int ow = 0; ow < 64; ow += 63) {
-        int iw0 = (ow << 1) - 1;
-        int iw1 = iw0 + 3;
-        float m = -3.402823466e+38F;
-        if ((unsigned)ih0 < 128U) {
-          int row = ih0 * 128;
-          if ((unsigned)iw0 < 128U) m = (float)a[row + iw0];
-          if ((unsigned)iw1 < 128U) {
-            float q = (float)a[row + iw1];
-            if (q > m) m = q;
-          }
-        }
-        if ((unsigned)ih1 < 128U) {
-          int row = ih1 * 128;
-          if ((unsigned)iw0 < 128U) {
-            float q = (float)a[row + iw0];
-            if (q > m) m = q;
-          }
-          if ((unsigned)iw1 < 128U) {
-            float q = (float)a[row + iw1];
-            if (q > m) m = q;
-          }
-        }
-        b0[oh * 64 + ow] = (half)m;
-      }
-    }
-    for (int oh = 0; oh < 64; oh += 63) {
-      int ih0 = (oh << 1) - 1;
-      int ih1 = ih0 + 3;
-      for (int ow = 1; ow < 63; ++ow) {
-        int iw0 = (ow << 1) - 1;
-        int iw1 = iw0 + 3;
-        float m = -3.402823466e+38F;
-        if ((unsigned)ih0 < 128U) {
-          int row = ih0 * 128;
-          if ((unsigned)iw0 < 128U) m = (float)a[row + iw0];
-          if ((unsigned)iw1 < 128U) {
-            float q = (float)a[row + iw1];
-            if (q > m) m = q;
-          }
-        }
-        if ((unsigned)ih1 < 128U) {
-          int row = ih1 * 128;
-          if ((unsigned)iw0 < 128U) {
-            float q = (float)a[row + iw0];
-            if (q > m) m = q;
-          }
-          if ((unsigned)iw1 < 128U) {
-            float q = (float)a[row + iw1];
-            if (q > m) m = q;
-          }
-        }
-        b0[oh * 64 + ow] = (half)m;
-      }
-    }
-    __memcpy(y + r * 4096, b0, 4096 * sizeof(half), NRAM2GDRAM);
+    __bang_write_value(a, 17152, (half)-65504.0f);
+    __memcpy(a + 131, x + r * 16384, 128 * sizeof(half), GDRAM2NRAM,
+             130 * sizeof(half), 128 * sizeof(half), 127);
+    __bang_maxpool(b, a, 1, 130, 130, 2, 2, 2, 2, 3, 3, 1, 1);
+    __memcpy(y + r * 4096, b, 4096 * sizeof(half), NRAM2GDRAM);
   }
 }
 
