@@ -10,13 +10,16 @@
 #define E3 (E1 * E1)
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  half z = 0;
+  __nram__ half a[320];
+  __bang_write_zero(a, 320);
   for (int g = taskId; g < E2; g += taskDim) {
     half *p = y + g * E3;
-    __gdramset(p, E1 * 2, &z);
-    __gdramset(p + E1 * 130, E1 * 2, &z);
-    __gdramset(p + E1 * 2, 2, &z, E1 * sizeof(half), E0 - 1);
-    __gdramset(p + E1 * 2 + 130, 2, &z, E1 * sizeof(half), E0 - 1);
+    __memcpy(p, a, E1 * 2 * sizeof(half), NRAM2GDRAM);
+    __memcpy(p + E1 * 130, a, E1 * 2 * sizeof(half), NRAM2GDRAM);
+    __memcpy(p + E1 * 2, a, 2 * sizeof(half), NRAM2GDRAM,
+             E1 * sizeof(half), 0, E0 - 1);
+    __memcpy(p + E1 * 2 + 130, a, 2 * sizeof(half), NRAM2GDRAM,
+             E1 * sizeof(half), 0, E0 - 1);
     __memcpy(p + E1 * 2 + 2, x + g * E0 * E0, E0 * sizeof(half),
              GDRAM2GDRAM, E1 * sizeof(half), E0 * sizeof(half), E0 - 1);
   }

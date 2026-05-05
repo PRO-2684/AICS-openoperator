@@ -6,23 +6,23 @@
 #define E0 32
 #define E1 254
 #define E2 (E1 * E1)
-#define E3 27
-#define E4 16
+#define E3 9
+#define E4 48
+#define E5 65536
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[E2];
-  int total = E4 * E3;
-  for (int g = taskId; g < total; g += taskDim) {
-    int n = g / E3;
-    int b = g - n * E3;
-    int kw = b % 3;
-    int kh = (b / 3) % 3;
-    int c = b / 9;
-    const half *src = x + ((n * 3 + c) * 256 + kh) * 256 + kw;
-    half *dst = y + (n * E3 + b) * E2;
-    __memcpy(a, src, E1 * sizeof(half), GDRAM2NRAM, E1 * sizeof(half),
-             256 * sizeof(half), E1 - 1);
-    __memcpy(dst, a, E2 * sizeof(half), NRAM2GDRAM);
+  __nram__ half a[E5];
+  for (int g = taskId; g < E4; g += taskDim) {
+    int n = g / 3;
+    int c = g - n * 3;
+    __memcpy(a, x + (n * 3 + c) * E5, E5 * sizeof(half), GDRAM2NRAM);
+    for (int b = 0; b < E3; ++b) {
+      int kw = b % 3;
+      int kh = b / 3;
+      half *dst = y + (n * 27 + c * 9 + b) * E2;
+      __memcpy(dst, a + kh * 256 + kw, E1 * sizeof(half), NRAM2GDRAM,
+               E1 * sizeof(half), 256 * sizeof(half), E1 - 1);
+    }
   }
 }
 

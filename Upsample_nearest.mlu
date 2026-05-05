@@ -10,21 +10,19 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E2];
-  __nram__ unsigned int b[E3 / 2];
+  __nram__ half b[8192];
+  __nram__ half c[E3];
   for (int g = taskId; g < E1; g += taskDim) {
     __memcpy(a, x + g * E2, E2 * sizeof(half), GDRAM2NRAM);
-    for (int r = 0; r < 64; ++r) {
-      unsigned int *p0 = b + (r << 7);
-      unsigned int *p1 = p0 + 64;
-      const unsigned short *s = (const unsigned short *)a + (r << 6);
-#pragma unroll
-      for (int c = 0; c < 64; ++c) {
-        unsigned int v = s[c];
-        p0[c] = v | (v << 16);
-      }
-      __memcpy(p1, p0, 64 * sizeof(unsigned int), NRAM2NRAM);
-    }
-    __memcpy(y + g * E3, b, E3 * sizeof(half), NRAM2GDRAM);
+    __memcpy(b, a, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
+             sizeof(half), E2 - 1);
+    __memcpy(b + 1, a, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
+             sizeof(half), E2 - 1);
+    __memcpy(c, b, 128 * sizeof(half), NRAM2NRAM, 256 * sizeof(half),
+             128 * sizeof(half), 63);
+    __memcpy(c + 128, b, 128 * sizeof(half), NRAM2NRAM, 256 * sizeof(half),
+             128 * sizeof(half), 63);
+    __memcpy(y + g * E3, c, E3 * sizeof(half), NRAM2GDRAM);
   }
 }
 
