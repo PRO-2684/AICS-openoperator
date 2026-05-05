@@ -6,18 +6,20 @@
 #define R(P)                                                                  \
   do {                                                                        \
     int p = (P) * 4000;                                                       \
-    half m = x[p];                                                            \
-    y[p] = m;                                                                 \
+    __memcpy(a, x + p, 8000, GDRAM2NRAM);                                     \
+    half m = a[0];                                                            \
     for (int i = 1; i < 4000; ++i) {                                          \
-      half v = x[p + i];                                                      \
+      half v = a[i];                                                          \
       if (v < m) {                                                            \
         m = v;                                                                \
       }                                                                       \
-      y[p + i] = m;                                                           \
+      a[i] = m;                                                               \
     }                                                                         \
+    __memcpy(y + p, a, 8000, NRAM2GDRAM);                                     \
   } while (0);
 
 __mlu_entry__ void k(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[4000];
   int q = taskId << 2;
   R(q)
   R(q + 1)
