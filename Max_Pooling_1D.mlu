@@ -13,10 +13,15 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   for (int r = taskId; r < E0; r += taskDim) {
     int base = r << 5;
     __memcpy(t, x + base * 128, 4096 * sizeof(half), GDRAM2NRAM);
-    __memcpy(a + 2, t, 128 * sizeof(half), NRAM2NRAM, 132 * sizeof(half),
-             128 * sizeof(half), 31);
-    __bang_maxpool(b, a, 1, 32, 132, 1, 4, 2, 1, 1, 3, 1, 1);
-    __memcpy(y + base * 62, b, 1984 * sizeof(half), NRAM2GDRAM);
+    for (int i = 0; i < 32; ++i) {
+      __memcpy(a + 64 + i, t + i * 128, sizeof(half), NRAM2NRAM,
+               32 * sizeof(half), sizeof(half), 127);
+    }
+    __bang_maxpool(b, a, 32, 1, 132, 1, 4, 2, 1, 1, 3, 1, 1);
+    for (int i = 0; i < 32; ++i) {
+      __memcpy(y + (base + i) * 62, b + i, sizeof(half), NRAM2GDRAM,
+               sizeof(half), 32 * sizeof(half), 61);
+    }
   }
 }
 
