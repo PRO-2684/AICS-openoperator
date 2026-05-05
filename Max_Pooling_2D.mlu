@@ -9,21 +9,13 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a0[17152];
   __nram__ half a1[17152];
   __nram__ half b[4096];
-  __bang_write_value(a0, 130, (half)-65504.0f);
-  __bang_write_value(a0 + 16770, 130, (half)-65504.0f);
-  __bang_write_value(a1, 130, (half)-65504.0f);
-  __bang_write_value(a1 + 16770, 130, (half)-65504.0f);
-  for (int i = 1; i < 129; ++i) {
-    a0[i * 130] = (half)-65504.0f;
-    a0[i * 130 + 129] = (half)-65504.0f;
-    a1[i * 130] = (half)-65504.0f;
-    a1[i * 130 + 129] = (half)-65504.0f;
-  }
+  __bang_write_value(a0, 17152, (half)-65504.0f);
+  __bang_write_value(a1, 17152, (half)-65504.0f);
   int r = taskId;
   if (r < E0) {
     __memcpy_async(a0 + 131, x + r * 16384, 128 * sizeof(half), GDRAM2NRAM,
                    130 * sizeof(half), 128 * sizeof(half), 127);
-    __asm__ volatile("sync;");
+    __sync_all_ipu();
   }
   int q = 0;
   for (; r < E0; r += taskDim) {
@@ -43,7 +35,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     __bang_maxpool(b, a, 1, 130, 130, 2, 2, 2, 2, 3, 3, 1, 1);
     __memcpy(y + r * 4096, b, 4096 * sizeof(half), NRAM2GDRAM);
     if (nr < E0) {
-      __asm__ volatile("sync;");
+      __sync_all_ipu();
     }
     q ^= 1;
   }
