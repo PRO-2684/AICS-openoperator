@@ -4,7 +4,7 @@
 #include <torch/extension.h>
 
 #define E0 4000000
-#define E1 131072
+#define E1 196608
 #define E2 32
 
 __mlu_entry__ void k0(half *__restrict__ x) {
