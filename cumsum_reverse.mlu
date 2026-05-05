@@ -55,40 +55,35 @@ __mlu_entry__ void flip_kernel(const half *__restrict__ x,
 #undef S
 
 static void cumsum_dim1(torch::Tensor in, torch::Tensor out) {
-  int dims[2] = {ROWS, COLS};
-
-  cnnlTensorDescriptor_t in_desc;
-  cnnlTensorDescriptor_t out_desc;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&in_desc));
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&out_desc));
-  CNNL_CHECK(cnnlSetTensorDescriptor(in_desc, CNNL_LAYOUT_ARRAY,
-                                     CNNL_DTYPE_HALF, 2, dims));
-  CNNL_CHECK(cnnlSetTensorDescriptor(out_desc, CNNL_LAYOUT_ARRAY,
-                                     CNNL_DTYPE_HALF, 2, dims));
-
-  cnnlHandle_t handle;
-  CNNL_CHECK(cnnlCreate(&handle));
-  CNNL_CHECK(cnnlSetQueue(handle, torch_mlu::getCurMLUStream()));
-
-  size_t workspace_size = 0;
-  CNNL_CHECK(cnnlGetCumsumWorkspaceSize(handle, in_desc, 1, &workspace_size));
-  auto workspace =
-      torch::empty({(int64_t)workspace_size}, in.options().dtype(torch::kUInt8));
-
-  CNNL_CHECK(cnnlCumsum_v2(handle, in_desc, in.data_ptr(), 1, false, false,
-                           CNNL_NOT_PROPAGATE_NAN, out_desc, out.data_ptr(),
-                           workspace.data_ptr(), workspace_size));
-
-  CNNL_CHECK(cnnlDestroy(handle));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(out_desc));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(in_desc));
+  static cnnlTensorDescriptor_t d;
+  static torch::Tensor w;
+  static size_t z = 0;
+  static bool ok = false;
+  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
+  if (!ok) {
+    int dims[2] = {ROWS, COLS};
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+    CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF,
+                                       2, dims));
+    CNNL_CHECK(cnnlGetCumsumWorkspaceSize(handle, d, 1, &z));
+    w = torch::empty({(int64_t)z}, in.options().dtype(torch::kUInt8));
+    ok = true;
+  }
+  CNNL_CHECK(cnnlCumsum_v2(handle, d, in.data_ptr(), 1, false, false,
+                           CNNL_NOT_PROPAGATE_NAN, d, out.data_ptr(),
+                           w.data_ptr(), z));
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
-  auto flipped = torch::empty_like(x);
-  auto scanned = torch::empty_like(x);
-  auto out = torch::empty_like(x);
+  static torch::Tensor flipped;
+  static torch::Tensor scanned;
+  static torch::Tensor out;
+  if (!out.defined()) {
+    flipped = torch::empty_like(x);
+    scanned = torch::empty_like(x);
+    out = torch::empty_like(x);
+  }
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t grid = {ROWS, 1, 1};
