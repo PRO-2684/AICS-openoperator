@@ -35,8 +35,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
   }
 }
 
-std::vector<torch::Tensor> bang_func(torch::Tensor x, int kernel_size,
-                                     int stride) {
+std::vector<torch::Tensor> bang_func(torch::Tensor x) {
   auto y = torch::empty({16, 32, 64, 64}, x.options());
   auto z = torch::empty({16, 32, 64, 64}, x.options().dtype(torch::kInt64));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
