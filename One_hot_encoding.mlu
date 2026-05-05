@@ -6,7 +6,7 @@
 
 #define ROWS 1024
 #define CLASSES 512
-#define TASKS 16
+#define TASKS 64
 #define ROWS_PER_TASK (ROWS / TASKS)
 #define OUT_PER_TASK (ROWS_PER_TASK * CLASSES)
 
