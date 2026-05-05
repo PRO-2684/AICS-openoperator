@@ -7,7 +7,6 @@
 #define E1 4000
 #define E2 4096
 #define E3 4032
-#define E4 3968
 
 __mlu_entry__ void k0(const half *__restrict__ x,
                       const unsigned char *__restrict__ m,
@@ -18,20 +17,19 @@ __mlu_entry__ void k0(const half *__restrict__ x,
   __nram__ float b[E2];
   for (int r = taskId; r < E0; r += taskDim) {
     int p = r * E1;
-    int n = r + 1 < E0 ? E3 : E4;
-    __memcpy(h, x + p, n * sizeof(half), GDRAM2NRAM);
-    __memcpy(c, m + p, n * sizeof(int8_t), GDRAM2NRAM);
-    __bang_half2float(a, h, n);
-    __bang_int82float(b, c, n, 0);
-    __bang_mul(a, a, b, n);
-    if (n < E1) {
-      for (int i = n; i < E1; ++i) {
-        a[i] = m[p + i] ? (float)x[p + i] : 0.0f;
-      }
+    if (r + 1 < E0) {
+      __memcpy(h, x + p, E3 * sizeof(half), GDRAM2NRAM);
+      __memcpy(c, m + p, E3 * sizeof(int8_t), GDRAM2NRAM);
+    } else {
+      __memcpy(h, x + p, E1 * sizeof(half), GDRAM2NRAM);
+      __memcpy(c, m + p, E1 * sizeof(int8_t), GDRAM2NRAM);
+      __bang_write_value(h + E1, E3 - E1, (half)0.0f);
+      __bang_write_value(c + E1, E3 - E1, (int8_t)0);
     }
-    for (int i = E1; i < E2; ++i) {
-      a[i] = 0.0f;
-    }
+    __bang_half2float(a, h, E3);
+    __bang_int82float(b, c, E3, 0);
+    __bang_mul(a, a, b, E3);
+    __bang_write_value(a + E3, E2 - E3, 0.0f);
     __bang_write_value(b, 1, 0.0f);
     __memcpy(b + 1, a, (E2 - 1) * sizeof(float), NRAM2NRAM);
     __bang_add(a, a, b, E2);
