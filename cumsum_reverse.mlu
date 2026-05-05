@@ -1,6 +1,7 @@
 #include <bang.h>
 #include <cnnl.h>
 #include <cnrt.h>
+#include <aten/cnnl/cnnlHandle.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
