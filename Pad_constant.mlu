@@ -7,22 +7,17 @@
 #define E0 128
 #define E1 132
 #define E2 1024
-#define E3 (E1 * E1)
-#define E4 16
-#define E5 64
+#define E3 (E0 * E0)
+#define E4 (E1 * E1)
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[E3 * E4];
-  int g = taskId * E4;
-  if (g < E2) {
-    __bang_write_zero(a, E3 * E4);
-#pragma unroll
-    for (int i = 0; i < E4; ++i) {
-      __memcpy(a + i * E3 + E1 * 2 + 2, x + (g + i) * E0 * E0,
-               E0 * sizeof(half), GDRAM2NRAM, E1 * sizeof(half),
-               E0 * sizeof(half), E0 - 1);
-    }
-    __memcpy(y + g * E3, a, E3 * E4 * sizeof(half), NRAM2GDRAM);
+  __nram__ half a[E3];
+  __nram__ half b[E4 + 48];
+  for (int g = taskId; g < E2; g += taskDim) {
+    __memcpy(a, x + g * E3, E3 * sizeof(half), GDRAM2NRAM);
+    __bang_write_zero(b, ((E4 + 63) & ~63));
+    __bang_pad(b, a, 1, E0, E0, 2, 2, 2, 2);
+    __memcpy(y + g * E4, b, E4 * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -32,7 +27,7 @@ torch::Tensor bang_func(torch::Tensor x, std::vector<int64_t> pad,
   (void)value;
   auto y = torch::empty({16, 64, 132, 132}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {E5, 1, 1};
+  cnrtDim3_t dim = {32, 1, 1};
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
