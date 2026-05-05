@@ -3,7 +3,7 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define N 16
+#define N 32
 #define H 8
 
 __mlu_entry__ void kernel(const half *__restrict__ x,
@@ -12,8 +12,8 @@ __mlu_entry__ void kernel(const half *__restrict__ x,
                           const half *__restrict__ weights,
                           const int *__restrict__ bins, half *__restrict__ out) {
   int t = taskId;
-  int p = t >> 1;
-  int j = (t & 1) << 2;
+  int p = t >> 2;
+  int j = (t & 3) << 1;
   (void)bin_ids;
   (void)bins;
   int idx = indices[p];
@@ -23,8 +23,6 @@ __mlu_entry__ void kernel(const half *__restrict__ x,
 
   out[dst_base + 0] = x[src_base + 0] * w;
   out[dst_base + 1] = x[src_base + 1] * w;
-  out[dst_base + 2] = x[src_base + 2] * w;
-  out[dst_base + 3] = x[src_base + 3] * w;
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices,
