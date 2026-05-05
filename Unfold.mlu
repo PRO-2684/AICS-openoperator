@@ -41,9 +41,9 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
   cnnlConvolutionDescriptor_t cd;
   CNNL_CHECK(cnnlCreateConvolutionDescriptor(&cd));
   int p[4] = {0, 0, 0, 0};
-  int s[2] = {1, 1};
-  int l[2] = {1, 1};
-  CNNL_CHECK(cnnlSetConvolutionDescriptor(cd, 4, p, s, l, 1,
+  int st[2] = {1, 1};
+  int dl[2] = {1, 1};
+  CNNL_CHECK(cnnlSetConvolutionDescriptor(cd, 4, p, st, dl, 1,
                                           CNNL_DTYPE_HALF));
   CNNL_CHECK(cnnlIm2Col(torch_mlu::getCurrentHandle(), xd, x.data_ptr(), wd,
                         cd, nullptr, nullptr, nullptr, nullptr, 0, yd,
