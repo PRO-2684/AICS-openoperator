@@ -1,57 +1,38 @@
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define X(e)                                                                   \
-  do {                                                                         \
-    cnnlStatus_t s = (e);                                                      \
-    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
-  } while (0)
+#define E0 1024
+#define E1 8
+#define E2 8
+#define E3 256
+#define E4 256
 
-static cnnlTensorDescriptor_t a() {
-  int d[4] = {1024, 256, 256, 1};
-  int s[4] = {65536, 256, 1, 1};
-  cnnlTensorDescriptor_t r;
-  X(cnnlCreateTensorDescriptor(&r));
-  X(cnnlSetTensorDescriptorEx(r, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, d, s));
-  return r;
-}
-
-static cnnlTensorDescriptor_t b() {
-  int d[4] = {1024, 8, 8, 1};
-  int s[4] = {64, 8, 1, 1};
-  cnnlTensorDescriptor_t r;
-  X(cnnlCreateTensorDescriptor(&r));
-  X(cnnlSetTensorDescriptorEx(r, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, d, s));
-  return r;
-}
-
-static cnnlPoolingDescriptor_t c() {
-  cnnlPoolingDescriptor_t r;
-  X(cnnlCreatePoolingDescriptor(&r));
-  int k[2] = {32, 32};
-  int p[4] = {0, 0, 0, 0};
-  int s[2] = {32, 32};
-  int d[2] = {1, 1};
-  X(cnnlSetPoolingNdDescriptor_v2(r, CNNL_POOLING_MAX, CNNL_NOT_PROPAGATE_NAN,
-                                  2, k, p, s, d, false));
-  return r;
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[1024];
+  __nram__ half b[64];
+  int n = E0 * E1;
+  for (int t = taskId; t < n; t += taskDim) {
+    int r = t & 7;
+    int bc = t >> 3;
+    int p = bc * E3 * E4 + r * 32 * E4;
+    int o = (bc * E1 + r) * E2;
+    for (int k = 0; k < 8; ++k) {
+      __memcpy(a, x + p + k * 32, 32 * sizeof(half), GDRAM2NRAM,
+               32 * sizeof(half), E4 * sizeof(half), 31);
+      __bang_max(b, a, 1024);
+      y[o + k] = b[0];
+    }
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, std::vector<int64_t> output_size) {
-  auto y = torch::empty({16, 64, 8, 8}, x.options());
-  static cnnlTensorDescriptor_t xd = nullptr;
-  static cnnlTensorDescriptor_t yd = nullptr;
-  static cnnlPoolingDescriptor_t pd = nullptr;
-  if (xd == nullptr) {
-    xd = a();
-    yd = b();
-    pd = c();
-  }
-  cnnlHandle_t h = torch_mlu::getCurrentHandle();
-  X(cnnlPoolingForward(h, pd, nullptr, xd, x.data_ptr(), nullptr, yd,
-                       y.data_ptr(), nullptr, 0));
-  return y;
+  auto out = torch::empty({16, 64, E1, E2}, x.options());
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t g = {4, 8, 1};
+  k0<<<g, cnrtFuncTypeUnion1, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+  return out;
 }
-
-#undef X
