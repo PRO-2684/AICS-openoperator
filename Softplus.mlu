@@ -1,54 +1,41 @@
 #include <bang.h>
-#include <bang_device_functions_decls.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define CHUNK_ELEMS 4096
-#define ELEMS_PER_TASK 8192
+#define E0 8192
+#define E1 32
 
-__mlu_func__ void softplus_compute(half *x, half *tmp, half *pos,
-                                   uint32_t elems) {
-  __memcpy(pos, x, elems * sizeof(half), NRAM2NRAM);
-  __bang_abs(x, x, elems);
-  __bang_add(pos, pos, x, elems);
-  __bang_mul_scalar(pos, pos, (half)0.5f, elems);
-  __bang_mul_scalar(x, x, (half)-1.0f, elems);
-  __bang_active_exp_less_0(tmp, x, elems);
-  __bang_add_scalar(tmp, tmp, (half)1.0f, elems);
-  __bang_active_loghp(x, tmp, elems);
-  __bang_add(x, x, pos, elems);
-}
-
-__mlu_entry__ void softplus_half_kernel(half *__restrict__ input) {
-  __nram__ half buf0[CHUNK_ELEMS];
-  __nram__ half tmp0[CHUNK_ELEMS];
-  __nram__ half pos0[CHUNK_ELEMS];
-  __nram__ half buf1[CHUNK_ELEMS];
-  __nram__ half tmp1[CHUNK_ELEMS];
-  __nram__ half pos1[CHUNK_ELEMS];
-
-  const uint32_t base = taskId * ELEMS_PER_TASK;
-  half *ptr0 = (half *)__builtin_assume_aligned(input + base, 512);
-  half *ptr1 =
-      (half *)__builtin_assume_aligned(input + base + CHUNK_ELEMS, 512);
-
-  __memcpy(buf0, ptr0, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  __sync_io();
-  __memcpy(buf1, ptr1, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  softplus_compute(buf0, tmp0, pos0, CHUNK_ELEMS);
-  __sync_io_move_compute();
-  __memcpy(ptr0, buf0, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
-  softplus_compute(buf1, tmp1, pos1, CHUNK_ELEMS);
-  __sync_io_move_compute();
-  __memcpy(ptr1, buf1, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
-  __sync_io();
+__mlu_entry__ void k0(half *__restrict__ x) {
+  __nram__ half a[E0];
+  __nram__ half b[E0];
+  __nram__ half c[E0];
+  __nram__ half d[E0];
+  int p = taskId * E0;
+  __memcpy(a, x + p, E0 * sizeof(half), GDRAM2NRAM);
+  __bang_abs(b, a, E0);
+  __memcpy(c, a, E0 * sizeof(half), NRAM2NRAM);
+  __bang_add(c, c, b, E0);
+  __bang_mul_scalar(c, c, (half)0.5f, E0);
+  __bang_write_value(d, E0, (half)0.00119371f);
+  __bang_mul(d, d, b, E0);
+  __bang_add_scalar(d, d, (half)-0.02177595f, E0);
+  __bang_mul(d, d, b, E0);
+  __bang_add_scalar(d, d, (half)0.15467753f, E0);
+  __bang_mul(d, d, b, E0);
+  __bang_add_scalar(d, d, (half)-0.51590403f, E0);
+  __bang_mul(d, d, b, E0);
+  __bang_add_scalar(d, d, (half)0.69521382f, E0);
+  __bang_le_scalar(a, b, (half)6.0f, E0);
+  __bang_mul(d, d, a, E0);
+  __bang_add(c, c, d, E0);
+  __memcpy(x + p, c, E0 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {16, 2, 1};
-  softplus_half_kernel<<<dim, cnrtFuncTypeUnion4, queue>>>(
+  cnrtDim3_t dim = {E1, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
   return x;
 }
