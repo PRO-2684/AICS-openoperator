@@ -10,21 +10,16 @@
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   static cnnlTensorDescriptor_t d;
-  static torch::Tensor w;
-  static size_t z = 0;
   static bool ok = false;
   auto y = torch::empty_like(x);
-  cnnlHandle_t h = torch_mlu::getCurrentHandle();
   if (!ok) {
     int a[2] = {128, 4000};
     C(cnnlCreateTensorDescriptor(&d));
     C(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, a));
-    C(cnnlGetCumprodWorkspaceSize(h, d, 1, &z));
-    w = torch::empty({(int64_t)z}, x.options().dtype(torch::kUInt8));
     ok = true;
   }
-  C(cnnlCumprod_v2(h, d, x.data_ptr(), 1, false, false, d, y.data_ptr(),
-                   w.data_ptr(), z));
+  C(cnnlCumprod(torch_mlu::getCurrentHandle(), d, x.data_ptr(), 1, false,
+                false, d, y.data_ptr()));
   return y;
 }
 
