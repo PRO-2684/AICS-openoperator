@@ -9,16 +9,21 @@
 #define E3 16384
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[E2];
-  __nram__ half c[E3];
   for (int g = taskId; g < E1; g += taskDim) {
-    __memcpy(a, x + g * E2, E2 * sizeof(half), GDRAM2NRAM);
-    __bang_write_zero(c, E3);
-    __bang_unpool(c, a, 1, 64, 64, 2, 2, 2, 2, 0);
-    __bang_unpool(c, a, 1, 64, 64, 2, 2, 2, 2, 1);
-    __bang_unpool(c, a, 1, 64, 64, 2, 2, 2, 2, 2);
-    __bang_unpool(c, a, 1, 64, 64, 2, 2, 2, 2, 3);
-    __memcpy(y + g * E3, c, E3 * sizeof(half), NRAM2GDRAM);
+    const half *src = x + g * E2;
+    half *dst = y + g * E3;
+    __memcpy(dst, src, sizeof(half), GDRAM2GDRAM, 2 * sizeof(half), 63,
+             256 * sizeof(half), 63, sizeof(half), 63, 64 * sizeof(half),
+             63);
+    __memcpy(dst + 1, src, sizeof(half), GDRAM2GDRAM, 2 * sizeof(half), 63,
+             256 * sizeof(half), 63, sizeof(half), 63, 64 * sizeof(half),
+             63);
+    __memcpy(dst + 128, src, sizeof(half), GDRAM2GDRAM, 2 * sizeof(half), 63,
+             256 * sizeof(half), 63, sizeof(half), 63, 64 * sizeof(half),
+             63);
+    __memcpy(dst + 129, src, sizeof(half), GDRAM2GDRAM, 2 * sizeof(half), 63,
+             256 * sizeof(half), 63, sizeof(half), 63, 64 * sizeof(half),
+             63);
   }
 }
 
