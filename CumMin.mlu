@@ -4,7 +4,9 @@
 #include <torch/extension.h>
 
 #define S(D)                                                                  \
-  __bang_write_value(b, 4096, (half)65504.0f);                                \
+  for (int j = 0; j < 64; ++j) {                                              \
+    __bang_write_value(b + j * 64, (D), (half)65504.0f);                      \
+  }                                                                           \
   __memcpy(b + (D), a, (64 - (D)) * sizeof(half), NRAM2NRAM,                  \
            64 * sizeof(half), 64 * sizeof(half), 63);                         \
   __bang_minimum(a, a, b, 4096);
