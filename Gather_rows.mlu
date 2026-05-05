@@ -7,19 +7,24 @@
 #define E0 32
 #define E1 64
 #define E2 1024
+#define A(I) y[p + (I)] = x[q + idx[p + (I)]];
+#define B(I) A(I) A(I + 1) A(I + 2) A(I + 3) A(I + 4) A(I + 5) A(I + 6) A(I + 7)
 
 __mlu_entry__ void k0(const half *__restrict__ x,
                       const int64_t *__restrict__ idx,
                       half *__restrict__ y) {
-  for (int p = taskId; p < E0 * E1; p += taskDim) {
-    int r = p >> 5;
-    y[p] = x[r * E2 + idx[p]];
-  }
+  int r = taskId;
+  int p = r * E0;
+  int q = r * E2;
+  B(0)
+  B(8)
+  B(16)
+  B(24)
 }
 
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor index) {
   auto out = torch::empty({E1, E0}, input.options());
-  cnrtDim3_t d = {32, 1, 1};
+  cnrtDim3_t d = {E1, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(index.data_ptr<int64_t>()),
@@ -27,6 +32,8 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor index) {
   return out;
 }
 
+#undef B
+#undef A
 #undef E2
 #undef E1
 #undef E0
