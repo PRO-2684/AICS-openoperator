@@ -45,7 +45,7 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size) {
   CNNL_CHECK(cnnlSetTensorDescriptor(y_desc, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF,
                                      4, y_dims));
   CNNL_CHECK(cnnlSetPooling2dDescriptor_v2(
-      pooling_desc, CNNL_POOLING_AVERAGE_COUNT_INCLUDE_PADDING,
+      pooling_desc, CNNL_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING,
       CNNL_NOT_PROPAGATE_NAN, kernel_size, kernel_size, 0, 0, 0, 0,
       kernel_size, kernel_size, 1, 1, false));
 
