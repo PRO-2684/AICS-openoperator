@@ -15,16 +15,19 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
   __bang_active_relu(a, a, E1);
   int n = (int)__bang_filter(a, a, a, E1);
   y[taskId] = n;
-  __sync_all_ipu();
+  __memcpy(z + p, a, n * sizeof(half), NRAM2GDRAM);
+}
 
+__mlu_entry__ void k1(half *__restrict__ z, int *__restrict__ y) {
+  __nram__ half a[E1];
   int q = 0;
-  for (int i = 0; i < taskId; ++i) {
-    q += y[i];
+  for (int i = 0; i < E2; ++i) {
+    int n = y[i];
+    __memcpy(a, z + i * E1, n * sizeof(half), GDRAM2NRAM);
+    __memcpy(z + q, a, n * sizeof(half), NRAM2GDRAM);
+    q += n;
   }
-  __memcpy(z + q, a, n * sizeof(half), NRAM2GDRAM);
-  if (taskId == E2 - 1) {
-    y[32] = q + n;
-  }
+  y[E2] = q;
 }
 
 torch::Tensor bang_func(torch::Tensor input, double v) {
@@ -36,6 +39,9 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
 
   k0<<<dim, cnrtFuncTypeUnion8, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()), work.data_ptr<int>());
+  cnrtDim3_t one = {1, 1, 1};
+  k1<<<one, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(out.data_ptr<at::Half>()), work.data_ptr<int>());
 
   int n = 0;
