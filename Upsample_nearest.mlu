@@ -3,28 +3,25 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 32
+#define E0 64
 #define E1 256
 #define E2 4096
 #define E3 16384
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E2];
+  __nram__ half b[8192];
   __nram__ half c[E3];
   for (int g = taskId; g < E1; g += taskDim) {
     __memcpy(a, x + g * E2, E2 * sizeof(half), GDRAM2NRAM);
-    __memcpy(c, a, sizeof(half), NRAM2NRAM, 2 * sizeof(half), 63,
-             256 * sizeof(half), 63, sizeof(half), 63, 64 * sizeof(half),
-             63);
-    __memcpy(c + 1, a, sizeof(half), NRAM2NRAM, 2 * sizeof(half), 63,
-             256 * sizeof(half), 63, sizeof(half), 63, 64 * sizeof(half),
-             63);
-    __memcpy(c + 128, a, sizeof(half), NRAM2NRAM, 2 * sizeof(half), 63,
-             256 * sizeof(half), 63, sizeof(half), 63, 64 * sizeof(half),
-             63);
-    __memcpy(c + 129, a, sizeof(half), NRAM2NRAM, 2 * sizeof(half), 63,
-             256 * sizeof(half), 63, sizeof(half), 63, 64 * sizeof(half),
-             63);
+    __memcpy(b, a, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
+             sizeof(half), E2 - 1);
+    __memcpy(b + 1, a, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
+             sizeof(half), E2 - 1);
+    __memcpy(c, b, 128 * sizeof(half), NRAM2NRAM, 256 * sizeof(half),
+             128 * sizeof(half), 63);
+    __memcpy(c + 128, b, 128 * sizeof(half), NRAM2NRAM, 256 * sizeof(half),
+             128 * sizeof(half), 63);
     __memcpy(y + g * E3, c, E3 * sizeof(half), NRAM2GDRAM);
   }
 }
