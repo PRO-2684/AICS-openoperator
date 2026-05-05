@@ -3,8 +3,8 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 16
-#define E1 32768
+#define E0 32
+#define E1 16384
 #define E2 64
 
 __mlu_func__ half f0(half *__restrict__ x, half *__restrict__ y, int n) {
