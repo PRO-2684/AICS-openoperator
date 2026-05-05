@@ -17,10 +17,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
   __bang_fcmpfilter(CMP_GT, b, a, (half)0.0f, E1);
   int n = *((int *)b);
 
-  int q = 0;
-  for (int i = 0; i < taskId; ++i) {
-    q += y[i];
-  }
+  int q = y[taskId];
   __memcpy(z + q, b + 2, n * sizeof(half), NRAM2GDRAM);
 }
 
@@ -36,9 +33,11 @@ __mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
   __sync_all_ipu();
 
   if (taskId == E2 - 1) {
-    int q = n;
-    for (int i = 0; i < taskId; ++i) {
-      q += y[i];
+    int q = 0;
+    for (int i = 0; i < E2; ++i) {
+      int t = y[i];
+      y[i] = q;
+      q += t;
     }
     y[32] = q;
   }
@@ -47,14 +46,11 @@ __mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
 torch::Tensor bang_func(torch::Tensor input, double v) {
   (void)v;
   static torch::Tensor out;
-  static torch::Tensor work;
   static torch::Tensor work2;
   if (!out.defined())
     out = torch::empty({E0}, input.options());
   else
     out.resize_({E0});
-  if (!work.defined())
-    work = torch::empty({33}, input.options().dtype(torch::kInt32));
   if (!work2.defined())
     work2 = torch::empty({33}, input.options().dtype(torch::kInt32));
 
