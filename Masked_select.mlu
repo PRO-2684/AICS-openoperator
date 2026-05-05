@@ -1,6 +1,4 @@
 #include <bang.h>
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
@@ -9,57 +7,45 @@
 #define E1 32768
 #define E2 32
 
-#define C0(expr)                                                               \
-  do {                                                                         \
-    cnnlStatus_t s = (expr);                                                   \
-    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL ", (int)s);                   \
-  } while (0)
-
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
+                      int *__restrict__ y) {
   __nram__ half a[E1];
-  __nram__ half b[E1];
   int p = taskId * E1;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-  __bang_gt_scalar(b, a, (half)0.0f, E1);
-  __memcpy(y + p, b, E1 * sizeof(half), NRAM2GDRAM);
-}
+  __bang_active_relu(a, a, E1);
+  int n = (int)__bang_filter(a, a, a, E1);
+  y[taskId] = n;
+  __sync_all_ipu();
 
-static cnnlTensorDescriptor_t d1(int n) {
-  int dims[1] = {n};
-  cnnlTensorDescriptor_t d;
-  C0(cnnlCreateTensorDescriptor(&d));
-  C0(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 1, dims));
-  return d;
+  int q = 0;
+  for (int i = 0; i < taskId; ++i) {
+    q += y[i];
+  }
+  __memcpy(z + q, a, n * sizeof(half), NRAM2GDRAM);
+  if (taskId == E2 - 1) {
+    y[32] = q + n;
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor input, double v) {
   (void)v;
-  auto out = torch::empty({E0}, input.options());
-  auto mask = torch::empty({E0}, input.options());
-  auto num = torch::empty({1}, input.options().dtype(torch::kUInt32));
+  static torch::Tensor out;
+  static torch::Tensor work;
+  if (!out.defined())
+    out = torch::empty({E0}, input.options());
+  else
+    out.resize_({E0});
+  if (!work.defined())
+    work = torch::empty({33}, input.options().dtype(torch::kInt32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {E2, 1, 1};
+
   k0<<<dim, cnrtFuncTypeUnion8, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(mask.data_ptr<at::Half>()));
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()), work.data_ptr<int>());
 
-  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
-  cnnlTensorDescriptor_t xd = d1(E0);
-  cnnlTensorDescriptor_t md = d1(E0);
-  cnnlTensorDescriptor_t od = d1(E0);
-  size_t ws = 0;
-  C0(cnnlGetMaskedWorkspaceSize(handle, CNNL_MASKED_SELECT, xd, md, nullptr, od,
-                                &ws));
-  auto work = torch::empty({(int64_t)ws}, input.options().dtype(torch::kUInt8));
-  C0(cnnlMasked_v5(handle, CNNL_MASKED_SELECT, xd, input.data_ptr(), md,
-                   mask.data_ptr(), nullptr, nullptr, work.data_ptr(), ws, od,
-                   out.data_ptr(), num.data_ptr<unsigned int>()));
-  C0(cnnlDestroyTensorDescriptor(od));
-  C0(cnnlDestroyTensorDescriptor(md));
-  C0(cnnlDestroyTensorDescriptor(xd));
-
-  unsigned int n = 0;
-  cnrtMemcpyAsync(&n, num.data_ptr<unsigned int>(), sizeof(unsigned int), queue,
+  int n = 0;
+  cnrtMemcpyAsync(&n, work.data_ptr<int>() + 32, sizeof(int), queue,
                   cnrtMemcpyDevToHost);
   cnrtQueueSync(queue);
   out.resize_({(int64_t)n});
