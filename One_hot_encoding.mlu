@@ -6,14 +6,21 @@
 
 #define ROWS 1024
 #define CLASSES 512
-#define TASKS 32
-#define ROWS_PER_TASK (ROWS / TASKS)
+#define TASKS 48
+#define ROWS_PER_TASK 22
 #define OUT_PER_TASK (ROWS_PER_TASK * CLASSES)
 
 __mlu_entry__ void onehot_i64_kernel(const int64_t *__restrict__ idx,
                                      float *__restrict__ out) {
   const int row_base = taskId * ROWS_PER_TASK;
   const int out_base = row_base * CLASSES;
+  if (row_base >= ROWS) {
+    return;
+  }
+  int count = ROWS - row_base;
+  if (count > ROWS_PER_TASK) {
+    count = ROWS_PER_TASK;
+  }
 
   float *po = (float *)__builtin_assume_aligned(out + out_base, 512);
 
@@ -21,12 +28,12 @@ __mlu_entry__ void onehot_i64_kernel(const int64_t *__restrict__ idx,
   __bang_write_zero(obuf, OUT_PER_TASK);
 
 #pragma unroll
-  for (int r = 0; r < ROWS_PER_TASK; ++r) {
+  for (int r = 0; r < count; ++r) {
     const int cls = (int)idx[row_base + r];
     obuf[r * CLASSES + cls] = 1.0f;
   }
 
-  __memcpy(po, obuf, OUT_PER_TASK * sizeof(float), NRAM2GDRAM);
+  __memcpy(po, obuf, count * CLASSES * sizeof(float), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int num_classes) {
