@@ -17,24 +17,20 @@ __mlu_entry__ void kernel(const half *__restrict__ x,
   }
 
   half acc[H];
+
 #pragma unroll
   for (int j = 0; j < H; ++j) {
     acc[j] = (half)0.0f;
   }
-
+  int idx0 = indices[token];
+  int idx1 = indices[token + 4];
+  half w0 = weights[idx0];
+  half w1 = weights[idx1];
+  int p0 = token * H;
+  int p1 = (E1 + token) * H;
 #pragma unroll
-  for (int p = 0; p < 8; ++p) {
-    int idx = indices[p];
-    if ((idx >> 1) == token) {
-      int expert = p >= 4;
-      int slot = expert ? p - 4 : p;
-      int src_base = (expert * E1 + slot) * H;
-      half w = weights[idx];
-#pragma unroll
-      for (int j = 0; j < H; ++j) {
-        acc[j] = acc[j] + x[src_base + j] * w;
-      }
-    }
+  for (int j = 0; j < H; ++j) {
+    acc[j] = x[p0 + j] * w0 + x[p1 + j] * w1;
   }
 
   int dst_base = token * H;
