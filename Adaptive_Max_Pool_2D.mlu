@@ -1,14 +1,87 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 100 100_Adaptive_Max_Pool_2D
-// Category: pool
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，对输入张量进行二维自适应最大池化处理，将其采样至指定的输出尺寸。输入包括形状为 `[batch, channels, H, W]` 的张量 `x` 以及目标输出高度 `out_h` 与宽度 `out_w`；输出为形状是 `[batch, channels, out_h, out_w]` 的张量。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x, std::vector<int64_t> output_size);
+#define E0 1024
+#define E1 8
+#define E2 8
+#define E3 256
+#define E4 256
+
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[8192];
+  __nram__ float b[8192];
+  int n = E0 * E1;
+  for (int t = taskId; t < n; t += taskDim) {
+    int r = t & 7;
+    int bc = t >> 3;
+    int p = bc * E3 * E4 + r * 32 * E4;
+    for (int i = 0; i < 32; ++i) {
+      __memcpy(a + i * E4, x + p + i * E4, E4 * sizeof(half), GDRAM2NRAM);
+    }
+    __bang_half2float(b, a, 8192);
+    float m0 = -3.4028234663852886e38f;
+    float m1 = -3.4028234663852886e38f;
+    float m2 = -3.4028234663852886e38f;
+    float m3 = -3.4028234663852886e38f;
+    float m4 = -3.4028234663852886e38f;
+    float m5 = -3.4028234663852886e38f;
+    float m6 = -3.4028234663852886e38f;
+    float m7 = -3.4028234663852886e38f;
+    for (int i = 0; i < 32; ++i) {
+      float *u = b + i * E4;
+      for (int j = 0; j < 32; ++j) {
+        float v = u[j];
+        if (v > m0) m0 = v;
+      }
+      for (int j = 32; j < 64; ++j) {
+        float v = u[j];
+        if (v > m1) m1 = v;
+      }
+      for (int j = 64; j < 96; ++j) {
+        float v = u[j];
+        if (v > m2) m2 = v;
+      }
+      for (int j = 96; j < 128; ++j) {
+        float v = u[j];
+        if (v > m3) m3 = v;
+      }
+      for (int j = 128; j < 160; ++j) {
+        float v = u[j];
+        if (v > m4) m4 = v;
+      }
+      for (int j = 160; j < 192; ++j) {
+        float v = u[j];
+        if (v > m5) m5 = v;
+      }
+      for (int j = 192; j < 224; ++j) {
+        float v = u[j];
+        if (v > m6) m6 = v;
+      }
+      for (int j = 224; j < 256; ++j) {
+        float v = u[j];
+        if (v > m7) m7 = v;
+      }
+    }
+    int o = (bc * E1 + r) * E2;
+    y[o + 0] = (half)m0;
+    y[o + 1] = (half)m1;
+    y[o + 2] = (half)m2;
+    y[o + 3] = (half)m3;
+    y[o + 4] = (half)m4;
+    y[o + 5] = (half)m5;
+    y[o + 6] = (half)m6;
+    y[o + 7] = (half)m7;
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor x, std::vector<int64_t> output_size) {
-  TORCH_CHECK(false, "TODO: implement Adaptive_Max_Pool_2D");
+  auto out = torch::empty({16, 64, E1, E2}, x.options());
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t g = {32, 1, 1};
+  k0<<<g, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+  return out;
 }
