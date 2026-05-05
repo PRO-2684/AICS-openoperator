@@ -11,21 +11,32 @@ __mlu_entry__ void kernel(const half *__restrict__ x,
                           const int *__restrict__ indices,
                           const half *__restrict__ weights,
                           half *__restrict__ out) {
-  int base = taskId << 1;
+  int token = taskId;
+  if (token >= T) {
+    return;
+  }
+
+  half acc[H];
+
 #pragma unroll
-  for (int k = 0; k < 2; ++k) {
-    int token = base + k;
-    int idx0 = indices[token];
-    int idx1 = indices[token + 4];
-    half w0 = weights[idx0];
-    half w1 = weights[idx1];
-    int p0 = token * H;
-    int p1 = (E1 + token) * H;
-    int dst_base = token * H;
+  for (int j = 0; j < H; ++j) {
+    acc[j] = (half)0.0f;
+  }
+  int idx0 = indices[token];
+  int idx1 = indices[token + 4];
+  half w0 = weights[idx0];
+  half w1 = weights[idx1];
+  int p0 = token * H;
+  int p1 = (E1 + token) * H;
 #pragma unroll
-    for (int j = 0; j < H; ++j) {
-      out[dst_base + j] = x[p0 + j] * w0 + x[p1 + j] * w1;
-    }
+  for (int j = 0; j < H; ++j) {
+    acc[j] = x[p0 + j] * w0 + x[p1 + j] * w1;
+  }
+
+  int dst_base = token * H;
+#pragma unroll
+  for (int j = 0; j < H; ++j) {
+    out[dst_base + j] = acc[j];
   }
 }
 
@@ -38,7 +49,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices,
   auto out = torch::empty({T, H}, x.options());
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {2, 1, 1};
+  cnrtDim3_t dim = {T, 1, 1};
   kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       indices.data_ptr<int>(), reinterpret_cast<const half *>(weights.data_ptr<at::Half>()),
