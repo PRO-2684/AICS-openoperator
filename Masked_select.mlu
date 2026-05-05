@@ -7,6 +7,8 @@
 #define E1 32768
 #define E2 32
 
+__mlu_shared__ int s0[64];
+
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
                       int *__restrict__ y) {
   __nram__ half a[E1];
@@ -14,12 +16,12 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_active_relu(a, a, E1);
   int n = (int)__bang_filter(a, a, a, E1);
-  y[taskId] = n;
+  s0[taskId] = n;
   __sync_all_ipu();
 
   int q = 0;
   for (int i = 0; i < taskId; ++i) {
-    q += y[i];
+    q += s0[i];
   }
   __memcpy(z + q, a, n * sizeof(half), NRAM2GDRAM);
   if (taskId == E2 - 1) {
@@ -30,21 +32,23 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
 torch::Tensor bang_func(torch::Tensor input, double v) {
   (void)v;
   static torch::Tensor out;
+  static torch::Tensor work;
   if (!out.defined())
-    out = torch::empty({E0 + 128}, input.options());
+    out = torch::empty({E0}, input.options());
   else
-    out.resize_({E0 + 128});
+    out.resize_({E0});
+  if (!work.defined())
+    work = torch::empty({33}, input.options().dtype(torch::kInt32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {E2, 1, 1};
-  half *base = reinterpret_cast<half *>(out.data_ptr<at::Half>());
-  int *work = reinterpret_cast<int *>(base + E0);
 
   k0<<<dim, cnrtFuncTypeUnion8, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      base, work);
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()), work.data_ptr<int>());
 
   int n = 0;
-  cnrtMemcpyAsync(&n, work + 32, sizeof(int), queue, cnrtMemcpyDevToHost);
+  cnrtMemcpyAsync(&n, work.data_ptr<int>() + 32, sizeof(int), queue,
+                  cnrtMemcpyDevToHost);
   cnrtQueueSync(queue);
   out.resize_({(int64_t)n});
   return out;
