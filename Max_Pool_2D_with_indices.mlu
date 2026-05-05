@@ -20,22 +20,29 @@ if not hasattr(torch.nn.MaxPool2d, "_aics_forward"):
   PyGILState_Release(s);
 }
 
-#define E0 512
+#define E0 2097152
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[16384];
-  __nram__ half b0[8192];
-  __nram__ half b1[4096];
-  __nram__ half b2[4096];
-  for (int r = taskId; r < E0; r += taskDim) {
-    __memcpy(a, x + r * 16384, 16384 * sizeof(half), GDRAM2NRAM);
-    __bang_maxpool(b0, a, 2, 128, 64, 2, 1, 1, 2);
-    __memcpy(b1, b0, sizeof(half), NRAM2NRAM, sizeof(half),
-             2 * sizeof(half), 4095);
-    __memcpy(b2, b0 + 1, sizeof(half), NRAM2NRAM, sizeof(half),
-             2 * sizeof(half), 4095);
-    __bang_maximum(b1, b1, b2, 4096);
-    __memcpy(y + r * 4096, b1, 4096 * sizeof(half), NRAM2GDRAM);
+  for (int t = taskId; t < E0; t += taskDim) {
+    int ow = t & 63;
+    int oh = (t >> 6) & 63;
+    int r = t >> 12;
+    int p = r * 16384 + (oh << 1) * 128 + (ow << 1);
+    float v0 = (float)x[p];
+    float v1 = (float)x[p + 1];
+    float v2 = (float)x[p + 128];
+    float v3 = (float)x[p + 129];
+    float m = v0;
+    if (v1 > m) {
+      m = v1;
+    }
+    if (v2 > m) {
+      m = v2;
+    }
+    if (v3 > m) {
+      m = v3;
+    }
+    y[t] = (half)m;
   }
 }
 
