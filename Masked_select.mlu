@@ -45,7 +45,9 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
       reinterpret_cast<half *>(out.data_ptr<at::Half>()), work.data_ptr<int>());
 
   int n = 0;
-  cnrtMemcpy(&n, work.data_ptr<int>() + 32, sizeof(int), cnrtMemcpyDevToHost);
+  cnrtMemcpyAsync(&n, work.data_ptr<int>() + 32, sizeof(int), queue,
+                  cnrtMemcpyDevToHost);
+  cnrtQueueSync(queue);
   out.resize_({(int64_t)n});
   return out;
 }
