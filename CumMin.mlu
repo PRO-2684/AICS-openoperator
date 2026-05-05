@@ -3,45 +3,35 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define P(O, R)                                                                \
-  __memcpy(a + (O), x + (q + (R)) * 4000, 8000, GDRAM2NRAM);                   \
-  __bang_write_value(a + (O) + 4000, 96, (half)65504.0f);
-
-#define Q(O, D)                                                                \
-  __memcpy(b + (O), a + (O), (D)*2, NRAM2NRAM);                                \
-  __bang_write_value(b + (O) + 4000, 96, (half)65504.0f);
-
 #define S(D)                                                                   \
-  __bang_minimum(b + (D), a + (D), a, 8192 - (D));                             \
-  Q(0, D)                                                                      \
-  Q(4096, D)                                                                   \
+  __memcpy(b, a, (D)*2, NRAM2NRAM);                                            \
+  __bang_minimum(b + (D), a + (D), a, 4000 - (D));                             \
   t = a;                                                                       \
   a = b;                                                                       \
   b = t;
 
-#define R(A, B)                                                                \
+#define R(P)                                                                   \
   a = u;                                                                       \
   b = v;                                                                       \
-  P(0, A)                                                                      \
-  P(4096, B)                                                                   \
+  __memcpy(a, x + (P)*4000, 8000, GDRAM2NRAM);                                 \
   S(1)                                                                         \
-  S(2)                                                                         \
-  S(4) S(8) S(16) S(32) S(64) S(128) S(256) S(512) S(1024) S(2048)             \
-      __memcpy(y + (q + (A)) * 4000, a, 8000, NRAM2GDRAM);                     \
-  __memcpy(y + (q + (B)) * 4000, a + 4096, 8000, NRAM2GDRAM);
+  S(2) S(4) S(8) S(16) S(32) S(64) S(128) S(256) S(512) S(1024) S(2048)        \
+      __memcpy(y + (P)*4000, a, 8000, NRAM2GDRAM);
 
 __mlu_entry__ void k(const half *x, half *y) {
   int q = taskId << 2;
 
-  __nram__ half u[8192];
-  __nram__ half v[8192];
+  __nram__ half u[4096];
+  __nram__ half v[4096];
 
   half *a;
   half *b;
   half *t;
 
-  R(0, 1)
-  R(2, 3)
+  R(q)
+  R(q + 1)
+  R(q + 2)
+  R(q + 3)
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
@@ -61,5 +51,3 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
 
 #undef R
 #undef S
-#undef Q
-#undef P
