@@ -95,9 +95,9 @@ python scripts/update_problems.py
 | 044 | [HingeLoss](HingeLoss.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/0309352) |
 | 045 | [HuberLoss](HuberLoss.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/dc27df2) |
 | 046 | [InstanceNorm](InstanceNorm.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/31e0f22) |
-| 047 | [Max_Pooling_1D](Max_Pooling_1D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/b9fa5be) |
-| 048 | [Max_Pooling_2D](Max_Pooling_2D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/8de7f21) |
-| 049 | [Max_Pooling_3D](Max_Pooling_3D.mlu) | N/A | 🔴 |
+| 047 | [Max_Pooling_1D](Max_Pooling_1D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/342f486) |
+| 048 | [Max_Pooling_2D](Max_Pooling_2D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/342f486) |
+| 049 | [Max_Pooling_3D](Max_Pooling_3D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/12069b8) |
 | 050 | [cumprod](cumprod.mlu) | N/A | 🔴 |
 | 051 | [cumsum](cumsum.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/f5a0c30bb76cd4ecb84ed5a1cc4dd7ec69443cca) |
 | 052 | [cumsum_exclusive](cumsum_exclusive.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/deaec64) |
@@ -109,7 +109,7 @@ python scripts/update_problems.py
 | 058 | [Softmax](Softmax.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/e10226bead0673dae0803184816c6687fe4dd5a5) |
 | 059 | [hstu_mask_var_len_fwd](hstu_mask_var_len_fwd.mlu) | N/A | 🔴 |
 | 060 | [cross_entropy](cross_entropy.mlu) | N/A | 🔴 |
-| 061 | [adaptiveaveragepool](adaptiveaveragepool.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/78e2454) |
+| 061 | [adaptiveaveragepool](adaptiveaveragepool.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/7ed7d68) |
 | 062 | [compute_agg](compute_agg.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/9753fcd) |
 | 063 | [calc_block_sums](calc_block_sums.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/9383663) |
 | 064 | [adaptive_average_pool_nhwc](adaptive_average_pool_nhwc.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/6a44d3a) |
@@ -148,7 +148,7 @@ python scripts/update_problems.py
 | 097 | [PixelShuffle](PixelShuffle.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/b0225c7) |
 | 098 | [Attention_with_temperature](Attention_with_temperature.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/a105aa2c69c8fb104689ec98f98f377f59da8374) |
 | 099 | [DropPath](DropPath.mlu) | N/A | 🔴 |
-| 100 | [Adaptive_Max_Pool_2D](Adaptive_Max_Pool_2D.mlu) | N/A | 🔴 |
+| 100 | [Adaptive_Max_Pool_2D](Adaptive_Max_Pool_2D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/9605f05) |
 | 101 | [Max_Pool_2D_with_indices](Max_Pool_2D_with_indices.mlu) | N/A | 🔴 |
 | 102 | [Adaptive_Average_Pool_3D](Adaptive_Average_Pool_3D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/3912ff5) |
 | 103 | [MSE_Loss](MSE_Loss.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/d2d2e4d) |
