@@ -15,9 +15,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
   __nram__ half c[E1];
   int p = taskId * E1;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-  __bang_write_value(c, E1, (half)0.0f);
-  __bang_gt_bitindex(c, a, c, E1);
-  int n = (int)__bang_filter_bitindex(b, a, c, E1);
+  __bang_gt_scalar(c, a, (half)0.0f, E1);
+  int n = (int)__bang_filter(b, a, c, E1);
 
   int q = y[taskId];
   __memcpy(z + q, b, n * sizeof(half), NRAM2GDRAM);
