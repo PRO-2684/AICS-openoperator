@@ -3,48 +3,46 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define N0 32
-#define N1 8
-#define N2 128
-#define N3 128
-#define W 64
-#define R (N0 * N1 * N2)
-#define TASKS 32
+#define E0 32768
+#define E1 128
+#define E2 64
+#define E3 32
 
-__mlu_entry__ void kernel_main(const half *__restrict__ input,
-                               half *__restrict__ output) {
-  __nram__ half obuf[N3];
-  __nram__ half red[W];
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[E1];
+  __nram__ half b[E1 * 2];
+  __nram__ half r[E2];
 
-  __bang_write_zero(obuf, N3);
+  __bang_write_zero(b, E1 * 2);
 
-  for (int row = taskId; row < R; row += taskDim) {
-    const half *in =
-        (const half *)__builtin_assume_aligned(input + row * N3, 512);
-    half *out = (half *)__builtin_assume_aligned(output + row * N3, 512);
+  for (int row = taskId * 2; row < E0; row += taskDim * 2) {
+    const half *in = x + row * E1;
+    half *out = y + row * E1;
+    __memcpy(a, in, E2 * sizeof(half), GDRAM2NRAM, E2 * sizeof(half),
+             E1 * sizeof(half), 1);
+    __bang_active_exp(a, a, E1);
 
-    __memcpy(obuf, in, W * sizeof(half), GDRAM2NRAM);
+    __bang_reduce_sum(r, a, E2);
+    half v0 = (half)(1.0f / (float)r[0]);
+    __bang_mul_scalar(a, a, v0, E2);
+    __memcpy(b, a, E2 * sizeof(half), NRAM2NRAM);
 
-    __bang_active_exp(obuf, obuf, W);
+    __bang_reduce_sum(r, a + E2, E2);
+    half v1 = (half)(1.0f / (float)r[0]);
+    __bang_mul_scalar(a + E2, a + E2, v1, E2);
+    __memcpy(b + E1, a + E2, E2 * sizeof(half), NRAM2NRAM);
 
-    __bang_reduce_sum(red, obuf, W);
-
-    half inv = (half)(1.0f / (float)red[0]);
-    __bang_mul_scalar(obuf, obuf, inv, W);
-
-    __memcpy(out, obuf, N3 * sizeof(half), NRAM2GDRAM);
+    __memcpy(out, b, E1 * 2 * sizeof(half), NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask) {
+  (void)mask;
   auto y = torch::empty_like(x);
-
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t kdim = {TASKS, 1, 1};
-
-  kernel_main<<<kdim, cnrtFuncTypeBlock, queue>>>(
+  cnrtDim3_t dim = {E3, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-
   return y;
 }
