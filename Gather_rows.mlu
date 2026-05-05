@@ -13,17 +13,18 @@ __mlu_entry__ void k0(const half *__restrict__ x,
                       const int64_t *__restrict__ idx,
                       half *__restrict__ y) {
   __nram__ uint32_t o[E3];
+  __nram__ int64_t s[E3];
   __nram__ half a[E3];
 
   int r = taskId << 1;
   int p = r * E0;
+  __memcpy(s, idx + p, E3 * sizeof(int64_t), GDRAM2NRAM);
 #pragma unroll
   for (int i = 0; i < E3; ++i) {
     int u = i >> 5;
-    o[i] = (uint32_t)(((r + u) * E2 + idx[p + i]) * sizeof(half));
+    o[i] = (uint32_t)(((r + u) * E2 + s[i]) * sizeof(half));
   }
-  __gather_async(a, x, o, sizeof(half), GDRAM2NRAM, sizeof(half), E3);
-  __asm__ volatile("sync;");
+  __gather(a, x, o, sizeof(half), GDRAM2NRAM, sizeof(half), E3);
   __memcpy(y + p, a, E3 * sizeof(half), NRAM2GDRAM);
 }
 
