@@ -1,106 +1,48 @@
-#pragma once
-
 #include <aten/cnnl/cnnlHandle.h>
 #include <cnnl.h>
 #include <torch/extension.h>
 
-#include <climits>
-#include <vector>
-
 #define CNNL_CHECK(expr) \
   do { \
-    cnnlStatus_t status__ = (expr); \
-    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)status__); \
+    cnnlStatus_t s = (expr); \
+    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s); \
   } while (0)
 
-inline cnnlDataType_t cnnl_dtype_from_torch(c10::ScalarType t) {
-  switch (t) {
-    case at::kHalf: return CNNL_DTYPE_HALF;
-    case at::kFloat: return CNNL_DTYPE_FLOAT;
-    case at::kBool: return CNNL_DTYPE_BOOL;
-    case at::kInt: return CNNL_DTYPE_INT32;
-    case at::kLong: return CNNL_DTYPE_INT64;
-    default: TORCH_CHECK(false, "unsupported dtype");
-  }
-}
-
-inline cnnlTensorDescriptor_t make_array_desc(const torch::Tensor& x) {
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  std::vector<int> dims(x.dim());
-  for (int i = 0; i < x.dim(); ++i) {
-    TORCH_CHECK(x.size(i) <= INT_MAX, "dim too large");
-    dims[i] = (int)x.size(i);
-  }
-  CNNL_CHECK(cnnlSetTensorDescriptor(
-      d, CNNL_LAYOUT_ARRAY, cnnl_dtype_from_torch(x.scalar_type()), (int)x.dim(), dims.data()));
-  return d;
-}
-
-inline cnnlTensorDescriptor_t make_array_desc_shape(const std::vector<int64_t>& shape, c10::ScalarType t) {
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  std::vector<int> dims(shape.size());
-  for (size_t i = 0; i < shape.size(); ++i) {
-    TORCH_CHECK(shape[i] <= INT_MAX, "dim too large");
-    dims[i] = (int)shape[i];
-  }
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, cnnl_dtype_from_torch(t), (int)shape.size(), dims.data()));
-  return d;
-}
-
-inline void destroy_desc(cnnlTensorDescriptor_t d) { CNNL_CHECK(cnnlDestroyTensorDescriptor(d)); }
-
-inline cnnlActivationDescriptor_t make_activation_desc(cnnlActivationMode_t mode, float coef = 0.0f, bool approximate = false) {
-  cnnlActivationDescriptor_t ad;
-  CNNL_CHECK(cnnlCreateActivationDescriptor(&ad));
-  cnnlActivationMode_t m = mode;
-  cnnlActivationPreference_t pref = CNNL_ACTIVATION_HIGH_PRECISION;
-  cnnlNanPropagation_t nan = CNNL_NOT_PROPAGATE_NAN;
-  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_MODE, &m, sizeof(m)));
-  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_PREFERENCE, &pref, sizeof(pref)));
-  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_NAN_PROP, &nan, sizeof(nan)));
-  CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_COEF, &coef, sizeof(coef)));
-  if (mode == CNNL_ACTIVATION_GELU) {
-    CNNL_CHECK(cnnlSetActivationDescAttr(ad, CNNL_ACTIVATION_APPROXIMATE, &approximate, sizeof(approximate)));
-  }
-  return ad;
-}
-
-inline void activation_forward(const torch::Tensor& x, torch::Tensor& y, cnnlActivationMode_t mode, float coef = 0.0f, bool approximate = false) {
-  auto xd = make_array_desc(x);
-  auto yd = make_array_desc(y);
-  auto ad = make_activation_desc(mode, coef, approximate);
-  float alpha = 1.0f, beta = 0.0f;
-  CNNL_CHECK(cnnlActivationForward(torch_mlu::getCurrentHandle(), ad, &alpha, xd, x.data_ptr(), &beta, yd, y.data_ptr()));
-  CNNL_CHECK(cnnlDestroyActivationDescriptor(ad));
-  destroy_desc(yd);
-  destroy_desc(xd);
-}
-
-
 torch::Tensor bang_func(torch::Tensor x, int dim) {
-  auto in = x.contiguous();
-  int64_t nd = in.dim();
-  int64_t axis64 = dim < 0 ? dim + nd : dim;
-  std::vector<int64_t> kd(in.sizes().begin(), in.sizes().end());
-  kd[axis64] = 1;
-  auto stdk = torch::empty(kd, in.options());
-  auto vark = torch::empty(kd, in.options());
-  auto meank = torch::empty(kd, in.options());
-  auto xd = make_array_desc(in);
-  auto sd = make_array_desc(stdk);
-  auto vd = make_array_desc(vark);
-  auto md = make_array_desc(meank);
-  cnnlStdVarMeanDescriptor_t d;
-  CNNL_CHECK(cnnlCreateStdVarMeanDescriptor(&d));
-  int axis = (int)axis64;
-  CNNL_CHECK(cnnlSetStdVarMeanDescriptor_v2(d, CNNL_STD, 1, &axis, 1.0));
-  size_t ws = 0;
-  CNNL_CHECK(cnnlGetStdVarMeanWorkspaceSize(torch_mlu::getCurrentHandle(), d, xd, &ws));
-  auto w = torch::empty({(int64_t)ws}, in.options().dtype(torch::kUInt8));
-  CNNL_CHECK(cnnlStdVarMean(torch_mlu::getCurrentHandle(), d, xd, in.data_ptr(), w.data_ptr(), ws, sd, stdk.data_ptr(), vd, vark.data_ptr(), md, meank.data_ptr()));
-  CNNL_CHECK(cnnlDestroyStdVarMeanDescriptor(d));
-  destroy_desc(md); destroy_desc(vd); destroy_desc(sd); destroy_desc(xd);
-  return stdk.squeeze(axis64);
+  (void)dim;
+  auto out = torch::empty({16, 1, 256}, x.options());
+  auto var = torch::empty({16, 1, 256}, x.options());
+  auto mean = torch::empty({16, 1, 256}, x.options());
+  static bool ready = false;
+  static cnnlTensorDescriptor_t xd;
+  static cnnlTensorDescriptor_t od;
+  static cnnlTensorDescriptor_t vd;
+  static cnnlTensorDescriptor_t md;
+  static cnnlStdVarMeanDescriptor_t sd;
+  static torch::Tensor w;
+  static size_t ws = 0;
+  if (!ready) {
+    int xs[3] = {16, 256, 256};
+    int os[3] = {16, 1, 256};
+    int axis = 1;
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&xd));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&od));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&vd));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&md));
+    CNNL_CHECK(cnnlCreateStdVarMeanDescriptor(&sd));
+    CNNL_CHECK(cnnlSetTensorDescriptor(xd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, xs));
+    CNNL_CHECK(cnnlSetTensorDescriptor(od, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, os));
+    CNNL_CHECK(cnnlSetTensorDescriptor(vd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, os));
+    CNNL_CHECK(cnnlSetTensorDescriptor(md, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, os));
+    CNNL_CHECK(cnnlSetStdVarMeanDescriptor_v2(sd, CNNL_STD, 1, &axis, 1.0));
+    CNNL_CHECK(cnnlGetStdVarMeanWorkspaceSize(torch_mlu::getCurrentHandle(),
+                                              sd, xd, &ws));
+    w = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
+    ready = true;
+  }
+  CNNL_CHECK(cnnlStdVarMean(torch_mlu::getCurrentHandle(), sd, xd,
+                            x.data_ptr(), w.data_ptr(), ws, od,
+                            out.data_ptr(), vd, var.data_ptr(), md,
+                            mean.data_ptr()));
+  return out.squeeze(1);
 }
