@@ -7,28 +7,28 @@
 #define E0 32
 #define E1 64
 #define E2 1024
-#define A(I) a[(I)] = b[idx[p + (I)]];
-#define B(I) A(I) A(I + 1) A(I + 2) A(I + 3) A(I + 4) A(I + 5) A(I + 6) A(I + 7)
+#define E3 64
 
 __mlu_entry__ void k0(const half *__restrict__ x,
                       const int64_t *__restrict__ idx,
                       half *__restrict__ y) {
-  __nram__ half b[E2];
-  __nram__ half a[E0];
+  __nram__ uint32_t o[E3];
+  __nram__ half a[E3];
 
-  int r = taskId;
+  int r = taskId << 1;
   int p = r * E0;
-  __memcpy(b, x + r * E2, E2 * sizeof(half), GDRAM2NRAM);
-  B(0)
-  B(8)
-  B(16)
-  B(24)
-  __memcpy(y + p, a, E0 * sizeof(half), NRAM2GDRAM);
+#pragma unroll
+  for (int i = 0; i < E3; ++i) {
+    int u = i >> 5;
+    o[i] = (uint32_t)(((r + u) * E2 + idx[p + i]) * sizeof(half));
+  }
+  __gather(a, x, o, sizeof(half), GDRAM2NRAM, sizeof(half), E3);
+  __memcpy(y + p, a, E3 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor index) {
   auto out = torch::empty({E1, E0}, input.options());
-  cnrtDim3_t d = {E1, 1, 1};
+  cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(index.data_ptr<int64_t>()),
@@ -36,8 +36,7 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor index) {
   return out;
 }
 
-#undef B
-#undef A
+#undef E3
 #undef E2
 #undef E1
 #undef E0
