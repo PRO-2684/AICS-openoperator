@@ -22,12 +22,13 @@ __mlu_entry__ void kernel(const half *__restrict__ x,
       out[z + j] = (half)0.0f;
     }
   }
-  int idx = indices[route];
-  int src_base = (idx >> 1) * H;
+  (void)indices;
+  int idx = (slot << 1) + expert;
+  int src_base = slot * H;
   half w = weights[idx];
 #pragma unroll
   for (int j = 0; j < H; ++j) {
-    out[dst_base + j] = (half)((float)x[src_base + j] * (float)w);
+    out[dst_base + j] = x[src_base + j] * w;
   }
 }
 
