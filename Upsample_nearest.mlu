@@ -3,8 +3,8 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 32
-#define E1 512
+#define E0 128
+#define E1 128
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ out) {
   __nram__ half a[64];
@@ -19,11 +19,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ out) {
     half *dst1 = dst0 + 128;
 
     __memcpy(a, src, 64 * sizeof(half), GDRAM2NRAM);
-#pragma unroll
-    for (int i = 0; i < 64; ++i) {
-      b[(i << 1) + 0] = a[i];
-      b[(i << 1) + 1] = a[i];
-    }
+    __memcpy(b, a, sizeof(half), NRAM2NRAM, 2 * sizeof(half), sizeof(half),
+             63);
+    __memcpy(b + 1, a, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
+             sizeof(half), 63);
     __memcpy(dst0, b, 128 * sizeof(half), NRAM2GDRAM);
     __memcpy(dst1, b, 128 * sizeof(half), NRAM2GDRAM);
   }
