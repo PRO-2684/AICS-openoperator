@@ -3,7 +3,7 @@
 #include <torch/extension.h>
 #include <framework/core/MLUStream.h>
 
-#define CHUNK_SIZE 4096
+#define CHUNK_SIZE 131072
 #define TASK_COUNT 32
 
 __mlu_entry__ void matrix_scalar_mul_float_kernel(const float *input,
@@ -23,14 +23,8 @@ __mlu_entry__ void matrix_scalar_mul_float_kernel(const float *input,
 
   for (uint32_t offset = 0; offset < count; offset += CHUNK_SIZE) {
     uint32_t len = (offset + CHUNK_SIZE <= count) ? CHUNK_SIZE : (count - offset);
-    uint32_t aligned_len = (len + 63) & ~63;
-
     __memcpy(nram_buf, input + start + offset, len * sizeof(float), GDRAM2NRAM);
-    if (aligned_len > len) {
-      __bang_write_value(nram_buf + len, aligned_len - len, 0.0f);
-    }
-
-    __bang_mul_scalar(nram_buf, nram_buf, scalar, aligned_len);
+    __bang_mul_scalar(nram_buf, nram_buf, scalar, len);
 
     __memcpy(output + start + offset, nram_buf, len * sizeof(float), NRAM2GDRAM);
   }
@@ -49,18 +43,12 @@ __mlu_entry__ void matrix_scalar_mul_half_kernel(const half *input,
   uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
   uint32_t count = per_task + (task_id < remainder ? 1 : 0);
 
-  __nram__ half nram_buf[CHUNK_SIZE * 2];
+  __nram__ half nram_buf[CHUNK_SIZE];
 
   for (uint32_t offset = 0; offset < count; offset += CHUNK_SIZE) {
     uint32_t len = (offset + CHUNK_SIZE <= count) ? CHUNK_SIZE : (count - offset);
-    uint32_t aligned_len = (len + 63) & ~63;
-
     __memcpy(nram_buf, input + start + offset, len * sizeof(half), GDRAM2NRAM);
-    if (aligned_len > len) {
-      __bang_write_value(nram_buf + len, aligned_len - len, (half)0.0f);
-    }
-
-    __bang_mul_scalar(nram_buf, nram_buf, scalar, aligned_len);
+    __bang_mul_scalar(nram_buf, nram_buf, scalar, len);
 
     __memcpy(output + start + offset, nram_buf, len * sizeof(half), NRAM2GDRAM);
   }
