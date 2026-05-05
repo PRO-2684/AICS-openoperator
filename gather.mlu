@@ -12,10 +12,6 @@ __mlu_entry__ void kernel(const half *__restrict__ x,
                           const half *__restrict__ weights,
                           const int *__restrict__ bins, half *__restrict__ out) {
   int p = taskId;
-  if (p >= N) {
-    return;
-  }
-
   (void)bin_ids;
   (void)bins;
   int idx = indices[p];
@@ -25,7 +21,7 @@ __mlu_entry__ void kernel(const half *__restrict__ x,
 
 #pragma unroll
   for (int j = 0; j < H; ++j) {
-    out[dst_base + j] = (half)((float)x[src_base + j] * (float)w);
+    out[dst_base + j] = x[src_base + j] * w;
   }
 }
 
