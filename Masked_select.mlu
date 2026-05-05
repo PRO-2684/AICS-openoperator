@@ -7,43 +7,38 @@
 #define E0 1048576
 #define E1 32768
 #define E2 32
-#define E3 16384
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
                       int *__restrict__ y) {
-  __nram__ half a[E3 + 2];
-  for (int j = 0; j < 2; ++j) {
-    int r = taskId + j * E2;
-    int p = r * E3;
-    __memcpy(a, x + p, E3 * sizeof(half), GDRAM2NRAM);
-    __bang_fcmpfilter(CMP_GT, a, a, (half)0.0f, E3);
-    int n = *((int *)a);
-    int q = y[r];
-    __memcpy(z + q, a + 2, n * sizeof(half), NRAM2GDRAM);
-  }
+  __nram__ half a[E1 + 2];
+  int p = taskId * E1;
+  __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
+  __bang_fcmpfilter(CMP_GT, a, a, (half)0.0f, E1);
+  int n = *((int *)a);
+
+  int q = y[taskId];
+  __memcpy(z + q, a + 2, n * sizeof(half), NRAM2GDRAM);
 }
 
 __mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
-  __nram__ half a[E3];
+  __nram__ half a[E1];
   __nram__ unsigned int b[1];
-  for (int j = 0; j < 2; ++j) {
-    int r = taskId + j * E2;
-    int p = r * E3;
-    __memcpy(a, x + p, E3 * sizeof(half), GDRAM2NRAM);
-    __bang_active_relu(a, a, E3);
-    __bang_count(b, a, E3);
-    y[r] = (int)b[0];
-  }
+  int p = taskId * E1;
+  __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
+  __bang_active_relu(a, a, E1);
+  __bang_count(b, a, E1);
+  int n = (int)b[0];
+  y[taskId] = n;
   __sync_all_ipu();
 
   if (taskId == E2 - 1) {
     int q = 0;
-    for (int i = 0; i < E2 * 2; ++i) {
+    for (int i = 0; i < E2; ++i) {
       int t = y[i];
       y[i] = q;
       q += t;
     }
-    y[64] = q;
+    y[32] = q;
   }
 }
 
@@ -61,7 +56,7 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   else
     out.resize_({E0});
   if (!work2.defined())
-    work2 = torch::empty({65}, input.options().dtype(torch::kInt32));
+    work2 = torch::empty({33}, input.options().dtype(torch::kInt32));
   if (s0 == nullptr) {
     cnrtNotifierCreate(&s0);
     cnrtNotifierCreate(&e0);
@@ -85,7 +80,7 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   cnrtPlaceNotifier(e1, queue2);
 
   int n = 0;
-  cnrtMemcpyAsync(&n, work2.data_ptr<int>() + 64, sizeof(int), queue2,
+  cnrtMemcpyAsync(&n, work2.data_ptr<int>() + 32, sizeof(int), queue2,
                   cnrtMemcpyDevToHost);
   cnrtQueueSync(queue2);
   cnrtPlaceNotifier(s0, queue);
