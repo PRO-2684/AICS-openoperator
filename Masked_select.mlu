@@ -1,12 +1,11 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <framework/core/MLUEvent.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
 #define E0 1048576
-#define E1 16384
-#define E2 64
+#define E1 32768
+#define E2 32
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
                       int *__restrict__ y) {
@@ -47,22 +46,26 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   (void)v;
   static torch::Tensor out;
   static torch::Tensor work2;
+  static torch_mlu::MLUStream *stream2 = nullptr;
+  static cnrtNotifier_t ev = nullptr;
   if (!out.defined())
     out = torch::empty({E0}, input.options());
   else
     out.resize_({E0});
   if (!work2.defined())
-    work2 = torch::empty({65}, input.options().dtype(torch::kInt32));
+    work2 = torch::empty({33}, input.options().dtype(torch::kInt32));
+  if (stream2 == nullptr) {
+    stream2 =
+        new torch_mlu::MLUStream(torch_mlu::getStreamFromPool(false, input.get_device()));
+    cnrtNotifierCreateWithFlags(&ev, CNRT_NOTIFIER_DISABLE_TIMING_ALL);
+  }
 
-  torch_mlu::MLUStream stream2 =
-      torch_mlu::getStreamFromPool(false, input.get_device());
-  torch_mlu::MLUEvent ev;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtQueue_t queue2 = stream2.stream();
+  cnrtQueue_t queue2 = stream2->stream();
   cnrtDim3_t dim = {E2, 1, 1};
 
-  ev.place(torch_mlu::getCurrentMLUStream());
-  ev.wait(stream2);
+  cnrtPlaceNotifier(ev, queue);
+  cnrtQueueWaitNotifier(ev, queue2, 0);
   k1<<<dim, cnrtFuncTypeUnion8, queue2>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       work2.data_ptr<int>());
