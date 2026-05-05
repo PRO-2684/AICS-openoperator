@@ -13,7 +13,7 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[1024];
-  __nram__ half b[64];
+  __nram__ half b[128];
   int n = E0 * E1 * E2;
   for (int t = taskId; t < n; t += taskDim) {
     int h = t & 7;
@@ -24,12 +24,15 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
       int q = p + z * E5 * E6;
       __memcpy(a + z * 128, x + q, 128 * sizeof(half), GDRAM2NRAM);
     }
-    __bang_sumpool(b, a, 1, 32, 32, 4, 4, 4, 4);
+    __bang_sumpool(b, a, 128, 8, 1, 8, 1, 1, 1);
     int o = ((bc * E1 + d) * E2 + h) * E3;
     for (int k = 0; k < 8; ++k) {
       float s = 0.0f;
-      for (int z = 0; z < 8; ++z) {
-        s += (float)b[z * 8 + k];
+      for (int r = 0; r < 4; ++r) {
+#pragma unroll 4
+        for (int c = 0; c < 4; ++c) {
+          s += (float)b[r * E6 + k * 4 + c];
+        }
       }
       y[o + k] = (half)(s * 0.0078125f);
     }
