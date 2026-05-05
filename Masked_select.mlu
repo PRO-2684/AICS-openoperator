@@ -17,6 +17,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
   __bang_fcmpfilter(CMP_GT, b, a, (half)0.0f, E1);
   int n = *((int *)b);
   y[taskId] = n;
+  __sync_all_ipu();
 
   int q = 0;
   for (int i = 0; i < taskId; ++i) {
