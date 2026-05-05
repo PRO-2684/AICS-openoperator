@@ -11,18 +11,9 @@
 __mlu_entry__ void k0(const half *__restrict__ x,
                       const int64_t *__restrict__ idx,
                       half *__restrict__ y) {
-  __nram__ uint32_t o[E0];
-  __nram__ half a[E0];
-
-  for (int r = taskId; r < E1; r += taskDim) {
-    int p = r * E0;
-    int q = r * E2;
-#pragma unroll
-    for (int i = 0; i < E0; ++i) {
-      o[i] = (uint32_t)idx[p + i] * sizeof(half);
-    }
-    __gather(a, x + q, o, sizeof(half), GDRAM2NRAM, sizeof(half), E0);
-    __memcpy(y + p, a, E0 * sizeof(half), NRAM2GDRAM);
+  for (int p = taskId; p < E0 * E1; p += taskDim) {
+    int r = p >> 5;
+    y[p] = x[r * E2 + idx[p]];
   }
 }
 
