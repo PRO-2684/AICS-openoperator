@@ -5,14 +5,17 @@
 #include <torch/extension.h>
 
 #define E0 512
-#define E1 32
+#define E1 64
 
 __mlu_entry__ void k0(const half *__restrict__ values,
                       const int64_t *__restrict__ index,
                       half *__restrict__ out, int k) {
+  __nram__ half a[E0];
+
   for (int p = taskId; p < k; p += taskDim) {
     int64_t q = index[p];
-    __memcpy(out + q * E0, values + p * E0, E0 * sizeof(half), GDRAM2GDRAM);
+    __memcpy(a, values + p * E0, E0 * sizeof(half), GDRAM2NRAM);
+    __memcpy(out + q * E0, a, E0 * sizeof(half), NRAM2GDRAM);
   }
 }
 
