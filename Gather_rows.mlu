@@ -7,21 +7,22 @@
 #define E0 32
 #define E1 64
 #define E2 1024
+#define A(I) a[(I)] = b[idx[p + (I)]];
+#define B(I) A(I) A(I + 1) A(I + 2) A(I + 3) A(I + 4) A(I + 5) A(I + 6) A(I + 7)
 
 __mlu_entry__ void k0(const half *__restrict__ x,
                       const int64_t *__restrict__ idx,
                       half *__restrict__ y) {
-  __nram__ uint16_t o[E0];
+  __nram__ half b[E2];
   __nram__ half a[E0];
 
   int r = taskId;
   int p = r * E0;
-  int q = r * E2;
-#pragma unroll
-  for (int i = 0; i < E0; ++i) {
-    o[i] = (uint16_t)(idx[p + i] * sizeof(half));
-  }
-  __gather(a, x + q, o, sizeof(half), GDRAM2NRAM, sizeof(half), E0);
+  __memcpy(b, x + r * E2, E2 * sizeof(half), GDRAM2NRAM);
+  B(0)
+  B(8)
+  B(16)
+  B(24)
   __memcpy(y + p, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
@@ -35,6 +36,8 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor index) {
   return out;
 }
 
+#undef B
+#undef A
 #undef E2
 #undef E1
 #undef E0
