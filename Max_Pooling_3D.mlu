@@ -3,45 +3,48 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 13824000
+#define E0 512
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  for (int t = taskId; t < E0; t += taskDim) {
-    int ow = t % 30;
-    int u = t / 30;
-    int oh = u % 30;
-    u /= 30;
-    int od = u % 30;
-    int r = u / 30;
-    int d0 = (od << 1) - 1;
-    int h0 = (oh << 1) - 1;
-    int w0 = (ow << 1) - 1;
-    int q = r * 262144;
-    float m = -3.402823466e+38F;
-    for (int a = 0; a < 3; ++a) {
-      int id = d0 + a * 3;
-      if ((unsigned)id >= 64U) {
-        continue;
-      }
-      int pd = q + id * 4096;
-      for (int b = 0; b < 3; ++b) {
-        int ih = h0 + b * 3;
-        if ((unsigned)ih >= 64U) {
-          continue;
-        }
-        int ph = pd + ih * 64;
-        for (int c = 0; c < 3; ++c) {
-          int iw = w0 + c * 3;
-          if ((unsigned)iw < 64U) {
-            float v = (float)x[ph + iw];
-            if (v > m) {
-              m = v;
+  __nram__ half a[262144];
+  __nram__ half b[27000];
+  for (int r = taskId; r < E0; r += taskDim) {
+    __memcpy(a, x + r * 262144, 262144 * sizeof(half), GDRAM2NRAM);
+    for (int od = 0; od < 30; ++od) {
+      int d0 = (od << 1) - 1;
+      for (int oh = 0; oh < 30; ++oh) {
+        int h0 = (oh << 1) - 1;
+        for (int ow = 0; ow < 30; ++ow) {
+          int w0 = (ow << 1) - 1;
+          float m = -3.402823466e+38F;
+          for (int u = 0; u < 3; ++u) {
+            int id = d0 + u * 3;
+            if ((unsigned)id >= 64U) {
+              continue;
+            }
+            int pd = id * 4096;
+            for (int v = 0; v < 3; ++v) {
+              int ih = h0 + v * 3;
+              if ((unsigned)ih >= 64U) {
+                continue;
+              }
+              int ph = pd + ih * 64;
+              for (int w = 0; w < 3; ++w) {
+                int iw = w0 + w * 3;
+                if ((unsigned)iw < 64U) {
+                  float z = (float)a[ph + iw];
+                  if (z > m) {
+                    m = z;
+                  }
+                }
+              }
             }
           }
+          b[od * 900 + oh * 30 + ow] = (half)m;
         }
       }
     }
-    y[t] = (half)m;
+    __memcpy(y + r * 27000, b, 27000 * sizeof(half), NRAM2GDRAM);
   }
 }
 
