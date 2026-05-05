@@ -10,19 +10,25 @@
 #define E4 256
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[1024];
-  __nram__ half b[64];
+  __nram__ half a[8192];
+  __nram__ half b[256];
   int n = E0 * E1;
   for (int t = taskId; t < n; t += taskDim) {
     int r = t & 7;
     int bc = t >> 3;
     int p = bc * E3 * E4 + r * 32 * E4;
     int o = (bc * E1 + r) * E2;
+    __memcpy(a, x + p, 8192 * sizeof(half), GDRAM2NRAM);
+    __bang_maxpool(b, a, 32, 32, 8, 32, 1, 1, 32);
     for (int k = 0; k < 8; ++k) {
-      __memcpy(a, x + p + k * 32, 32 * sizeof(half), GDRAM2NRAM,
-               32 * sizeof(half), E4 * sizeof(half), 31);
-      __bang_max(b, a, 1024);
-      y[o + k] = b[0];
+      float m = (float)b[k * 32];
+      for (int i = 1; i < 32; ++i) {
+        float v = (float)b[k * 32 + i];
+        if (v > m) {
+          m = v;
+        }
+      }
+      y[o + k] = (half)m;
     }
   }
 }
