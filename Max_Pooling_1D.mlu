@@ -7,40 +7,26 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[128];
-  __nram__ half b[64];
+  __nram__ half b0[64];
+  __nram__ half b1[64];
+  __nram__ half b2[64];
+  __nram__ half b3[64];
   for (int r = taskId; r < E0; r += taskDim) {
     __memcpy(a, x + r * 128, 128 * sizeof(half), GDRAM2NRAM);
-    for (int ow = 0; ow < 62; ++ow) {
-      int base = (ow << 1) - 2;
-      float m = -3.402823466e+38F;
-      int p0 = base;
-      int p1 = base + 3;
-      int p2 = base + 6;
-      int p3 = base + 9;
-      if ((unsigned)p0 < 128U) {
-        m = (float)a[p0];
-      }
-      if ((unsigned)p1 < 128U) {
-        float v = (float)a[p1];
-        if (v > m) {
-          m = v;
-        }
-      }
-      if ((unsigned)p2 < 128U) {
-        float v = (float)a[p2];
-        if (v > m) {
-          m = v;
-        }
-      }
-      if ((unsigned)p3 < 128U) {
-        float v = (float)a[p3];
-        if (v > m) {
-          m = v;
-        }
-      }
-      b[ow] = (half)m;
-    }
-    __memcpy(y + r * 62, b, 62 * sizeof(half), NRAM2GDRAM);
+    __bang_write_value(b0, 64, (half)-65504.0f);
+    __bang_write_value(b3, 64, (half)-65504.0f);
+    __memcpy(b0 + 1, a, sizeof(half), NRAM2NRAM, sizeof(half),
+             2 * sizeof(half), 60);
+    __memcpy(b1, a + 1, sizeof(half), NRAM2NRAM, sizeof(half),
+             2 * sizeof(half), 61);
+    __memcpy(b2, a + 4, sizeof(half), NRAM2NRAM, sizeof(half),
+             2 * sizeof(half), 61);
+    __memcpy(b3, a + 7, sizeof(half), NRAM2NRAM, sizeof(half),
+             2 * sizeof(half), 60);
+    __bang_maximum(b0, b0, b1, 64);
+    __bang_maximum(b2, b2, b3, 64);
+    __bang_maximum(b0, b0, b2, 64);
+    __memcpy(y + r * 62, b0, 62 * sizeof(half), NRAM2GDRAM);
   }
 }
 
