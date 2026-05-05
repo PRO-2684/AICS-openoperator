@@ -8,49 +8,34 @@
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a0[17152];
   __nram__ half a1[17152];
-  __nram__ half a2[17152];
   __nram__ half b[4096];
   __bang_write_value(a0, 17152, (half)-65504.0f);
   __bang_write_value(a1, 17152, (half)-65504.0f);
-  __bang_write_value(a2, 17152, (half)-65504.0f);
   int r = taskId;
   if (r < E0) {
     __memcpy_async(a0 + 131, x + r * 16384, 128 * sizeof(half), GDRAM2NRAM,
                    130 * sizeof(half), 128 * sizeof(half), 127);
+    __asm__ volatile("sync;");
   }
-  int r1 = r + taskDim;
-  if (r1 < E0) {
-    __memcpy_async(a1 + 131, x + r1 * 16384, 128 * sizeof(half), GDRAM2NRAM,
-                   130 * sizeof(half), 128 * sizeof(half), 127);
-  }
-  __asm__ volatile("sync;");
   int q = 0;
-  int k = 0;
-  for (; r < E0; r += taskDim, ++k) {
-    int nr = r + taskDim * 2;
+  for (; r < E0; r += taskDim) {
+    int nr = r + taskDim;
     if (nr < E0) {
       if (q == 0) {
-        __memcpy_async(a2 + 131, x + nr * 16384, 128 * sizeof(half),
-                       GDRAM2NRAM, 130 * sizeof(half), 128 * sizeof(half),
-                       127);
-      } else if (q == 1) {
-        __memcpy_async(a0 + 131, x + nr * 16384, 128 * sizeof(half),
+        __memcpy_async(a1 + 131, x + nr * 16384, 128 * sizeof(half),
                        GDRAM2NRAM, 130 * sizeof(half), 128 * sizeof(half),
                        127);
       } else {
-        __memcpy_async(a1 + 131, x + nr * 16384, 128 * sizeof(half),
+        __memcpy_async(a0 + 131, x + nr * 16384, 128 * sizeof(half),
                        GDRAM2NRAM, 130 * sizeof(half), 128 * sizeof(half),
                        127);
       }
     }
-    half *a = q == 0 ? a0 : (q == 1 ? a1 : a2);
+    half *a = q == 0 ? a0 : a1;
     __bang_maxpool(b, a, 1, 130, 130, 2, 2, 2, 2, 3, 3, 1, 1);
-    __memcpy(y + r * 4096, b, 4096 * sizeof(half), NRAM2GDRAM);
-    if ((k & 1) == 1 && nr < E0) {
-      __asm__ volatile("sync;");
-    }
-    ++q;
-    if (q == 3) q = 0;
+    __memcpy_async(y + r * 4096, b, 4096 * sizeof(half), NRAM2GDRAM);
+    __sync_all_ipu();
+    q ^= 1;
   }
 }
 
