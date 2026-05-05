@@ -4,7 +4,7 @@
 #include <torch/extension.h>
 
 #define TILE 65536
-#define MAX_TASK 64
+#define MAX_TASK 16
 
 __mlu_entry__ void k_count(const half *__restrict__ x,
                            unsigned int *__restrict__ counts) {
