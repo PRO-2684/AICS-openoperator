@@ -7,42 +7,40 @@
 #define E0 256
 #define E1 4096
 #define E2 512
-#define E3 32
-#define E4 4096
+#define E3 4096
 
-__mlu_entry__ void k0(half *__restrict__ y) {
-  __nram__ half a[E4];
-  __bang_write_value(a, E4, (half)0.0f);
-  int p = taskId * E4;
-  __memcpy(y + p, a, E4 * sizeof(half), NRAM2GDRAM);
-}
-
-__mlu_entry__ void k1(const half *__restrict__ x,
+__mlu_entry__ void k0(const half *__restrict__ x,
                       const int64_t *__restrict__ idx,
                       half *__restrict__ y) {
   __nram__ half a[E0];
-  for (int r = taskId; r < E1; r += taskDim) {
+  __nram__ half b[E0];
+  __nram__ half z[E3];
+
+  __bang_write_value(z, E3, (half)0.0f);
+  for (int p = 0; p < E2 * E0; p += E3) {
+    __memcpy(y + p, z, E3 * sizeof(half), NRAM2GDRAM);
+  }
+
+  for (int r = 0; r < E1; ++r) {
     int q = (int)idx[r];
     __memcpy(a, x + r * E0, E0 * sizeof(half), GDRAM2NRAM);
-    __bang_atomic_reduce_add(y + q * E0, a, E0);
+    __memcpy(b, y + q * E0, E0 * sizeof(half), GDRAM2NRAM);
+    __bang_add(b, b, a, E0);
+    __memcpy(y + q * E0, b, E0 * sizeof(half), NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
   (void)dim_size;
   auto out = torch::empty({E2, E0}, src.options());
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {E3, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
-  k1<<<d, cnrtFuncTypeBlock, queue>>>(
+  cnrtDim3_t d = {1, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(src.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(index.data_ptr<int64_t>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
 }
 
-#undef E4
 #undef E3
 #undef E2
 #undef E1
