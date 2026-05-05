@@ -11,12 +11,18 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   for (int r = taskId; r < E0; r += taskDim) {
     int q = r << 1;
     __bang_write_value(a, 34304, (half)-65504.0f);
-    __memcpy(a + 2 + 131 * 2, x + q * 16384, 128 * 2 * sizeof(half),
-             GDRAM2NRAM, 130 * 2 * sizeof(half), 128 * 2 * sizeof(half), 127);
-    __memcpy(a + 3 + 131 * 2, x + (q + 1) * 16384, 128 * 2 * sizeof(half),
-             GDRAM2NRAM, 130 * 2 * sizeof(half), 128 * 2 * sizeof(half), 127);
+    for (int h = 0; h < 128; ++h) {
+      __memcpy(a + ((h + 1) * 130 + 1) * 2, x + q * 16384 + h * 128,
+               sizeof(half), GDRAM2NRAM, 2 * sizeof(half), sizeof(half), 127);
+      __memcpy(a + ((h + 1) * 130 + 1) * 2 + 1,
+               x + (q + 1) * 16384 + h * 128, sizeof(half), GDRAM2NRAM,
+               2 * sizeof(half), sizeof(half), 127);
+    }
     __bang_maxpool(b, a, 2, 130, 130, 2, 2, 2, 2, 3, 3, 1, 1);
-    __memcpy(y + q * 4096, b, 4096 * 2 * sizeof(half), NRAM2GDRAM);
+    __memcpy(y + q * 4096, b, sizeof(half), NRAM2GDRAM,
+             sizeof(half), 2 * sizeof(half), 4095);
+    __memcpy(y + (q + 1) * 4096, b + 1, sizeof(half), NRAM2GDRAM,
+             sizeof(half), 2 * sizeof(half), 4095);
   }
 }
 
