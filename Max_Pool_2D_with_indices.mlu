@@ -6,7 +6,7 @@
 #define E0 2097152
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
-                      int *__restrict__ z) {
+                      long long *__restrict__ z) {
   for (int t = taskId; t < E0; t += taskDim) {
     int ow = t & 63;
     int oh = (t >> 6) & 63;
@@ -31,8 +31,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
       idx = 3;
     }
     y[t] = (half)m;
-    z[t * 2] = idx;
-    z[t * 2 + 1] = 0;
+    z[t] = (long long)idx;
   }
 }
 
@@ -45,6 +44,6 @@ std::vector<torch::Tensor> bang_func(torch::Tensor x, int kernel_size,
   k0<<<g, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()),
-      reinterpret_cast<int *>(z.data_ptr<int64_t>()));
+      reinterpret_cast<long long *>(z.data_ptr<int64_t>()));
   return {y, z};
 }
