@@ -3,25 +3,24 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 64
-#define E1 8192
-#define E2 32
+#define E0 32
+#define E1 16384
 
 __mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y, int n) {
-  int q = n / E2;
-  int r = n - q * E2;
-  __bang_sumpool(y, x, E2, 1, q, 1, q, 1, q);
+  int q = n / 32;
+  int r = n - q * 32;
+  __bang_sumpool(y, x, 32, 1, q, 1, q, 1, q);
   if (r > 0) {
-    __bang_add(y, y, x + q * E2, r);
+    __bang_add(y, y, x + q * 32, r);
   }
-  __bang_reduce_sum(y, y, E2);
+  __bang_reduce_sum(y, y, 32);
   return y[0];
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ z) {
   __nram__ half a[E1];
   __nram__ float b[E1];
-  __nram__ float c[32];
+  __nram__ float c[E0];
   int p = taskId * E1;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_half2float(b, a, E1);
@@ -30,18 +29,14 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ z) {
 
 __mlu_entry__ void k1(const float *__restrict__ z, half *__restrict__ y) {
   __nram__ float a[E0];
-  __nram__ float b[32];
+  __nram__ float b[E0];
   __memcpy(a, z, E0 * sizeof(float), GDRAM2NRAM);
   y[0] = (half)f0(a, b, E0);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
-  static torch::Tensor out;
-  static torch::Tensor tmp;
-  if (!out.defined())
-    out = torch::empty({}, x.options());
-  if (!tmp.defined())
-    tmp = torch::empty({E0}, x.options().dtype(torch::kFloat32));
+  auto out = torch::empty({}, x.options());
+  auto tmp = torch::empty({E0}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d0 = {E0, 1, 1};
   cnrtDim3_t d1 = {1, 1, 1};
