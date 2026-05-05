@@ -43,23 +43,12 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   (void)v;
   static torch::Tensor out;
   static torch::Tensor work2;
-  static cnrtNotifier_t s0 = nullptr;
-  static cnrtNotifier_t e0 = nullptr;
-  static cnrtNotifier_t s1 = nullptr;
-  static cnrtNotifier_t e1 = nullptr;
-  static int seen = 0;
   if (!out.defined())
     out = torch::empty({E0}, input.options());
   else
     out.resize_({E0});
   if (!work2.defined())
     work2 = torch::empty({33}, input.options().dtype(torch::kInt32));
-  if (s0 == nullptr) {
-    cnrtNotifierCreate(&s0);
-    cnrtNotifierCreate(&e0);
-    cnrtNotifierCreate(&s1);
-    cnrtNotifierCreate(&e1);
-  }
 
   torch_mlu::MLUStream stream2 =
       torch_mlu::getStreamFromPool(false, input.get_device());
@@ -70,30 +59,17 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
 
   ev.place(torch_mlu::getCurrentMLUStream());
   ev.wait(stream2);
-  cnrtPlaceNotifier(s1, queue2);
   k1<<<dim, cnrtFuncTypeUnion8, queue2>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       work2.data_ptr<int>());
-  cnrtPlaceNotifier(e1, queue2);
 
   int n = 0;
   cnrtMemcpyAsync(&n, work2.data_ptr<int>() + 32, sizeof(int), queue2,
                   cnrtMemcpyDevToHost);
   cnrtQueueSync(queue2);
-  cnrtPlaceNotifier(s0, queue);
   k0<<<dim, cnrtFuncTypeUnion4, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
-  cnrtPlaceNotifier(e0, queue);
-  if (seen < 3) {
-    float t0 = 0.0f;
-    float t1 = 0.0f;
-    cnrtQueueSync(queue);
-    cnrtNotifierDuration(s1, e1, &t1);
-    cnrtNotifierDuration(s0, e0, &t0);
-    printf("diag111 count_us=%.3f compact_us=%.3f n=%d\n", t1, t0, n);
-  }
-  ++seen;
   out.resize_({(int64_t)n});
   return out;
 }
