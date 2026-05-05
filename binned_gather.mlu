@@ -25,6 +25,7 @@ __mlu_entry__ void kernel(const half *__restrict__ x,
 #pragma unroll
     for (int j = 0; j < H; ++j) {
       out[dst_base + j] = (half)((float)x[src_base + j] * (float)w);
+    }
   }
 }
 
