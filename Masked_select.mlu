@@ -4,17 +4,20 @@
 #include <torch/extension.h>
 
 #define E0 1048576
-#define E1 131072
-#define E2 8
+#define E1 32768
+#define E2 32
+#define E3 2048
 
 __mlu_entry__ void k0(const half *__restrict__ x, int *__restrict__ y) {
   __nram__ half a[E1];
   __nram__ half b[E1];
+  __nram__ half c[E3];
   int p = taskId * E1;
   half v = (half)0.0f;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-  __bang_gt_scalar(b, a, v, E1);
-  y[taskId] = (int)__bang_count(b, E1);
+  __bang_write_value(b, E1, v);
+  __bang_gt_bitindex(c, a, b, E1);
+  y[taskId] = (int)__bang_count_bitindex(c, E3);
 }
 
 __mlu_entry__ void k1(int *__restrict__ x) {
@@ -31,11 +34,13 @@ __mlu_entry__ void k2(const half *__restrict__ x, const int *__restrict__ y,
                       half *__restrict__ z) {
   __nram__ half a[E1];
   __nram__ half b[E1];
+  __nram__ half c[E3];
   int p = taskId * E1;
   half v = (half)0.0f;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-  __bang_gt_scalar(b, a, v, E1);
-  int n = (int)__bang_filter(a, a, b, E1);
+  __bang_write_value(b, E1, v);
+  __bang_gt_bitindex(c, a, b, E1);
+  int n = (int)__bang_filter_bitindex(a, a, c, E1);
   __memcpy(z + y[taskId], a, n * sizeof(half), NRAM2GDRAM);
 }
 
