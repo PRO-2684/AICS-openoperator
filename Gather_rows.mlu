@@ -7,7 +7,7 @@
 #define E0 32
 #define E1 64
 #define E2 1024
-#define E3 256
+#define E3 64
 
 __mlu_entry__ void k0(const half *__restrict__ x,
                       const int64_t *__restrict__ idx,
@@ -15,7 +15,7 @@ __mlu_entry__ void k0(const half *__restrict__ x,
   __nram__ uint32_t o[E3];
   __nram__ half a[E3];
 
-  int r = taskId << 3;
+  int r = taskId << 1;
   int p = r * E0;
 #pragma unroll
   for (int i = 0; i < E3; ++i) {
@@ -28,7 +28,7 @@ __mlu_entry__ void k0(const half *__restrict__ x,
 
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor index) {
   auto out = torch::empty({E1, E0}, input.options());
-  cnrtDim3_t d = {8, 1, 1};
+  cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(index.data_ptr<int64_t>()),
