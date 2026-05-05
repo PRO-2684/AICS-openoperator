@@ -11,7 +11,8 @@
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E2];
   __nram__ half b[E2];
-  __nram__ half c[E1];
+  __nram__ half c[E3];
+  __nram__ half h[E1];
   __nram__ float d[E3];
   __nram__ float e[E1];
   __nram__ float f[E1];
@@ -21,7 +22,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __bang_transpose(b, a, E1, E1);
   for (int i = 0; i < 8; ++i) {
     int q = i * 32;
-    __bang_half2float(d, b + i * E3, E3);
+    __bang_transpose(c, b + i * E3, 32, E1);
+    __bang_half2float(d, c, E3);
     __bang_sumpool(e + q, d, 32, 1, E1, 1, E1, 1, E1);
     __bang_square(d, d, E3);
     __bang_sumpool(f + q, d, 32, 1, E1, 1, E1, 1, E1);
@@ -32,8 +34,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __bang_mul_scalar(f, f, 0.00392156862745098f, E1);
   __bang_active_relu(f, f, E1);
   __bang_sqrt(f, f, E1);
-  __bang_float2half(c, f, E1);
-  __memcpy(y + taskId * E1, c, E1 * sizeof(half), NRAM2GDRAM);
+  __bang_float2half(h, f, E1);
+  __memcpy(y + taskId * E1, h, E1 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
