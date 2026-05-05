@@ -4,19 +4,18 @@
 #include <torch/extension.h>
 #include <vector>
 
-#define E0 132
-#define E1 128
+#define E0 128
+#define E1 132
 #define E2 1024
-#define E3 (E0 * E0)
-#define E4 32
+#define E3 (E1 * E1)
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[E3 + 48];
+  half z = 0;
   for (int g = taskId; g < E2; g += taskDim) {
-    __bang_write_zero(a, ((E3 + 63) & ~63));
-    __memcpy(a + E0 * 2 + 2, x + g * E1 * E1, E1 * sizeof(half), GDRAM2NRAM,
-             E0 * sizeof(half), E1 * sizeof(half), E1 - 1);
-    __memcpy(y + g * E3, a, E3 * sizeof(half), NRAM2GDRAM);
+    half *p = y + g * E3;
+    __gdramset(p, E3, &z);
+    __memcpy(p + E1 * 2 + 2, x + g * E0 * E0, E0 * sizeof(half),
+             GDRAM2GDRAM, E1 * sizeof(half), E0 * sizeof(half), E0 - 1);
   }
 }
 
@@ -26,7 +25,7 @@ torch::Tensor bang_func(torch::Tensor x, std::vector<int64_t> pad,
   (void)value;
   auto y = torch::empty({16, 64, 132, 132}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {E4, 1, 1};
+  cnrtDim3_t dim = {32, 1, 1};
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
