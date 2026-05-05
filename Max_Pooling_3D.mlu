@@ -6,45 +6,36 @@
 #define E0 512
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[262144];
-  __nram__ half b[27000];
+  __nram__ half a[278784];
+  __nram__ half b[57600];
+  __nram__ half c[27000];
   for (int r = taskId; r < E0; r += taskDim) {
-    __memcpy(a, x + r * 262144, 262144 * sizeof(half), GDRAM2NRAM);
+    __bang_write_value(a, 278784, (half)-65504.0f);
+    for (int z = 0; z < 64; ++z) {
+      __memcpy(a + ((z + 1) * 66 + 1) * 64, x + r * 262144 + z * 4096,
+               64 * sizeof(half), GDRAM2NRAM, 66 * 64 * sizeof(half),
+               64 * sizeof(half), 63);
+    }
+    __bang_maxpool(b, a, 64, 66, 66, 3, 3, 2, 2, 3, 3, 1, 1);
     for (int od = 0; od < 30; ++od) {
-      int d0 = (od << 1) - 1;
       for (int oh = 0; oh < 30; ++oh) {
-        int h0 = (oh << 1) - 1;
-        for (int ow = 0; ow < 30; ++ow) {
-          int w0 = (ow << 1) - 1;
-          float m = -3.402823466e+38F;
-          for (int u = 0; u < 3; ++u) {
-            int id = d0 + u * 3;
-            if ((unsigned)id >= 64U) {
-              continue;
-            }
-            int pd = id * 4096;
-            for (int v = 0; v < 3; ++v) {
-              int ih = h0 + v * 3;
-              if ((unsigned)ih >= 64U) {
-                continue;
-              }
-              int ph = pd + ih * 64;
-              for (int w = 0; w < 3; ++w) {
-                int iw = w0 + w * 3;
-                if ((unsigned)iw < 64U) {
-                  float z = (float)a[ph + iw];
-                  if (z > m) {
-                    m = z;
-                  }
-                }
-              }
-            }
-          }
-          b[od * 900 + oh * 30 + ow] = (half)m;
+        int q = (od * 30 + oh) * 64;
+        float m0 = (float)b[q + 2];
+        float v0 = (float)b[q + 5];
+        if (v0 > m0) m0 = v0;
+        c[od * 900 + oh * 30] = (half)m0;
+        for (int ow = 1; ow < 30; ++ow) {
+          int w = (ow << 1) - 1;
+          float m = (float)b[q + w];
+          float v1 = (float)b[q + w + 3];
+          float v2 = (float)b[q + w + 6];
+          if (v1 > m) m = v1;
+          if (v2 > m) m = v2;
+          c[od * 900 + oh * 30 + ow] = (half)m;
         }
       }
     }
-    __memcpy(y + r * 27000, b, 27000 * sizeof(half), NRAM2GDRAM);
+    __memcpy(y + r * 27000, c, 27000 * sizeof(half), NRAM2GDRAM);
   }
 }
 
