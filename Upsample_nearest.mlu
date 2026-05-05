@@ -4,39 +4,25 @@
 #include <torch/extension.h>
 
 #define E0 32
-#define E1 4096
-#define E2 8192
+#define E1 256
+#define E2 4096
 #define E3 16384
-#define E4 12
-#define E5 256
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[E1 * E4];
-  __nram__ half b[E2 * E4];
-  __nram__ half c[E3 * E4];
-  int g = taskId * E4;
-  if (g < E5) {
-    int n = E4;
-    if (g + n > E5)
-      n = E5 - g;
-    __memcpy(a, x + g * E1, E1 * n * sizeof(half), GDRAM2NRAM);
-#pragma unroll
-    for (int i = 0; i < E4; ++i) {
-      if (i >= n)
-        break;
-      half *pa = a + i * E1;
-      half *pb = b + i * E2;
-      half *pc = c + i * E3;
-      __memcpy(pb, pa, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
-               sizeof(half), E1 - 1);
-      __memcpy(pb + 1, pa, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
-               sizeof(half), E1 - 1);
-      __memcpy(pc, pb, 128 * sizeof(half), NRAM2NRAM, 256 * sizeof(half),
-               128 * sizeof(half), 63);
-      __memcpy(pc + 128, pb, 128 * sizeof(half), NRAM2NRAM,
-               256 * sizeof(half), 128 * sizeof(half), 63);
-    }
-    __memcpy(y + g * E3, c, E3 * n * sizeof(half), NRAM2GDRAM);
+  __nram__ half a[E2];
+  __nram__ half b[8192];
+  __nram__ half c[E3];
+  for (int g = taskId; g < E1; g += taskDim) {
+    __memcpy(a, x + g * E2, E2 * sizeof(half), GDRAM2NRAM);
+    __memcpy(b, a, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
+             sizeof(half), E2 - 1);
+    __memcpy(b + 1, a, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
+             sizeof(half), E2 - 1);
+    __memcpy(c, b, 128 * sizeof(half), NRAM2NRAM, 256 * sizeof(half),
+             128 * sizeof(half), 63);
+    __memcpy(c + 128, b, 128 * sizeof(half), NRAM2NRAM, 256 * sizeof(half),
+             128 * sizeof(half), 63);
+    __memcpy(y + g * E3, c, E3 * sizeof(half), NRAM2GDRAM);
   }
 }
 
