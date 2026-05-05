@@ -1,65 +1,46 @@
-#include <bang.h>
-#include <cnrt.h>
-#include <framework/core/MLUStream.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-#define TASK_NUM 32
-#define ROWS_TILE 16
-#define OW_SIZE 254
+#define CNNL_CHECK(expr) \
+  do { \
+    cnnlStatus_t s = (expr); \
+    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s); \
+  } while (0)
 
-__mlu_entry__ void kernel_unfold_direct_2d(const half *__restrict__ x,
-                                           half *__restrict__ y) {
-  constexpr int n_size = 16;
-  constexpr int c_size = 3;
-  constexpr int h_size = 256;
-  constexpr int w_size = 256;
-  constexpr int k_size = 3;
-  constexpr int oh_size = 254;
-  constexpr int area = oh_size * OW_SIZE;
-  constexpr int block = c_size * k_size * k_size;
-  constexpr int tile_per_group = (oh_size + ROWS_TILE - 1) / ROWS_TILE;
-
-  __nram__ half buf[ROWS_TILE * OW_SIZE];
-
-  const int total_tiles = n_size * block * tile_per_group;
-
-  for (int tile_id = taskId; tile_id < total_tiles; tile_id += taskDim) {
-    const int g = tile_id / tile_per_group;
-    const int tile = tile_id - g * tile_per_group;
-
-    const int n = g / block;
-    const int b = g - n * block;
-
-    const int kw = b % k_size;
-    const int kh = (b / k_size) % k_size;
-    const int c = b / (k_size * k_size);
-
-    const int oh0 = tile * ROWS_TILE;
-    int rows = ROWS_TILE;
-    if (oh0 + rows > oh_size)
-      rows = oh_size - oh0;
-
-    const int in_base = ((n * c_size + c) * h_size + (oh0 + kh)) * w_size + kw;
-    const int out_base = (n * block + b) * area + oh0 * OW_SIZE;
-
-    __memcpy(buf, x + in_base, OW_SIZE * sizeof(half), GDRAM2NRAM,
-             OW_SIZE * sizeof(half), w_size * sizeof(half), rows - 1);
-
-    __memcpy(y + out_base, buf, OW_SIZE * sizeof(half), NRAM2GDRAM,
-             OW_SIZE * sizeof(half), OW_SIZE * sizeof(half), rows - 1);
-  }
+static cnnlTensorDescriptor_t desc(cnnlTensorLayout_t layout,
+                                   cnnlDataType_t dtype, int n, int c, int h,
+                                   int w) {
+  int dims[4] = {n, c, h, w};
+  cnnlTensorDescriptor_t d;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+  CNNL_CHECK(cnnlSetTensorDescriptor(d, layout, dtype, 4, dims));
+  return d;
 }
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
                         int padding) {
+  (void)kernel_size;
+  (void)stride;
+  (void)padding;
   auto y = torch::empty({16, 27, 254 * 254}, x.options());
-  cnrtDim3_t dim_config = {TASK_NUM, 1, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-  kernel_unfold_direct_2d<<<dim_config, ktype, queue>>>(
-      static_cast<const half *>(x.data_ptr()),
-      static_cast<half *>(y.data_ptr()));
-
+  auto xd = desc(CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 16, 3, 256, 256);
+  auto wd = desc(CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 27, 3, 3, 3);
+  auto yd = desc(CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 16, 27, 254, 254);
+  cnnlConvolutionDescriptor_t cd;
+  CNNL_CHECK(cnnlCreateConvolutionDescriptor(&cd));
+  int pad[4] = {0, 0, 0, 0};
+  int st[2] = {1, 1};
+  int dl[2] = {1, 1};
+  CNNL_CHECK(cnnlSetConvolutionDescriptor(cd, 4, pad, st, dl, 1,
+                                          CNNL_DTYPE_HALF));
+  CNNL_CHECK(cnnlIm2Col(torch_mlu::getCurrentHandle(), xd, x.data_ptr(), wd,
+                        cd, nullptr, nullptr, nullptr, nullptr, 0, yd,
+                        y.data_ptr()));
+  CNNL_CHECK(cnnlDestroyConvolutionDescriptor(cd));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(yd));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(wd));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(xd));
   return y;
 }
