@@ -3,48 +3,39 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 512
-
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[262144];
-  __nram__ half b[27000];
-  for (int r = taskId; r < E0; r += taskDim) {
-    __memcpy(a, x + r * 262144, 262144 * sizeof(half), GDRAM2NRAM);
-    for (int od = 0; od < 30; ++od) {
-      int d0 = (od << 1) - 1;
-      for (int oh = 0; oh < 30; ++oh) {
-        int h0 = (oh << 1) - 1;
-        for (int ow = 0; ow < 30; ++ow) {
-          int w0 = (ow << 1) - 1;
-          float m = -3.402823466e+38F;
-          for (int u = 0; u < 3; ++u) {
-            int id = d0 + u * 3;
-            if ((unsigned)id >= 64U) {
-              continue;
-            }
-            int pd = id * 4096;
-            for (int v = 0; v < 3; ++v) {
-              int ih = h0 + v * 3;
-              if ((unsigned)ih >= 64U) {
-                continue;
-              }
-              int ph = pd + ih * 64;
-              for (int w = 0; w < 3; ++w) {
-                int iw = w0 + w * 3;
-                if ((unsigned)iw < 64U) {
-                  float z = (float)a[ph + iw];
-                  if (z > m) {
-                    m = z;
-                  }
-                }
-              }
-            }
-          }
-          b[od * 900 + oh * 30 + ow] = (half)m;
-        }
+  __nram__ half a[105600];
+  __nram__ half b[19200];
+  __nram__ half c0[9216];
+  __nram__ half c1[9216];
+  __nram__ half c2[9216];
+  for (int t = taskId; t < 1536; t += taskDim) {
+    int s = t % 3;
+    int p = t / 3;
+    int z = s * 10;
+    __bang_write_value(a, 105600, (half)-65504.0f);
+    for (int i = 0; i < 25; ++i) {
+      int d = (z << 1) + i - 1;
+      if ((unsigned)d < 64U) {
+        __memcpy(a + i * 4224 + 64, x + p * 262144 + d * 4096,
+                 4096 * sizeof(half), GDRAM2NRAM);
       }
     }
-    __memcpy(y + r * 27000, b, 27000 * sizeof(half), NRAM2GDRAM);
+    __bang_maxpool(b, a, 64, 25, 66, 3, 3, 2, 2, 3, 3, 1, 1);
+    __bang_write_value(c0, 9216, (half)-65504.0f);
+    for (int i = 0; i < 29; ++i) {
+      __memcpy(c0 + i + 1, b + 1 + (i << 1), sizeof(half), NRAM2NRAM,
+               30 * sizeof(half), 64 * sizeof(half), 299);
+    }
+    for (int i = 0; i < 30; ++i) {
+      __memcpy(c1 + i, b + 2 + (i << 1), sizeof(half), NRAM2NRAM,
+               30 * sizeof(half), 64 * sizeof(half), 299);
+      __memcpy(c2 + i, b + 5 + (i << 1), sizeof(half), NRAM2NRAM,
+               30 * sizeof(half), 64 * sizeof(half), 299);
+    }
+    __bang_maximum(c0, c0, c1, 9216);
+    __bang_maximum(c0, c0, c2, 9216);
+    __memcpy(y + p * 27000 + s * 9000, c0, 9000 * sizeof(half), NRAM2GDRAM);
   }
 }
 
