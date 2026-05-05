@@ -6,7 +6,7 @@
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[90112];
   __nram__ half b[768];
-  for (int t = taskId; t < 1536; t += taskDim) {
+  for (int t = taskId; t < 2048; t += taskDim) {
     int s = t & 15;
     int p = t >> 4;
     if (s >= 12) {
