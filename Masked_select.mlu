@@ -20,17 +20,12 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
   __sync_all_ipu();
 
   int q = 0;
-  int s = 0;
-  for (int i = 0; i < E2; ++i) {
-    int w = y[i];
-    if (i < taskId) {
-      q += w;
-    }
-    s += w;
+  for (int i = 0; i < taskId; ++i) {
+    q += y[i];
   }
   __memcpy(z + q, a, n * sizeof(half), NRAM2GDRAM);
-  if (taskId == 0) {
-    y[32] = s;
+  if (taskId == 31) {
+    y[32] = q + n;
   }
 }
 
