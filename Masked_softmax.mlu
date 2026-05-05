@@ -1,50 +1,49 @@
-#include <bang.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
+#include <cnnl_extra.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define N0 32
-#define N1 8
-#define N2 128
-#define N3 128
-#define W 64
-#define R (N0 * N1 * N2)
-#define TASKS 32
+#define CNNL_CHECK(expr) \
+  do { \
+    cnnlStatus_t s = (expr); \
+    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s); \
+  } while (0)
 
-__mlu_entry__ void kernel_main(const half *__restrict__ input,
-                               half *__restrict__ output) {
-  __nram__ half obuf[N3];
-  __nram__ half red[W];
-
-  __bang_write_zero(obuf, N3);
-
-  for (int row = taskId; row < R; row += taskDim) {
-    const half *in =
-        (const half *)__builtin_assume_aligned(input + row * N3, 512);
-    half *out = (half *)__builtin_assume_aligned(output + row * N3, 512);
-
-    __memcpy(obuf, in, W * sizeof(half), GDRAM2NRAM);
-
-    __bang_active_exp(obuf, obuf, W);
-
-    __bang_reduce_sum(red, obuf, W);
-
-    half inv = (half)(1.0f / (float)red[0]);
-    __bang_mul_scalar(obuf, obuf, inv, W);
-
-    __memcpy(out, obuf, N3 * sizeof(half), NRAM2GDRAM);
+__mlu_entry__ void k0(const bool *__restrict__ a, bool *__restrict__ b) {
+  for (int i = taskId; i < 524288; i += taskDim) {
+    b[i] = !a[i];
   }
+}
+
+static cnnlTensorDescriptor_t desc4(const torch::Tensor &x,
+                                    cnnlDataType_t dtype) {
+  int dims[4] = {(int)x.size(0), (int)x.size(1), (int)x.size(2),
+                 (int)x.size(3)};
+  cnnlTensorDescriptor_t d;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, dtype, 4, dims));
+  return d;
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask) {
   auto y = torch::empty_like(x);
+  auto m = torch::empty_like(mask);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t kdim = {TASKS, 1, 1};
+  cnrtDim3_t dim = {32, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(mask.data_ptr<bool>(), m.data_ptr<bool>());
 
-  kernel_main<<<kdim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-
+  cnnlTensorDescriptor_t xd = desc4(x, CNNL_DTYPE_HALF);
+  cnnlTensorDescriptor_t md = desc4(m, CNNL_DTYPE_BOOL);
+  cnnlTensorDescriptor_t yd = desc4(y, CNNL_DTYPE_HALF);
+  CNNL_CHECK(cnnlMaskedSoftmax(torch_mlu::getCurrentHandle(),
+                               CNNL_MASKED_SOFTMAX_MASKED_FILL_NEG_INF, -1,
+                               1.0f, xd, x.data_ptr(), md, m.data_ptr(), yd,
+                               y.data_ptr()));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(yd));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(md));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(xd));
   return y;
 }
