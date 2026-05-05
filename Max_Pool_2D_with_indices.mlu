@@ -6,7 +6,7 @@
 #define E0 2097152
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
-                      long *__restrict__ z) {
+                      int *__restrict__ z) {
   for (int t = taskId; t < E0; t += taskDim) {
     int ow = t & 63;
     int oh = (t >> 6) & 63;
@@ -17,21 +17,22 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
     float v2 = (float)x[p + 128];
     float v3 = (float)x[p + 129];
     float m = v0;
-    long idx = (long)((oh << 1) * 128 + (ow << 1));
+    int idx = (oh << 1) * 128 + (ow << 1);
     if (v1 > m) {
       m = v1;
       idx += 1;
     }
     if (v2 > m) {
       m = v2;
-      idx = (long)(((oh << 1) + 1) * 128 + (ow << 1));
+      idx = ((oh << 1) + 1) * 128 + (ow << 1);
     }
     if (v3 > m) {
       m = v3;
-      idx = (long)(((oh << 1) + 1) * 128 + (ow << 1) + 1);
+      idx = ((oh << 1) + 1) * 128 + (ow << 1) + 1;
     }
     y[t] = (half)m;
-    z[t] = idx;
+    z[t * 2] = idx;
+    z[t * 2 + 1] = 0;
   }
 }
 
@@ -43,6 +44,7 @@ std::vector<torch::Tensor> bang_func(torch::Tensor x, int kernel_size,
   cnrtDim3_t g = {4, 8, 1};
   k0<<<g, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()), z.data_ptr<long>());
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()),
+      reinterpret_cast<int *>(z.data_ptr<int64_t>()));
   return {y, z};
 }
