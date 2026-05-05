@@ -13,7 +13,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half b[E2];
   __nram__ half c[E3];
   __nram__ half h[E1];
-  __nram__ float d[E3];
+  __nram__ half r[E1];
+  __nram__ half s[E1];
   __nram__ float e[E1];
   __nram__ float f[E1];
   __nram__ float g[E1];
@@ -23,11 +24,12 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   for (int i = 0; i < 8; ++i) {
     int q = i * 32;
     __bang_transpose(c, b + i * E3, 32, E1);
-    __bang_half2float(d, c, E3);
-    __bang_sumpool(e + q, d, 32, 1, E1, 1, E1, 1, E1);
-    __bang_square(d, d, E3);
-    __bang_sumpool(f + q, d, 32, 1, E1, 1, E1, 1, E1);
+    __bang_sumpool(r + q, c, 32, 1, E1, 1, E1, 1, E1);
+    __bang_square(c, c, E3);
+    __bang_sumpool(s + q, c, 32, 1, E1, 1, E1, 1, E1);
   }
+  __bang_half2float(e, r, E1);
+  __bang_half2float(f, s, E1);
   __bang_mul(g, e, e, E1);
   __bang_mul_scalar(g, g, 0.00390625f, E1);
   __bang_sub(f, f, g, E1);
