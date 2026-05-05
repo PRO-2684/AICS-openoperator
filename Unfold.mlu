@@ -10,19 +10,40 @@
 #define E4 16
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[E2];
+  __nram__ half a[E2 * 2];
   int total = E4 * E3;
-  for (int g = taskId; g < total; g += taskDim) {
+  int g = taskId;
+  if (g < total) {
     int n = g / E3;
     int b = g - n * E3;
     int kw = b % 3;
     int kh = (b / 3) % 3;
     int c = b / 9;
     const half *src = x + ((n * 3 + c) * 256 + kh) * 256 + kw;
+    __memcpy_async(a, src, E1 * sizeof(half), GDRAM2NRAM,
+                   E1 * sizeof(half), 256 * sizeof(half), E1 - 1);
+  }
+  __asm__ volatile("sync;");
+  int t = 0;
+  for (; g < total; g += taskDim, ++t) {
+    int q = t & 1;
+    int nq = q ^ 1;
+    int ng = g + taskDim;
+    if (ng < total) {
+      int n = ng / E3;
+      int b = ng - n * E3;
+      int kw = b % 3;
+      int kh = (b / 3) % 3;
+      int c = b / 9;
+      const half *src = x + ((n * 3 + c) * 256 + kh) * 256 + kw;
+      __memcpy_async(a + nq * E2, src, E1 * sizeof(half), GDRAM2NRAM,
+                     E1 * sizeof(half), 256 * sizeof(half), E1 - 1);
+    }
+    int n = g / E3;
+    int b = g - n * E3;
     half *dst = y + (n * E3 + b) * E2;
-    __memcpy(a, src, E1 * sizeof(half), GDRAM2NRAM, E1 * sizeof(half),
-             256 * sizeof(half), E1 - 1);
-    __memcpy(dst, a, E2 * sizeof(half), NRAM2GDRAM);
+    __memcpy_async(dst, a + q * E2, E2 * sizeof(half), NRAM2GDRAM);
+    __asm__ volatile("sync;");
   }
 }
 
