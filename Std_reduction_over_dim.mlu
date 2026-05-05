@@ -13,20 +13,15 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ float c[E1];
   __nram__ float d[E1];
   __nram__ float e[E1];
-  __nram__ float f[E1];
   int p = taskId * E2;
   __memcpy(a, x + p, E2 * sizeof(half), GDRAM2NRAM);
-  __bang_write_value(c, E1, 0.0f);
-  __bang_write_value(d, E1, 0.0f);
-  for (int i = 0; i < E1; ++i) {
-    __bang_half2float(e, a + i * E1, E1);
-    __bang_add(c, c, e, E1);
-    __bang_square(f, e, E1);
-    __bang_add(d, d, f, E1);
-  }
-  __bang_mul(f, c, c, E1);
-  __bang_mul_scalar(f, f, 0.00390625f, E1);
-  __bang_sub(d, d, f, E1);
+  __bang_half2float(e, a, E2);
+  __bang_sumpool(c, e, E1, 1, E1, 1, E1, 1, E1);
+  __bang_square(e, e, E2);
+  __bang_sumpool(d, e, E1, 1, E1, 1, E1, 1, E1);
+  __bang_mul(e, c, c, E1);
+  __bang_mul_scalar(e, e, 0.00390625f, E1);
+  __bang_sub(d, d, e, E1);
   __bang_mul_scalar(d, d, 0.00392156862745098f, E1);
   __bang_active_relu(d, d, E1);
   __bang_sqrt(d, d, E1);
