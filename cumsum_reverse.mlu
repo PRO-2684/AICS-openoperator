@@ -15,20 +15,15 @@
 
 __mlu_entry__ void flip_kernel(const half *__restrict__ x,
                                half *__restrict__ y) {
-  int row = taskId;
-  if (row >= ROWS) {
-    return;
-  }
-
-  int base = row * COLS;
-
   __nram__ half u[4096];
   __nram__ half v[4096];
-  half *a = u;
-  half *b = v;
-  half *t;
-  __bang_write_value(a, 96, (half)0.0f);
-  __memcpy(a + 96, x + base, COLS * sizeof(half), GDRAM2NRAM);
+  for (int row = taskId; row < ROWS; row += taskDim) {
+    int base = row * COLS;
+    half *a = u;
+    half *b = v;
+    half *t;
+    __bang_write_value(a, 96, (half)0.0f);
+    __memcpy(a + 96, x + base, COLS * sizeof(half), GDRAM2NRAM);
 #define S(D)                                                                  \
   __memcpy(b, a + (D), (D)*sizeof(half), NRAM2NRAM, (D)*2 * sizeof(half),      \
            (D)*2 * sizeof(half), 4096 / ((D)*2) - 1);                         \
@@ -49,7 +44,8 @@ __mlu_entry__ void flip_kernel(const half *__restrict__ x,
   S(4)
   S(2)
   S(1)
-  __memcpy(y + base, a, COLS * sizeof(half), NRAM2GDRAM);
+    __memcpy(y + base, a, COLS * sizeof(half), NRAM2GDRAM);
+  }
 }
 
 #undef S
@@ -86,7 +82,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   }
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t grid = {ROWS, 1, 1};
+  cnrtDim3_t grid = {4, 8, 1};
   flip_kernel<<<grid, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(flipped.data_ptr<at::Half>()));
