@@ -1,8 +1,10 @@
 #include <bang.h>
+#include <c10/core/ScalarType.h>
+#include <c10/util/Half.h>
 #include <cnrt.h>
+#include <cstdint>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <cstdint>
 
 #define ROWS 1024
 #define CLASSES 512
@@ -11,33 +13,34 @@
 #define OUT_PER_TASK (ROWS_PER_TASK * CLASSES)
 
 __mlu_entry__ void onehot_i64_kernel(const int64_t *__restrict__ idx,
-                                     float *__restrict__ out) {
+                                     half *__restrict__ out) {
   const int row_base = taskId * ROWS_PER_TASK;
   const int out_base = row_base * CLASSES;
 
-  float *po = (float *)__builtin_assume_aligned(out + out_base, 512);
+  half *po = (half *)__builtin_assume_aligned(out + out_base, 512);
 
-  __nram__ float obuf[OUT_PER_TASK];
+  __nram__ half obuf[OUT_PER_TASK];
   __bang_write_zero(obuf, OUT_PER_TASK);
 
 #pragma unroll
   for (int r = 0; r < ROWS_PER_TASK; ++r) {
     const int cls = (int)idx[row_base + r];
-    obuf[r * CLASSES + cls] = 1.0f;
+    obuf[r * CLASSES + cls] = (half)1.0f;
   }
 
-  __memcpy(po, obuf, OUT_PER_TASK * sizeof(float), NRAM2GDRAM);
+  __memcpy(po, obuf, OUT_PER_TASK * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int num_classes) {
   (void)num_classes;
-  auto out = torch::empty({ROWS, CLASSES}, x.options().dtype(torch::kFloat));
+  auto out = torch::empty({ROWS, CLASSES}, x.options().dtype(torch::kHalf));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {TASKS, 1, 1};
 
   onehot_i64_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      x.data_ptr<int64_t>(), out.data_ptr<float>());
+      x.data_ptr<int64_t>(),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
 
   return out;
 }
