@@ -7,39 +7,15 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half t[4096];
+  __nram__ half a[4224];
   __nram__ half b[2048];
-  __nram__ half c0[2048];
-  __nram__ half c1[2048];
-  __nram__ half c2[2048];
-  __nram__ half c3[2048];
+  __bang_write_value(a, 4224, (half)-65504.0f);
   for (int r = taskId; r < E0; r += taskDim) {
     int base = r << 5;
     __memcpy(t, x + base * 128, 4096 * sizeof(half), GDRAM2NRAM);
-    __bang_write_value(c0, 2048, (half)-65504.0f);
-    __bang_write_value(c1, 2048, (half)-65504.0f);
-    __bang_write_value(c2, 2048, (half)-65504.0f);
-    __bang_write_value(c3, 2048, (half)-65504.0f);
-    for (int i = 0; i < 32; ++i) {
-      int pi = i * 128;
-      int po = i * 62;
-      __memcpy(c0 + po + 1, t + pi, sizeof(half), NRAM2NRAM,
-               sizeof(half), 2 * sizeof(half), 59);
-      __memcpy(c1 + po + 1, t + pi + 3, sizeof(half), NRAM2NRAM,
-               sizeof(half), 2 * sizeof(half), 59);
-      __memcpy(c2 + po + 1, t + pi + 6, sizeof(half), NRAM2NRAM,
-               sizeof(half), 2 * sizeof(half), 59);
-      __memcpy(c3 + po + 1, t + pi + 9, sizeof(half), NRAM2NRAM,
-               sizeof(half), 2 * sizeof(half), 59);
-      c1[po] = t[pi + 1];
-      c2[po] = t[pi + 4];
-      c3[po] = t[pi + 7];
-      c0[po + 61] = t[pi + 120];
-      c1[po + 61] = t[pi + 123];
-      c2[po + 61] = t[pi + 126];
-    }
-    __bang_maximum(c0, c0, c1, 2048);
-    __bang_maximum(c2, c2, c3, 2048);
-    __bang_maximum(b, c0, c2, 2048);
+    __memcpy(a + 2, t, 128 * sizeof(half), NRAM2NRAM, 132 * sizeof(half),
+             128 * sizeof(half), 31);
+    __bang_maxpool(b, a, 1, 32, 132, 1, 4, 2, 1, 1, 3, 1, 1);
     __memcpy(y + base * 62, b, 1984 * sizeof(half), NRAM2GDRAM);
   }
 }
@@ -48,8 +24,8 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
                         int padding, int dilation, bool return_indices) {
   auto y = torch::empty({16, 64, 62}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {32, 1, 1};
-  k0<<<g, cnrtFuncTypeBlock, queue>>>(
+  cnrtDim3_t g = {4, 8, 1};
+  k0<<<g, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
