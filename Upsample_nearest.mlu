@@ -8,7 +8,7 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ out) {
   __nram__ half a[64];
-  __nram__ unsigned int b[64];
+  __nram__ half b[128];
 
   int p0 = taskId * E1;
   for (int r = 0; r < E1; ++r) {
@@ -21,8 +21,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ out) {
     __memcpy(a, src, 64 * sizeof(half), GDRAM2NRAM);
 #pragma unroll
     for (int i = 0; i < 64; ++i) {
-      unsigned int v = ((unsigned short *)a)[i];
-      b[i] = v | (v << 16);
+      b[(i << 1) + 0] = a[i];
+      b[(i << 1) + 1] = a[i];
     }
     __memcpy(dst0, b, 128 * sizeof(half), NRAM2GDRAM);
     __memcpy(dst1, b, 128 * sizeof(half), NRAM2GDRAM);
