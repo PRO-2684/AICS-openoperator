@@ -111,8 +111,8 @@ torch::Tensor bang_func(torch::Tensor input, double scalar) {
   }
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {TASK_COUNT, 1, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
+  cnrtDim3_t dim = {4, 8, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
 
   if (input.scalar_type() == at::kFloat) {
     matrix_scalar_mul_float_kernel<<<dim, ktype, queue>>>(
