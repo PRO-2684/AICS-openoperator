@@ -10,11 +10,11 @@
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
                       int *__restrict__ y) {
   __nram__ half a[E1];
-  __nram__ half b[E1];
+  __nram__ half b[E1 + 2];
   int p = taskId * E1;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-  __bang_active_relu(b, a, E1);
-  int n = (int)__bang_filter(a, b, b, E1);
+  __bang_fcmpfilter(CMP_GT, b, a, (half)0.0f, E1);
+  int n = *((int *)b);
   y[taskId] = n;
   __sync_all_ipu();
 
@@ -22,7 +22,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
   for (int i = 0; i < taskId; ++i) {
     q += y[i];
   }
-  __memcpy(z + q, a, n * sizeof(half), NRAM2GDRAM);
+  __memcpy(z + q, b + 2, n * sizeof(half), NRAM2GDRAM);
   if (taskId == E2 - 1) {
     y[32] = q + n;
   }
