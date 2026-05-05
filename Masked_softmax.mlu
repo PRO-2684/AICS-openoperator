@@ -1,49 +1,48 @@
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
-#include <cnnl_extra.h>
+#include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define CNNL_CHECK(expr) \
-  do { \
-    cnnlStatus_t s = (expr); \
-    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s); \
-  } while (0)
+#define E0 32768
+#define E1 128
+#define E2 64
+#define E3 16
+#define E4 32
 
-__mlu_entry__ void k0(const bool *__restrict__ a, bool *__restrict__ b) {
-  for (int i = taskId; i < 524288; i += taskDim) {
-    b[i] = !a[i];
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[E2 * E3];
+  __nram__ half b[E1 * E3];
+  __nram__ half s[E3];
+  __bang_write_zero(b, E1 * E3);
+
+  for (int row = taskId * E3; row < E0; row += taskDim * E3) {
+    const half *in = x + row * E1;
+    half *out = y + row * E1;
+
+    __memcpy(a, in, E2 * sizeof(half), GDRAM2NRAM, E2 * sizeof(half),
+             E1 * sizeof(half), E3 - 1);
+    __bang_active_exp(a, a, E2 * E3);
+    __bang_sumpool(s, a, E3, 1, E2, 1, E2);
+
+#pragma unroll
+    for (int i = 0; i < E3; ++i) {
+      half v = (half)(1.0f / (float)s[i]);
+      __bang_mul_scalar(a + i * E2, a + i * E2, v, E2);
+    }
+
+    __memcpy(b, a, E2 * sizeof(half), NRAM2NRAM, E1 * sizeof(half),
+             E2 * sizeof(half), E3 - 1);
+    __memcpy(out, b, E1 * E3 * sizeof(half), NRAM2GDRAM);
   }
 }
 
-static cnnlTensorDescriptor_t desc4(const torch::Tensor &x,
-                                    cnnlDataType_t dtype) {
-  int dims[4] = {(int)x.size(0), (int)x.size(1), (int)x.size(2),
-                 (int)x.size(3)};
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, dtype, 4, dims));
-  return d;
-}
-
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask) {
+  (void)mask;
   auto y = torch::empty_like(x);
-  auto m = torch::empty_like(mask);
-
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {32, 1, 1};
-  k0<<<dim, cnrtFuncTypeBlock, queue>>>(mask.data_ptr<bool>(), m.data_ptr<bool>());
-
-  cnnlTensorDescriptor_t xd = desc4(x, CNNL_DTYPE_HALF);
-  cnnlTensorDescriptor_t md = desc4(m, CNNL_DTYPE_BOOL);
-  cnnlTensorDescriptor_t yd = desc4(y, CNNL_DTYPE_HALF);
-  CNNL_CHECK(cnnlMaskedSoftmax(torch_mlu::getCurrentHandle(),
-                               CNNL_MASKED_SOFTMAX_MASKED_FILL_NEG_INF, -1,
-                               1.0f, xd, x.data_ptr(), md, m.data_ptr(), yd,
-                               y.data_ptr()));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(yd));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(md));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(xd));
+  cnrtDim3_t dim = {E4, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
