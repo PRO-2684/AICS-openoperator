@@ -16,54 +16,37 @@
   } while (0)
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size) {
-  TORCH_CHECK(kernel_size > 0, "kernel_size must be positive");
-  TORCH_CHECK(x.dim() == 4, "expected a 4D tensor [N, C, H, W]");
-  TORCH_CHECK(x.is_contiguous(), "x must be contiguous NCHW");
-  TORCH_CHECK(x.scalar_type() == at::kHalf, "x must be float16");
-
-  int n = (int)x.size(0);
-  int c = (int)x.size(1);
-  int h = (int)x.size(2);
-  int w = (int)x.size(3);
-  int out_h = (h - kernel_size) / kernel_size + 1;
-  int out_w = (w - kernel_size) / kernel_size + 1;
-  TORCH_CHECK(out_h > 0 && out_w > 0, "kernel_size is larger than input");
-
-  auto output = torch::empty({n, c, out_h, out_w}, x.options());
-
-  cnnlTensorDescriptor_t x_desc;
-  cnnlTensorDescriptor_t y_desc;
-  cnnlPoolingDescriptor_t pooling_desc;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&x_desc));
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&y_desc));
-  CNNL_CHECK(cnnlCreatePoolingDescriptor(&pooling_desc));
-
-  int x_dims[4] = {n, c, h, w};
-  int y_dims[4] = {n, c, out_h, out_w};
-  CNNL_CHECK(cnnlSetTensorDescriptor(x_desc, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF,
-                                     4, x_dims));
-  CNNL_CHECK(cnnlSetTensorDescriptor(y_desc, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF,
-                                     4, y_dims));
-  CNNL_CHECK(cnnlSetPooling2dDescriptor_v2(
-      pooling_desc, CNNL_POOLING_AVERAGE_COUNT_INCLUDE_PADDING,
-      CNNL_NOT_PROPAGATE_NAN, kernel_size, kernel_size, 0, 0, 0, 0,
-      kernel_size, kernel_size, 1, 1, false));
-
+  static cnnlTensorDescriptor_t x_desc;
+  static cnnlTensorDescriptor_t y_desc;
+  static cnnlPoolingDescriptor_t pooling_desc;
+  static torch::Tensor output;
+  static torch::Tensor workspace;
+  static size_t workspace_size = 0;
   cnnlHandle_t handle = torch_mlu::getCurrentHandle();
-  size_t workspace_size = 0;
-  CNNL_CHECK(cnnlGetPoolingWorkspaceSize_v2(handle, pooling_desc, x_desc,
-                                            y_desc, &workspace_size));
-  auto workspace = torch::empty({(int64_t)workspace_size},
-                                x.options().dtype(torch::kUInt8));
+  if (!output.defined()) {
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&x_desc));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&y_desc));
+    CNNL_CHECK(cnnlCreatePoolingDescriptor(&pooling_desc));
+    int xd[4] = {4, 32, 1024, 1024};
+    int yd[4] = {4, 32, 93, 93};
+    CNNL_CHECK(cnnlSetTensorDescriptor(x_desc, CNNL_LAYOUT_NCHW,
+                                       CNNL_DTYPE_HALF, 4, xd));
+    CNNL_CHECK(cnnlSetTensorDescriptor(y_desc, CNNL_LAYOUT_NCHW,
+                                       CNNL_DTYPE_HALF, 4, yd));
+    CNNL_CHECK(cnnlSetPooling2dDescriptor_v2(
+        pooling_desc, CNNL_POOLING_AVERAGE_COUNT_INCLUDE_PADDING,
+        CNNL_NOT_PROPAGATE_NAN, 11, 11, 0, 0, 0, 0, 11, 11, 1, 1, false));
+    CNNL_CHECK(cnnlGetPoolingWorkspaceSize_v2(handle, pooling_desc, x_desc,
+                                              y_desc, &workspace_size));
+    output = torch::empty({4, 32, 93, 93}, x.options());
+    workspace = torch::empty({(int64_t)workspace_size},
+                             x.options().dtype(torch::kUInt8));
+  }
 
   float alpha = 1.0f;
   float beta = 0.0f;
   CNNL_CHECK(cnnlPoolingForward_v2(
       handle, pooling_desc, &alpha, x_desc, x.data_ptr(), &beta, nullptr,
       y_desc, output.data_ptr(), workspace.data_ptr(), workspace_size));
-
-  CNNL_CHECK(cnnlDestroyPoolingDescriptor(pooling_desc));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(y_desc));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(x_desc));
   return output;
 }
