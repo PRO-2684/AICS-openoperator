@@ -83,7 +83,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   }
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t grid = {16, 1, 1};
+  cnrtDim3_t grid = {4, 8, 1};
   flip_kernel<<<grid, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(flipped.data_ptr<at::Half>()));
