@@ -3,23 +3,40 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 64
-#define E1 16384
+#define E0 32
+#define E1 256
+#define E2 4096
+#define E3 16384
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[64];
-  __nram__ half b[128];
-  for (int g = taskId; g < E1; g += taskDim) {
-    int p = g >> 6;
-    int q = g & 63;
-    half *dst = y + p * 16384 + q * 256;
-    __memcpy(a, x + g * 64, 64 * sizeof(half), GDRAM2NRAM);
-    __memcpy(b, a, sizeof(half), NRAM2NRAM, 2 * sizeof(half), sizeof(half),
-             63);
-    __memcpy(b + 1, a, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
-             sizeof(half), 63);
-    __memcpy(dst, b, 128 * sizeof(half), NRAM2GDRAM);
-    __memcpy(dst + 128, b, 128 * sizeof(half), NRAM2GDRAM);
+  __nram__ half a[E2 * 2];
+  __nram__ half b[8192 * 2];
+  __nram__ half c[E3 * 2];
+  int g = taskId;
+  if (g < E1)
+    __memcpy_async(a, x + g * E2, E2 * sizeof(half), GDRAM2NRAM);
+  __asm__ volatile("sync;");
+  int t = 0;
+  for (; g < E1; g += taskDim, ++t) {
+    int q = t & 1;
+    int nq = q ^ 1;
+    int ng = g + taskDim;
+    if (ng < E1)
+      __memcpy_async(a + nq * E2, x + ng * E2, E2 * sizeof(half),
+                     GDRAM2NRAM);
+    half *pa = a + q * E2;
+    half *pb = b + q * 8192;
+    half *pc = c + q * E3;
+    __memcpy(pb, pa, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
+             sizeof(half), E2 - 1);
+    __memcpy(pb + 1, pa, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
+             sizeof(half), E2 - 1);
+    __memcpy(pc, pb, 128 * sizeof(half), NRAM2NRAM, 256 * sizeof(half),
+             128 * sizeof(half), 63);
+    __memcpy(pc + 128, pb, 128 * sizeof(half), NRAM2NRAM, 256 * sizeof(half),
+             128 * sizeof(half), 63);
+    __memcpy_async(y + g * E3, pc, E3 * sizeof(half), NRAM2GDRAM);
+    __asm__ volatile("sync;");
   }
 }
 
