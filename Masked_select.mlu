@@ -1,65 +1,94 @@
 #include <bang.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
+#include <climits>
+#include <vector>
+
 #define E0 1048576
-#define E1 16384
-#define E2 64
+#define E1 32768
+#define E2 32
 
-__mlu_entry__ void k0(const half *__restrict__ x, int *__restrict__ y) {
+#define CNNL_CHECK(expr)                                                       \
+  do {                                                                         \
+    cnnlStatus_t s = (expr);                                                   \
+    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
+  } while (0)
+
+#define CNRT_CHECK(expr)                                                       \
+  do {                                                                         \
+    cnrtRet_t s = (expr);                                                      \
+    TORCH_CHECK(s == cnrtSuccess, "CNRT call failed: ", (int)s);               \
+  } while (0)
+
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E1];
   __nram__ half b[E1];
   int p = taskId * E1;
   half v = (half)0.0f;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_gt_scalar(b, a, v, E1);
-  y[taskId] = (int)__bang_filter(a, a, b, E1);
+  __memcpy(y + p, b, E1 * sizeof(half), NRAM2GDRAM);
 }
 
-__mlu_entry__ void k1(int *__restrict__ x) {
-  int s = 0;
-  for (int i = 0; i < E2; ++i) {
-    int v = x[i];
-    x[i] = s;
-    s += v;
+static cnnlTensorDescriptor_t make_desc(const torch::Tensor &x) {
+  cnnlTensorDescriptor_t desc;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&desc));
+  std::vector<int> dims(x.dim());
+  for (int i = 0; i < x.dim(); ++i) {
+    TORCH_CHECK(x.size(i) <= INT_MAX, "dimension too large");
+    dims[i] = (int)x.size(i);
   }
-  x[E2] = s;
+  CNNL_CHECK(cnnlSetTensorDescriptor(desc, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF,
+                                     (int)x.dim(), dims.data()));
+  return desc;
 }
 
-__mlu_entry__ void k2(const half *__restrict__ x, const int *__restrict__ y,
-                      half *__restrict__ z) {
-  __nram__ half a[E1];
-  __nram__ half b[E1];
-  int p = taskId * E1;
-  half v = (half)0.0f;
-  __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-  __bang_gt_scalar(b, a, v, E1);
-  int n = (int)__bang_filter(a, a, b, E1);
-  __memcpy(z + y[taskId], a, n * sizeof(half), NRAM2GDRAM);
+static void destroy_desc(cnnlTensorDescriptor_t desc) {
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(desc));
 }
 
 torch::Tensor bang_func(torch::Tensor input, double v) {
   (void)v;
+  auto mask = torch::empty_like(input);
   auto out = torch::empty({E0}, input.options());
-  auto work = torch::empty({E2 + 1}, input.options().dtype(torch::kInt32));
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d0 = {E2, 1, 1};
-  cnrtDim3_t d1 = {1, 1, 1};
+  auto num = torch::empty({1}, input.options().dtype(torch::kInt32));
 
-  k0<<<d0, cnrtFuncTypeBlock, queue>>>(
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {E2, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      work.data_ptr<int>());
-  k1<<<d1, cnrtFuncTypeBlock, queue>>>(work.data_ptr<int>());
-  k2<<<d0, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      work.data_ptr<int>(),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+      reinterpret_cast<half *>(mask.data_ptr<at::Half>()));
+
+  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
+  cnnlTensorDescriptor_t in_desc = make_desc(input);
+  cnnlTensorDescriptor_t mask_desc = make_desc(mask);
+  cnnlTensorDescriptor_t out_desc = make_desc(out);
+
+  size_t workspace_size = 0;
+  CNNL_CHECK(cnnlGetMaskedWorkspaceSize(handle, CNNL_MASKED_SELECT, in_desc,
+                                        mask_desc, nullptr, out_desc,
+                                        &workspace_size));
+  auto workspace =
+      torch::empty({(int64_t)workspace_size}, input.options().dtype(torch::kUInt8));
+  void *workspace_ptr = workspace_size == 0 ? nullptr : workspace.data_ptr();
+
+  CNNL_CHECK(cnnlMasked_v5(
+      handle, CNNL_MASKED_SELECT, in_desc, input.data_ptr(), mask_desc,
+      mask.data_ptr(), nullptr, nullptr, workspace_ptr, workspace_size, out_desc,
+      out.data_ptr(), reinterpret_cast<uint32_t *>(num.data_ptr<int>())));
+
+  destroy_desc(out_desc);
+  destroy_desc(mask_desc);
+  destroy_desc(in_desc);
 
   int n = 0;
-  cnrtMemcpyAsync(&n, work.data_ptr<int>() + E2, sizeof(int), queue,
-                  cnrtMemcpyDevToHost);
-  cnrtQueueSync(queue);
+  CNRT_CHECK(cnrtMemcpyAsync(&n, num.data_ptr<int>(), sizeof(int), queue,
+                            cnrtMemcpyDevToHost));
+  CNRT_CHECK(cnrtQueueSync(queue));
   out.resize_({(int64_t)n});
   return out;
 }
