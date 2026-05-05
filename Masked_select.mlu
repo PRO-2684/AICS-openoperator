@@ -5,8 +5,8 @@
 #include <torch/extension.h>
 
 #define E0 1048576
-#define E1 65536
-#define E2 16
+#define E1 16384
+#define E2 64
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
                       int *__restrict__ y) {
@@ -52,7 +52,7 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   else
     out.resize_({E0});
   if (!work2.defined())
-    work2 = torch::empty({17}, input.options().dtype(torch::kInt32));
+    work2 = torch::empty({65}, input.options().dtype(torch::kInt32));
 
   torch_mlu::MLUStream stream2 =
       torch_mlu::getStreamFromPool(false, input.get_device());
