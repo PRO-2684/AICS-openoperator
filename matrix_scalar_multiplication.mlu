@@ -3,13 +3,13 @@
 #include <torch/extension.h>
 #include <framework/core/MLUStream.h>
 
-#define CHUNK_SIZE 4096
+#define CHUNK_SIZE 16384
 #define TASK_COUNT 32
 
 __mlu_entry__ void matrix_scalar_mul_float_kernel(const float *input,
                                                   float *output,
                                                   uint32_t total,
-                                                  float scalar) {
+                                                  half scalar) {
   if (__is_mpu()) return;
 
   uint32_t task_id = taskId;
