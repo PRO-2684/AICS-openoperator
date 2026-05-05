@@ -3,7 +3,7 @@
 #include <torch/extension.h>
 #include <framework/core/MLUStream.h>
 
-#define CHUNK_SIZE 16384
+#define CHUNK_SIZE 8192
 #define TASK_COUNT 32
 
 __mlu_entry__ void matrix_scalar_mul_float_kernel(const float *input,
