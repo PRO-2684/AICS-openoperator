@@ -19,9 +19,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     int p = bc * E3 * E4 + r * 32 * E4;
     int o = (bc * E1 + r) * E2;
     __memcpy(a, x + p, 8192 * sizeof(half), GDRAM2NRAM);
-    __bang_maxpool(b, a, 128, 32, 2, 32, 1, 1, 32);
+    __bang_maxpool(b, a, 256, 32, 1, 32, 1, 1, 1);
     for (int k = 0; k < 8; ++k) {
-      int q = (k >> 2) * 128 + ((k & 3) << 5);
+      int q = k << 5;
       float m = (float)b[q];
       for (int i = 1; i < 32; ++i) {
         float v = (float)b[q + i];
