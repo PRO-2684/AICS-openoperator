@@ -16,19 +16,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   for (int bc = taskId; bc < E0; bc += taskDim) {
     __memcpy(a, x + bc * E3 * E4, 65536 * sizeof(half), GDRAM2NRAM);
     __bang_maxpool(b, a, 256, 256, 1, 32, 1, 1, 32);
-    for (int r = 0; r < 8; ++r) {
-      for (int k = 0; k < 8; ++k) {
-        int q = r * 256 + (k << 5);
-        float m = (float)b[q];
-        for (int i = 1; i < 32; ++i) {
-          float v = (float)b[q + i];
-          if (v > m) {
-            m = v;
-          }
-        }
-        c[r * 8 + k] = (half)m;
-      }
-    }
+    __bang_maxpool(c, b, 32, 8, 8, 1, 1);
     __memcpy(y + bc * 64, c, 64 * sizeof(half), NRAM2GDRAM);
   }
 }
