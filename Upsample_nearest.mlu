@@ -35,7 +35,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
              128 * sizeof(half), 63);
     __memcpy(pc + 128, pb, 128 * sizeof(half), NRAM2NRAM, 256 * sizeof(half),
              128 * sizeof(half), 63);
-    __memcpy_async(y + g * E3, pc, E3 * sizeof(half), NRAM2GDRAM);
+    __memcpy(y + g * E3, pc, E3 * sizeof(half), NRAM2GDRAM);
     __asm__ volatile("sync;");
   }
 }
