@@ -3,7 +3,7 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define N 32
+#define N 8
 #define H 8
 
 __mlu_entry__ void kernel(const half *__restrict__ x,
@@ -11,25 +11,25 @@ __mlu_entry__ void kernel(const half *__restrict__ x,
                           const int *__restrict__ bin_ids,
                           const half *__restrict__ weights,
                           const int *__restrict__ bins, half *__restrict__ out) {
-  int t = taskId;
-  int p = t >> 2;
-  int j = (t & 3) << 1;
+  __nram__ half a[H];
+  int p = taskId;
   (void)bin_ids;
   (void)bins;
   int idx = indices[p];
-  int src_base = (idx >> 1) * H + j;
+  int src_base = (idx >> 1) * H;
   half w = weights[idx];
-  int dst_base = p * H + j;
+  int dst_base = p * H;
 
-  out[dst_base + 0] = x[src_base + 0] * w;
-  out[dst_base + 1] = x[src_base + 1] * w;
+  __memcpy(a, x + src_base, H * sizeof(half), GDRAM2NRAM);
+  __bang_mul_scalar(a, a, w, H);
+  __memcpy(out + dst_base, a, H * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices,
                         torch::Tensor bin_ids, torch::Tensor weights,
                         torch::Tensor bins, int top_k) {
   (void)top_k;
-  auto out = torch::empty({8, H}, x.options());
+  auto out = torch::empty({N, H}, x.options());
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {N, 1, 1};
