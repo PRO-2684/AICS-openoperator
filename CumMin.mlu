@@ -5,7 +5,7 @@
 
 #define S(D)                                                                  \
   __memcpy(b, a, (D)*2, NRAM2NRAM);                                           \
-  __bang_minequal(b + (D), a + (D), a, 4096 - (D));                           \
+  __bang_minequal(b + (D), a + (D), a, 4000 - (D));                           \
   t = a;                                                                      \
   a = b;                                                                      \
   b = t;
@@ -14,7 +14,6 @@
   a = u;                                                                      \
   b = v;                                                                      \
   __memcpy(a, x + (P)*4000, 8000, GDRAM2NRAM);                                \
-  __bang_write_value(a + 4000, 96, (half)65504.0f);                           \
   S(1)                                                                        \
   S(2) S(4) S(8) S(16) S(32) S(64) S(128) S(256) S(512) S(1024) S(2048)       \
       __memcpy(y + (P)*4000, a, 8000, NRAM2GDRAM);
