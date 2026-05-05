@@ -22,9 +22,8 @@ __mlu_entry__ void kernel(const half *__restrict__ x,
   for (int j = 0; j < H; ++j) {
     acc[j] = (half)0.0f;
   }
-  (void)indices;
-  int idx0 = token << 1;
-  int idx1 = idx0 + 1;
+  int idx0 = indices[token];
+  int idx1 = indices[token + 4];
   half w0 = weights[idx0];
   half w1 = weights[idx1];
   int p0 = token * H;
