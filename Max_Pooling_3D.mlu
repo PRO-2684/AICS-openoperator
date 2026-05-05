@@ -4,40 +4,36 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[147840];
-  __nram__ half b[28800];
-  __nram__ half c0[13824];
-  __nram__ half c1[13824];
-  for (int t = taskId; t < 1024; t += taskDim) {
-    int s = t & 1;
-    int p = t >> 1;
-    int z = s * 15;
-    __bang_write_value(a, 147840, (half)-65504.0f);
-    for (int i = 0; i < 35; ++i) {
-      int d = (z << 1) + i - 1;
+  __nram__ half a[274560];
+  __nram__ half b[57600];
+  __nram__ half c0[27072];
+  __nram__ half c1[27072];
+  for (int p = taskId; p < 512; p += taskDim) {
+    __bang_write_value(a, 274560, (half)-65504.0f);
+    for (int i = 0; i < 65; ++i) {
+      int d = i - 1;
       if ((unsigned)d < 64U) {
         __memcpy(a + i * 4224 + 64, x + p * 262144 + d * 4096,
                  4096 * sizeof(half), GDRAM2NRAM);
       }
     }
-    __bang_maxpool(b, a, 64, 35, 66, 3, 3, 2, 2, 3, 3, 1, 1);
-    __bang_write_value(c0, 13824, (half)-65504.0f);
+    __bang_maxpool(b, a, 64, 65, 66, 3, 3, 2, 2, 3, 3, 1, 1);
+    __bang_write_value(c0, 27072, (half)-65504.0f);
     for (int i = 0; i < 29; ++i) {
       __memcpy(c0 + i + 1, b + 1 + (i << 1), sizeof(half), NRAM2NRAM,
-               30 * sizeof(half), 64 * sizeof(half), 449);
+               30 * sizeof(half), 64 * sizeof(half), 899);
     }
     for (int i = 0; i < 30; ++i) {
       __memcpy(c1 + i, b + 2 + (i << 1), sizeof(half), NRAM2NRAM,
-               30 * sizeof(half), 64 * sizeof(half), 449);
+               30 * sizeof(half), 64 * sizeof(half), 899);
     }
-    __bang_maximum(c0, c0, c1, 13824);
+    __bang_maximum(c0, c0, c1, 27072);
     for (int i = 0; i < 30; ++i) {
       __memcpy(c1 + i, b + 5 + (i << 1), sizeof(half), NRAM2NRAM,
-               30 * sizeof(half), 64 * sizeof(half), 449);
+               30 * sizeof(half), 64 * sizeof(half), 899);
     }
-    __bang_maximum(c0, c0, c1, 13824);
-    __memcpy(y + p * 27000 + s * 13500, c0, 13500 * sizeof(half),
-             NRAM2GDRAM);
+    __bang_maximum(c0, c0, c1, 27072);
+    __memcpy(y + p * 27000, c0, 27000 * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -46,8 +42,8 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
                         bool ceil_mode) {
   auto y = torch::empty({16, 32, 30, 30, 30}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {4, 8, 1};
-  k0<<<g, cnrtFuncTypeUnion1, queue>>>(
+  cnrtDim3_t g = {32, 1, 1};
+  k0<<<g, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
