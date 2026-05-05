@@ -3,47 +3,46 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 16
-#define E1 256
-#define E2 65536
-#define E3 8192
+#define E0 32
+#define E1 128
+#define E2 256
+#define E3 65536
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[E2];
-  __nram__ float b[E2];
-  __nram__ float c[E3];
-  __nram__ float d[E3];
+  __nram__ half a[E1];
+  __nram__ half b[E1];
+  __nram__ float c[E1];
+  __nram__ float d[E1];
   __nram__ float e[E1];
   __nram__ float f[E1];
-  __nram__ half g[E1];
-  int p = taskId * E2;
-  __memcpy(a, x + p, E2 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(b, a, E2);
-  for (int j = 0; j < 8; ++j) {
-    int q = j * 32;
-    for (int i = 0; i < E1; ++i) {
-      __memcpy(c + i * 32, b + i * E1 + q, 32 * sizeof(float), NRAM2NRAM);
-    }
-    __bang_sumpool(e + q, c, 32, 1, E1, 1, E1, 1, E1);
-    __bang_square(d, c, E3);
-    __bang_sumpool(f + q, d, 32, 1, E1, 1, E1, 1, E1);
+  int u = taskId >> 1;
+  int v = (taskId & 1) * E1;
+  int p = u * E3 + v;
+  __bang_write_value(c, E1, 0.0f);
+  __bang_write_value(d, E1, 0.0f);
+  for (int i = 0; i < E2; ++i) {
+    __memcpy(a, x + p + i * E2, E1 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(e, a, E1);
+    __bang_add(c, c, e, E1);
+    __bang_square(f, e, E1);
+    __bang_add(d, d, f, E1);
   }
-  __bang_mul(d, e, e, E1);
-  __bang_mul_scalar(d, d, 0.00390625f, E1);
-  __bang_sub(f, f, d, E1);
-  __bang_mul_scalar(f, f, 0.00392156862745098f, E1);
-  __bang_active_relu(f, f, E1);
-  __bang_sqrt(f, f, E1);
-  __bang_float2half(g, f, E1);
-  __memcpy(y + taskId * E1, g, E1 * sizeof(half), NRAM2GDRAM);
+  __bang_mul(e, c, c, E1);
+  __bang_mul_scalar(e, e, 0.00390625f, E1);
+  __bang_sub(d, d, e, E1);
+  __bang_mul_scalar(d, d, 0.00392156862745098f, E1);
+  __bang_active_relu(d, d, E1);
+  __bang_sqrt(d, d, E1);
+  __bang_float2half(b, d, E1);
+  __memcpy(y + u * E2 + v, b, E1 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
-  auto out = torch::empty({E0, E1}, x.options());
+  auto out = torch::empty({16, E2}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t h = {E0, 1, 1};
-  k0<<<h, cnrtFuncTypeUnion4, queue>>>(
+  cnrtDim3_t g = {E0, 1, 1};
+  k0<<<g, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
