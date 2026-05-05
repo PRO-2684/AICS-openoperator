@@ -3,8 +3,8 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 16384
-#define E1 16
+#define E0 8192
+#define E1 32
 
 __mlu_entry__ void k0(half *__restrict__ x) {
   __nram__ half a[E0];
@@ -13,7 +13,7 @@ __mlu_entry__ void k0(half *__restrict__ x) {
   __memcpy(a, x + p, E0 * sizeof(half), GDRAM2NRAM);
   __bang_abs(b, a, E0);
   __bang_add_scalar(b, b, (half)1.0f, E0);
-  __bang_active_reciphp(b, b, E0);
+  __bang_recip(b, b, E0);
   __bang_mul(a, a, b, E0);
   __memcpy(x + p, a, E0 * sizeof(half), NRAM2GDRAM);
 }

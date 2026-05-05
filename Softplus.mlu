@@ -1,56 +1,34 @@
-#pragma once
-
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <bang_device_functions_decls.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#include <climits>
-#include <vector>
+#define E0 8192
+#define E1 32
 
-#define CNNL_CHECK(expr) \
-  do { \
-    cnnlStatus_t status__ = (expr); \
-    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)status__); \
-  } while (0)
-
-inline cnnlDataType_t cnnl_dtype_from_torch(c10::ScalarType t) {
-  switch (t) {
-    case at::kHalf: return CNNL_DTYPE_HALF;
-    case at::kFloat: return CNNL_DTYPE_FLOAT;
-    case at::kBool: return CNNL_DTYPE_BOOL;
-    case at::kInt: return CNNL_DTYPE_INT32;
-    case at::kLong: return CNNL_DTYPE_INT64;
-    default: TORCH_CHECK(false, "unsupported dtype");
-  }
-}
-
-inline cnnlTensorDescriptor_t make_array_desc(const torch::Tensor& x) {
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  std::vector<int> dims(x.dim());
-  for (int i = 0; i < x.dim(); ++i) {
-    TORCH_CHECK(x.size(i) <= INT_MAX, "dim too large");
-    dims[i] = (int)x.size(i);
-  }
-  CNNL_CHECK(cnnlSetTensorDescriptor(
-      d, CNNL_LAYOUT_ARRAY, cnnl_dtype_from_torch(x.scalar_type()), (int)x.dim(), dims.data()));
-  return d;
-}
-
-inline void destroy_desc(cnnlTensorDescriptor_t d) {
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(d));
+__mlu_entry__ void k0(half *__restrict__ x) {
+  __nram__ half a[E0];
+  __nram__ half b[E0];
+  __nram__ half c[E0];
+  int p = taskId * E0;
+  __memcpy(a, x + p, E0 * sizeof(half), GDRAM2NRAM);
+  __memcpy(c, a, E0 * sizeof(half), NRAM2NRAM);
+  __bang_abs(a, a, E0);
+  __bang_add(c, c, a, E0);
+  __bang_mul_scalar(c, c, (half)0.5f, E0);
+  __bang_mul_scalar(a, a, (half)-1.0f, E0);
+  __bang_active_exp_less_0(b, a, E0);
+  __bang_add_scalar(b, b, (half)1.0f, E0);
+  __bang_active_loghp(a, b, E0);
+  __bang_add(a, a, c, E0);
+  __memcpy(x + p, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
-  auto in = x.contiguous();
-  auto out = torch::empty_like(in);
-  auto xd = make_array_desc(in);
-  auto yd = make_array_desc(out);
-  float beta = 1.0f;
-  float threshold = 20.0f;
-  CNNL_CHECK(cnnlSoftplusForward_v2(torch_mlu::getCurrentHandle(), &beta, &threshold,
-                                    xd, in.data_ptr(), yd, out.data_ptr()));
-  destroy_desc(yd);
-  destroy_desc(xd);
-  return out;
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {E1, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+  return x;
 }
