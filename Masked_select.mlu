@@ -35,6 +35,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
   __bang_count(b, a, E1);
   int n = (int)b[0];
   y[taskId] = n;
+  __sync_all_ipu();
 
   if (taskId == E2 - 1) {
     int q = n;
