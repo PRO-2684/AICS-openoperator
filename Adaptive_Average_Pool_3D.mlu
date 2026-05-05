@@ -12,30 +12,27 @@
 #define E6 32
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[1024];
-  __nram__ half b[128];
-  int n = E0 * E1 * E2;
+  __nram__ half a[8192];
+  __nram__ half b[256];
+  __nram__ half c[64];
+  int n = E0 * E1;
   for (int t = taskId; t < n; t += taskDim) {
-    int h = t & 7;
-    int d = (t >> 3) & 3;
-    int bc = t >> 5;
-    int p = bc * (E4 * E5 * E6) + d * 8 * (E5 * E6) + h * 4 * E6;
-    for (int z = 0; z < 8; ++z) {
-      int q = p + z * E5 * E6;
-      __memcpy(a + z * 128, x + q, 128 * sizeof(half), GDRAM2NRAM);
-    }
-    __bang_sumpool(b, a, 128, 8, 1, 8, 1, 1, 1);
-    int o = ((bc * E1 + d) * E2 + h) * E3;
-    for (int k = 0; k < 8; ++k) {
-      float s = 0.0f;
-      for (int r = 0; r < 4; ++r) {
+    int d = t & 3;
+    int bc = t >> 2;
+    int p = bc * (E4 * E5 * E6) + d * 8 * (E5 * E6);
+    __memcpy(a, x + p, 8192 * sizeof(half), GDRAM2NRAM);
+    __bang_sumpool(b, a, 32, 8, 32, 8, 4, 4, 8);
+    for (int h = 0; h < 8; ++h) {
+      for (int k = 0; k < 8; ++k) {
+        float s = 0.0f;
 #pragma unroll 4
         for (int c = 0; c < 4; ++c) {
-          s += (float)b[r * E6 + k * 4 + c];
+          s += (float)b[h * 32 + k * 4 + c];
         }
+        c[h * 8 + k] = (half)(s * 0.0078125f);
       }
-      y[o + k] = (half)(s * 0.0078125f);
     }
+    __memcpy(y + (bc * E1 + d) * 64, c, 64 * sizeof(half), NRAM2GDRAM);
   }
 }
 
