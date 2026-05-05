@@ -5,10 +5,16 @@
 
 #define E0 32
 #define E1 16384
+#define E2 16
 
 __mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y, int n) {
-  asm volatile("reducesum.nram.compact.f32 [%[dst]], [%[src]], %[size];\n"
-               ::[dst] "r"(y), [src] "r"(x), [size] "r"(n));
+  int q = n / E2;
+  int r = n - q * E2;
+  __bang_sumpool(y, x, E2, 1, q, 1, q, 1, q);
+  if (r > 0) {
+    __bang_add(y, y, x + q * E2, r);
+  }
+  __bang_reduce_sum(y, y, E2);
   return y[0];
 }
 
