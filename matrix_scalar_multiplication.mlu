@@ -3,7 +3,7 @@
 #include <torch/extension.h>
 #include <framework/core/MLUStream.h>
 
-#define CHUNK_SIZE 16384
+#define CHUNK_SIZE 4096
 #define TASK_COUNT 32
 
 __mlu_entry__ void matrix_scalar_mul_float_kernel(const float *input,
@@ -43,56 +43,14 @@ __mlu_entry__ void matrix_scalar_mul_half_kernel(const half *input,
   uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
   uint32_t count = per_task + (task_id < remainder ? 1 : 0);
 
-  __nram__ half nram_in[CHUNK_SIZE * 2];
-  __nram__ half nram_out[CHUNK_SIZE * 2];
-  const half *in = input + start;
-  half *out = output + start;
-  uint32_t repeat = count / CHUNK_SIZE;
-  uint32_t rem = count - repeat * CHUNK_SIZE;
+  __nram__ half nram_buf[CHUNK_SIZE * 2];
 
-  if (repeat > 0) {
-    __memcpy_async(nram_in, in, CHUNK_SIZE * sizeof(half), GDRAM2NRAM);
-    __asm__ volatile("sync;");
-  }
-  if (repeat > 1) {
-    __memcpy_async(nram_in + CHUNK_SIZE, in + CHUNK_SIZE,
-                   CHUNK_SIZE * sizeof(half), GDRAM2NRAM);
-    __bang_mul_scalar(nram_out, nram_in, scalar, CHUNK_SIZE);
-    __asm__ volatile("sync;");
-  }
-  for (uint32_t i = 0; i + 2 < repeat; ++i) {
-    uint32_t cur = i & 1;
-    uint32_t nxt = (i + 1) & 1;
-    __memcpy_async(out + i * CHUNK_SIZE, nram_out + cur * CHUNK_SIZE,
-                   CHUNK_SIZE * sizeof(half), NRAM2GDRAM);
-    __memcpy_async(nram_in + cur * CHUNK_SIZE, in + (i + 2) * CHUNK_SIZE,
-                   CHUNK_SIZE * sizeof(half), GDRAM2NRAM);
-    __bang_mul_scalar(nram_out + nxt * CHUNK_SIZE,
-                      nram_in + nxt * CHUNK_SIZE, scalar, CHUNK_SIZE);
-    __asm__ volatile("sync;");
-  }
-  if (repeat > 1) {
-    uint32_t idx = (repeat - 2) & 1;
-    __memcpy_async(out + (repeat - 2) * CHUNK_SIZE,
-                   nram_out + idx * CHUNK_SIZE, CHUNK_SIZE * sizeof(half),
-                   NRAM2GDRAM);
-  }
-  if (repeat > 0) {
-    uint32_t idx = (repeat - 1) & 1;
-    __bang_mul_scalar(nram_out + idx * CHUNK_SIZE,
-                      nram_in + idx * CHUNK_SIZE, scalar, CHUNK_SIZE);
-    __asm__ volatile("sync;");
-    __memcpy_async(out + (repeat - 1) * CHUNK_SIZE,
-                   nram_out + idx * CHUNK_SIZE, CHUNK_SIZE * sizeof(half),
-                   NRAM2GDRAM);
-  }
-  if (rem > 0) {
-    uint32_t aligned = (rem + 63) & ~63;
-    __memcpy(nram_in, in + repeat * CHUNK_SIZE, rem * sizeof(half),
-             GDRAM2NRAM);
-    __bang_mul_scalar(nram_out, nram_in, scalar, aligned);
-    __memcpy(out + repeat * CHUNK_SIZE, nram_out, rem * sizeof(half),
-             NRAM2GDRAM);
+  for (uint32_t offset = 0; offset < count; offset += CHUNK_SIZE) {
+    uint32_t len = (offset + CHUNK_SIZE <= count) ? CHUNK_SIZE : (count - offset);
+    __memcpy(nram_buf, input + start + offset, len * sizeof(half), GDRAM2NRAM);
+    __bang_mul_scalar(nram_buf, nram_buf, scalar, len);
+
+    __memcpy(output + start + offset, nram_buf, len * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -104,15 +62,14 @@ torch::Tensor bang_func(torch::Tensor input, double scalar) {
   auto output = torch::empty_like(input);
   uint32_t total = static_cast<uint32_t>(input.numel());
   float scalar_f = static_cast<float>(scalar);
-  half scalar_h = (half)scalar_f;
 
   if (total == 0) {
     return output;
   }
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {4, 8, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
+  cnrtDim3_t dim = {TASK_COUNT, 1, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
 
   if (input.scalar_type() == at::kFloat) {
     matrix_scalar_mul_float_kernel<<<dim, ktype, queue>>>(
@@ -120,7 +77,7 @@ torch::Tensor bang_func(torch::Tensor input, double scalar) {
   } else {
     matrix_scalar_mul_half_kernel<<<dim, ktype, queue>>>(
         reinterpret_cast<half *>(input.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(output.data_ptr<at::Half>()), total, scalar_h);
+        reinterpret_cast<half *>(output.data_ptr<at::Half>()), total, scalar_f);
   }
 
   return output;
