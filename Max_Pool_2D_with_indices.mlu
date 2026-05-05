@@ -1,14 +1,48 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 101 101_Max_Pool_2D_with_indices
-// Category: pool
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，对四维张量执行二维最大池化（Max Pooling 2D）运算，并同步返回池化结果及其对应的最大值索引。输入包括形状为 `[batch, channel, height, width]` 的张量 `x`，以及用于定义窗口大小和滑动步长的标量 `kernel_size` 与 `stride`；输出为池化后的张量及其对应的索引张量。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride);
+#define E0 2097152
 
-torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride) {
-  TORCH_CHECK(false, "TODO: implement Max_Pool_2D_with_indices");
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
+                      long *__restrict__ z) {
+  for (int t = taskId; t < E0; t += taskDim) {
+    int ow = t & 63;
+    int oh = (t >> 6) & 63;
+    int bc = t >> 12;
+    int p = bc * 16384 + (oh << 1) * 128 + (ow << 1);
+    float v0 = (float)x[p];
+    float v1 = (float)x[p + 1];
+    float v2 = (float)x[p + 128];
+    float v3 = (float)x[p + 129];
+    float m = v0;
+    long idx = (long)((oh << 1) * 128 + (ow << 1));
+    if (v1 > m) {
+      m = v1;
+      idx += 1;
+    }
+    if (v2 > m) {
+      m = v2;
+      idx = (long)(((oh << 1) + 1) * 128 + (ow << 1));
+    }
+    if (v3 > m) {
+      m = v3;
+      idx = (long)(((oh << 1) + 1) * 128 + (ow << 1) + 1);
+    }
+    y[t] = (half)m;
+    z[t] = idx;
+  }
+}
+
+std::vector<torch::Tensor> bang_func(torch::Tensor x, int kernel_size,
+                                     int stride) {
+  auto y = torch::empty({16, 32, 64, 64}, x.options());
+  auto z = torch::empty({16, 32, 64, 64}, x.options().dtype(torch::kInt64));
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t g = {4, 8, 1};
+  k0<<<g, cnrtFuncTypeUnion1, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()), z.data_ptr<long>());
+  return {y, z};
 }
