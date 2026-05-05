@@ -1,60 +1,94 @@
-#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
 #include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define C(expr)                                                               \
+#define ROWS 128
+#define COLS 4000
+
+#define CNNL_CHECK(expr)                                                     \
   do {                                                                       \
-    cnnlStatus_t s = (expr);                                                 \
-    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", s);          \
+    cnnlStatus_t status = (expr);                                            \
+    TORCH_CHECK(status == CNNL_STATUS_SUCCESS, "CNNL call failed: ", status); \
   } while (0)
 
-__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ p,
-                      half *__restrict__ y) {
-  __nram__ half a[4000];
-  __nram__ half b[4000];
-  __nram__ half c[4000];
-  for (int r = taskId; r < 128; r += taskDim) {
-    int o = r * 4000;
-    __memcpy(a, x + o, 8000, GDRAM2NRAM);
-    __memcpy(b, p + o, 8000, GDRAM2NRAM);
-    __bang_write_value(c, 4000, b[3999]);
-    __bang_sub(c, c, b, 4000);
-    __bang_add(c, c, a, 4000);
-    __memcpy(y + o, c, 8000, NRAM2GDRAM);
+__mlu_entry__ void flip_kernel(const half *__restrict__ x,
+                               half *__restrict__ y) {
+  int row = taskId;
+  if (row >= ROWS) {
+    return;
   }
+
+  int base = row * COLS;
+
+  __nram__ half ibuf[COLS];
+  __nram__ half obuf[COLS];
+
+  __memcpy(ibuf, x + base, COLS * sizeof(half), GDRAM2NRAM);
+#define F(I)                                                                  \
+  obuf[I] = ibuf[3999 - (I)];                                                 \
+  obuf[(I) + 1] = ibuf[3998 - (I)];                                           \
+  obuf[(I) + 2] = ibuf[3997 - (I)];                                           \
+  obuf[(I) + 3] = ibuf[3996 - (I)];                                           \
+  obuf[(I) + 4] = ibuf[3995 - (I)];                                           \
+  obuf[(I) + 5] = ibuf[3994 - (I)];                                           \
+  obuf[(I) + 6] = ibuf[3993 - (I)];                                           \
+  obuf[(I) + 7] = ibuf[3992 - (I)];
+
+  for (int i = 0; i <= 3992; i += 8) {
+    F(i)
+  }
+  __memcpy(y + base, obuf, COLS * sizeof(half), NRAM2GDRAM);
 }
 
-static void scan(torch::Tensor x, torch::Tensor y) {
-  static cnnlTensorDescriptor_t d;
-  static torch::Tensor w;
-  static size_t z = 0;
-  static bool ok = false;
-  cnnlHandle_t h = torch_mlu::getCurrentHandle();
-  if (!ok) {
-    int a[2] = {128, 4000};
-    C(cnnlCreateTensorDescriptor(&d));
-    C(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, a));
-    C(cnnlGetCumsumWorkspaceSize(h, d, 1, &z));
-    w = torch::empty({(int64_t)z}, x.options().dtype(torch::kUInt8));
-    ok = true;
-  }
-  C(cnnlCumsum_v2(h, d, x.data_ptr(), 1, false, false, CNNL_NOT_PROPAGATE_NAN,
-                  d, y.data_ptr(), w.data_ptr(), z));
+#undef F
+
+static void cumsum_dim1(torch::Tensor in, torch::Tensor out) {
+  int dims[2] = {ROWS, COLS};
+
+  cnnlTensorDescriptor_t in_desc;
+  cnnlTensorDescriptor_t out_desc;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&in_desc));
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&out_desc));
+  CNNL_CHECK(cnnlSetTensorDescriptor(in_desc, CNNL_LAYOUT_ARRAY,
+                                     CNNL_DTYPE_HALF, 2, dims));
+  CNNL_CHECK(cnnlSetTensorDescriptor(out_desc, CNNL_LAYOUT_ARRAY,
+                                     CNNL_DTYPE_HALF, 2, dims));
+
+  cnnlHandle_t handle;
+  CNNL_CHECK(cnnlCreate(&handle));
+  CNNL_CHECK(cnnlSetQueue(handle, torch_mlu::getCurMLUStream()));
+
+  size_t workspace_size = 0;
+  CNNL_CHECK(cnnlGetCumsumWorkspaceSize(handle, in_desc, 1, &workspace_size));
+  auto workspace =
+      torch::empty({(int64_t)workspace_size}, in.options().dtype(torch::kUInt8));
+
+  CNNL_CHECK(cnnlCumsum_v2(handle, in_desc, in.data_ptr(), 1, false, false,
+                           CNNL_NOT_PROPAGATE_NAN, out_desc, out.data_ptr(),
+                           workspace.data_ptr(), workspace_size));
+
+  CNNL_CHECK(cnnlDestroy(handle));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(out_desc));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(in_desc));
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
-  auto p = torch::empty_like(x);
-  auto y = torch::empty_like(x);
-  scan(x, p);
-  cnrtDim3_t g = {4, 8, 1};
-  k0<<<g, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(p.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-  return y;
-}
+  (void)dim;
+  auto flipped = torch::empty_like(x);
+  auto scanned = torch::empty_like(x);
+  auto out = torch::empty_like(x);
 
-#undef C
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t grid = {ROWS, 1, 1};
+  flip_kernel<<<grid, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(flipped.data_ptr<at::Half>()));
+  cumsum_dim1(flipped, scanned);
+  flip_kernel<<<grid, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(scanned.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+
+  return out;
+}
