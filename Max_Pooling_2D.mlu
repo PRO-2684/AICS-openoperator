@@ -3,47 +3,51 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 2097152
+#define E0 512
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  for (int t = taskId; t < E0; t += taskDim) {
-    int ow = t & 63;
-    int oh = (t >> 6) & 63;
-    int r = t >> 12;
-    int ih0 = (oh << 1) - 1;
-    int iw0 = (ow << 1) - 1;
-    int ih1 = ih0 + 3;
-    int iw1 = iw0 + 3;
-    int q = r * 16384;
-    float m = -3.402823466e+38F;
-    if ((unsigned)ih0 < 128U) {
-      int row = q + ih0 * 128;
-      if ((unsigned)iw0 < 128U) {
-        m = (float)x[row + iw0];
-      }
-      if ((unsigned)iw1 < 128U) {
-        float v = (float)x[row + iw1];
-        if (v > m) {
-          m = v;
+  __nram__ half a[16384];
+  __nram__ half b[4096];
+  for (int r = taskId; r < E0; r += taskDim) {
+    __memcpy(a, x + r * 16384, 16384 * sizeof(half), GDRAM2NRAM);
+    for (int oh = 0; oh < 64; ++oh) {
+      int ih0 = (oh << 1) - 1;
+      int ih1 = ih0 + 3;
+      for (int ow = 0; ow < 64; ++ow) {
+        int iw0 = (ow << 1) - 1;
+        int iw1 = iw0 + 3;
+        float m = -3.402823466e+38F;
+        if ((unsigned)ih0 < 128U) {
+          int row = ih0 * 128;
+          if ((unsigned)iw0 < 128U) {
+            m = (float)a[row + iw0];
+          }
+          if ((unsigned)iw1 < 128U) {
+            float v = (float)a[row + iw1];
+            if (v > m) {
+              m = v;
+            }
+          }
         }
+        if ((unsigned)ih1 < 128U) {
+          int row = ih1 * 128;
+          if ((unsigned)iw0 < 128U) {
+            float v = (float)a[row + iw0];
+            if (v > m) {
+              m = v;
+            }
+          }
+          if ((unsigned)iw1 < 128U) {
+            float v = (float)a[row + iw1];
+            if (v > m) {
+              m = v;
+            }
+          }
+        }
+        b[oh * 64 + ow] = (half)m;
       }
     }
-    if ((unsigned)ih1 < 128U) {
-      int row = q + ih1 * 128;
-      if ((unsigned)iw0 < 128U) {
-        float v = (float)x[row + iw0];
-        if (v > m) {
-          m = v;
-        }
-      }
-      if ((unsigned)iw1 < 128U) {
-        float v = (float)x[row + iw1];
-        if (v > m) {
-          m = v;
-        }
-      }
-    }
-    y[t] = (half)m;
+    __memcpy(y + r * 4096, b, 4096 * sizeof(half), NRAM2GDRAM);
   }
 }
 

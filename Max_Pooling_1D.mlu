@@ -3,40 +3,44 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 63488
+#define E0 1024
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  for (int t = taskId; t < E0; t += taskDim) {
-    int ow = t % 62;
-    int r = t / 62;
-    int base = r * 128 + (ow << 1) - 2;
-    float m = -3.402823466e+38F;
-    int p0 = base;
-    int p1 = base + 3;
-    int p2 = base + 6;
-    int p3 = base + 9;
-    if ((unsigned)p0 < 128U) {
-      m = (float)x[r * 128 + p0];
-    }
-    if ((unsigned)p1 < 128U) {
-      float v = (float)x[r * 128 + p1];
-      if (v > m) {
-        m = v;
+  __nram__ half a[128];
+  __nram__ half b[64];
+  for (int r = taskId; r < E0; r += taskDim) {
+    __memcpy(a, x + r * 128, 128 * sizeof(half), GDRAM2NRAM);
+    for (int ow = 0; ow < 62; ++ow) {
+      int base = (ow << 1) - 2;
+      float m = -3.402823466e+38F;
+      int p0 = base;
+      int p1 = base + 3;
+      int p2 = base + 6;
+      int p3 = base + 9;
+      if ((unsigned)p0 < 128U) {
+        m = (float)a[p0];
       }
-    }
-    if ((unsigned)p2 < 128U) {
-      float v = (float)x[r * 128 + p2];
-      if (v > m) {
-        m = v;
+      if ((unsigned)p1 < 128U) {
+        float v = (float)a[p1];
+        if (v > m) {
+          m = v;
+        }
       }
-    }
-    if ((unsigned)p3 < 128U) {
-      float v = (float)x[r * 128 + p3];
-      if (v > m) {
-        m = v;
+      if ((unsigned)p2 < 128U) {
+        float v = (float)a[p2];
+        if (v > m) {
+          m = v;
+        }
       }
+      if ((unsigned)p3 < 128U) {
+        float v = (float)a[p3];
+        if (v > m) {
+          m = v;
+        }
+      }
+      b[ow] = (half)m;
     }
-    y[t] = (half)m;
+    __memcpy(y + r * 62, b, 62 * sizeof(half), NRAM2GDRAM);
   }
 }
 
