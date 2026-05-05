@@ -15,6 +15,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[8192];
   __nram__ half b[256];
   __nram__ half c[64];
+  __nram__ half d0[64];
+  __nram__ half d1[64];
+  __nram__ half d2[64];
+  __nram__ half d3[64];
   int n = E0 * E1;
   for (int t = taskId; t < n; t += taskDim) {
     int d = t & 3;
@@ -22,16 +26,18 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     int p = bc * (E4 * E5 * E6) + d * 8 * (E5 * E6);
     __memcpy(a, x + p, 8192 * sizeof(half), GDRAM2NRAM);
     __bang_sumpool(b, a, 32, 8, 32, 8, 4, 4, 8);
-    for (int h = 0; h < 8; ++h) {
-      for (int k = 0; k < 8; ++k) {
-        float s = 0.0f;
-#pragma unroll 4
-        for (int c = 0; c < 4; ++c) {
-          s += (float)b[h * 32 + k * 4 + c];
-        }
-        c[h * 8 + k] = (half)(s * 0.0078125f);
-      }
-    }
+    __memcpy(d0, b, sizeof(half), NRAM2NRAM, sizeof(half),
+             4 * sizeof(half), 63);
+    __memcpy(d1, b + 1, sizeof(half), NRAM2NRAM, sizeof(half),
+             4 * sizeof(half), 63);
+    __memcpy(d2, b + 2, sizeof(half), NRAM2NRAM, sizeof(half),
+             4 * sizeof(half), 63);
+    __memcpy(d3, b + 3, sizeof(half), NRAM2NRAM, sizeof(half),
+             4 * sizeof(half), 63);
+    __bang_add(d0, d0, d1, 64);
+    __bang_add(d2, d2, d3, 64);
+    __bang_add(c, d0, d2, 64);
+    __bang_mul_scalar(c, c, (half)0.0078125f, 64);
     __memcpy(y + (bc * E1 + d) * 64, c, 64 * sizeof(half), NRAM2GDRAM);
   }
 }
