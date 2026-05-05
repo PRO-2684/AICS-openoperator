@@ -5,7 +5,7 @@
 
 #define S(D)                                                                  \
   __memcpy(b, a, (D)*2, NRAM2NRAM);                                           \
-  __bang_minimum(b + (D), a + (D), a, 4000 - (D));                            \
+  __bang_minequal(b + (D), a + (D), a, 4000 - (D));                           \
   t = a;                                                                      \
   a = b;                                                                      \
   b = t;
