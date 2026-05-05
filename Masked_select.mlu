@@ -1,5 +1,6 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUEvent.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
@@ -55,9 +56,13 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
 
   torch_mlu::MLUStream stream2 =
       torch_mlu::getStreamFromPool(false, input.get_device());
+  torch_mlu::MLUEvent ev;
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtQueue_t queue2 = stream2.stream();
   cnrtDim3_t dim = {E2, 1, 1};
 
+  ev.place(torch_mlu::getCurrentMLUStream());
+  ev.wait(stream2);
   k1<<<dim, cnrtFuncTypeUnion8, queue2>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       work2.data_ptr<int>());
@@ -65,10 +70,10 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   int n = 0;
   cnrtMemcpyAsync(&n, work2.data_ptr<int>() + 32, sizeof(int), queue2,
                   cnrtMemcpyDevToHost);
-  k0<<<dim, cnrtFuncTypeUnion4, queue2>>>(
+  cnrtQueueSync(queue2);
+  k0<<<dim, cnrtFuncTypeUnion4, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
-  cnrtQueueSync(queue2);
   out.resize_({(int64_t)n});
   return out;
 }
