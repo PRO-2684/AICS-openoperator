@@ -17,18 +17,18 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
     float v2 = (float)x[p + 128];
     float v3 = (float)x[p + 129];
     float m = v0;
-    int idx = (oh << 1) * 128 + (ow << 1);
+    int idx = 0;
     if (v1 > m) {
       m = v1;
-      idx += 1;
+      idx = 1;
     }
     if (v2 > m) {
       m = v2;
-      idx = ((oh << 1) + 1) * 128 + (ow << 1);
+      idx = 2;
     }
     if (v3 > m) {
       m = v3;
-      idx = ((oh << 1) + 1) * 128 + (ow << 1) + 1;
+      idx = 3;
     }
     y[t] = (half)m;
     z[t * 2] = idx;
