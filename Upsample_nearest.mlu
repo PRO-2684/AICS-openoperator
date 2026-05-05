@@ -7,7 +7,7 @@
 #define E1 4096
 #define E2 8192
 #define E3 16384
-#define E4 8
+#define E4 12
 #define E5 256
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
@@ -16,9 +16,14 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half c[E3 * E4];
   int g = taskId * E4;
   if (g < E5) {
-    __memcpy(a, x + g * E1, E1 * E4 * sizeof(half), GDRAM2NRAM);
+    int n = E4;
+    if (g + n > E5)
+      n = E5 - g;
+    __memcpy(a, x + g * E1, E1 * n * sizeof(half), GDRAM2NRAM);
 #pragma unroll
     for (int i = 0; i < E4; ++i) {
+      if (i >= n)
+        break;
       half *pa = a + i * E1;
       half *pb = b + i * E2;
       half *pc = c + i * E3;
@@ -31,7 +36,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
       __memcpy(pc + 128, pb, 128 * sizeof(half), NRAM2NRAM,
                256 * sizeof(half), 128 * sizeof(half), 63);
     }
-    __memcpy(y + g * E3, c, E3 * E4 * sizeof(half), NRAM2GDRAM);
+    __memcpy(y + g * E3, c, E3 * n * sizeof(half), NRAM2GDRAM);
   }
 }
 
