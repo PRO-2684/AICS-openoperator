@@ -5,29 +5,56 @@
 
 #define E0 4000000
 #define E1 4096
-#define E2 32
+#define E2 8192
 
 __mlu_entry__ void k0(half *__restrict__ x) {
   __nram__ half a[E1];
-  for (int p = taskId * E1; p < E0; p += E1 * E2) {
-    int n = E0 - p;
-    if (n > E1) {
-      n = E1;
+  __nram__ half b[E1];
+  for (int p = taskId * E2; p < E0; p += E2 * taskDim) {
+    half *p0 = x + p;
+    half *p1 = x + p + E1;
+    int n0 = E0 - p;
+    if (n0 > E1) {
+      n0 = E1;
     }
-    int m = (n + 63) & ~63;
-    __memcpy(a, x + p, n * sizeof(half), GDRAM2NRAM);
-    if (m > n) {
-      __bang_write_value(a + n, m - n, (half)0.0f);
+    int q = p + E1;
+    int n1 = E0 - q;
+    if (n1 > E1) {
+      n1 = E1;
     }
-    __bang_active_gelup(a, a, m);
-    __memcpy(x + p, a, n * sizeof(half), NRAM2GDRAM);
+    if (n1 < 0) {
+      n1 = 0;
+    }
+    int m0 = (n0 + 63) & ~63;
+    int m1 = (n1 + 63) & ~63;
+
+    __memcpy(a, p0, n0 * sizeof(half), GDRAM2NRAM);
+    __sync_io();
+    if (n1 > 0) {
+      __memcpy(b, p1, n1 * sizeof(half), GDRAM2NRAM);
+    }
+    if (m0 > n0) {
+      __bang_write_value(a + n0, m0 - n0, (half)0.0f);
+    }
+    __bang_active_gelu(a, a, m0);
+    __sync_io_move_compute();
+    __memcpy(p0, a, n0 * sizeof(half), NRAM2GDRAM);
+    if (n1 > 0) {
+      if (m1 > n1) {
+        __bang_write_value(b + n1, m1 - n1, (half)0.0f);
+      }
+      __bang_active_gelu(b, b, m1);
+      __sync_io_move_compute();
+      __memcpy(p1, b, n1 * sizeof(half), NRAM2GDRAM);
+    }
+    __sync_io();
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {E2, 1, 1};
-  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+  cnrtDim3_t dim = {16, 2, 1};
+  k0<<<dim, cnrtFuncTypeUnion4, queue>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
   return x;
 }

@@ -59,7 +59,7 @@ torch::Tensor bang_func(torch::Tensor input, double scalar) {
   TORCH_CHECK(input.scalar_type() == at::kFloat || input.scalar_type() == at::kHalf,
               "input must be float32 or float16");
 
-  auto output = input;
+  auto output = torch::empty_like(input);
   uint32_t total = static_cast<uint32_t>(input.numel());
   float scalar_f = static_cast<float>(scalar);
 
