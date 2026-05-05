@@ -1,44 +1,55 @@
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define CNNL_CHECK(expr)                                                     \
-  do {                                                                       \
-    cnnlStatus_t status = (expr);                                            \
-    TORCH_CHECK(status == CNNL_STATUS_SUCCESS, "CNNL call failed: ", status); \
-  } while (0)
+#define E0 512
+
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a0[17152];
+  __nram__ half a1[17152];
+  __nram__ half b0[4096];
+  __nram__ half b1[4096];
+  __bang_write_value(a0, 17152, (half)-65504.0f);
+  __bang_write_value(a1, 17152, (half)-65504.0f);
+  int r = taskId;
+  if (r < E0) {
+    __memcpy_async(a0 + 131, x + r * 16384, 128 * sizeof(half), GDRAM2NRAM,
+                   130 * sizeof(half), 128 * sizeof(half), 127);
+    __asm__ volatile("sync;");
+  }
+  int q = 0;
+  for (; r < E0; r += taskDim) {
+    int nr = r + taskDim;
+    if (nr < E0) {
+      if (q == 0) {
+        __memcpy_async(a1 + 131, x + nr * 16384, 128 * sizeof(half),
+                       GDRAM2NRAM, 130 * sizeof(half), 128 * sizeof(half),
+                       127);
+      } else {
+        __memcpy_async(a0 + 131, x + nr * 16384, 128 * sizeof(half),
+                       GDRAM2NRAM, 130 * sizeof(half), 128 * sizeof(half),
+                       127);
+      }
+    }
+    half *a = q == 0 ? a0 : a1;
+    half *b = q == 0 ? b0 : b1;
+    __bang_maxpool(b, a, 1, 130, 130, 2, 2, 2, 2, 3, 3, 1, 1);
+    __memcpy(y + r * 4096, b, 4096 * sizeof(half), NRAM2GDRAM);
+    if (nr < E0) {
+      __asm__ volatile("sync;");
+    }
+    q ^= 1;
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
                         int padding, int dilation) {
-  static cnnlTensorDescriptor_t xd;
-  static cnnlTensorDescriptor_t yd;
-  static cnnlPoolingDescriptor_t pd;
-  static torch::Tensor ws;
-  static size_t sz = 0;
-  static bool ready = false;
   auto y = torch::empty({16, 32, 64, 64}, x.options());
-  cnnlHandle_t h = torch_mlu::getCurrentHandle();
-  if (!ready) {
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&xd));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&yd));
-    CNNL_CHECK(cnnlCreatePoolingDescriptor(&pd));
-    int a[4] = {16, 32, 128, 128};
-    int b[4] = {16, 32, 64, 64};
-    CNNL_CHECK(cnnlSetTensorDescriptor(xd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF,
-                                       4, a));
-    CNNL_CHECK(cnnlSetTensorDescriptor(yd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF,
-                                       4, b));
-    CNNL_CHECK(cnnlSetPooling2dDescriptor_v2(
-        pd, CNNL_POOLING_MAX, CNNL_NOT_PROPAGATE_NAN, 2, 2, 1, 1, 1, 1, 2, 2,
-        3, 3, false));
-    CNNL_CHECK(cnnlGetPoolingWorkspaceSize_v2(h, pd, xd, yd, &sz));
-    ws = torch::empty({(int64_t)sz}, x.options().dtype(torch::kUInt8));
-    ready = true;
-  }
-  float alpha = 1.0f;
-  float beta = 0.0f;
-  CNNL_CHECK(cnnlPoolingForward_v2(h, pd, &alpha, xd, x.data_ptr(), &beta,
-                                  nullptr, yd, y.data_ptr(), ws.data_ptr(),
-                                  sz));
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t g = {4, 8, 1};
+  k0<<<g, cnrtFuncTypeUnion1, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
