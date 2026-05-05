@@ -10,10 +10,3 @@ Here are some questions that cannot be completed due to official reasons
 132_Sparse_embedding
 
 ```
-
-## Tester cannot compare reference output
-
-```text
-101_Max_Pool_2D_with_indices
-
-```
