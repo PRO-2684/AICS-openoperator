@@ -3,8 +3,8 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 8192
-#define E1 32
+#define E0 16384
+#define E1 16
 
 __mlu_entry__ void k0(half *__restrict__ x) {
   __nram__ half a[E0];

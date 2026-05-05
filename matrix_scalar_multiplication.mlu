@@ -3,7 +3,7 @@
 #include <torch/extension.h>
 #include <framework/core/MLUStream.h>
 
-#define CHUNK_SIZE 131072
+#define CHUNK_SIZE 4096
 #define TASK_COUNT 32
 
 __mlu_entry__ void matrix_scalar_mul_float_kernel(const float *input,
@@ -43,7 +43,7 @@ __mlu_entry__ void matrix_scalar_mul_half_kernel(const half *input,
   uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
   uint32_t count = per_task + (task_id < remainder ? 1 : 0);
 
-  __nram__ half nram_buf[CHUNK_SIZE];
+  __nram__ half nram_buf[CHUNK_SIZE * 2];
 
   for (uint32_t offset = 0; offset < count; offset += CHUNK_SIZE) {
     uint32_t len = (offset + CHUNK_SIZE <= count) ? CHUNK_SIZE : (count - offset);
@@ -59,7 +59,7 @@ torch::Tensor bang_func(torch::Tensor input, double scalar) {
   TORCH_CHECK(input.scalar_type() == at::kFloat || input.scalar_type() == at::kHalf,
               "input must be float32 or float16");
 
-  auto output = torch::empty_like(input);
+  auto output = input;
   uint32_t total = static_cast<uint32_t>(input.numel());
   float scalar_f = static_cast<float>(scalar);
 
