@@ -3,23 +3,72 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
+#define T(D)                                                                  \
+  __memcpy(d, c, (D)*2, NRAM2NRAM);                                           \
+  __bang_minimum(d + (D), c + (D), c, n - (D));                               \
+  t = c;                                                                      \
+  c = d;                                                                      \
+  d = t;
+
+#define C(O, N)                                                               \
+  do {                                                                        \
+    int n = (N);                                                              \
+    half *c = a + (O);                                                        \
+    half *d = b + (O);                                                        \
+    half *t;                                                                  \
+    T(1)                                                                      \
+    T(2)                                                                      \
+    T(4)                                                                      \
+    T(8)                                                                      \
+    T(16)                                                                     \
+    T(32)                                                                     \
+    T(64)                                                                     \
+    T(128)                                                                    \
+    T(256)                                                                    \
+    __memcpy(a + (O), c, (N)*2, NRAM2NRAM);                                   \
+    __bang_write_value(b + (O), (N), m);                                      \
+    __bang_minimum(a + (O), a + (O), b + (O), (N));                           \
+    m = a[(O) + (N)-1];                                                       \
+  } while (0);
+
+#define C0(O, N)                                                              \
+  do {                                                                        \
+    int n = (N);                                                              \
+    half *c = a + (O);                                                        \
+    half *d = b + (O);                                                        \
+    half *t;                                                                  \
+    T(1)                                                                      \
+    T(2)                                                                      \
+    T(4)                                                                      \
+    T(8)                                                                      \
+    T(16)                                                                     \
+    T(32)                                                                     \
+    T(64)                                                                     \
+    T(128)                                                                    \
+    T(256)                                                                    \
+    __memcpy(a + (O), c, (N)*2, NRAM2NRAM);                                   \
+    m = a[(O) + (N)-1];                                                       \
+  } while (0);
+
 #define R(P)                                                                  \
   do {                                                                        \
     int p = (P) * 4000;                                                       \
     __memcpy(a, x + p, 8000, GDRAM2NRAM);                                     \
-    half m = a[0];                                                            \
-    for (int i = 1; i < 4000; ++i) {                                          \
-      half v = a[i];                                                          \
-      if (v < m) {                                                            \
-        m = v;                                                                \
-      }                                                                       \
-      a[i] = m;                                                               \
-    }                                                                         \
+    half m;                                                                   \
+    C0(0, 512)                                                                \
+    C(512, 512)                                                               \
+    C(1024, 512)                                                              \
+    C(1536, 512)                                                              \
+    C(2048, 512)                                                              \
+    C(2560, 512)                                                              \
+    C(3072, 512)                                                              \
+    C(3584, 416)                                                              \
     __memcpy(y + p, a, 8000, NRAM2GDRAM);                                     \
   } while (0);
 
 __mlu_entry__ void k(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[4000];
+  __nram__ half a[4096];
+  __nram__ half b[4096];
   int q = taskId << 2;
   R(q)
   R(q + 1)
@@ -39,3 +88,6 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
 }
 
 #undef R
+#undef C0
+#undef C
+#undef T
