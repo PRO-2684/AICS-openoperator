@@ -9,7 +9,7 @@
 __mlu_entry__ void matrix_scalar_mul_float_kernel(const float *input,
                                                   float *output,
                                                   uint32_t total,
-                                                  half scalar) {
+                                                  float scalar) {
   if (__is_mpu()) return;
 
   uint32_t task_id = taskId;
@@ -33,7 +33,7 @@ __mlu_entry__ void matrix_scalar_mul_float_kernel(const float *input,
 __mlu_entry__ void matrix_scalar_mul_half_kernel(const half *input,
                                                  half *output,
                                                  uint32_t total,
-                                                 float scalar) {
+                                                 half scalar) {
   if (__is_mpu()) return;
 
   uint32_t task_id = taskId;
@@ -62,6 +62,7 @@ torch::Tensor bang_func(torch::Tensor input, double scalar) {
   auto output = torch::empty_like(input);
   uint32_t total = static_cast<uint32_t>(input.numel());
   float scalar_f = static_cast<float>(scalar);
+  half scalar_h = (half)scalar_f;
 
   if (total == 0) {
     return output;
@@ -77,7 +78,7 @@ torch::Tensor bang_func(torch::Tensor input, double scalar) {
   } else {
     matrix_scalar_mul_half_kernel<<<dim, ktype, queue>>>(
         reinterpret_cast<half *>(input.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(output.data_ptr<at::Half>()), total, scalar_f);
+        reinterpret_cast<half *>(output.data_ptr<at::Half>()), total, scalar_h);
   }
 
   return output;
