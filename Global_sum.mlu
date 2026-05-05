@@ -3,15 +3,21 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 8
-#define E1 65536
+#define E0 32
+#define E1 16384
+#define E2 64
 
 __mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y, int n) {
   int q = n / 32;
   int r = n - q * 32;
-  __bang_sumpool(y, x, 32, 1, q, 1, q, 1, q);
-  if (r > 0) {
-    __bang_add(y, y, x + q * 32, r);
+  if (q > 0) {
+    __bang_sumpool(y, x, 32, 1, q, 1, q, 1, q);
+    if (r > 0) {
+      __bang_add(y, y, x + q * 32, r);
+    }
+  } else {
+    __bang_write_value(y, 32, 0.0f);
+    __memcpy(y, x, n * sizeof(float), NRAM2NRAM);
   }
   __bang_reduce_sum(y, y, 32);
   return y[0];
@@ -19,20 +25,21 @@ __mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y, int n) {
 
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ z) {
   __nram__ half a[E1];
-  __nram__ float b[E1];
-  __nram__ float c[32];
+  __nram__ half b[E2];
+  __nram__ float c[E2];
+  __nram__ float d[32];
   int p = taskId * E1;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(b, a, E1);
-  z[taskId] = f0(b, c, E1);
+  __bang_sumpool(b, a, E2, 1, E1 / E2, 1, E1 / E2, 1, E1 / E2);
+  __bang_half2float(c, b, E2);
+  z[taskId] = f0(c, d, E2);
 }
 
 __mlu_entry__ void k1(const float *__restrict__ z, half *__restrict__ y) {
-  __nram__ float a[32];
+  __nram__ float a[E0];
   __nram__ float b[32];
-  __bang_write_value(a, 32, 0.0f);
   __memcpy(a, z, E0 * sizeof(float), GDRAM2NRAM);
-  y[0] = (half)f0(a, b, 32);
+  y[0] = (half)f0(a, b, E0);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
@@ -41,7 +48,8 @@ torch::Tensor bang_func(torch::Tensor x) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d0 = {E0, 1, 1};
   cnrtDim3_t d1 = {1, 1, 1};
-  k0<<<d0, cnrtFuncTypeUnion4, queue>>>(
+  k0<<<d0, cnrtFuncTypeUnion1, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       tmp.data_ptr<float>());
   k1<<<d1, cnrtFuncTypeBlock, queue>>>(tmp.data_ptr<float>(),
                                        reinterpret_cast<half *>(out.data_ptr<at::Half>()));
