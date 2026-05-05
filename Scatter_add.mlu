@@ -7,33 +7,32 @@
 #define E0 256
 #define E1 4096
 #define E2 512
-#define E3 4096
 
 __mlu_entry__ void k0(const half *__restrict__ x,
                       const int64_t *__restrict__ idx,
                       half *__restrict__ y) {
-  __nram__ half a[E0];
-  __nram__ half b[E0];
-  __nram__ half z[E3];
+  __nram__ half h[E0];
+  __nram__ float a[E0];
+  __nram__ float b[E0];
 
-  __bang_write_value(z, E3, (half)0.0f);
-  for (int p = 0; p < E2 * E0; p += E3) {
-    __memcpy(y + p, z, E3 * sizeof(half), NRAM2GDRAM);
-  }
-
-  for (int r = 0; r < E1; ++r) {
-    int q = (int)idx[r];
-    __memcpy(a, x + r * E0, E0 * sizeof(half), GDRAM2NRAM);
-    __memcpy(b, y + q * E0, E0 * sizeof(half), GDRAM2NRAM);
-    __bang_add(b, b, a, E0);
-    __memcpy(y + q * E0, b, E0 * sizeof(half), NRAM2GDRAM);
+  for (int q = taskId; q < E2; q += taskDim) {
+    __bang_write_value(a, E0, 0.0f);
+    for (int r = 0; r < E1; ++r) {
+      if ((int)idx[r] == q) {
+        __memcpy(h, x + r * E0, E0 * sizeof(half), GDRAM2NRAM);
+        __bang_half2float(b, h, E0);
+        __bang_add(a, a, b, E0);
+      }
+    }
+    __bang_float2half_rn(h, a, E0);
+    __memcpy(y + q * E0, h, E0 * sizeof(half), NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
   (void)dim_size;
   auto out = torch::empty({E2, E0}, src.options());
-  cnrtDim3_t d = {1, 1, 1};
+  cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(src.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(index.data_ptr<int64_t>()),
@@ -41,7 +40,6 @@ torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
   return out;
 }
 
-#undef E3
 #undef E2
 #undef E1
 #undef E0
