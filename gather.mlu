@@ -16,13 +16,12 @@ __mlu_entry__ void kernel(const half *__restrict__ x,
     return;
   }
 
-  int b = bin_ids[p];
-  int start = b == 0 ? 0 : bins[b - 1];
-  int dst = p - start + start;
+  (void)bin_ids;
+  (void)bins;
   int idx = indices[p];
   int src_base = (idx >> 1) * H;
   half w = weights[idx];
-  int dst_base = dst * H;
+  int dst_base = p * H;
 
 #pragma unroll
   for (int j = 0; j < H; ++j) {
