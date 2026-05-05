@@ -10,12 +10,21 @@
   a = b;                                                                      \
   b = t;
 
+#define Q(D, X)                                                               \
+  X                                                                            \
+  __bang_minequal(b + (D), a + (D), a, 4000 - (D));                           \
+  t = a;                                                                      \
+  a = b;                                                                      \
+  b = t;
+
 #define R(P)                                                                  \
   a = u;                                                                      \
   b = v;                                                                      \
   __memcpy(a, x + (P)*4000, 8000, GDRAM2NRAM);                                \
-  S(1)                                                                        \
-  S(2) S(4) S(8) S(16) S(32) S(64) S(128) S(256) S(512) S(1024) S(2048)       \
+  Q(1, b[0] = a[0];)                                                          \
+  Q(2, b[0] = a[0]; b[1] = a[1];)                                             \
+  Q(4, b[0] = a[0]; b[1] = a[1]; b[2] = a[2]; b[3] = a[3];)                  \
+  S(8) S(16) S(32) S(64) S(128) S(256) S(512) S(1024) S(2048)                \
       __memcpy(y + (P)*4000, a, 8000, NRAM2GDRAM);
 
 __mlu_entry__ void k(const half *x, half *y) {
@@ -46,4 +55,5 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
 }
 
 #undef R
+#undef Q
 #undef S
