@@ -1,32 +1,65 @@
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define C(expr)                                                               \
-  do {                                                                       \
-    cnnlStatus_t s = (expr);                                                 \
-    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", s);          \
-  } while (0)
+#define P(O, R)                                                                \
+  __memcpy(a + (O), x + (q + (R)) * 4000, 8000, GDRAM2NRAM);                   \
+  __bang_write_value(a + (O) + 4000, 96, (half)65504.0f);
+
+#define Q(O, D)                                                                \
+  __memcpy(b + (O), a + (O), (D)*2, NRAM2NRAM);                                \
+  __bang_write_value(b + (O) + 4000, 96, (half)65504.0f);
+
+#define S(D)                                                                   \
+  __bang_minimum(b + (D), a + (D), a, 8192 - (D));                             \
+  Q(0, D)                                                                      \
+  Q(4096, D)                                                                   \
+  t = a;                                                                       \
+  a = b;                                                                       \
+  b = t;
+
+#define R(A, B)                                                                \
+  a = u;                                                                       \
+  b = v;                                                                       \
+  P(0, A)                                                                      \
+  P(4096, B)                                                                   \
+  S(1)                                                                         \
+  S(2)                                                                         \
+  S(4) S(8) S(16) S(32) S(64) S(128) S(256) S(512) S(1024) S(2048)             \
+      __memcpy(y + (q + (A)) * 4000, a, 8000, NRAM2GDRAM);                     \
+  __memcpy(y + (q + (B)) * 4000, a + 4096, 8000, NRAM2GDRAM);
+
+__mlu_entry__ void k(const half *x, half *y) {
+  int q = taskId << 2;
+
+  __nram__ half u[8192];
+  __nram__ half v[8192];
+
+  half *a;
+  half *b;
+  half *t;
+
+  R(0, 1)
+  R(2, 3)
+}
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
-  static cnnlTensorDescriptor_t xd;
-  static cnnlTensorDescriptor_t id;
-  static torch::Tensor y;
-  static torch::Tensor idx;
-  static bool ok = false;
-  if (!ok) {
-    int a[2] = {128, 4000};
-    C(cnnlCreateTensorDescriptor(&xd));
-    C(cnnlCreateTensorDescriptor(&id));
-    C(cnnlSetTensorDescriptor(xd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, a));
-    C(cnnlSetTensorDescriptor(id, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_INT32, 2, a));
-    y = torch::empty_like(x);
-    idx = torch::empty({128, 4000}, x.options().dtype(torch::kInt32));
-    ok = true;
-  }
-  C(cnnlCummin(torch_mlu::getCurrentHandle(), xd, x.data_ptr(), 1, xd,
-               y.data_ptr(), id, idx.data_ptr()));
+  auto y = torch::empty_like(x);
+
+  cnrtDim3_t d;
+  d.x = 4;
+  d.y = 8;
+  d.z = 1;
+
+  k<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+
   return y;
 }
 
-#undef C
+#undef R
+#undef S
+#undef Q
+#undef P

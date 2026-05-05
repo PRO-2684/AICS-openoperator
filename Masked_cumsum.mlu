@@ -7,7 +7,6 @@
 #define E1 4000
 #define E2 4096
 #define E3 4032
-#define S(D) __bang_add(a + (D), a + (D), a, E2 - (D));
 
 __mlu_entry__ void k0(const half *__restrict__ x,
                       const unsigned char *__restrict__ m,
@@ -31,23 +30,45 @@ __mlu_entry__ void k0(const half *__restrict__ x,
     __bang_int82float(b, c, E3, 0);
     __bang_mul(a, a, b, E3);
     __bang_write_value(a + E3, E2 - E3, 0.0f);
-    S(1)
-    S(2)
-    S(4)
-    S(8)
-    S(16)
-    S(32)
-    S(64)
-    S(128)
-    S(256)
-    S(512)
-    S(1024)
-    S(2048)
+    __bang_write_value(b, 1, 0.0f);
+    __memcpy(b + 1, a, (E2 - 1) * sizeof(float), NRAM2NRAM);
+    __bang_add(a, a, b, E2);
+    __bang_write_value(b, 2, 0.0f);
+    __memcpy(b + 2, a, (E2 - 2) * sizeof(float), NRAM2NRAM);
+    __bang_add(a, a, b, E2);
+    __bang_write_value(b, 4, 0.0f);
+    __memcpy(b + 4, a, (E2 - 4) * sizeof(float), NRAM2NRAM);
+    __bang_add(a, a, b, E2);
+    __bang_write_value(b, 8, 0.0f);
+    __memcpy(b + 8, a, (E2 - 8) * sizeof(float), NRAM2NRAM);
+    __bang_add(a, a, b, E2);
+    __bang_write_value(b, 16, 0.0f);
+    __memcpy(b + 16, a, (E2 - 16) * sizeof(float), NRAM2NRAM);
+    __bang_add(a, a, b, E2);
+    __bang_write_value(b, 32, 0.0f);
+    __memcpy(b + 32, a, (E2 - 32) * sizeof(float), NRAM2NRAM);
+    __bang_add(a, a, b, E2);
+    __bang_write_value(b, 64, 0.0f);
+    __memcpy(b + 64, a, (E2 - 64) * sizeof(float), NRAM2NRAM);
+    __bang_add(a, a, b, E2);
+    __bang_write_value(b, 128, 0.0f);
+    __memcpy(b + 128, a, (E2 - 128) * sizeof(float), NRAM2NRAM);
+    __bang_add(a, a, b, E2);
+    __bang_write_value(b, 256, 0.0f);
+    __memcpy(b + 256, a, (E2 - 256) * sizeof(float), NRAM2NRAM);
+    __bang_add(a, a, b, E2);
+    __bang_write_value(b, 512, 0.0f);
+    __memcpy(b + 512, a, (E2 - 512) * sizeof(float), NRAM2NRAM);
+    __bang_add(a, a, b, E2);
+    __bang_write_value(b, 1024, 0.0f);
+    __memcpy(b + 1024, a, (E2 - 1024) * sizeof(float), NRAM2NRAM);
+    __bang_add(a, a, b, E2);
+    __bang_write_value(b, 2048, 0.0f);
+    __memcpy(b + 2048, a, (E2 - 2048) * sizeof(float), NRAM2NRAM);
+    __bang_add(a, a, b, E2);
     __memcpy(y + p, a, E1 * sizeof(float), NRAM2GDRAM);
   }
 }
-
-#undef S
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, int dim) {
   auto out = torch::empty({E0, E1}, x.options().dtype(torch::kFloat32));
