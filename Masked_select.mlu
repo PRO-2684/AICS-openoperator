@@ -30,10 +30,12 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
 
 __mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
   __nram__ half a[E1];
+  __nram__ unsigned int b[1];
   int p = taskId * E1;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_active_relu(a, a, E1);
-  int n = (int)__bang_filter(a, a, a, E1);
+  __bang_count(b, a, E1);
+  int n = (int)b[0];
   y[taskId] = n;
   __sync_all_ipu();
 
@@ -72,7 +74,7 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   k0<<<dim, cnrtFuncTypeUnion8, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()), work.data_ptr<int>());
-  k1<<<dim, cnrtFuncTypeUnion1, queue2>>>(
+  k1<<<dim, cnrtFuncTypeUnion8, queue2>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       work2.data_ptr<int>());
 
