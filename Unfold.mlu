@@ -3,26 +3,36 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 96
+#define E0 64
 #define E1 254
 #define E2 (E1 * E1)
 #define E3 27
-#define E4 16
 
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[E2];
-  int total = E4 * E3;
-  for (int g = taskId; g < total; g += taskDim) {
-    int n = g / E3;
-    int b = g - n * E3;
-    int kw = b % 3;
-    int kh = (b / 3) % 3;
-    int c = b / 9;
-    const half *src = x + ((n * 3 + c) * 256 + kh) * 256 + kw;
-    half *dst = y + (n * E3 + b) * E2;
-    __memcpy(a, src, E1 * sizeof(half), GDRAM2NRAM, E1 * sizeof(half),
-             256 * sizeof(half), E1 - 1);
-    __memcpy(dst, a, E2 * sizeof(half), NRAM2GDRAM);
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z) {
+  __nram__ half a[E1 * E3];
+  int total = 16 * E1;
+  for (int r = taskId; r < total; r += taskDim) {
+    int n = r / E1;
+    int h = r - n * E1;
+    for (int w = 0; w < E1; ++w) {
+      half *p = a + w * E3;
+#pragma unroll
+      for (int c = 0; c < 3; ++c) {
+        const half *s = x + (n * 3 + c) * 65536 + h * 256 + w;
+        int q = c * 9;
+        p[q] = __load_gdram(s);
+        p[q + 1] = __load_gdram(s + 1);
+        p[q + 2] = __load_gdram(s + 2);
+        p[q + 3] = __load_gdram(s + 256);
+        p[q + 4] = __load_gdram(s + 257);
+        p[q + 5] = __load_gdram(s + 258);
+        p[q + 6] = __load_gdram(s + 512);
+        p[q + 7] = __load_gdram(s + 513);
+        p[q + 8] = __load_gdram(s + 514);
+      }
+    }
+    __memcpy(z + (n * E2 + h * E1) * E3, a, E1 * E3 * sizeof(half),
+             NRAM2GDRAM);
   }
 }
 
@@ -31,11 +41,11 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
   (void)kernel_size;
   (void)stride;
   (void)padding;
-  auto y = torch::empty({16, 27, 254 * 254}, x.options());
+  auto z = torch::empty({16, 254 * 254, 27}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {E0, 1, 1};
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-  return y;
+      reinterpret_cast<half *>(z.data_ptr<at::Half>()));
+  return z.as_strided({16, 27, 254 * 254}, {E2 * E3, 1, E3});
 }
