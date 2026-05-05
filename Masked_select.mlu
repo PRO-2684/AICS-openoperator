@@ -22,13 +22,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
 
 __mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
   __nram__ half a[E1];
-  __nram__ unsigned int b[1];
   int p = taskId * E1;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_active_relu(a, a, E1);
-  __bang_count(b, a, E1);
-  int n = (int)b[0];
-  y[taskId] = n;
+  y[taskId] = (int)__bang_count(a, E1);
   __sync_all_ipu();
 
   if (taskId == E2 - 1) {
