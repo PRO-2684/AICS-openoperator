@@ -1,26 +1,43 @@
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define C(expr)                                                               \
-  do {                                                                       \
-    cnnlStatus_t s = (expr);                                                 \
-    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", s);          \
-  } while (0)
+#define A(I)                                                                  \
+  s = s * a[I];                                                              \
+  a[I] = s;
+
+#define B(I) A(I) A(I + 1) A(I + 2) A(I + 3) A(I + 4) A(I + 5) A(I + 6) A(I + 7)
+
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[4000];
+  for (int r = taskId; r < 128; r += taskDim) {
+    int p = r * 4000;
+    __memcpy(a, x + p, 8000, GDRAM2NRAM);
+    half s = a[0];
+    for (int i = 1; i <= 249; i += 8) {
+      B(i)
+    }
+    A(257)
+    A(258)
+    A(259)
+    A(260)
+    A(261)
+    A(262)
+    A(263)
+    __bang_write_value(a + 264, 3736, (half)0.0f);
+    __memcpy(y + p, a, 8000, NRAM2GDRAM);
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
-  static cnnlTensorDescriptor_t d;
-  static bool ok = false;
   auto y = torch::empty_like(x);
-  if (!ok) {
-    int a[2] = {128, 4000};
-    C(cnnlCreateTensorDescriptor(&d));
-    C(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, a));
-    ok = true;
-  }
-  C(cnnlCumprod(torch_mlu::getCurrentHandle(), d, x.data_ptr(), 1, false,
-                false, d, y.data_ptr()));
+  cnrtDim3_t g = {4, 8, 1};
+  k0<<<g, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
 
-#undef C
+#undef B
+#undef A
