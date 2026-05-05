@@ -17,6 +17,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     __memcpy(a + 128, t, 16384 * sizeof(half), NRAM2NRAM);
     __bang_maxpool(b, a, 128, 130, 1, 2, 1, 1, 2, 1, 3, 1, 1);
     __bang_write_value(c0, 4096, (half)-65504.0f);
+    __bang_write_value(c1, 4096, (half)-65504.0f);
     for (int i = 0; i < 64; ++i) {
       __memcpy(c0 + i * 64 + 1, b + i * 128 + 1, sizeof(half), NRAM2NRAM,
                sizeof(half), 2 * sizeof(half), 62);
