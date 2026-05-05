@@ -3,35 +3,52 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 2097152
+#define E0 512
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
                       long long *__restrict__ z) {
-  for (int t = taskId; t < E0; t += taskDim) {
-    int ow = t & 63;
-    int oh = (t >> 6) & 63;
-    int bc = t >> 12;
-    int p = bc * 16384 + (oh << 1) * 128 + (ow << 1);
-    float v0 = (float)x[p];
-    float v1 = (float)x[p + 1];
-    float v2 = (float)x[p + 128];
-    float v3 = (float)x[p + 129];
-    float m = v0;
-    int idx = 0;
-    if (v1 > m) {
-      m = v1;
-      idx = 1;
+  __nram__ half a[16384];
+  __nram__ half b0[4096];
+  __nram__ half b1[4096];
+  __nram__ half b2[4096];
+  __nram__ half b3[4096];
+  for (int r = taskId; r < E0; r += taskDim) {
+    __memcpy(a, x + r * 16384, 16384 * sizeof(half), GDRAM2NRAM);
+    for (int h = 0; h < 64; ++h) {
+      int p = h * 128;
+      __memcpy(b0 + h * 64, a + (p << 1), sizeof(half), NRAM2NRAM,
+               sizeof(half), 2 * sizeof(half), 63);
+      __memcpy(b1 + h * 64, a + (p << 1) + 1, sizeof(half), NRAM2NRAM,
+               sizeof(half), 2 * sizeof(half), 63);
+      __memcpy(b2 + h * 64, a + (p << 1) + 128, sizeof(half), NRAM2NRAM,
+               sizeof(half), 2 * sizeof(half), 63);
+      __memcpy(b3 + h * 64, a + (p << 1) + 129, sizeof(half), NRAM2NRAM,
+               sizeof(half), 2 * sizeof(half), 63);
     }
-    if (v2 > m) {
-      m = v2;
-      idx = 2;
+    for (int i = 0; i < 4096; ++i) {
+      float v0 = (float)b0[i];
+      float v1 = (float)b1[i];
+      float v2 = (float)b2[i];
+      float v3 = (float)b3[i];
+      float m = v0;
+      int idx = 0;
+      if (v1 > m) {
+        m = v1;
+        idx = 1;
+      }
+      if (v2 > m) {
+        m = v2;
+        idx = 2;
+      }
+      if (v3 > m) {
+        idx = 3;
+      }
+      z[r * 4096 + i] = (long long)idx;
     }
-    if (v3 > m) {
-      m = v3;
-      idx = 3;
-    }
-    y[t] = (half)m;
-    z[t] = (long long)idx;
+    __bang_maximum(b0, b0, b1, 4096);
+    __bang_maximum(b2, b2, b3, 4096);
+    __bang_maximum(b0, b0, b2, 4096);
+    __memcpy(y + r * 4096, b0, 4096 * sizeof(half), NRAM2GDRAM);
   }
 }
 
