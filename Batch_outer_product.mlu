@@ -6,23 +6,20 @@
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       half *__restrict__ c) {
   __nram__ half x[256];
-  __nram__ half y[32768];
-  __nram__ half z[32768];
+  __nram__ half y[65536];
+  __nram__ half z[65536];
 
   for (int p = taskId; p < 64; p += taskDim) {
     __memcpy(x, b + p * 256, 256 * sizeof(half), GDRAM2NRAM);
-    for (int q = 0; q < 256; q += 128) {
-      int r = p * 256 + q;
-      __memcpy(y, x, 256 * sizeof(half), NRAM2NRAM, 256 * sizeof(half), 0,
-               127);
-#pragma unroll 128
-      for (int i = 0; i < 128; ++i) {
-        __bang_write_value(z + i * 256, 256, a[r + i]);
-      }
-      __bang_cycle_mul(y, z, x, 32768, 256);
-      __memcpy(c + p * 65536 + q * 256, y, 32768 * sizeof(half),
-               NRAM2GDRAM);
+    int r = p * 256;
+    __memcpy(y, x, 256 * sizeof(half), NRAM2NRAM, 256 * sizeof(half), 0,
+             255);
+#pragma unroll 256
+    for (int i = 0; i < 256; ++i) {
+      __bang_write_value(z + i * 256, 256, a[r + i]);
     }
+    __bang_cycle_mul(y, z, x, 65536, 256);
+    __memcpy(c + p * 65536, y, 65536 * sizeof(half), NRAM2GDRAM);
   }
 }
 
