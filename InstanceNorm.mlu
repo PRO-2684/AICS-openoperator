@@ -17,9 +17,8 @@ __mlu_func__ float reduce_sum_half(half *buf, half *tmp, int n) {
     __bang_reduce_sum(dst, src, cur);
 
     int groups = cur / 64;
-    for (int i = 0; i < groups; ++i) {
-      src[i] = dst[i * 64];
-    }
+    __memcpy(src, dst, sizeof(half), NRAM2NRAM, sizeof(half),
+             64 * sizeof(half), groups - 1);
 
     cur = groups;
   }
