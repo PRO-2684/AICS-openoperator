@@ -59,11 +59,18 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ kc,
     __bang_add(o0, o0, s0 + 192, 64);
     __memcpy(s1, r0 + 256, 4 * sizeof(float), SRAM2NRAM);
 
-    float sn = 0.0f;
+    float sn0 = 0.0f;
+    float sn1 = 0.0f;
+    float sn2 = 0.0f;
+    float sn3 = 0.0f;
 #pragma unroll
-    for (int i = 0; i < 64; ++i) {
-      sn += (float)q[h * 64 + i] * (float)kn[h * 64 + i];
+    for (int i = 0; i < 16; ++i) {
+      sn0 += (float)q[h * 64 + i] * (float)kn[h * 64 + i];
+      sn1 += (float)q[h * 64 + i + 16] * (float)kn[h * 64 + i + 16];
+      sn2 += (float)q[h * 64 + i + 32] * (float)kn[h * 64 + i + 32];
+      sn3 += (float)q[h * 64 + i + 48] * (float)kn[h * 64 + i + 48];
     }
+    float sn = sn0 + sn1 + sn2 + sn3;
     sn = expf(sn * 0.125f);
     float inv = 1.0f / (s1[0] + s1[1] + s1[2] + s1[3] + sn);
 #pragma unroll
