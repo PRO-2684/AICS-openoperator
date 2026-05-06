@@ -63,8 +63,8 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
   if (ws_size == 0) {
     CNNL_CHECK(cnnlGetScaledDotProductAttnWorkspaceSize_v3(
         handle, nullptr, nullptr, qd, qd, qd, nullptr, nullptr, bd, nullptr,
-        nullptr, 128, 128, false, -1, -1, false,
-        CNNL_COMPUTATION_HIGH_PRECISION, CNNL_DTYPE_FLOAT, &ws_size));
+        nullptr, 128, 128, false, -1, -1, false, CNNL_COMPUTATION_FAST,
+        CNNL_DTYPE_HALF, &ws_size));
   }
   static torch::Tensor ws;
   if (!ws.defined()) {
@@ -74,7 +74,7 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
       handle, nullptr, nullptr, qd, q.data_ptr(), qd, k.data_ptr(), qd,
       v.data_ptr(), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, bd,
       buf.data_ptr(), nullptr, nullptr, nullptr, nullptr, 128, 128, false, -1,
-      -1, 0.125f, CNNL_COMPUTATION_HIGH_PRECISION, CNNL_DTYPE_FLOAT,
+      -1, 0.125f, CNNL_COMPUTATION_FAST, CNNL_DTYPE_HALF,
       ws_size ? ws.data_ptr() : nullptr, ws_size, false, nullptr, nullptr, qd,
       out.data_ptr()));
   return out;
