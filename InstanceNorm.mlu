@@ -62,7 +62,7 @@ __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
 
     half *hwork = (half *)fbuf;
     __memcpy(hwork, hbuf, SAMPLE_ELEMS * sizeof(half), NRAM2NRAM);
-    float mean = reduce_sum_half(hwork, htmp, SAMPLE_ELEMS) * 0.00002288818359375f;
+    float mean = reduce_sum_half(hwork, htmp, SAMPLE_ELEMS) * 0.000019073486328125f;
 
     __bang_square(htmp, hbuf, LOCAL_ELEMS);
     float sq_sum = reduce_sum_half(htmp, hwork, LOCAL_ELEMS);
