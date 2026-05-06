@@ -8,16 +8,16 @@
     TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
   } while (0)
 
-static cnnlTensorDescriptor_t f(int n) {
+static cnnlTensorDescriptor_t f(int n, cnnlDataType_t t) {
   int d[1] = {n};
   cnnlTensorDescriptor_t r;
   X(cnnlCreateTensorDescriptor(&r));
-  X(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 1, d));
+  X(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, t, 1, d));
   return r;
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  auto C = torch::empty({2048, 2048}, A.options());
+  auto C = torch::empty({2048, 2048}, A.options().dtype(torch::kFloat));
 
   static cnnlTensorDescriptor_t a = nullptr;
   static cnnlTensorDescriptor_t b = nullptr;
@@ -39,9 +39,9 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   float be = 0.0f;
 
   if (d == nullptr) {
-    a = f(4194304);
-    b = f(4194304);
-    c = f(4194304);
+    a = f(4194304, CNNL_DTYPE_HALF);
+    b = f(4194304, CNNL_DTYPE_HALF);
+    c = f(4194304, CNNL_DTYPE_FLOAT);
     X(cnnlCreateStrideBatchMatMulDescriptor(&d));
     X(cnnlCreateStrideBatchMatMulAlgo(&e));
     cnnlStrideBatchMatMulHeuristicResult_t r;
