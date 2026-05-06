@@ -74,43 +74,14 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   int n = s ? 12 : 10;
   int hk = h >> 1;
 
-  __nram__ half q0[384];
   __nram__ half p0[384];
-  __nram__ half k2[2048];
   __nram__ half v2[2048];
   __nram__ half y1[768];
-  __nram__ float a0[768];
   __nram__ float y0[768];
-  __wram__ half k1[2048];
   __wram__ half v1[2048];
 
-  __bang_write_value(q0, 384, (half)0.0f);
   __bang_write_value(p0, 384, (half)0.0f);
-  __bang_write_value(k2, 2048, (half)0.0f);
   __bang_write_value(v2, 2048, (half)0.0f);
-
-#pragma unroll
-  for (int r = 0; r < 12; ++r) {
-    if (r < n) {
-      __memcpy(q0 + r * 32, q + (((b + r) * 4 + h) * 32),
-               32 * sizeof(half), GDRAM2NRAM);
-    }
-  }
-
-#pragma unroll
-  for (int c = 0; c < 64; ++c) {
-#pragma unroll
-    for (int d = 0; d < 32; ++d) {
-      half u = (half)0.0f;
-      if (c < n) {
-        u = k[(((b + c) * 2 + hk) * 32) + d];
-      }
-      k2[c * 32 + d] = u;
-    }
-  }
-
-  __memcpy(k1, k2, 2048 * sizeof(half), NRAM2WRAM);
-  __bang_matmul(a0, q0, k1, n, 32, 64);
 
 #pragma unroll
   for (int r = 0; r < 12; ++r) {
@@ -120,7 +91,14 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
       for (int c = 0; c < 12; ++c) {
         float u = 0.0f;
         if (c < n && mr >= c && mr < f1(s, c)) {
-          u = f2(a0[r * 64 + c] * 0.7f) * 0.08333333333333333f;
+          float a = 0.0f;
+#pragma unroll
+          for (int d = 0; d < 32; ++d) {
+            float x0 = (float)q[(((b + r) * 4 + h) * 32) + d];
+            float x1 = (float)k[(((b + c) * 2 + hk) * 32) + d];
+            a += x0 * x1;
+          }
+          u = f2(a * 0.7f) * 0.08333333333333333f;
         }
         p0[r * 32 + c] = (half)u;
       }
