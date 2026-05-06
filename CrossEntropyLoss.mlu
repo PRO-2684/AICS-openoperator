@@ -1,100 +1,74 @@
-#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
-#include <cnnl_extra.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <math.h>
+#include <stdint.h>
 #include <torch/extension.h>
 
-#define E0 4096
-#define E1 10
-#define E2 32
-#define E3 128
+#define ROWS 4096
+#define COLS 10
+#define TASKS 64
+#define ROWS_PER_TASK (ROWS / TASKS)
+#define LOCAL_ELEMS (ROWS_PER_TASK * COLS)
 
-#define C(x)                                                                   \
-  do {                                                                         \
-    cnnlStatus_t s = (x);                                                       \
-    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);        \
-  } while (0)
+__mlu_entry__ void k0(const half *__restrict__ predictions,
+                      const int64_t *__restrict__ targets,
+                      float *__restrict__ partial) {
+  int row0 = taskId * ROWS_PER_TASK;
+  int base = row0 * COLS;
 
-__mlu_entry__ void k0(const int64_t *__restrict__ x, int *__restrict__ y) {
-  int p = taskId * E3;
+  __nram__ half hbuf[LOCAL_ELEMS];
+  __nram__ float fbuf[LOCAL_ELEMS];
+
+  __memcpy(hbuf, predictions + base, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(fbuf, hbuf, LOCAL_ELEMS);
+  __bang_active_exp(fbuf, fbuf, LOCAL_ELEMS);
+
+  float acc = 0.0f;
+
 #pragma unroll 1
-  for (int i = 0; i < E3; ++i) {
-    y[p + i] = (int)x[p + i];
+  for (int r = 0; r < ROWS_PER_TASK; ++r) {
+    int off = r * COLS;
+    float sum = 0.0f;
+
+#pragma unroll
+    for (int c = 0; c < COLS; ++c) {
+      sum += fbuf[off + c];
+    }
+
+    int64_t label = targets[row0 + r];
+    acc += logf(sum) - (float)hbuf[off + label];
   }
+
+  partial[taskId] = acc;
 }
 
-__mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y, int n) {
-  int q = n / 32;
-  int r = n - q * 32;
-  __bang_sumpool(y, x, 32, 1, q, 1, q, 1, q);
-  if (r > 0) {
-    __bang_add(y, y, x + q * 32, r);
-  }
-  __bang_reduce_sum(y, y, 32);
-  return y[0];
-}
+__mlu_entry__ void k1(const float *__restrict__ partial, half *__restrict__ out) {
+  float acc = 0.0f;
 
-__mlu_entry__ void k1(const float *__restrict__ x, half *__restrict__ y) {
-  __nram__ float a[E0];
-  __nram__ float b[E3];
-  __memcpy(a, x, E0 * sizeof(float), GDRAM2NRAM);
-  y[0] = (half)(f0(a, b, E0) * 0.000244140625f);
+#pragma unroll
+  for (int i = 0; i < TASKS; ++i) {
+    acc += partial[i];
+  }
+
+  out[0] = (half)(acc * (1.0f / (float)ROWS));
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
-  static cnnlTensorDescriptor_t xd = nullptr;
-  static cnnlTensorDescriptor_t td = nullptr;
-  static cnnlTensorDescriptor_t yd = nullptr;
-  static cnnlTensorDescriptor_t ld = nullptr;
-  static torch::Tensor ti;
-  static torch::Tensor loss;
-  static torch::Tensor lse;
-  static torch::Tensor ws;
-  static size_t wsz = 0;
-  static bool init = false;
-
   auto out = torch::empty({}, predictions.options());
-  if (!ti.defined())
-    ti = torch::empty({E0}, targets.options().dtype(torch::kInt32));
-  if (!loss.defined())
-    loss = torch::empty({E0}, predictions.options().dtype(torch::kFloat32));
-  if (!lse.defined())
-    lse = torch::empty({E0}, predictions.options().dtype(torch::kFloat32));
-
-  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
-  if (!init) {
-    int xdims[2] = {E0, E1};
-    int odims[1] = {E0};
-    C(cnnlCreateTensorDescriptor(&xd));
-    C(cnnlCreateTensorDescriptor(&td));
-    C(cnnlCreateTensorDescriptor(&yd));
-    C(cnnlCreateTensorDescriptor(&ld));
-    C(cnnlSetTensorDescriptor(xd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, xdims));
-    C(cnnlSetTensorDescriptor(td, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_INT32, 1,
-                              odims));
-    C(cnnlSetTensorDescriptor(yd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT, 1,
-                              odims));
-    C(cnnlSetTensorDescriptor(ld, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT, 1,
-                              odims));
-    C(cnnlGetCrossEntropyForwardWorkspaceSize(handle, false, 0.0f, -100, xd, td,
-                                              &wsz));
-    if (wsz > 0)
-      ws = torch::empty({(long)wsz}, predictions.options().dtype(torch::kUInt8));
-    init = true;
-  }
+  auto partial = torch::empty({TASKS}, predictions.options().dtype(torch::kFloat32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d0 = {E2, 1, 1};
-  cnrtDim3_t d1 = {1, 1, 1};
-  k0<<<d0, cnrtFuncTypeBlock, queue>>>(
+  cnrtDim3_t dim = {TASKS, 1, 1};
+  cnrtDim3_t one = {1, 1, 1};
+
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(targets.data_ptr<int64_t>()),
-      ti.data_ptr<int>());
-  C(cnnlCrossEntropyForward(
-      handle, false, 0.0f, 0.0f, xd, predictions.data_ptr(), -100, 0, E1,
-      wsz ? ws.data_ptr() : nullptr, wsz, td, ti.data_ptr(), yd,
-      loss.data_ptr<float>(), ld, lse.data_ptr<float>()));
-  k1<<<d1, cnrtFuncTypeBlock, queue>>>(
-      loss.data_ptr<float>(), reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+      reinterpret_cast<float *>(partial.data_ptr<float>()));
+  k1<<<one, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const float *>(partial.data_ptr<float>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+
   return out;
 }
