@@ -28,9 +28,9 @@ __mlu_func__ float f0(float x) {
 
 __mlu_entry__ void k0(const half *__restrict__ predictions,
                       const int64_t *__restrict__ targets,
-                      float *__restrict__ out) {
+                      half *__restrict__ out) {
   if (taskId == 0) {
-    out[0] = 0.0f;
+    out[0] = (half)0.0f;
   }
   __sync_all_ipu();
 
@@ -62,13 +62,13 @@ __mlu_entry__ void k0(const half *__restrict__ predictions,
     acc += f0(sum) - (float)hbuf[off + label];
   }
 
-  __nram__ float h[1];
-  h[0] = acc * (1.0f / (float)ROWS);
-  __bang_atomic_reduce_add(out, h, 1);
+  __nram__ half h[1];
+  h[0] = (half)(acc * (1.0f / (float)ROWS));
+  __bang_atomic_reduce_add_async(out, h, 1);
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
-  auto out = torch::empty({}, predictions.options().dtype(torch::kFloat32));
+  auto out = torch::empty({}, predictions.options());
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {TASKS, 1, 1};
@@ -76,7 +76,7 @@ torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   k0<<<dim, cnrtFuncTypeUnion8, queue>>>(
       reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(targets.data_ptr<int64_t>()),
-      reinterpret_cast<float *>(out.data_ptr<float>()));
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
 
   return out;
 }
