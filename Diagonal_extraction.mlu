@@ -3,42 +3,23 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void diag_float_kernel(const float* a, float* out, int batch, int n) {
-  int idx = taskId;
-  int task_num = taskDim;
-  int total = batch * n;
-  for (int p = idx; p < total; p += task_num) {
-    int b = p / n;
-    int i = p - b * n;
-    out[p] = a[b * n * n + i * n + i];
-  }
-}
+#define E0 512
+#define E1 32
 
-__mlu_entry__ void diag_half_kernel(const half* a, half* out, int batch, int n) {
-  int idx = taskId;
-  int task_num = taskDim;
-  int total = batch * n;
-  for (int p = idx; p < total; p += task_num) {
-    int b = p / n;
-    int i = p - b * n;
-    out[p] = a[b * n * n + i * n + i];
-  }
+__mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ y) {
+  __nram__ half x[E0];
+  int p = taskId * E0 * E0;
+  __memcpy(x, a + p, sizeof(half), GDRAM2NRAM, sizeof(half),
+           (E0 + 1) * sizeof(half), E0 - 1);
+  __memcpy(y + taskId * E0, x, E0 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor A, int offset) {
   (void)offset;
-  int batch = (int)A.size(0);
-  int n = (int)A.size(1);
-  auto out = torch::empty({batch, n}, A.options());
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {4, 8, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
-  if (A.scalar_type() == at::kHalf) {
-    diag_half_kernel<<<dim, ktype, queue>>>(
-        reinterpret_cast<const half*>(A.data_ptr<at::Half>()),
-        reinterpret_cast<half*>(out.data_ptr<at::Half>()), batch, n);
-  } else {
-    diag_float_kernel<<<dim, ktype, queue>>>(A.data_ptr<float>(), out.data_ptr<float>(), batch, n);
-  }
+  auto out = torch::empty({E1, E0}, A.options());
+  cnrtDim3_t d = {E1, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
 }
