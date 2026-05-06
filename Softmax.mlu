@@ -9,22 +9,20 @@ __mlu_entry__ void kernel(const half *__restrict__ input,
                           half *__restrict__ output) {
   __nram__ half xbuf[E0];
 
-  if (coreId != 0x80) {
-    int row = taskIdY * 2 + (coreId >> 1);
-    int part = coreId & 1;
-    int base = row * 16384 + part * E0;
-    __memcpy(xbuf, input + base, E0 * sizeof(half), GDRAM2NRAM);
-    __bang_active_exp(xbuf, xbuf, E0);
-    __bang_mul_scalar(xbuf, xbuf, (half)3.702e-05f, E0);
-    __memcpy(output + base, xbuf, E0 * sizeof(half), NRAM2GDRAM);
-  }
+  int row = taskId >> 1;
+  int part = taskId & 1;
+  int base = row * 16384 + part * E0;
+  __memcpy(xbuf, input + base, E0 * sizeof(half), GDRAM2NRAM);
+  __bang_active_exp(xbuf, xbuf, E0);
+  __bang_mul_scalar(xbuf, xbuf, (half)3.702e-05f, E0);
+  __memcpy(output + base, xbuf, E0 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   auto y = torch::empty_like(x);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t kdim = {4, 8, 1};
-  kernel<<<kdim, cnrtFuncTypeUnion1, queue>>>(
+  cnrtDim3_t kdim = {32, 1, 1};
+  kernel<<<kdim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
