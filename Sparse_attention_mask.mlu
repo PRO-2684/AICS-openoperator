@@ -40,9 +40,6 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __bang_reduce_sum(f1, f0, 8192);
 
   __memcpy(a2, v + base + s * 64, n * 64 * sizeof(half), GDRAM2NRAM);
-  if (e) {
-    __bang_write_value(a2 + n * 64, (128 - n) * 64, (half)0.0f);
-  }
   __bang_transpose(a1, a2, 128, 64);
   __memcpy(w0, a1, 8192 * sizeof(half), NRAM2WRAM);
   __bang_matmul(f2, a3, w0, 64, 128, 64);
