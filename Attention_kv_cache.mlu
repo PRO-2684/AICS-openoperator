@@ -22,9 +22,6 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ kc,
   if (c != 0x80) {
     int t = c * 128;
     __memcpy(q0, q + h * 64, 64 * sizeof(half), GDRAM2NRAM);
-    if (c == 0) {
-      __memcpy(a2, q0, 64 * sizeof(half), NRAM2NRAM);
-    }
     __memcpy(a0, kc + h * 32768 + t * 64, 8192 * sizeof(half), GDRAM2NRAM);
     __bang_reshape_filter(a1, a0, 128, 1, 1, 64);
     __memcpy(w0, a1, 8192 * sizeof(half), NRAM2WRAM);
