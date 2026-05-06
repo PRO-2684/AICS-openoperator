@@ -9,8 +9,8 @@
   } while (0)
 
 static cnnlTensorDescriptor_t f2(int a, int b) {
-  int d[2] = {a, b};
-  int s[2] = {b, 1};
+  int64_t d[2] = {a, b};
+  int64_t s[2] = {b, 1};
   cnnlTensorDescriptor_t r;
   X(cnnlCreateTensorDescriptor(&r));
   X(cnnlSetTensorDescriptorEx_v2(r, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, d, s));
