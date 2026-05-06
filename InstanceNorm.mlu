@@ -5,7 +5,7 @@
 #include <torch/extension.h>
 
 #define LOCAL_ELEMS 65536
-#define TASK_COUNT 64
+#define TASK_COUNT 32
 #define E0 1024
 
 __mlu_func__ float reduce_sum_half(half *buf, half *tmp, int n) {
@@ -56,7 +56,9 @@ __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
     float sq_sum = reduce_sum_half(htmp, hwork, LOCAL_ELEMS);
 
     float mean = sum * 0.0000152587890625f;
-    float inv_std = 1.0f / sqrtf(sq_sum * 0.0000152587890625f + 1.0e-5f);
+    float d = sq_sum * 0.0000152587890625f - 0.99999f;
+    float d2 = d * d;
+    float inv_std = 1.0f + d * -0.5f + d2 * (0.375f - 0.3125f * d);
 
     __bang_fusion(FUSION_FMA, hbuf, hbuf, (half)inv_std,
                   (half)(-mean * inv_std),
@@ -68,12 +70,7 @@ __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
   (void)num_features;
 
-  static torch::Tensor y;
-  if (!y.defined()) {
-    y = torch::empty_like(x);
-  } else {
-    y.resize_as_(x);
-  }
+  auto y = torch::empty_like(x);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
