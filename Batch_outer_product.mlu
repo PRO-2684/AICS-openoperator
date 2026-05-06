@@ -3,32 +3,67 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 64
-#define E1 256
-#define E2 65536
+__mlu_global__ void k(const half *a, const half *b, half *c) {
+  __nram__ half x[256];
+  __nram__ half y[8192];
 
-__mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
-                      half *__restrict__ c) {
-  __nram__ half x[E1];
-  __nram__ half y[E2];
-  __nram__ float z[E2];
-  __wram__ half w[E1];
+  for (int p = taskId; p < 64; p += taskDim) {
+    __memcpy(x, b + p * 256, 512, GDRAM2NRAM);
 
-  if (taskId < E0) {
-    __memcpy(x, a + taskId * E1, E1 * sizeof(half), GDRAM2NRAM);
-    __memcpy(w, b + taskId * E1, E1 * sizeof(half), GDRAM2WRAM);
-    __bang_matmul(z, x, w, E1, 1, E1);
-    __bang_float2half_rn(y, z, E2);
-    __memcpy(c + taskId * E2, y, E2 * sizeof(half), NRAM2GDRAM);
+    for (int q = 0; q < 256; q += 32) {
+      int r = p * 256 + q;
+      int o = p * 65536 + q * 256;
+
+      __bang_mul_scalar(y, x, a[r], 256);
+      __bang_mul_scalar(y + 256, x, a[r + 1], 256);
+      __bang_mul_scalar(y + 512, x, a[r + 2], 256);
+      __bang_mul_scalar(y + 768, x, a[r + 3], 256);
+      __bang_mul_scalar(y + 1024, x, a[r + 4], 256);
+      __bang_mul_scalar(y + 1280, x, a[r + 5], 256);
+      __bang_mul_scalar(y + 1536, x, a[r + 6], 256);
+      __bang_mul_scalar(y + 1792, x, a[r + 7], 256);
+      __bang_mul_scalar(y + 2048, x, a[r + 8], 256);
+      __bang_mul_scalar(y + 2304, x, a[r + 9], 256);
+      __bang_mul_scalar(y + 2560, x, a[r + 10], 256);
+      __bang_mul_scalar(y + 2816, x, a[r + 11], 256);
+      __bang_mul_scalar(y + 3072, x, a[r + 12], 256);
+      __bang_mul_scalar(y + 3328, x, a[r + 13], 256);
+      __bang_mul_scalar(y + 3584, x, a[r + 14], 256);
+      __bang_mul_scalar(y + 3840, x, a[r + 15], 256);
+      __bang_mul_scalar(y + 4096, x, a[r + 16], 256);
+      __bang_mul_scalar(y + 4352, x, a[r + 17], 256);
+      __bang_mul_scalar(y + 4608, x, a[r + 18], 256);
+      __bang_mul_scalar(y + 4864, x, a[r + 19], 256);
+      __bang_mul_scalar(y + 5120, x, a[r + 20], 256);
+      __bang_mul_scalar(y + 5376, x, a[r + 21], 256);
+      __bang_mul_scalar(y + 5632, x, a[r + 22], 256);
+      __bang_mul_scalar(y + 5888, x, a[r + 23], 256);
+      __bang_mul_scalar(y + 6144, x, a[r + 24], 256);
+      __bang_mul_scalar(y + 6400, x, a[r + 25], 256);
+      __bang_mul_scalar(y + 6656, x, a[r + 26], 256);
+      __bang_mul_scalar(y + 6912, x, a[r + 27], 256);
+      __bang_mul_scalar(y + 7168, x, a[r + 28], 256);
+      __bang_mul_scalar(y + 7424, x, a[r + 29], 256);
+      __bang_mul_scalar(y + 7680, x, a[r + 30], 256);
+      __bang_mul_scalar(y + 7936, x, a[r + 31], 256);
+
+      __memcpy(c + o, y, 16384, NRAM2GDRAM);
+    }
   }
 }
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
   auto c = torch::empty({64, 256, 256}, a.options());
-  cnrtDim3_t d = {4, 8, 2};
-  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+
+  cnrtDim3_t d;
+  d.x = 4;
+  d.y = 8;
+  d.z = 1;
+
+  k<<<d, CNRT_FUNC_TYPE_UNION1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(a.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(b.data_ptr<at::Half>()),
       reinterpret_cast<half *>(c.data_ptr<at::Half>()));
+
   return c;
 }
