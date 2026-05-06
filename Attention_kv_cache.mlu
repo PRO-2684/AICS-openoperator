@@ -33,8 +33,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ kc,
     float ps = s1[0] + s1[32] + s1[64] + s1[96];
     __memcpy(a0, vc + h * 32768 + t * 64, 8192 * sizeof(half), GDRAM2NRAM);
     __bang_transpose(a1, a0, 128, 64);
-    __bang_reshape_filter(a2, a1, 64, 1, 1, 128);
-    __memcpy(w0, a2, 8192 * sizeof(half), NRAM2WRAM);
+    __memcpy(w0, a1, 8192 * sizeof(half), NRAM2WRAM);
     __bang_float2half_rn(q0, s0, 128);
     __bang_matmul(o0, q0, w0, 1, 128, 64);
 
