@@ -8,6 +8,11 @@
 #define LOCAL_ELEMS 8192 * 4
 
 __mlu_func__ float reduce_sum_float_small(float *buf, float *tmp, int n) {
+  if (n == 32768) {
+    __bang_sumpool(tmp, buf, 32, 1, 1024, 1, 1024, 1, 1024);
+    __bang_reduce_sum(tmp, tmp, 32);
+    return tmp[0];
+  }
   int cur = n;
   float *src = buf;
   float *dst = tmp;
