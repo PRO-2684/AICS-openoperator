@@ -6,34 +6,51 @@
 
 __mlu_func__ int f0(int s, int r) {
   if (s == 0) {
-    if (r < 3) {
-      return 4;
+    if (r == 3) {
+      return 15;
     }
-    return r;
+    if (r < 5) {
+      return 31;
+    }
+    if (r == 5) {
+      return 63;
+    }
+    if (r == 6) {
+      return 127;
+    }
+    if (r == 7) {
+      return 255;
+    }
+    if (r == 8) {
+      return 319;
+    }
+    return 831;
   }
   if (r < 2) {
-    return 1;
+    return 3;
   }
   if (r < 5) {
-    return 4;
+    return 31;
   }
-  return r;
-}
-
-__mlu_func__ int f1(int s, int c) {
-  if (s == 0) {
-    if (c >= 6 && c < 8) {
-      return 8;
-    }
-    return 10;
+  if (r == 5) {
+    return 63;
   }
-  if (c >= 6 && c < 8) {
-    return 8;
+  if (r == 6) {
+    return 127;
   }
-  if (c >= 8 && c < 10) {
-    return 10;
+  if (r == 7) {
+    return 255;
   }
-  return 12;
+  if (r == 8) {
+    return 319;
+  }
+  if (r == 9) {
+    return 831;
+  }
+  if (r == 10) {
+    return 1855;
+  }
+  return 3903;
 }
 
 __mlu_func__ float f2(float x) {
@@ -109,10 +126,10 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   for (int r = 0; r < 12; ++r) {
     if (r < n) {
       __bang_write_value(y0, 40, 0.0f);
-      int mr = f0(s, r);
+      int m = f0(s, r);
 #pragma unroll
       for (int c = 0; c < 12; ++c) {
-        if (c < n && mr >= c && mr < f1(s, c)) {
+        if ((m >> c) & 1) {
           float w = f2(a0[r * 64 + c] * 0.7f) * 0.08333333333333333f;
           __bang_fusion(FUSION_FMA, y0, v0 + c * 64, w, y0, 40, 40);
         }
