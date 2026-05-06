@@ -84,7 +84,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
     }
   }
 
-  __memcpy(k1, k2, 2048 * sizeof(half), NRAM2WRAM);
+  __bang_reshape_filter(k1, k2, 64, 1, 1, 32, NRAM2WRAM);
   __bang_matmul(a0, q0, k1, n, 32, 64);
 
 #pragma unroll
@@ -115,7 +115,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
     }
   }
 
-  __memcpy(v1, v2, 2048 * sizeof(half), NRAM2WRAM);
+  __bang_reshape_filter(v1, v2, 64, 1, 1, 32, NRAM2WRAM);
   __bang_matmul(y0, p0, v1, n, 32, 64);
   __bang_float2half_rn(y1, y0, n * 64);
 
