@@ -30,7 +30,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ z,
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_half2float(b, a, E1);
   c[0] = f0(b, c, E1);
-  __bang_atomic_reduce_add_async(z, c, 1);
+  __bang_atomic_reduce_add(z, c[0], 1);
   __sync_all_ipu();
   if (taskId == E0 - 1) {
     __memcpy(c, z, sizeof(float), GDRAM2NRAM);
