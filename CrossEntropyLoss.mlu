@@ -19,25 +19,21 @@ __mlu_entry__ void k0(const half *__restrict__ predictions,
 
   __nram__ half hbuf[LOCAL_ELEMS];
   __nram__ float fbuf[LOCAL_ELEMS];
+  __nram__ float lbuf[ROWS_PER_TASK];
 
   __memcpy(hbuf, predictions + base, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
   __bang_half2float(fbuf, hbuf, LOCAL_ELEMS);
   __bang_active_exp(fbuf, fbuf, LOCAL_ELEMS);
+  __bang_sumpool(lbuf, fbuf, 1, ROWS_PER_TASK, COLS, 1, COLS, COLS, 1);
+  __bang_active_log(lbuf, lbuf, ROWS_PER_TASK);
 
   float acc = 0.0f;
 
 #pragma unroll 1
   for (int r = 0; r < ROWS_PER_TASK; ++r) {
     int off = r * COLS;
-    float sum = 0.0f;
-
-#pragma unroll
-    for (int c = 0; c < COLS; ++c) {
-      sum += fbuf[off + c];
-    }
-
     int64_t label = targets[row0 + r];
-    acc += logf(sum) - (float)hbuf[off + label];
+    acc += lbuf[r] - (float)hbuf[off + label];
   }
 
   partial[taskId] = acc;
