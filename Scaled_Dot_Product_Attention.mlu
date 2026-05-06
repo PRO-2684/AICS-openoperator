@@ -1,6 +1,9 @@
 #include <aten/cnnl/cnnlHandle.h>
+#include <bang.h>
 #include <cnnl.h>
 #include <cnnl_extra.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
 #define CNNL_CHECK(expr)                                                        \
@@ -9,14 +12,43 @@
     TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
   } while (0)
 
+__mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
+                      const half *__restrict__ v, half *__restrict__ q2,
+                      half *__restrict__ k2, half *__restrict__ v2) {
+  __nram__ half t[8192];
+  int b = taskId >> 3;
+  int h = taskId & 7;
+  int p0 = (b * 8 + h) * 8192;
+  int p1 = b * 65536 + h * 64;
+  __memcpy(t, q + p0, 8192 * sizeof(half), GDRAM2NRAM);
+  __memcpy(q2 + p1, t, 64 * sizeof(half), NRAM2GDRAM, 512 * sizeof(half),
+           64 * sizeof(half), 127);
+  __memcpy(t, k + p0, 8192 * sizeof(half), GDRAM2NRAM);
+  __memcpy(k2 + p1, t, 64 * sizeof(half), NRAM2GDRAM, 512 * sizeof(half),
+           64 * sizeof(half), 127);
+  __memcpy(t, v + p0, 8192 * sizeof(half), GDRAM2NRAM);
+  __memcpy(v2 + p1, t, 64 * sizeof(half), NRAM2GDRAM, 512 * sizeof(half),
+           64 * sizeof(half), 127);
+}
+
+__mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half t[8192];
+  int b = taskId >> 3;
+  int h = taskId & 7;
+  int p0 = b * 65536 + h * 64;
+  int p1 = (b * 8 + h) * 8192;
+  __memcpy(t, x + p0, 64 * sizeof(half), GDRAM2NRAM, 64 * sizeof(half),
+           512 * sizeof(half), 127);
+  __memcpy(y + p1, t, 8192 * sizeof(half), NRAM2GDRAM);
+}
+
 static cnnlTensorDescriptor_t desc0() {
   static cnnlTensorDescriptor_t d = nullptr;
   if (d == nullptr) {
     int dims[4] = {2, 128, 8, 64};
-    int st[4] = {65536, 64, 8192, 1};
     CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-    CNNL_CHECK(cnnlSetTensorDescriptorEx(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF,
-                                         4, dims, st));
+    CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4,
+                                       dims));
   }
   return d;
 }
@@ -25,6 +57,24 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
                         double scale) {
   (void)scale;
   auto out = torch::empty_like(q);
+  static torch::Tensor q2;
+  static torch::Tensor k2;
+  static torch::Tensor v2;
+  static torch::Tensor y2;
+  if (!q2.defined()) {
+    q2 = torch::empty_like(q);
+    k2 = torch::empty_like(q);
+    v2 = torch::empty_like(q);
+    y2 = torch::empty_like(q);
+  }
+  cnrtDim3_t dim = {16, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(q.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(k.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(v.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(q2.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(k2.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(v2.data_ptr<at::Half>()));
   auto d = desc0();
   cnnlHandle_t handle = torch_mlu::getCurrentHandle();
   static size_t ws_size = 0;
@@ -39,11 +89,14 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
     ws = torch::empty({(int64_t)ws_size}, q.options().dtype(torch::kUInt8));
   }
   CNNL_CHECK(cnnlScaledDotProductAttn_v4(
-      handle, nullptr, nullptr, d, q.data_ptr(), d, k.data_ptr(), d,
-      v.data_ptr(), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+      handle, nullptr, nullptr, d, q2.data_ptr(), d, k2.data_ptr(), d,
+      v2.data_ptr(), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
       nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 128, 128, false, -1,
       -1, 0.125f, CNNL_COMPUTATION_FAST, CNNL_DTYPE_HALF,
       ws_size ? ws.data_ptr() : nullptr, ws_size, false, nullptr, nullptr, d,
-      out.data_ptr()));
+      y2.data_ptr()));
+  k1<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(y2.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
 }
