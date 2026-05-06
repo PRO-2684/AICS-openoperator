@@ -55,12 +55,8 @@ __mlu_entry__ void k1(const float *__restrict__ partial, half *__restrict__ out)
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
-  static torch::Tensor out;
-  static torch::Tensor partial;
-  if (!out.defined())
-    out = torch::empty({}, predictions.options());
-  if (!partial.defined())
-    partial = torch::empty({TASKS}, predictions.options().dtype(torch::kFloat32));
+  auto out = torch::empty({}, predictions.options());
+  auto partial = torch::empty({TASKS}, predictions.options().dtype(torch::kFloat32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {TASKS, 1, 1};

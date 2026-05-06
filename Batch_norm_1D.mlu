@@ -76,21 +76,11 @@ __mlu_entry__ void k2(const half *__restrict__ x, const float *__restrict__ u,
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bias,
                         torch::Tensor running_mean, torch::Tensor running_var,
                         int num_features) {
-  static torch::Tensor out;
-  static torch::Tensor s;
-  static torch::Tensor q;
-  static torch::Tensor u;
-  static torch::Tensor v;
-  if (!out.defined())
-    out = torch::empty_like(x);
-  if (!s.defined())
-    s = torch::empty({E2, E1}, x.options().dtype(torch::kFloat32));
-  if (!q.defined())
-    q = torch::empty({E2, E1}, x.options().dtype(torch::kFloat32));
-  if (!u.defined())
-    u = torch::empty({E1}, x.options().dtype(torch::kFloat32));
-  if (!v.defined())
-    v = torch::empty({E1}, x.options().dtype(torch::kFloat32));
+  auto out = torch::empty_like(x);
+  auto s = torch::empty({E2, E1}, x.options().dtype(torch::kFloat32));
+  auto q = torch::empty({E2, E1}, x.options().dtype(torch::kFloat32));
+  auto u = torch::empty({E1}, x.options().dtype(torch::kFloat32));
+  auto v = torch::empty({E1}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t g = {E2, 1, 1};
   k0<<<g, cnrtFuncTypeBlock, queue>>>(
