@@ -8,11 +8,13 @@
     TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
   } while (0)
 
-static cnnlTensorDescriptor_t f(int n) {
-  int d[1] = {n};
+static cnnlTensorDescriptor_t f2(int a, int b) {
+  int64_t d[2] = {a, b};
+  int64_t st[2] = {b, 1};
   cnnlTensorDescriptor_t r;
   X(cnnlCreateTensorDescriptor(&r));
-  X(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 1, d));
+  X(cnnlSetTensorDescriptorEx_v2(r, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, d,
+                                 st));
   return r;
 }
 
@@ -22,58 +24,40 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   static cnnlTensorDescriptor_t a = nullptr;
   static cnnlTensorDescriptor_t b = nullptr;
   static cnnlTensorDescriptor_t c = nullptr;
-  static cnnlStrideBatchMatMulDescriptor_t d = nullptr;
-  static cnnlStrideBatchMatMulAlgo_t e = nullptr;
+  static cnnlMatMulDescriptor_t d = nullptr;
+  static cnnlMatMulAlgo_t e = nullptr;
   static size_t z = 0;
 
   cnnlHandle_t h = torch_mlu::getCurrentHandle();
-  bool ta = false;
-  bool tb = false;
-  int m = 1024;
-  int n = 768;
-  int k = 2048;
-  int la = 2048;
-  int lb = 768;
-  int lc = 768;
-  int ld = 768;
-  int bs[1] = {16};
-  int64_t sa[1] = {2097152};
-  int64_t sb[1] = {0};
-  int64_t sc[1] = {786432};
   float al = 1.0f;
   float be = 0.0f;
 
   if (d == nullptr) {
-    a = f(16 * 1024 * 2048);
-    b = f(2048 * 768);
-    c = f(16 * 1024 * 768);
-    X(cnnlCreateStrideBatchMatMulDescriptor(&d));
-    X(cnnlCreateStrideBatchMatMulAlgo(&e));
-    cnnlStrideBatchMatMulHeuristicResult_t r;
-    X(cnnlCreateStrideBatchMatMulHeuristicResult(&r));
-    cnnlDataType_t t = CNNL_DTYPE_FLOAT;
-    int u = 1;
+    a = f2(16384, 2048);
+    b = f2(2048, 768);
+    c = f2(16384, 768);
+    X(cnnlMatMulDescCreate(&d));
+    X(cnnlCreateMatMulAlgo(&e));
+    cnnlMatMulHeuristicResult_t r;
+    X(cnnlCreateMatMulHeuristicResult(&r));
     int v = 0;
-    X(cnnlSetStrideBatchMatMulDescAttr(d, CNNL_STRIDE_BMM_COMPUTE_TYPE, &t,
-                                       sizeof(t)));
-    X(cnnlSetStrideBatchMatMulDescAttr(d, CNNL_STRIDE_BMM_MAX_BATCH_DIM, &u,
-                                       sizeof(u)));
-    X(cnnlSetStrideBatchMatMulDescAttr(d, CNNL_STRIDE_BMM_ALLOW_TF32, &v,
-                                       sizeof(v)));
+    int lda = 2048;
+    int ldb = 768;
+    int ldc = 768;
+    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_ALLOW_TF32, &v, sizeof(v)));
+    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDA, &lda, sizeof(lda)));
+    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDB, &ldb, sizeof(ldb)));
+    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDC, &ldc, sizeof(ldc)));
     int q = 0;
-    X(cnnlGetStrideBatchMatMulAlgoHeuristic_v2(
-        h, d, a, b, c, c, ta, tb, &al, &be, m, n, k, la, lb, lc, ld, bs, sa, sb,
-        sc, sc, nullptr, 1, &r, &q));
-    X(cnnlGetStrideBatchMatMulHeuristicResult(r, &e, &z));
-    X(cnnlDestroyStrideBatchMatMulHeuristicResult(r));
+    X(cnnlGetMatMulAlgoHeuristic(h, d, a, b, c, c, nullptr, 1, &r, &q));
+    X(cnnlGetMatMulHeuristicResult(r, e, &z));
+    X(cnnlDestroyMatMulHeuristicResult(r));
   }
 
   auto w = torch::empty({(int64_t)z}, A.options().dtype(torch::kUInt8));
-  X(cnnlStrideBatchMatMul_v3(h, d, e, ta, tb, m, n, k, bs, &al, a,
-                             A.data_ptr(), la, sa, b, B.data_ptr(), lb, sb,
-                             &be, c, C.data_ptr(), lc, sc,
-                             z ? w.data_ptr() : nullptr, z, c, C.data_ptr(), ld,
-                             sc));
+  X(cnnlMatMul_v2(h, d, e, &al, a, A.data_ptr(), b, B.data_ptr(), &be, c,
+                  C.data_ptr(), z ? w.data_ptr() : nullptr, z, c,
+                  C.data_ptr()));
   return C;
 }
 
