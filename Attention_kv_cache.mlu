@@ -57,12 +57,8 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ kc,
 
     __memcpy(q0, kn + h * 64, 64 * sizeof(half), GDRAM2NRAM);
     __bang_mul(q0, q0, a2, 64);
-    __bang_half2float(s0, q0, 64);
-    float sn = 0.0f;
-#pragma unroll
-    for (int i = 0; i < 64; ++i) {
-      sn += s0[i];
-    }
+    __bang_reduce_sum(q0, q0, 64);
+    float sn = (float)q0[0];
     sn = expf(sn * 0.125f);
     float inv = 1.0f / (s1[0] + s1[1] + s1[2] + s1[3] + sn);
     __memcpy(q0, vn + h * 64, 64 * sizeof(half), GDRAM2NRAM);
