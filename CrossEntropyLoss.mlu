@@ -18,11 +18,11 @@ __mlu_entry__ void k0(const half *__restrict__ predictions,
   int base = row0 * COLS;
 
   __nram__ half hbuf[LOCAL_ELEMS];
-  __nram__ half ebuf[LOCAL_ELEMS];
+  __nram__ float fbuf[LOCAL_ELEMS];
 
   __memcpy(hbuf, predictions + base, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
-  __memcpy(ebuf, hbuf, LOCAL_ELEMS * sizeof(half), NRAM2NRAM);
-  __bang_active_exp(ebuf, ebuf, LOCAL_ELEMS);
+  __bang_half2float(fbuf, hbuf, LOCAL_ELEMS);
+  __bang_active_exp(fbuf, fbuf, LOCAL_ELEMS);
 
   float acc = 0.0f;
 
@@ -33,7 +33,7 @@ __mlu_entry__ void k0(const half *__restrict__ predictions,
 
 #pragma unroll
     for (int c = 0; c < COLS; ++c) {
-      sum += (float)ebuf[off + c];
+      sum += fbuf[off + c];
     }
 
     int64_t label = targets[row0 + r];
