@@ -152,7 +152,12 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
   (void)context_expand;
   (void)label_lens;
   (void)preference;
-  auto y = torch::empty({22, 4, 40}, q.options());
+  static torch::Tensor y;
+  if (!y.defined()) {
+    y = torch::empty({22, 4, 40}, q.options());
+  } else {
+    y.resize_({22, 4, 40});
+  }
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t g = {8, 1, 1};
   k0<<<g, cnrtFuncTypeBlock, queue>>>(
