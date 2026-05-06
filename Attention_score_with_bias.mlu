@@ -23,10 +23,9 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __memcpy(w0, a3, 8192 * sizeof(half), NRAM2WRAM);
   __bang_matmul(f0, a0, w0, 128, 64, 128);
   __bang_mul_scalar(f0, f0, 0.125f, 16384);
-  __memcpy(a2, b + (p & 7) * 16384, 16384 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(f1, a2, 16384);
-  __bang_add(f0, f0, f1, 16384);
   __bang_float2half_rn(a2, f0, 16384);
+  __memcpy(a4, b + (p & 7) * 16384, 16384 * sizeof(half), GDRAM2NRAM);
+  __bang_add(a2, a2, a4, 16384);
   __bang_active_exp(a2, a2, 16384);
   __bang_reduce_sum(a4, a2, 16384);
 
