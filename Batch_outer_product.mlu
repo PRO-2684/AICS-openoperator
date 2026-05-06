@@ -8,17 +8,17 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   __nram__ half x[256];
   __nram__ half y[65536];
   __nram__ half z[65536];
-  __nram__ half t[65536];
 
   for (int p = taskId; p < 64; p += taskDim) {
     __memcpy(x, b + p * 256, 256 * sizeof(half), GDRAM2NRAM);
     int r = p * 256;
     __memcpy(y, x, 256 * sizeof(half), NRAM2NRAM, 256 * sizeof(half), 0,
              255);
-    __memcpy(z, a + r, 256 * sizeof(half), GDRAM2NRAM, 256 * sizeof(half), 0,
-             255);
-    __bang_transpose(t, z, 256, 256);
-    __bang_mul(y, y, t, 65536);
+#pragma unroll 256
+    for (int i = 0; i < 256; ++i) {
+      __bang_write_value(z + i * 256, 256, a[r + i]);
+    }
+    __bang_cycle_mul(y, z, x, 65536, 256);
     __memcpy(c + p * 65536, y, 65536 * sizeof(half), NRAM2GDRAM);
   }
 }
