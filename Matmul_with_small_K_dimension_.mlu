@@ -29,7 +29,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
     for (int r = 0; r < E1; ++r) {
       __memcpy(y + r * E2, b + r * E0 + cp, E2 * sizeof(half), GDRAM2NRAM);
     }
-    __memcpy(w, y, E3 * sizeof(half), NRAM2WRAM);
+    __bang_reshape_filter(w, y, 1, E1, E2, 1, NRAM2WRAM);
 
     __bang_matmul(f, x, w, E1, E1, E2);
 
