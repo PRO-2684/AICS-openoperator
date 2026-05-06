@@ -5,22 +5,34 @@
 
 __mlu_global__ void k(const half *a, const half *b, half *c) {
   __nram__ half x[256];
-  __nram__ half y[8192];
+  __nram__ half y[4096];
 
-  for (int i = taskId; i < 512; i += taskDim) {
-    int p = i >> 3;
-    int q = (i & 7) << 5;
+  for (int i = taskId; i < 1024; i += taskDim) {
+    int p = i >> 4;
+    int q = (i & 15) << 4;
     int r = p * 256 + q;
     int o = p * 65536 + q * 256;
 
     __memcpy(x, b + p * 256, 512, GDRAM2NRAM);
 
-#pragma unroll
-    for (int j = 0; j < 32; ++j) {
-      __bang_mul_scalar(y + j * 256, x, a[r + j], 256);
-    }
+    __bang_mul_scalar(y, x, a[r], 256);
+    __bang_mul_scalar(y + 256, x, a[r + 1], 256);
+    __bang_mul_scalar(y + 512, x, a[r + 2], 256);
+    __bang_mul_scalar(y + 768, x, a[r + 3], 256);
+    __bang_mul_scalar(y + 1024, x, a[r + 4], 256);
+    __bang_mul_scalar(y + 1280, x, a[r + 5], 256);
+    __bang_mul_scalar(y + 1536, x, a[r + 6], 256);
+    __bang_mul_scalar(y + 1792, x, a[r + 7], 256);
+    __bang_mul_scalar(y + 2048, x, a[r + 8], 256);
+    __bang_mul_scalar(y + 2304, x, a[r + 9], 256);
+    __bang_mul_scalar(y + 2560, x, a[r + 10], 256);
+    __bang_mul_scalar(y + 2816, x, a[r + 11], 256);
+    __bang_mul_scalar(y + 3072, x, a[r + 12], 256);
+    __bang_mul_scalar(y + 3328, x, a[r + 13], 256);
+    __bang_mul_scalar(y + 3584, x, a[r + 14], 256);
+    __bang_mul_scalar(y + 3840, x, a[r + 15], 256);
 
-    __memcpy(c + o, y, 16384, NRAM2GDRAM);
+    __memcpy(c + o, y, 8192, NRAM2GDRAM);
   }
 }
 
