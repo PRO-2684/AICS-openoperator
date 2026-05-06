@@ -7,7 +7,8 @@
 #define E1 256
 #define E2 1024
 #define E3 64
-#define E4 4
+#define E4 2
+#define E5 8
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ h,
                       const half *__restrict__ b0, const half *__restrict__ b1,
@@ -105,7 +106,7 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor hidden,
   (void)totalElements;
   auto y = torch::empty({E2}, input.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {E4, 1, 1};
+  cnrtDim3_t d = {E5, 1, 1};
   k1<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(hidden.data_ptr<at::Half>()),
