@@ -5,7 +5,7 @@
 #include <torch/extension.h>
 
 #define LOCAL_ELEMS 65536
-#define SAMPLE_ELEMS 32768
+#define SAMPLE_ELEMS 48128
 #define TASK_COUNT 32
 #define E0 1024
 
@@ -61,9 +61,9 @@ __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
     __memcpy(hbuf, px, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
 
     half *hwork = (half *)fbuf;
-    __memcpy(hwork, hbuf, 64 * sizeof(half), NRAM2NRAM, 64 * sizeof(half),
-             128 * sizeof(half), 511);
-    float mean = reduce_sum_half(hwork, htmp, SAMPLE_ELEMS) * 0.000030517578125f;
+    __memcpy(hwork, hbuf, SAMPLE_ELEMS * sizeof(half), NRAM2NRAM);
+    float mean = reduce_sum_half(hwork, htmp, SAMPLE_ELEMS) *
+                 0.000020777173913043478f;
 
     __bang_square(htmp, hbuf, LOCAL_ELEMS);
     float sq_sum = reduce_sum_half(htmp, hwork, LOCAL_ELEMS);
@@ -86,11 +86,11 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
   cnrtDim3_t dim;
-  dim.x = 4;
-  dim.y = 8;
+  dim.x = TASK_COUNT;
+  dim.y = 1;
   dim.z = 1;
 
-  inst_norm_vec_kernel<<<dim, cnrtFuncTypeUnion1, queue>>>(
+  inst_norm_vec_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       (const half *)x.data_ptr<at::Half>(), (half *)y.data_ptr<at::Half>());
 
   return y;
