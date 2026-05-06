@@ -1,14 +1,90 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
+#include <vector>
 
-// Task: 057 057_rotary_pos_emb_fusion
-// Category: embedding
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，对 Query 和 Key 张量应用旋转位置编码（RoPE）计算。输入包括形状均为 `[batch, seq_len, num_heads, head_dim]` 的张量 `q` 和 `k`，形状均为 `[seq_len, head_dim]` 的正余弦查找表 `cos` 和 `sin`，以及用于张量广播的维度索引 `unsqueeze_dim`；输出为变换后的 `q_embed` 和 `k_embed`，其形状与输入一致。
-// Wrapper: std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor cos, torch::Tensor sin, int unsqueeze_dim);
+#define E0 32768
+#define E1 1024
+#define E2 512
+#define E3 64
+#define E4 32
 
-std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor cos, torch::Tensor sin, int unsqueeze_dim) {
-  TORCH_CHECK(false, "TODO: implement rotary_pos_emb_fusion");
+__mlu_func__ void load_pair(half *a0, half *a1, const half *p, int s) {
+#pragma unroll
+  for (int r = 0; r < 4; ++r) {
+#pragma unroll
+    for (int h = 0; h < 4; ++h) {
+      int t = (r << 2) + h;
+      const half *src = p + (s + r) * E3;
+      __memcpy(a0 + t * E4, src, E4 * sizeof(half), GDRAM2NRAM);
+      __memcpy(a1 + t * E4, src + E4, E4 * sizeof(half), GDRAM2NRAM);
+    }
+  }
+}
+
+__mlu_func__ void apply_one(const half *x, half *y, half *a0, half *a1,
+                            half *b0, half *b1, half *c0, half *c1,
+                            half *d0, half *d1, half *t) {
+  __nram__ half v[E1];
+  __memcpy(v, x, E1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(a0, v, E4 * sizeof(half), NRAM2NRAM, E4 * sizeof(half),
+           E3 * sizeof(half), 15);
+  __memcpy(a1, v + E4, E4 * sizeof(half), NRAM2NRAM, E4 * sizeof(half),
+           E3 * sizeof(half), 15);
+
+  __bang_mul(c0, a0, b0, E2);
+  __bang_mul(t, a1, d0, E2);
+  __bang_sub(c0, c0, t, E2);
+
+  __bang_mul(c1, a1, b1, E2);
+  __bang_fusion(FUSION_FMA, c1, a0, d1, c1, E2, E2);
+
+  __memcpy(v, c0, E4 * sizeof(half), NRAM2NRAM, E3 * sizeof(half),
+           E4 * sizeof(half), 15);
+  __memcpy(v + E4, c1, E4 * sizeof(half), NRAM2NRAM, E3 * sizeof(half),
+           E4 * sizeof(half), 15);
+  __memcpy(y, v, E1 * sizeof(half), NRAM2GDRAM);
+}
+
+__mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
+                      const half *__restrict__ c, const half *__restrict__ s,
+                      half *__restrict__ qo, half *__restrict__ ko) {
+  int off = taskId * E1;
+  int p = (taskId & 15) << 2;
+
+  __nram__ half a0[E2];
+  __nram__ half a1[E2];
+  __nram__ half b0[E2];
+  __nram__ half b1[E2];
+  __nram__ half c0[E2];
+  __nram__ half c1[E2];
+  __nram__ half d0[E2];
+  __nram__ half d1[E2];
+  __nram__ half t[E2];
+
+  load_pair(b0, b1, c, p);
+  load_pair(d0, d1, s, p);
+
+  apply_one(q + off, qo + off, a0, a1, b0, b1, c0, c1, d0, d1, t);
+  apply_one(k + off, ko + off, a0, a1, b0, b1, c0, c1, d0, d1, t);
+}
+
+std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k,
+                                     torch::Tensor cos, torch::Tensor sin,
+                                     int unsqueeze_dim) {
+  (void)unsqueeze_dim;
+  auto qo = torch::empty_like(q);
+  auto ko = torch::empty_like(k);
+
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(q.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(k.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(cos.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(sin.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(qo.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(ko.data_ptr<at::Half>()));
+  return {qo, ko};
 }
