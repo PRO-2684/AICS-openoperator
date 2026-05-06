@@ -12,6 +12,9 @@
 __mlu_entry__ void kernel(const half *__restrict__ input,
                           half *__restrict__ output) {
   const int row = taskId;
+  if (row >= A) {
+    return;
+  }
 
   __nram__ half xbuf[B];
   __nram__ half tmp[D];
@@ -45,7 +48,7 @@ __mlu_entry__ void kernel(const half *__restrict__ input,
 torch::Tensor bang_func(torch::Tensor x) {
   auto y = torch::empty_like(x);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t kdim = {A, 1, 1};
+  cnrtDim3_t kdim = {4, 8, 1};
   kernel<<<kdim, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
