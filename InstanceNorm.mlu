@@ -22,6 +22,8 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
   (void)num_features;
 
   auto y = torch::empty_like(x);
+  auto xh = torch::empty({16, 256, 256, 64}, x.options());
+  auto yh = torch::empty({16, 256, 256, 64}, x.options());
   auto s = torch::empty({64}, x.options());
   auto b = torch::empty({64}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
@@ -30,36 +32,68 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
       reinterpret_cast<half *>(s.data_ptr<at::Half>()),
       reinterpret_cast<half *>(b.data_ptr<at::Half>()));
 
+  static cnnlTensorDescriptor_t x_desc0 = nullptr;
   static cnnlTensorDescriptor_t x_desc = nullptr;
+  static cnnlTensorDescriptor_t y_desc0 = nullptr;
+  static cnnlTransposeDescriptor_t td0 = nullptr;
+  static cnnlTransposeDescriptor_t td1 = nullptr;
   static cnnlTensorDescriptor_t sb_desc = nullptr;
   static cnnlTensorDescriptor_t mv_desc = nullptr;
+  static size_t ws0 = 0;
+  static size_t ws1 = 0;
   static size_t ws_size = 0;
   if (x_desc == nullptr) {
-    int s0[4] = {16, 256, 256, 64};
-    int st0[4] = {4194304, 256, 1, 65536};
-    int s1[1] = {64};
+    int s0[4] = {16, 64, 256, 256};
+    int s1[4] = {16, 256, 256, 64};
+    int p0[4] = {0, 2, 3, 1};
+    int p1[4] = {0, 3, 1, 2};
+    int s3[1] = {64};
     int s2[2] = {16, 64};
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&x_desc0));
     CNNL_CHECK(cnnlCreateTensorDescriptor(&x_desc));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&y_desc0));
+    CNNL_CHECK(cnnlCreateTransposeDescriptor(&td0));
+    CNNL_CHECK(cnnlCreateTransposeDescriptor(&td1));
     CNNL_CHECK(cnnlCreateTensorDescriptor(&sb_desc));
     CNNL_CHECK(cnnlCreateTensorDescriptor(&mv_desc));
-    CNNL_CHECK(cnnlSetTensorDescriptorEx(x_desc, CNNL_LAYOUT_NHWC,
-                                         CNNL_DTYPE_HALF, 4, s0, st0));
+    CNNL_CHECK(cnnlSetTensorDescriptor(x_desc0, CNNL_LAYOUT_ARRAY,
+                                       CNNL_DTYPE_HALF, 4, s0));
+    CNNL_CHECK(cnnlSetTensorDescriptor(x_desc, CNNL_LAYOUT_NHWC,
+                                       CNNL_DTYPE_HALF, 4, s1));
+    CNNL_CHECK(cnnlSetTensorDescriptor(y_desc0, CNNL_LAYOUT_ARRAY,
+                                       CNNL_DTYPE_HALF, 4, s0));
+    CNNL_CHECK(cnnlSetTransposeDescriptor(td0, 4, p0));
+    CNNL_CHECK(cnnlSetTransposeDescriptor(td1, 4, p1));
     CNNL_CHECK(cnnlSetTensorDescriptor(sb_desc, CNNL_LAYOUT_ARRAY,
-                                       CNNL_DTYPE_HALF, 1, s1));
+                                       CNNL_DTYPE_HALF, 1, s3));
     CNNL_CHECK(cnnlSetTensorDescriptor(mv_desc, CNNL_LAYOUT_NC, CNNL_DTYPE_HALF,
                                        2, s2));
+    CNNL_CHECK(cnnlGetTransposeWorkspaceSize(torch_mlu::getCurrentHandle(),
+                                             x_desc0, td0, &ws0));
+    CNNL_CHECK(cnnlGetTransposeWorkspaceSize(torch_mlu::getCurrentHandle(),
+                                             x_desc, td1, &ws1));
     CNNL_CHECK(cnnlGetInstanceNormForwardWorkspaceSize(
         torch_mlu::getCurrentHandle(), x_desc, &ws_size));
+    if (ws0 > ws_size)
+      ws_size = ws0;
+    if (ws1 > ws_size)
+      ws_size = ws1;
   }
 
   auto ws = torch::empty({(int64_t)ws_size}, x.options().dtype(torch::kUInt8));
   auto mean = torch::empty({16, 64}, x.options());
   auto inv = torch::empty({16, 64}, x.options());
+  CNNL_CHECK(cnnlTranspose_v2(
+      torch_mlu::getCurrentHandle(), td0, x_desc0, x.data_ptr(), x_desc,
+      xh.data_ptr(), ws_size ? ws.data_ptr() : nullptr, ws_size));
   CNNL_CHECK(cnnlInstanceNormForward(
       torch_mlu::getCurrentHandle(), 1.0e-5f, 0.1f, sb_desc, s.data_ptr(),
-      x_desc, x.data_ptr(), b.data_ptr(), mv_desc, nullptr, nullptr,
-      ws_size ? ws.data_ptr() : nullptr, ws_size, x_desc, y.data_ptr(),
+      x_desc, xh.data_ptr(), b.data_ptr(), mv_desc, nullptr, nullptr,
+      ws_size ? ws.data_ptr() : nullptr, ws_size, x_desc, yh.data_ptr(),
       mean.data_ptr(), inv.data_ptr()));
+  CNNL_CHECK(cnnlTranspose_v2(
+      torch_mlu::getCurrentHandle(), td1, x_desc, yh.data_ptr(), y_desc0,
+      y.data_ptr(), ws_size ? ws.data_ptr() : nullptr, ws_size));
 
   return y;
 }
