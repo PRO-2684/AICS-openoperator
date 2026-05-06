@@ -1,89 +1,53 @@
-#include <bang.h>
-#include <cnrt.h>
-#include <framework/core/MLUStream.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
+#include <cnnl_extra.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
-                      const half *__restrict__ v, half *__restrict__ y) {
-  int p = taskId;
-  while (p < 64) {
-    int h = p >> 3;
-    int rb = (p & 7) << 5;
-    __nram__ half q0[2048];
-    __nram__ half k0[8192];
-    __nram__ half k1[8192];
-    __nram__ half w0h[4096];
-    __nram__ float s0[4096];
-    __nram__ float s1[4096];
-    __nram__ float o0[2048];
-    __nram__ float o1[2048];
-    __nram__ float d0[64];
-    __nram__ half yh[2048];
-    __wram__ half w0[8192];
+#define CNNL_CHECK(expr)                                                        \
+  do {                                                                         \
+    cnnlStatus_t s = (expr);                                                    \
+    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
+  } while (0)
 
-    __memcpy(q0, q + h * 16384 + rb * 64, 2048 * sizeof(half), GDRAM2NRAM);
-    __bang_write_value(o0, 2048, 0.0f);
-    __bang_write_value(d0, 64, 0.0f);
-
-#pragma unroll 2
-    for (int ch = 0; ch < 2; ++ch) {
-      int kb = ch << 7;
-      __memcpy(k0, k + h * 16384 + kb * 64, 8192 * sizeof(half), GDRAM2NRAM);
-      __bang_reshape_filter(k1, k0, 128, 1, 1, 64);
-      __memcpy(w0, k1, 8192 * sizeof(half), NRAM2WRAM);
-      __bang_matmul(s0, q0, w0, 32, 64, 128);
-      __bang_mul_scalar(s0, s0, 0.125f, 4096);
-      __bang_active_exp(s0, s0, 4096);
-
-#pragma unroll
-      for (int r = 0; r < 32; ++r) {
-        int pos = rb + r;
-        int lo = pos - 32 - kb;
-        int hi = pos + 32 - kb;
-        if (lo > 0) {
-          __bang_write_value(s0 + r * 128, lo, 0.0f);
-        }
-        if (hi < 127) {
-          __bang_write_value(s0 + r * 128 + hi + 1, 127 - hi, 0.0f);
-        }
-      }
-
-      __memcpy(s1, s0, 4096 * sizeof(float), NRAM2NRAM);
-      __bang_reduce_sum(s1, s1, 4096);
-#pragma unroll
-      for (int r = 0; r < 32; ++r) {
-        d0[r] += s1[r * 128] + s1[r * 128 + 32] + s1[r * 128 + 64] +
-                 s1[r * 128 + 96];
-      }
-
-      __bang_float2half_rn(w0h, s0, 4096);
-      __memcpy(k0, v + h * 16384 + kb * 64, 8192 * sizeof(half), GDRAM2NRAM);
-      __bang_transpose(k1, k0, 128, 64);
-      __bang_reshape_filter(k0, k1, 64, 1, 1, 128);
-      __memcpy(w0, k0, 8192 * sizeof(half), NRAM2WRAM);
-      __bang_matmul(o1, w0h, w0, 32, 128, 64);
-      __bang_add(o0, o0, o1, 2048);
-    }
-
-#pragma unroll
-    for (int r = 0; r < 32; ++r) {
-      __bang_mul_scalar(o0 + r * 64, o0 + r * 64, 1.0f / d0[r], 64);
-    }
-    __bang_float2half_rn(yh, o0, 2048);
-    __memcpy(y + h * 16384 + rb * 64, yh, 2048 * sizeof(half), NRAM2GDRAM);
-    p += taskDim;
+static cnnlTensorDescriptor_t d0() {
+  static cnnlTensorDescriptor_t d = nullptr;
+  if (d == nullptr) {
+    int dims[4] = {2, 256, 4, 64};
+    int st[4] = {65536, 64, 16384, 1};
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+    CNNL_CHECK(cnnlSetTensorDescriptorEx(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF,
+                                         4, dims, st));
   }
+  return d;
 }
 
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
                         int window_size) {
   (void)window_size;
-  auto y = torch::empty_like(q);
-  cnrtDim3_t d = {32, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(q.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(k.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(v.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-  return y;
+  static torch::Tensor out;
+  if (!out.defined())
+    out = torch::empty_like(q);
+  else
+    out.resize_({2, 4, 256, 64});
+  auto d = d0();
+  auto handle = torch_mlu::getCurrentHandle();
+  static size_t ws_size = 0;
+  if (ws_size == 0) {
+    CNNL_CHECK(cnnlGetScaledDotProductAttnWorkspaceSize_v3(
+        handle, nullptr, nullptr, d, d, d, nullptr, nullptr, nullptr, nullptr,
+        nullptr, 256, 256, false, 32, 32, false, CNNL_COMPUTATION_FAST,
+        CNNL_DTYPE_HALF, &ws_size));
+  }
+  static torch::Tensor ws;
+  if (!ws.defined()) {
+    ws = torch::empty({(int64_t)ws_size}, q.options().dtype(torch::kUInt8));
+  }
+  CNNL_CHECK(cnnlScaledDotProductAttn_v4(
+      handle, nullptr, nullptr, d, q.data_ptr(), d, k.data_ptr(), d,
+      v.data_ptr(), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 256, 256, false, 32,
+      32, 0.125f, CNNL_COMPUTATION_FAST, CNNL_DTYPE_HALF,
+      ws_size ? ws.data_ptr() : nullptr, ws_size, false, nullptr, nullptr, d,
+      out.data_ptr()));
+  return out;
 }
