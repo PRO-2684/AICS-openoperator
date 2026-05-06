@@ -134,7 +134,7 @@ python scripts/update_problems.py
 | 083 | [Causal_Self_Attention](Causal_Self_Attention.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/a105aa2c69c8fb104689ec98f98f377f59da8374) |
 | 084 | [Cross_Attention](Cross_Attention.mlu) | N/A | 🔴 |
 | 085 | [Linear](Linear.mlu) | N/A | 🔴 |
-| 086 | [Batch_outer_product](Batch_outer_product.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/7503e64) |
+| 086 | [Batch_outer_product](Batch_outer_product.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/c4d3749) |
 | 087 | [Hadamard_product](Hadamard_product.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/1eda60594d6e0b532762d4a53c465437ad2d7e60) |
 | 088 | [Matrix_trace](Matrix_trace.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/591ffedc0fbb7528b8e252a2d94c663eb19484ec) |
 | 089 | [Diagonal_extraction](Diagonal_extraction.mlu) | N/A | 🔴 |
