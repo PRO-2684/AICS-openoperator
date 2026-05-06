@@ -22,13 +22,18 @@ __mlu_func__ float f0(float x) {
   float m = v.f;
   float y = (m - 1.0f) / (m + 1.0f);
   float y2 = y * y;
-  float p = 2.0f * y * (1.0f + y2 * 0.3333333333333333f);
+  float p = 2.0f * y * (1.0f + y2 * (0.3333333333333333f + y2 * 0.2f));
   return (float)e * 0.6931471805599453f + p;
 }
 
 __mlu_entry__ void k0(const half *__restrict__ predictions,
                       const int64_t *__restrict__ targets,
-                      float *__restrict__ partial, half *__restrict__ out) {
+                      half *__restrict__ out) {
+  if (taskId == 0) {
+    out[0] = (half)0.0f;
+  }
+  __sync_all_ipu();
+
   int row0 = taskId * ROWS_PER_TASK;
   int base = row0 * COLS;
 
@@ -55,25 +60,13 @@ __mlu_entry__ void k0(const half *__restrict__ predictions,
     acc += f0(sum) - (float)hbuf[off + label];
   }
 
-  partial[taskId] = acc;
-  __sync_all_ipu();
-
-  if (taskId != TASKS - 1) {
-    return;
-  }
-  acc = 0.0f;
-#pragma unroll
-  for (int i = 0; i < TASKS; ++i) {
-    acc += partial[i];
-  }
-
-  out[0] = (half)(acc * (1.0f / (float)ROWS));
+  __nram__ half h[1];
+  h[0] = (half)(acc * (1.0f / (float)ROWS));
+  __bang_atomic_reduce_add(out, h, 1);
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   auto out = torch::empty({}, predictions.options());
-  auto partial =
-      torch::empty({TASKS}, predictions.options().dtype(torch::kFloat32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {TASKS, 1, 1};
@@ -81,7 +74,6 @@ torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   k0<<<dim, cnrtFuncTypeUnion8, queue>>>(
       reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(targets.data_ptr<int64_t>()),
-      reinterpret_cast<float *>(partial.data_ptr<float>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
 
   return out;
