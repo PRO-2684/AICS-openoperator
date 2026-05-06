@@ -107,7 +107,7 @@ python scripts/update_problems.py
 | 056 | [gather](gather.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/3c19c5d) |
 | 057 | [rotary_pos_emb_fusion](rotary_pos_emb_fusion.mlu) | N/A | 🔴 |
 | 058 | [Softmax](Softmax.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/e10226bead0673dae0803184816c6687fe4dd5a5) |
-| 059 | [hstu_mask_var_len_fwd](hstu_mask_var_len_fwd.mlu) | N/A | 🔴 |
+| 059 | [hstu_mask_var_len_fwd](hstu_mask_var_len_fwd.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/6021dcf) |
 | 060 | [cross_entropy](cross_entropy.mlu) | N/A | 🔴 |
 | 061 | [adaptiveaveragepool](adaptiveaveragepool.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/559b5fa) |
 | 062 | [compute_agg](compute_agg.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/9753fcd) |
