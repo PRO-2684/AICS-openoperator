@@ -34,8 +34,9 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   for (int i = 0; i < 128; ++i) {
     float s = f1[i * 128] + f1[i * 128 + 32] + f1[i * 128 + 64] +
               f1[i * 128 + 96];
-    __bang_mul_scalar(f2 + i * 64, f2 + i * 64, 1.0f / s, 64);
+    __bang_write_value(f0 + i * 64, 64, 1.0f / s);
   }
+  __bang_mul(f2, f2, f0, 8192);
   __bang_float2half_rn(a0, f2, 8192);
   __memcpy(y + p * 8192, a0, 8192 * sizeof(half), NRAM2GDRAM);
 }
