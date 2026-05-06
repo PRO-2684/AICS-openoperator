@@ -53,13 +53,14 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ kc,
     __bang_add(o0, s0, s0 + 64, 64);
     __bang_add(o0, o0, s0 + 128, 64);
     __bang_add(o0, o0, s0 + 192, 64);
+    __memcpy(s1, r0, 4 * sizeof(float), SRAM2NRAM);
 
     __memcpy(q0, kn + h * 64, 64 * sizeof(half), GDRAM2NRAM);
     __bang_mul(q0, q0, a2, 64);
     __bang_reduce_sum(q0, q0, 64);
     float sn = (float)q0[0];
     sn = expf(sn * 0.125f);
-    float inv = 1.0f / (r0[0] + r0[1] + r0[2] + r0[3] + sn);
+    float inv = 1.0f / (s1[0] + s1[1] + s1[2] + s1[3] + sn);
     __memcpy(q0, vn + h * 64, 64 * sizeof(half), GDRAM2NRAM);
     __bang_half2float(s0, q0, 64);
     __bang_mul_scalar(s0, s0, sn, 64);
@@ -76,7 +77,7 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor kc, torch::Tensor vc,
     y = torch::empty_like(q);
   else
     y.resize_({1, 8, 1, 64});
-  cnrtDim3_t d = {1, 8, 1};
+  cnrtDim3_t d = {4, 8, 1};
   k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(q.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(kc.data_ptr<at::Half>()),
