@@ -3,8 +3,8 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 4096
-#define E1 64
+#define E0 8192
+#define E1 128
 
 __mlu_entry__ void kernel(const half *__restrict__ input,
                           half *__restrict__ output) {
@@ -13,39 +13,40 @@ __mlu_entry__ void kernel(const half *__restrict__ input,
   __nram__ half tmp[E1];
 
   int active = coreId != 0x80;
-  for (int n = 0; n < 2; ++n) {
-    int base = 0;
-    if (active) {
-      int row = taskIdY * 2 + n;
-      base = row * 16384 + coreId * E0;
+  int row = 0;
+  int part = 0;
+  int base = 0;
 
-      __memcpy(xbuf, input + base, E0 * sizeof(half), GDRAM2NRAM);
-      __bang_argmax(tmp, xbuf, E0);
-      s[coreId] = tmp[0];
-    }
-    __sync_cluster();
+  if (active) {
+    row = taskIdY * 2 + (coreId >> 1);
+    part = coreId & 1;
+    base = row * 16384 + part * E0;
 
-    if (active) {
-      half m0 = s[0] > s[1] ? s[0] : s[1];
-      half m1 = s[2] > s[3] ? s[2] : s[3];
-      half row_max = m0 > m1 ? m0 : m1;
-      __bang_add_scalar(xbuf, xbuf, (half)(-row_max), E0);
-      __bang_active_exp_less_0(xbuf, xbuf, E0);
+    __memcpy(xbuf, input + base, E0 * sizeof(half), GDRAM2NRAM);
+    __bang_argmax(tmp, xbuf, E0);
+    s[coreId] = tmp[0];
+  }
+  __sync_cluster();
 
-      __bang_reduce_sum(xbuf, xbuf, E0);
-      __memcpy(tmp, xbuf, sizeof(half), NRAM2NRAM, sizeof(half),
-               64 * sizeof(half), E1 - 1);
-      __bang_reduce_sum(tmp, tmp, E1);
-      s[coreId] = tmp[0];
-    }
-    __sync_cluster();
+  if (active) {
+    int pair = coreId & 2;
+    half row_max = s[pair] > s[pair + 1] ? s[pair] : s[pair + 1];
+    __bang_add_scalar(xbuf, xbuf, (half)(-row_max), E0);
+    __bang_active_exp_less_0(xbuf, xbuf, E0);
 
-    if (active) {
-      half inv_sum = (half)(1.0f / (float)(s[0] + s[1] + s[2] + s[3]));
-      __bang_mul_scalar(xbuf, xbuf, inv_sum, E0);
-      __memcpy(output + base, xbuf, E0 * sizeof(half), NRAM2GDRAM);
-    }
-    __sync_cluster();
+    __bang_reduce_sum(xbuf, xbuf, E0);
+    __memcpy(tmp, xbuf, sizeof(half), NRAM2NRAM, sizeof(half),
+             64 * sizeof(half), E1 - 1);
+    __bang_reduce_sum(tmp, tmp, E1);
+    s[coreId] = tmp[0] + tmp[64];
+  }
+  __sync_cluster();
+
+  if (active) {
+    int pair = coreId & 2;
+    half inv_sum = (half)(1.0f / (float)(s[pair] + s[pair + 1]));
+    __bang_mul_scalar(xbuf, xbuf, inv_sum, E0);
+    __memcpy(output + base, xbuf, E0 * sizeof(half), NRAM2GDRAM);
   }
 }
 
