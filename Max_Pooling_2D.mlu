@@ -6,40 +6,35 @@
 #define E0 512
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a0[17152];
-  __nram__ half a1[17152];
-  __nram__ half b0[4096];
-  __nram__ half b1[4096];
-  __bang_write_value(a0, 17152, (half)-65504.0f);
-  __bang_write_value(a1, 17152, (half)-65504.0f);
-  int r = taskId;
-  if (r < E0) {
-    __memcpy_async(a0 + 131, x + r * 16384, 128 * sizeof(half), GDRAM2NRAM,
-                   130 * sizeof(half), 128 * sizeof(half), 127);
-    __asm__ volatile("sync;");
-  }
-  int q = 0;
-  for (; r < E0; r += taskDim) {
-    int nr = r + taskDim;
-    if (nr < E0) {
-      if (q == 0) {
-        __memcpy_async(a1 + 131, x + nr * 16384, 128 * sizeof(half),
-                       GDRAM2NRAM, 130 * sizeof(half), 128 * sizeof(half),
-                       127);
-      } else {
-        __memcpy_async(a0 + 131, x + nr * 16384, 128 * sizeof(half),
-                       GDRAM2NRAM, 130 * sizeof(half), 128 * sizeof(half),
-                       127);
-      }
+  __nram__ half t[16384];
+  __nram__ half a[4096];
+  __nram__ half b[4096];
+  __nram__ half c[4096];
+  __nram__ half d[4096];
+  for (int r = taskId; r < E0; r += taskDim) {
+    __memcpy(t, x + r * 16384, 16384 * sizeof(half), GDRAM2NRAM);
+    __bang_write_value(a, 4096, (half)-65504.0f);
+    __bang_write_value(b, 4096, (half)-65504.0f);
+    __bang_write_value(c, 4096, (half)-65504.0f);
+    __bang_write_value(d, 4096, (half)-65504.0f);
+    for (int i = 1; i < 64; ++i) {
+      half *p = t + (2 * i - 1) * 128;
+      __memcpy(a + i * 64 + 1, p + 1, sizeof(half), NRAM2NRAM,
+               sizeof(half), 2 * sizeof(half), 62);
+      __memcpy(b + i * 64, p + 2, sizeof(half), NRAM2NRAM,
+               sizeof(half), 2 * sizeof(half), 62);
     }
-    half *a = q == 0 ? a0 : a1;
-    half *b = q == 0 ? b0 : b1;
-    __bang_maxpool(b, a, 1, 130, 130, 2, 2, 2, 2, 3, 3, 1, 1);
-    __memcpy(y + r * 4096, b, 4096 * sizeof(half), NRAM2GDRAM);
-    if (nr < E0) {
-      __asm__ volatile("sync;");
+    for (int i = 0; i < 63; ++i) {
+      half *p = t + (2 * i + 2) * 128;
+      __memcpy(c + i * 64 + 1, p + 1, sizeof(half), NRAM2NRAM,
+               sizeof(half), 2 * sizeof(half), 62);
+      __memcpy(d + i * 64, p + 2, sizeof(half), NRAM2NRAM,
+               sizeof(half), 2 * sizeof(half), 62);
     }
-    q ^= 1;
+    __bang_max(a, a, b, 4096);
+    __bang_max(c, c, d, 4096);
+    __bang_max(a, a, c, 4096);
+    __memcpy(y + r * 4096, a, 4096 * sizeof(half), NRAM2GDRAM);
   }
 }
 
