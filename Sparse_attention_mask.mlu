@@ -23,11 +23,11 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __nram__ float f2[4096];
   __wram__ half w0[8192];
 
-  if (e) {
-    __bang_write_value(a2, 8192, (half)0.0f);
-  }
   __memcpy(a0, q + base + r * 64, 4096 * sizeof(half), GDRAM2NRAM);
   __memcpy(a2, k + base + s * 64, n * 64 * sizeof(half), GDRAM2NRAM);
+  if (e) {
+    __bang_write_value(a2 + n * 64, (128 - n) * 64, (half)0.0f);
+  }
   __bang_reshape_filter(a1, a2, 128, 1, 1, 64);
   __memcpy(w0, a1, 8192 * sizeof(half), NRAM2WRAM);
   __bang_matmul(f0, a0, w0, 64, 64, 128);
@@ -39,10 +39,10 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __bang_half2float(f0, a3, 8192);
   __bang_reduce_sum(f1, f0, 8192);
 
-  if (e) {
-    __bang_write_value(a2, 8192, (half)0.0f);
-  }
   __memcpy(a2, v + base + s * 64, n * 64 * sizeof(half), GDRAM2NRAM);
+  if (e) {
+    __bang_write_value(a2 + n * 64, (128 - n) * 64, (half)0.0f);
+  }
   __bang_transpose(a1, a2, 128, 64);
   __memcpy(w0, a1, 8192 * sizeof(half), NRAM2WRAM);
   __bang_matmul(f2, a3, w0, 64, 128, 64);
