@@ -23,8 +23,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ kc,
     int t = c * 128;
     __memcpy(q0, q + h * 64, 64 * sizeof(half), GDRAM2NRAM);
     __memcpy(a0, kc + h * 32768 + t * 64, 8192 * sizeof(half), GDRAM2NRAM);
-    __bang_reshape_filter(a1, a0, 128, 1, 1, 64);
-    __memcpy(w0, a1, 8192 * sizeof(half), NRAM2WRAM);
+    __memcpy(w0, a0, 8192 * sizeof(half), NRAM2WRAM);
     __bang_matmul(s0, q0, w0, 1, 64, 128);
     __bang_mul_scalar(s0, s0, 0.125f, 128);
     __bang_active_exp(s0, s0, 128);
