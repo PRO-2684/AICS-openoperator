@@ -46,7 +46,7 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
     X(cnnlCreateStrideBatchMatMulAlgo(&e));
     cnnlStrideBatchMatMulHeuristicResult_t r;
     X(cnnlCreateStrideBatchMatMulHeuristicResult(&r));
-    cnnlDataType_t t = CNNL_DTYPE_FLOAT;
+    cnnlDataType_t t = CNNL_DTYPE_HALF;
     int u = 1;
     int v = 0;
     X(cnnlSetStrideBatchMatMulDescAttr(d, CNNL_STRIDE_BMM_COMPUTE_TYPE, &t,
