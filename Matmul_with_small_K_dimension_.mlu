@@ -10,7 +10,7 @@
 #define E4 32768
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
-                      half *__restrict__ c) {
+                      float *__restrict__ c) {
   __nram__ half x[E1 * E1];
   __nram__ half y[E3];
   __nram__ half z[E3];
@@ -33,22 +33,21 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
     __memcpy(w, z, E3 * sizeof(half), NRAM2WRAM);
 
     __bang_matmul(f, x, w, E1, E1, E2);
-    __bang_float2half_rn(z, f, E3);
 
 #pragma unroll
     for (int r = 0; r < E1; ++r) {
-      __memcpy(c + (rp + r) * E0 + cp, z + r * E2, E2 * sizeof(half),
+      __memcpy(c + (rp + r) * E0 + cp, f + r * E2, E2 * sizeof(float),
                NRAM2GDRAM);
     }
   }
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  auto C = torch::empty({E0, E0}, A.options());
+  auto C = torch::empty({E0, E0}, A.options().dtype(torch::kFloat));
   cnrtDim3_t d = {4, 8, 1};
   k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(C.data_ptr<at::Half>()));
+      C.data_ptr<float>());
   return C;
 }
