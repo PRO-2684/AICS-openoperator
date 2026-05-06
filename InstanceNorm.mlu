@@ -57,8 +57,8 @@ __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
                                         half *__restrict__ y, int outer,
                                         int inner, float eps) {
   __nram__ half hbuf[LOCAL_ELEMS];
+  __nram__ half htmp[LOCAL_ELEMS];
   __nram__ float fbuf[LOCAL_ELEMS];
-  __nram__ float tbuf[LOCAL_ELEMS];
 
   for (int idx = taskId; idx < outer; idx += taskDim) {
     const half *px = x + (int64_t)idx * inner;
@@ -67,7 +67,6 @@ __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
     __memcpy(hbuf, px, inner * sizeof(half), GDRAM2NRAM);
 
     half *hwork = (half *)fbuf;
-    half *htmp = (half *)tbuf;
     __memcpy(hwork, hbuf, inner * sizeof(half), NRAM2NRAM);
     float sum = reduce_sum_half(hwork, htmp, inner);
 
