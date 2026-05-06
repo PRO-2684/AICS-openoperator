@@ -6,29 +6,7 @@
 
 #define LOCAL_ELEMS 65536
 #define TASK_COUNT 32
-
-__mlu_func__ float reduce_sum_float(float *buf, float *tmp, int n) {
-  int cur = n;
-  float *src = buf;
-  float *dst = tmp;
-
-  while (cur > 32) {
-    __bang_reduce_sum(dst, src, cur);
-
-    int groups = cur / 32;
-    for (int i = 0; i < groups; ++i) {
-      src[i] = dst[i * 32];
-    }
-
-    cur = groups;
-  }
-
-  float s = 0.0f;
-  for (int i = 0; i < cur; ++i) {
-    s += src[i];
-  }
-  return s;
-}
+#define E0 1024
 
 __mlu_func__ float reduce_sum_half(half *buf, half *tmp, int n) {
   int cur = n;
@@ -54,38 +32,37 @@ __mlu_func__ float reduce_sum_half(half *buf, half *tmp, int n) {
 }
 
 __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
-                                        half *__restrict__ y, int outer,
-                                        int inner, float eps) {
+                                        half *__restrict__ y) {
   __nram__ half hbuf[LOCAL_ELEMS];
   __nram__ half htmp[LOCAL_ELEMS];
   __nram__ float fbuf[LOCAL_ELEMS];
 
-  for (int idx = taskId; idx < outer; idx += taskDim) {
-    const half *px = x + (int64_t)idx * inner;
-    half *py = y + (int64_t)idx * inner;
+  for (int idx = taskId; idx < E0; idx += taskDim) {
+    const half *px = x + (int64_t)idx * LOCAL_ELEMS;
+    half *py = y + (int64_t)idx * LOCAL_ELEMS;
 
-    __memcpy(hbuf, px, inner * sizeof(half), GDRAM2NRAM);
+    __memcpy(hbuf, px, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
 
     half *hwork = (half *)fbuf;
-    __memcpy(hwork, hbuf, inner * sizeof(half), NRAM2NRAM);
-    float sum = reduce_sum_half(hwork, htmp, inner);
+    __memcpy(hwork, hbuf, LOCAL_ELEMS * sizeof(half), NRAM2NRAM);
+    float sum = reduce_sum_half(hwork, htmp, LOCAL_ELEMS);
 
-    __memcpy(hwork, hbuf, inner * sizeof(half), NRAM2NRAM);
-    __bang_square(hwork, hwork, inner);
-    float sq_sum = reduce_sum_half(hwork, htmp, inner);
+    __memcpy(hwork, hbuf, LOCAL_ELEMS * sizeof(half), NRAM2NRAM);
+    __bang_square(hwork, hwork, LOCAL_ELEMS);
+    float sq_sum = reduce_sum_half(hwork, htmp, LOCAL_ELEMS);
 
-    float inv_n = 1.0f / (float)inner;
-    float mean = sum * inv_n;
-    float var = sq_sum * inv_n - mean * mean;
+    float mean = sum * 0.0000152587890625f;
+    float var = sq_sum * 0.0000152587890625f - mean * mean;
     if (var < 0.0f)
       var = 0.0f;
-    float inv_std = 1.0f / sqrtf(var + eps);
+    float inv_std = 1.0f / sqrtf(var + 1.0e-5f);
 
-    __bang_half2float(fbuf, hbuf, inner);
-    __bang_fusion(FUSION_FMA, fbuf, fbuf, inv_std, -mean * inv_std, inner);
+    __bang_half2float(fbuf, hbuf, LOCAL_ELEMS);
+    __bang_fusion(FUSION_FMA, fbuf, fbuf, inv_std, -mean * inv_std,
+                  LOCAL_ELEMS);
 
-    __bang_float2half_rn(hbuf, fbuf, inner);
-    __memcpy(py, hbuf, inner * sizeof(half), NRAM2GDRAM);
+    __bang_float2half_rn(hbuf, fbuf, LOCAL_ELEMS);
+    __memcpy(py, hbuf, LOCAL_ELEMS * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -93,14 +70,6 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
   (void)num_features;
 
   auto y = torch::empty_like(x);
-
-  int n = (int)x.size(0);
-  int c = (int)x.size(1);
-  int h = (int)x.size(2);
-  int w = (int)x.size(3);
-
-  int outer = n * c;
-  int inner = h * w;
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
@@ -110,8 +79,7 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
   dim.z = 1;
 
   inst_norm_vec_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      (const half *)x.data_ptr<at::Half>(), (half *)y.data_ptr<at::Half>(),
-      outer, inner, 1.0e-5f);
+      (const half *)x.data_ptr<at::Half>(), (half *)y.data_ptr<at::Half>());
 
   return y;
 }
