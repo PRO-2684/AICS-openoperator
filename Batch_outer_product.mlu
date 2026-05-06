@@ -14,8 +14,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
     __memcpy(x, b + p * 256, 256 * sizeof(half), GDRAM2NRAM);
     int r = p * 256;
     __memcpy(w, a + r, 256 * sizeof(half), GDRAM2NRAM);
-    __memcpy(y, x, 256 * sizeof(half), NRAM2NRAM, 256 * sizeof(half), 0,
-             255);
 #pragma unroll 256
     for (int i = 0; i < 256; ++i) {
       __bang_write_value(z + i * 256, 256, w[i]);
