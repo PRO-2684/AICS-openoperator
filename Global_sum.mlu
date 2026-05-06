@@ -5,23 +5,24 @@
 
 #define E0 32
 #define E1 16384
+#define E2 64
 
 __mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y, int n) {
-  int q = n / 32;
-  int r = n - q * 32;
-  __bang_sumpool(y, x, 32, 1, q, 1, q, 1, q);
+  int q = n / E2;
+  int r = n - q * E2;
+  __bang_sumpool(y, x, E2, 1, q, 1, q, 1, q);
   if (r > 0) {
-    __bang_add(y, y, x + q * 32, r);
+    __bang_add(y, y, x + q * E2, r);
   }
-  __bang_reduce_sum(y, y, 32);
-  return y[0];
+  __bang_reduce_sum(y, y, E2);
+  return y[0] + y[32];
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ z,
                       half *__restrict__ y) {
   __nram__ half a[E1];
   __nram__ float b[E1];
-  __nram__ float c[E0];
+  __nram__ float c[E2];
   if (taskId == 0) {
     z[0] = 0.0f;
   }
@@ -30,7 +31,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ z,
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_half2float(b, a, E1);
   c[0] = f0(b, c, E1);
-  __bang_atomic_reduce_add(z, c[0], 1);
+  __bang_atomic_reduce_add(z, c, 1);
   __sync_all_ipu();
   if (taskId == E0 - 1) {
     __memcpy(c, z, sizeof(float), GDRAM2NRAM);
