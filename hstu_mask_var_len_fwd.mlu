@@ -6,51 +6,34 @@
 
 __mlu_func__ int f0(int s, int r) {
   if (s == 0) {
-    if (r == 3) {
-      return 15;
+    if (r < 3) {
+      return 4;
     }
-    if (r < 5) {
-      return 31;
-    }
-    if (r == 5) {
-      return 63;
-    }
-    if (r == 6) {
-      return 127;
-    }
-    if (r == 7) {
-      return 255;
-    }
-    if (r == 8) {
-      return 319;
-    }
-    return 831;
+    return r;
   }
   if (r < 2) {
-    return 3;
+    return 1;
   }
   if (r < 5) {
-    return 31;
+    return 4;
   }
-  if (r == 5) {
-    return 63;
+  return r;
+}
+
+__mlu_func__ int f1(int s, int c) {
+  if (s == 0) {
+    if (c >= 6 && c < 8) {
+      return 8;
+    }
+    return 10;
   }
-  if (r == 6) {
-    return 127;
+  if (c >= 6 && c < 8) {
+    return 8;
   }
-  if (r == 7) {
-    return 255;
+  if (c >= 8 && c < 10) {
+    return 10;
   }
-  if (r == 8) {
-    return 319;
-  }
-  if (r == 9) {
-    return 831;
-  }
-  if (r == 10) {
-    return 1855;
-  }
-  return 3903;
+  return 12;
 }
 
 __mlu_func__ float f2(float x) {
@@ -96,7 +79,6 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __nram__ half v2[768];
   __nram__ half y1[64];
   __nram__ float a0[768];
-  __nram__ float b0[768];
   __nram__ float v0[768];
   __nram__ float y0[64];
   __wram__ half k1[2048];
@@ -113,10 +95,6 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
 
   __memcpy(k1, k2, 2048 * sizeof(half), NRAM2WRAM);
   __bang_matmul(a0, q0, k1, n, 32, 64);
-  __bang_mul_scalar(a0, a0, 0.7f, n * 64);
-  __memcpy(b0, a0, n * 64 * sizeof(float), NRAM2NRAM);
-  __bang_active_sigmoid(a0, a0, n * 64);
-  __bang_mul(a0, a0, b0, n * 64);
 
 #pragma unroll
   for (int c = 0; c < 12; ++c) {
@@ -131,11 +109,11 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   for (int r = 0; r < 12; ++r) {
     if (r < n) {
       __bang_write_value(y0, 40, 0.0f);
-      int m = f0(s, r);
+      int mr = f0(s, r);
 #pragma unroll
       for (int c = 0; c < 12; ++c) {
-        if ((m >> c) & 1) {
-          float w = a0[r * 64 + c] * 0.08333333333333333f;
+        if (c < n && mr >= c && mr < f1(s, c)) {
+          float w = f2(a0[r * 64 + c] * 0.7f) * 0.08333333333333333f;
           __bang_fusion(FUSION_FMA, y0, v0 + c * 64, w, y0, 40, 40);
         }
       }
