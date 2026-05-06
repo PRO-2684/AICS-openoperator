@@ -33,9 +33,8 @@ __mlu_func__ float reduce_sum_half(half *buf, half *tmp, int n) {
 
 __mlu_func__ float f0(const half *src, half *tmp, half *pack) {
   __bang_reduce_sum(tmp, src, LOCAL_ELEMS);
-  for (int i = 0; i < 1024; ++i) {
-    pack[i] = tmp[i * 64];
-  }
+  __memcpy(pack, tmp, sizeof(half), NRAM2NRAM, sizeof(half),
+           64 * sizeof(half), 1023);
   return reduce_sum_half(pack, tmp, 1024);
 }
 
