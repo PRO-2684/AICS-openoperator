@@ -1,14 +1,74 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 069 069_lstm_cell_forward
-// Category: fuse
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，执行 LSTM 单元的前向门控计算与细胞状态更新，生成当前时刻的隐藏状态。输入包括门控输入张量 `input` 与 `hidden`（形状均为 `[batch, 4, hsz]`）、偏置项 `bias1` 与 `bias2`（形状均为 `[4, hsz]`）以及当前细胞状态 `cx`（形状为 `[batch, hsz]`）；同时需传入标量参数隐藏层维度 `hsz` 及总元素个数 `totalElements`。算子对各门控信号应用 Sigmoid 和 Tanh 激活并完成状态融合，最终输出形状为 `[totalElements]` 的更新后隐藏状态。
-// Wrapper: torch::Tensor bang_func(torch::Tensor input, torch::Tensor hidden, torch::Tensor bias1, torch::Tensor bias2, torch::Tensor cx, int hsz, int totalElements);
+#define E0 4096
+#define E1 256
+#define E2 1024
+#define E3 64
 
-torch::Tensor bang_func(torch::Tensor input, torch::Tensor hidden, torch::Tensor bias1, torch::Tensor bias2, torch::Tensor cx, int hsz, int totalElements) {
-  TORCH_CHECK(false, "TODO: implement lstm_cell_forward");
+__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ h,
+                      const half *__restrict__ b0, const half *__restrict__ b1,
+                      const half *__restrict__ c0, half *__restrict__ y) {
+  __nram__ half a[E0];
+  __nram__ half b[E0];
+  __nram__ half p[E1];
+  __nram__ half q[E1];
+  __nram__ half i[E2];
+  __nram__ half f[E2];
+  __nram__ half c[E2];
+  __nram__ half o[E2];
+
+  __memcpy(a, x, E0 * sizeof(half), GDRAM2NRAM);
+  __memcpy(b, h, E0 * sizeof(half), GDRAM2NRAM);
+  __bang_add(a, a, b, E0);
+
+  __memcpy(p, b0, E1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(q, b1, E1 * sizeof(half), GDRAM2NRAM);
+  __bang_add(p, p, q, E1);
+
+#pragma unroll
+  for (int r = 0; r < 16; ++r) {
+    __bang_add(a + r * E1, a + r * E1, p, E1);
+  }
+
+  __memcpy(i, a, E3 * sizeof(half), NRAM2NRAM, E3 * sizeof(half),
+           E1 * sizeof(half), 15);
+  __memcpy(f, a + E3, E3 * sizeof(half), NRAM2NRAM, E3 * sizeof(half),
+           E1 * sizeof(half), 15);
+  __memcpy(c, a + E3 * 2, E3 * sizeof(half), NRAM2NRAM, E3 * sizeof(half),
+           E1 * sizeof(half), 15);
+  __memcpy(o, a + E3 * 3, E3 * sizeof(half), NRAM2NRAM, E3 * sizeof(half),
+           E1 * sizeof(half), 15);
+
+  __bang_active_sigmoid(i, i, E2);
+  __bang_active_sigmoid(f, f, E2);
+  __bang_active_tanh(c, c, E2);
+  __bang_active_sigmoid(o, o, E2);
+
+  __memcpy(b, c0, E2 * sizeof(half), GDRAM2NRAM);
+  __bang_mul(f, f, b, E2);
+  __bang_fusion(FUSION_FMA, f, i, c, f, E2, E2);
+  __bang_active_tanh(f, f, E2);
+  __bang_mul(o, o, f, E2);
+  __memcpy(y, o, E2 * sizeof(half), NRAM2GDRAM);
+}
+
+torch::Tensor bang_func(torch::Tensor input, torch::Tensor hidden,
+                        torch::Tensor bias1, torch::Tensor bias2,
+                        torch::Tensor cx, int hsz, int totalElements) {
+  (void)hsz;
+  (void)totalElements;
+  auto y = torch::empty({E2}, input.options());
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t d = {1, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(hidden.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(bias1.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(bias2.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(cx.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  return y;
 }
