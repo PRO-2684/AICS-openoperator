@@ -7,27 +7,12 @@
 #define LOCAL_ELEMS 65536
 #define TASK_COUNT 32
 #define E0 1024
-#define E1 49152
 
-__mlu_func__ float reduce_sum_half(half *buf, half *tmp, int n) {
-  int cur = n;
-  half *src = buf;
-  half *dst = tmp;
-
-  while (cur > 64) {
-    __bang_reduce_sum(dst, src, cur);
-
-    int groups = cur / 64;
-    for (int i = 0; i < groups; ++i) {
-      src[i] = dst[i * 64];
-    }
-
-    cur = groups;
-  }
-
+__mlu_func__ float f0(const half *src, half *tmp) {
+  __bang_reduce_sum(tmp, src, LOCAL_ELEMS);
   float s = 0.0f;
-  for (int i = 0; i < cur; ++i) {
-    s += (float)src[i];
+  for (int i = 0; i < 1024; ++i) {
+    s += (float)tmp[i * 64];
   }
   return s;
 }
@@ -44,16 +29,15 @@ __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
 
     __memcpy(hbuf, px, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
 
+    float sum = f0(hbuf, htmp);
+
     half *hwork = (half *)fbuf;
     __memcpy(hwork, hbuf, LOCAL_ELEMS * sizeof(half), NRAM2NRAM);
-    float sum = reduce_sum_half(hwork, htmp, LOCAL_ELEMS);
-
-    __memcpy(hwork, hbuf, E1 * sizeof(half), NRAM2NRAM);
-    __bang_square(hwork, hwork, E1);
-    float sq_sum = reduce_sum_half(hwork, htmp, E1);
+    __bang_square(hwork, hwork, LOCAL_ELEMS);
+    float sq_sum = f0(hwork, htmp);
 
     float mean = sum * 0.0000152587890625f;
-    float var = sq_sum * 0.000020345052083333333f - mean * mean;
+    float var = sq_sum * 0.0000152587890625f - mean * mean;
     if (var < 0.0f)
       var = 0.0f;
     float inv_std = 1.0f / sqrtf(var + 1.0e-5f);
