@@ -6,12 +6,9 @@
 #define E0 16
 #define E1 256
 #define E2 65536
-#define E3 32768
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E2];
-  __nram__ half b[E2];
-  __nram__ half c[E3];
   __nram__ half h[E1];
   __nram__ half r[E1];
   __nram__ half s[E1];
@@ -20,14 +17,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ float g[E1];
   int p = taskId * E2;
   __memcpy(a, x + p, E2 * sizeof(half), GDRAM2NRAM);
-  __bang_transpose(b, a, E1, E1);
-  for (int i = 0; i < 2; ++i) {
-    int q = i * 128;
-    __bang_transpose(c, b + i * E3, 128, E1);
-    __bang_sumpool(r + q, c, 128, 1, E1, 1, E1, 1, E1);
-    __bang_square(c, c, E3);
-    __bang_sumpool(s + q, c, 128, 1, E1, 1, E1, 1, E1);
-  }
+  __bang_sumpool(r, a, E1, 1, E1, 1, E1, 1, E1);
+  __bang_square(a, a, E2);
+  __bang_sumpool(s, a, E1, 1, E1, 1, E1, 1, E1);
   __bang_half2float(e, r, E1);
   __bang_half2float(f, s, E1);
   __bang_mul(g, e, e, E1);
