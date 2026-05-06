@@ -64,38 +64,33 @@ __mlu_func__ float f2(float x) {
 __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
                       const half *__restrict__ v, half *__restrict__ y) {
   int t = taskId;
-  if (t >= 4) {
+  if (t >= 8) {
     return;
   }
 
-  int s = t >> 1;
-  int hk = t & 1;
+  int s = t >> 2;
+  int h = t & 3;
   int b = s ? 10 : 0;
   int n = s ? 12 : 10;
-  int m = n << 1;
-  int h0 = hk << 1;
+  int hk = h >> 1;
 
-  __nram__ half q0[768];
-  __nram__ half p0[768];
+  __nram__ half q0[384];
+  __nram__ half p0[384];
   __nram__ half k2[2048];
   __nram__ half v2[2048];
-  __nram__ half y1[1536];
-  __nram__ float a0[1536];
-  __nram__ float y0[1536];
+  __nram__ half y1[768];
+  __nram__ float a0[768];
+  __nram__ float y0[768];
   __wram__ half k1[2048];
   __wram__ half v1[2048];
 
-  __bang_write_value(q0, 768, (half)0.0f);
-  __bang_write_value(p0, 768, (half)0.0f);
-  __bang_write_value(k2, 2048, (half)0.0f);
+  __bang_write_value(p0, 384, (half)0.0f);
   __bang_write_value(v2, 2048, (half)0.0f);
 
 #pragma unroll
   for (int r = 0; r < 12; ++r) {
     if (r < n) {
-      __memcpy(q0 + r * 32, q + (((b + r) * 4 + h0) * 32),
-               32 * sizeof(half), GDRAM2NRAM);
-      __memcpy(q0 + (n + r) * 32, q + (((b + r) * 4 + h0 + 1) * 32),
+      __memcpy(q0 + r * 32, q + (((b + r) * 4 + h) * 32),
                32 * sizeof(half), GDRAM2NRAM);
       __memcpy(k2 + r * 32, k + (((b + r) * 2 + hk) * 32),
                32 * sizeof(half), GDRAM2NRAM);
@@ -103,23 +98,19 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   }
 
   __memcpy(k1, k2, 2048 * sizeof(half), NRAM2WRAM);
-  __bang_matmul(a0, q0, k1, m, 32, 64);
+  __bang_matmul(a0, q0, k1, n, 32, 64);
 
 #pragma unroll
-  for (int u = 0; u < 2; ++u) {
+  for (int r = 0; r < 12; ++r) {
+    if (r < n) {
+      int mr = f0(s, r);
 #pragma unroll
-    for (int r = 0; r < 12; ++r) {
-      if (r < n) {
-        int mr = f0(s, r);
-#pragma unroll
-        for (int c = 0; c < 12; ++c) {
-          float z = 0.0f;
-          if (c < n && mr >= c && mr < f1(s, c)) {
-            z = f2(a0[(u * n + r) * 64 + c] * 0.7f) *
-                0.08333333333333333f;
-          }
-          p0[(u * n + r) * 32 + c] = (half)z;
+      for (int c = 0; c < 12; ++c) {
+        float u = 0.0f;
+        if (c < n && mr >= c && mr < f1(s, c)) {
+          u = f2(a0[r * 64 + c] * 0.7f) * 0.08333333333333333f;
         }
+        p0[r * 32 + c] = (half)u;
       }
     }
   }
@@ -131,17 +122,14 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   }
 
   __memcpy(v1, v2, 2048 * sizeof(half), NRAM2WRAM);
-  __bang_matmul(y0, p0, v1, m, 32, 64);
-  __bang_float2half_rn(y1, y0, m * 64);
+  __bang_matmul(y0, p0, v1, n, 32, 64);
+  __bang_float2half_rn(y1, y0, n * 64);
 
 #pragma unroll
-  for (int u = 0; u < 2; ++u) {
-#pragma unroll
-    for (int r = 0; r < 12; ++r) {
-      if (r < n) {
-        __memcpy(y + (((b + r) * 4 + h0 + u) * 40),
-                 y1 + (u * n + r) * 64, 40 * sizeof(half), NRAM2GDRAM);
-      }
+  for (int r = 0; r < 12; ++r) {
+    if (r < n) {
+      __memcpy(y + (((b + r) * 4 + h) * 40), y1 + r * 64,
+               40 * sizeof(half), NRAM2GDRAM);
     }
   }
 }
@@ -166,7 +154,7 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
   (void)preference;
   auto y = torch::empty({22, 4, 40}, q.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {4, 1, 1};
+  cnrtDim3_t g = {8, 1, 1};
   k0<<<g, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(q.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(k.data_ptr<at::Half>()),
