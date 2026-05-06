@@ -22,7 +22,7 @@ __mlu_func__ float f0(float x) {
   float m = v.f;
   float y = (m - 1.0f) / (m + 1.0f);
   float y2 = y * y;
-  float p = 2.0f * y * (1.0f + y2 * (0.3333333333333333f + y2 * 0.2f));
+  float p = 2.0f * y * (1.0f + y2 * 0.3333333333333333f);
   return (float)e * 0.6931471805599453f + p;
 }
 
