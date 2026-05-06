@@ -39,10 +39,11 @@ __mlu_entry__ void k0(const half *__restrict__ predictions,
 
   __nram__ half hbuf[LOCAL_ELEMS];
   __nram__ float fbuf[LOCAL_ELEMS];
-  __nram__ int64_t tbuf[ROWS_PER_TASK];
+  __nram__ int tbuf[ROWS_PER_TASK];
 
   __memcpy(hbuf, predictions + base, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
-  __memcpy(tbuf, targets + row0, ROWS_PER_TASK * sizeof(int64_t), GDRAM2NRAM);
+  __memcpy(tbuf, targets + row0, sizeof(int), GDRAM2NRAM, sizeof(int),
+           sizeof(int64_t), ROWS_PER_TASK - 1);
   __bang_half2float(fbuf, hbuf, LOCAL_ELEMS);
   __bang_active_exp(fbuf, fbuf, LOCAL_ELEMS);
 
@@ -58,13 +59,13 @@ __mlu_entry__ void k0(const half *__restrict__ predictions,
       sum += fbuf[off + c];
     }
 
-    int64_t label = tbuf[r];
+    int label = tbuf[r];
     acc += f0(sum) - (float)hbuf[off + label];
   }
 
   __nram__ half h[1];
   h[0] = (half)(acc * (1.0f / (float)ROWS));
-  __bang_atomic_reduce_add_async(out, h, 1);
+  __bang_atomic_reduce_add(out, h, 1);
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
