@@ -85,14 +85,14 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   int hk = h >> 1;
 
   __nram__ half q0[96];
-  __nram__ half k2[2048];
+  __nram__ half k2[512];
   __nram__ half v2[768];
   __nram__ half y1[64];
   __nram__ float a0[192];
   __nram__ float b0[192];
   __nram__ float v0[768];
   __nram__ float y0[64];
-  __wram__ half k1[2048];
+  __wram__ half k1[512];
 
 #pragma unroll
   for (int r = 0; r < 12; ++r) {
@@ -111,12 +111,12 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
     }
   }
 
-  __memcpy(k1, k2, 2048 * sizeof(half), NRAM2WRAM);
-  __bang_matmul(a0, q0, k1, m0, 32, 64);
-  __bang_mul_scalar(a0, a0, 0.7f, m0 * 64);
-  __memcpy(b0, a0, m0 * 64 * sizeof(float), NRAM2NRAM);
-  __bang_active_sigmoid(a0, a0, m0 * 64);
-  __bang_mul(a0, a0, b0, m0 * 64);
+  __memcpy(k1, k2, 512 * sizeof(half), NRAM2WRAM);
+  __bang_matmul(a0, q0, k1, m0, 32, 16);
+  __bang_mul_scalar(a0, a0, 0.7f, m0 * 16);
+  __memcpy(b0, a0, m0 * 16 * sizeof(float), NRAM2NRAM);
+  __bang_active_sigmoid(a0, a0, m0 * 16);
+  __bang_mul(a0, a0, b0, m0 * 16);
 
 #pragma unroll
   for (int c = 0; c < 12; ++c) {
@@ -136,7 +136,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
 #pragma unroll
       for (int c = 0; c < 12; ++c) {
         if (c < n && mr >= c && mr < f1(s, c)) {
-          float w = a0[r * 64 + c] * 0.08333333333333333f;
+          float w = a0[r * 16 + c] * 0.08333333333333333f;
           __bang_fusion(FUSION_FMA, y0, v0 + c * 64, w, y0, 40, 40);
         }
       }
