@@ -51,6 +51,8 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
 
   __nram__ half q0[384];
   __nram__ half p0[384];
+  __nram__ half k2[2048];
+  __nram__ half v2[2048];
   __nram__ half y1[768];
   __nram__ float a0[768];
   __nram__ float y0[768];
@@ -59,6 +61,8 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
 
   __bang_write_value(q0, 384, (half)0.0f);
   __bang_write_value(p0, 384, (half)0.0f);
+  __bang_write_value(k2, 2048, (half)0.0f);
+  __bang_write_value(v2, 2048, (half)0.0f);
 
 #pragma unroll
   for (int r = 0; r < 12; ++r) {
@@ -76,10 +80,11 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
       if (c < n) {
         u = k[(((b + c) * 2 + hk) * 32) + d];
       }
-      k1[c * 32 + d] = u;
+      k2[c * 32 + d] = u;
     }
   }
 
+  __memcpy(k1, k2, 2048 * sizeof(half), NRAM2WRAM);
   __bang_matmul(a0, q0, k1, n, 32, 64);
 
 #pragma unroll
@@ -106,10 +111,11 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
       if (d < 40 && c < n) {
         u = v[(((b + c) * 2 + hk) * 40) + d];
       }
-      v1[d * 32 + c] = u;
+      v2[d * 32 + c] = u;
     }
   }
 
+  __memcpy(v1, v2, 2048 * sizeof(half), NRAM2WRAM);
   __bang_matmul(y0, p0, v1, n, 32, 64);
   __bang_float2half_rn(y1, y0, n * 64);
 
