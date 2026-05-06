@@ -7,6 +7,7 @@
 #define E1 256
 #define E2 1024
 #define E3 64
+#define E4 4
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ h,
                       const half *__restrict__ b0, const half *__restrict__ b1,
@@ -51,6 +52,52 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ h,
   __memcpy(y, o, E2 * sizeof(half), NRAM2GDRAM);
 }
 
+__mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ h,
+                      const half *__restrict__ b0, const half *__restrict__ b1,
+                      const half *__restrict__ c0, half *__restrict__ y) {
+  __nram__ half a[E1 * E4];
+  __nram__ half b[E1 * E4];
+  __nram__ half p[E1];
+  __nram__ half q[E1];
+  __nram__ half i[E3 * E4];
+  __nram__ half f[E3 * E4];
+  __nram__ half c[E3 * E4];
+  __nram__ half o[E3 * E4];
+
+  int base = taskId * E1 * E4;
+  int out = taskId * E3 * E4;
+
+  __memcpy(a, x + base, E1 * E4 * sizeof(half), GDRAM2NRAM);
+  __memcpy(b, h + base, E1 * E4 * sizeof(half), GDRAM2NRAM);
+  __bang_add(a, a, b, E1 * E4);
+
+  __memcpy(p, b0, E1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(q, b1, E1 * sizeof(half), GDRAM2NRAM);
+  __bang_add(p, p, q, E1);
+  __bang_cycle_add(a, a, p, E1 * E4, E1);
+
+  __memcpy(i, a, E3 * sizeof(half), NRAM2NRAM, E3 * sizeof(half),
+           E1 * sizeof(half), E4 - 1);
+  __memcpy(f, a + E3, E3 * sizeof(half), NRAM2NRAM, E3 * sizeof(half),
+           E1 * sizeof(half), E4 - 1);
+  __memcpy(c, a + E3 * 2, E3 * sizeof(half), NRAM2NRAM, E3 * sizeof(half),
+           E1 * sizeof(half), E4 - 1);
+  __memcpy(o, a + E3 * 3, E3 * sizeof(half), NRAM2NRAM, E3 * sizeof(half),
+           E1 * sizeof(half), E4 - 1);
+
+  __bang_active_sigmoid(i, i, E3 * E4);
+  __bang_active_sigmoid(f, f, E3 * E4);
+  __bang_active_tanh(c, c, E3 * E4);
+  __bang_active_sigmoid(o, o, E3 * E4);
+
+  __memcpy(b, c0 + out, E3 * E4 * sizeof(half), GDRAM2NRAM);
+  __bang_mul(f, f, b, E3 * E4);
+  __bang_fusion(FUSION_FMA, f, i, c, f, E3 * E4, E3 * E4);
+  __bang_active_tanh(f, f, E3 * E4);
+  __bang_mul(o, o, f, E3 * E4);
+  __memcpy(y + out, o, E3 * E4 * sizeof(half), NRAM2GDRAM);
+}
+
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor hidden,
                         torch::Tensor bias1, torch::Tensor bias2,
                         torch::Tensor cx, int hsz, int totalElements) {
@@ -58,8 +105,8 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor hidden,
   (void)totalElements;
   auto y = torch::empty({E2}, input.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {1, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, queue>>>(
+  cnrtDim3_t d = {E4, 1, 1};
+  k1<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(hidden.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(bias1.data_ptr<at::Half>()),
