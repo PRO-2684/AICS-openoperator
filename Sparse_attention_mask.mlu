@@ -38,12 +38,12 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
   if (!ws.defined()) {
     ws = torch::empty({(int64_t)ws_size}, q.options().dtype(torch::kUInt8));
   }
-  cnnlScaledDotProductAttn_v4(
+  CNNL_CHECK(cnnlScaledDotProductAttn_v4(
       handle, nullptr, nullptr, d, q.data_ptr(), d, k.data_ptr(), d,
       v.data_ptr(), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
       nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 256, 256, false, 32,
       32, 0.125f, CNNL_COMPUTATION_FAST, CNNL_DTYPE_HALF,
       ws_size ? ws.data_ptr() : nullptr, ws_size, false, nullptr, nullptr, d,
-      out.data_ptr());
+      out.data_ptr()));
   return out;
 }
