@@ -76,12 +76,12 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
 
   __nram__ half q0[384];
   __nram__ half p0[384];
-  __nram__ half k2[512];
+  __nram__ half k2[2048];
   __nram__ half v2[1280];
   __nram__ half y1[480];
-  __nram__ float a0[192];
+  __nram__ float a0[768];
   __nram__ float y0[480];
-  __wram__ half k1[512];
+  __wram__ half k1[2048];
   __wram__ half v1[1280];
 
   __bang_write_value(p0, 384, (half)0.0f);
@@ -97,8 +97,8 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
     }
   }
 
-  __memcpy(k1, k2, 512 * sizeof(half), NRAM2WRAM);
-  __bang_matmul(a0, q0, k1, n, 32, 16);
+  __memcpy(k1, k2, 2048 * sizeof(half), NRAM2WRAM);
+  __bang_matmul(a0, q0, k1, n, 32, 64);
 
 #pragma unroll
   for (int r = 0; r < 12; ++r) {
@@ -108,7 +108,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
       for (int c = 0; c < 12; ++c) {
         float u = 0.0f;
         if (c < n && mr >= c && mr < f1(s, c)) {
-          u = f2(a0[r * 16 + c] * 0.7f) * 0.08333333333333333f;
+          u = f2(a0[r * 64 + c] * 0.7f) * 0.08333333333333333f;
         }
         p0[r * 32 + c] = (half)u;
       }
