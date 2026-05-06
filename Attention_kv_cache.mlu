@@ -22,6 +22,9 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ kc,
   if (c != 0x80) {
     int t = c * 128;
     __memcpy(q0, q + h * 64, 64 * sizeof(half), GDRAM2NRAM);
+    if (c == 0) {
+      __memcpy(a2, q0, 64 * sizeof(half), NRAM2NRAM);
+    }
     __memcpy(a0, kc + h * 32768 + t * 64, 8192 * sizeof(half), GDRAM2NRAM);
     __bang_reshape_filter(a1, a0, 128, 1, 1, 64);
     __memcpy(w0, a1, 8192 * sizeof(half), NRAM2WRAM);
@@ -52,16 +55,20 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ kc,
     __bang_add(o0, o0, s0 + 192, 64);
     __memcpy(s1, r0 + 256, 4 * sizeof(float), SRAM2NRAM);
 
+    __memcpy(q0, kn + h * 64, 64 * sizeof(half), GDRAM2NRAM);
+    __bang_mul(q0, q0, a2, 64);
+    __bang_half2float(s0, q0, 64);
     float sn = 0.0f;
 #pragma unroll
     for (int i = 0; i < 64; ++i) {
-      sn += (float)q[h * 64 + i] * (float)kn[h * 64 + i];
+      sn += s0[i];
     }
     sn = expf(sn * 0.125f);
     float inv = 1.0f / (s1[0] + s1[1] + s1[2] + s1[3] + sn);
+    __memcpy(q0, vn + h * 64, 64 * sizeof(half), GDRAM2NRAM);
 #pragma unroll
     for (int i = 0; i < 64; ++i) {
-      o0[i] = (o0[i] + sn * (float)vn[h * 64 + i]) * inv;
+      o0[i] = (o0[i] + sn * (float)q0[i]) * inv;
     }
     __bang_float2half_rn(o1, o0, 64);
     __memcpy(y + h * 64, o1, 64 * sizeof(half), NRAM2GDRAM);
