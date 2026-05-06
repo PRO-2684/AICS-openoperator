@@ -8,6 +8,7 @@
 #define E2 65536
 #define E3 32768
 #define E4 32
+#define E5 128
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z) {
   __nram__ half a[E3];
@@ -24,29 +25,30 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z) {
 }
 
 __mlu_entry__ void k1(const half *__restrict__ z, half *__restrict__ y) {
-  __nram__ half h[E1];
-  __nram__ half r[E1];
-  __nram__ half s[E1];
-  __nram__ float e[E1];
-  __nram__ float f[E1];
-  __nram__ float g[E1];
-  int p = taskId * 2 * E1;
-  __memcpy(r, z + p, E1 * sizeof(half), GDRAM2NRAM);
-  __memcpy(h, z + p + E1, E1 * sizeof(half), GDRAM2NRAM);
-  __bang_add(r, r, h, E1);
-  __memcpy(s, z + E4 * E1 + p, E1 * sizeof(half), GDRAM2NRAM);
-  __memcpy(h, z + E4 * E1 + p + E1, E1 * sizeof(half), GDRAM2NRAM);
-  __bang_add(s, s, h, E1);
-  __bang_half2float(e, r, E1);
-  __bang_half2float(f, s, E1);
-  __bang_mul(g, e, e, E1);
-  __bang_mul_scalar(g, g, 0.00390625f, E1);
-  __bang_sub(f, f, g, E1);
-  __bang_mul_scalar(f, f, 0.00392156862745098f, E1);
-  __bang_active_relu(f, f, E1);
-  __bang_sqrt(f, f, E1);
-  __bang_float2half(h, f, E1);
-  __memcpy(y + taskId * E1, h, E1 * sizeof(half), NRAM2GDRAM);
+  __nram__ half h[E5];
+  __nram__ half r[E5];
+  __nram__ half s[E5];
+  __nram__ float e[E5];
+  __nram__ float f[E5];
+  __nram__ float g[E5];
+  int p = (taskId >> 1) * 2 * E1 + (taskId & 1) * E5;
+  __memcpy(r, z + p, E5 * sizeof(half), GDRAM2NRAM);
+  __memcpy(h, z + p + E1, E5 * sizeof(half), GDRAM2NRAM);
+  __bang_add(r, r, h, E5);
+  __memcpy(s, z + E4 * E1 + p, E5 * sizeof(half), GDRAM2NRAM);
+  __memcpy(h, z + E4 * E1 + p + E1, E5 * sizeof(half), GDRAM2NRAM);
+  __bang_add(s, s, h, E5);
+  __bang_half2float(e, r, E5);
+  __bang_half2float(f, s, E5);
+  __bang_mul(g, e, e, E5);
+  __bang_mul_scalar(g, g, 0.00390625f, E5);
+  __bang_sub(f, f, g, E5);
+  __bang_mul_scalar(f, f, 0.00392156862745098f, E5);
+  __bang_active_relu(f, f, E5);
+  __bang_sqrt(f, f, E5);
+  __bang_float2half(h, f, E5);
+  __memcpy(y + (taskId >> 1) * E1 + (taskId & 1) * E5, h,
+           E5 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
@@ -59,7 +61,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
     out = torch::empty({E0, E1}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t h0 = {E4, 1, 1};
-  cnrtDim3_t h1 = {E0, 1, 1};
+  cnrtDim3_t h1 = {E4, 1, 1};
   k0<<<h0, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(tmp.data_ptr<at::Half>()));
