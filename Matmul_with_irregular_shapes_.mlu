@@ -42,16 +42,16 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
 
   int bs[1] = {1};
 
-  int64_t sa[1] = {24199545};
-  int64_t sb[1] = {17460729};
+  int64_t sa[1] = {24196545};
+  int64_t sb[1] = {17461029};
   int64_t sc[1] = {48581805};
 
   float al = 1.0f;
   float be = 0.0f;
 
   if (d == nullptr) {
-    a = f(24199545, CNNL_DTYPE_HALF);
-    b = f(17460729, CNNL_DTYPE_HALF);
+    a = f(24196545, CNNL_DTYPE_HALF);
+    b = f(17461029, CNNL_DTYPE_HALF);
     c = f(48581805, CNNL_DTYPE_FLOAT);
 
     X(cnnlCreateStrideBatchMatMulDescriptor(&d));
