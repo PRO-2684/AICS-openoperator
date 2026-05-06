@@ -12,40 +12,64 @@
 static cnnlTensorDescriptor_t d0() {
   static cnnlTensorDescriptor_t d = nullptr;
   if (d == nullptr) {
-    int dims[4] = {2, 128, 8, 64};
-    int st[4] = {65536, 64, 8192, 1};
+    int dims[4] = {2, 8, 128, 64};
     CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-    CNNL_CHECK(cnnlSetTensorDescriptorEx(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF,
-                                         4, dims, st));
+    CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4,
+                                       dims));
+  }
+  return d;
+}
+
+static cnnlTensorDescriptor_t d1() {
+  static cnnlTensorDescriptor_t d = nullptr;
+  if (d == nullptr) {
+    int dims[2] = {8, 256};
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+    CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT, 2,
+                                       dims));
+  }
+  return d;
+}
+
+static cnnlFlashAttentionDescriptor_t d2() {
+  static cnnlFlashAttentionDescriptor_t d = nullptr;
+  if (d == nullptr) {
+    CNNL_CHECK(cnnlCreateFlashAttentionDescriptor(&d));
+    CNNL_CHECK(cnnlSetFlashAttentionDescriptor_v2(
+        d, CNNL_DTYPE_FLOAT, CNNL_COMPUTATION_HIGH_PRECISION,
+        CNNL_ATTN_MASK_CAUSAL, CNNL_ATTN_TENSOR_LAYOUT_B_HN_S_HS, false, false,
+        false, 128, 128, 0.0f, 0.125f));
   }
   return d;
 }
 
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v) {
   static torch::Tensor out;
+  static torch::Tensor lse;
   if (!out.defined())
     out = torch::empty_like(q);
   else
     out.resize_({2, 8, 128, 64});
-  auto d = d0();
+  if (!lse.defined())
+    lse = torch::empty({8, 256}, q.options().dtype(torch::kFloat32));
+
+  auto x = d0();
+  auto y = d1();
+  auto z = d2();
   auto handle = torch_mlu::getCurrentHandle();
   static size_t ws_size = 0;
   if (ws_size == 0) {
-    CNNL_CHECK(cnnlGetScaledDotProductAttnWorkspaceSize_v3(
-        handle, nullptr, nullptr, d, d, d, nullptr, nullptr, nullptr, nullptr,
-        nullptr, 128, 128, true, -1, -1, false, CNNL_COMPUTATION_FAST,
-        CNNL_DTYPE_HALF, &ws_size));
+    CNNL_CHECK(cnnlGetFlashAttentionForwardWorkspaceSize_v2(
+        handle, z, x, x, x, nullptr, nullptr, nullptr, nullptr, nullptr, y,
+        &ws_size));
   }
   static torch::Tensor ws;
-  if (!ws.defined()) {
+  if (!ws.defined())
     ws = torch::empty({(int64_t)ws_size}, q.options().dtype(torch::kUInt8));
-  }
-  CNNL_CHECK(cnnlScaledDotProductAttn_v4(
-      handle, nullptr, nullptr, d, q.data_ptr(), d, k.data_ptr(), d,
-      v.data_ptr(), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 128, 128, true, -1,
-      -1, 0.125f, CNNL_COMPUTATION_FAST, CNNL_DTYPE_HALF,
-      ws_size ? ws.data_ptr() : nullptr, ws_size, false, nullptr, nullptr, d,
-      out.data_ptr()));
+  CNNL_CHECK(cnnlFlashAttentionForward_v2(
+      handle, z, x, q.data_ptr(), x, k.data_ptr(), x, v.data_ptr(), nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+      nullptr, nullptr, ws_size ? ws.data_ptr() : nullptr, ws_size, nullptr,
+      nullptr, y, lse.data_ptr(), x, out.data_ptr()));
   return out;
 }
