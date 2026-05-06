@@ -3,48 +3,31 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 8192
-#define E1 128
+#define E0 16384
+#define E1 256
 
 __mlu_entry__ void kernel(const half *__restrict__ input,
                           half *__restrict__ output) {
-  __mlu_shared__ half s[4];
   __nram__ half xbuf[E0];
   __nram__ half tmp[E1];
 
-  int active = coreId != 0x80;
-  int row = 0;
-  int part = 0;
-  int base = 0;
-
-  if (active) {
-    row = taskIdY * 2 + (coreId >> 1);
-    part = coreId & 1;
-    base = row * 16384 + part * E0;
-
-    __memcpy(xbuf, input + base, E0 * sizeof(half), GDRAM2NRAM);
-    __bang_active_exp(xbuf, xbuf, E0);
-
-    __bang_reduce_sum(xbuf, xbuf, E0);
-    __memcpy(tmp, xbuf, sizeof(half), NRAM2NRAM, sizeof(half),
-             64 * sizeof(half), E1 - 1);
-    __bang_reduce_sum(tmp, tmp, E1);
-    s[coreId] = tmp[0] + tmp[64];
-  }
-  __sync_cluster();
-
-  if (active) {
-    int pair = coreId & 2;
-    half inv_sum = (half)(1.0f / (float)(s[pair] + s[pair + 1]));
-    __bang_mul_scalar(xbuf, xbuf, inv_sum, E0);
-    __memcpy(output + base, xbuf, E0 * sizeof(half), NRAM2GDRAM);
-  }
+  int row = taskId;
+  __memcpy(xbuf, input + row * E0, E0 * sizeof(half), GDRAM2NRAM);
+  __bang_active_exp(xbuf, xbuf, E0);
+  __bang_reduce_sum(xbuf, xbuf, E0);
+  __memcpy(tmp, xbuf, sizeof(half), NRAM2NRAM, sizeof(half),
+           64 * sizeof(half), E1 - 1);
+  __bang_reduce_sum(tmp, tmp, E1);
+  half row_sum = tmp[0] + tmp[64] + tmp[128] + tmp[192];
+  half inv_sum = (half)(1.0f / (float)row_sum);
+  __bang_mul_scalar(xbuf, xbuf, inv_sum, E0);
+  __memcpy(output + row * E0, xbuf, E0 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   auto y = torch::empty_like(x);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t kdim = {4, 8, 1};
+  cnrtDim3_t kdim = {16, 1, 1};
   kernel<<<kdim, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
