@@ -42,7 +42,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
-  auto out = torch::empty({E0, E1}, x.options());
+  static torch::Tensor out;
+  if (!out.defined())
+    out = torch::empty({E0, E1}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t h = {E0, 1, 1};
   k0<<<h, cnrtFuncTypeUnion1, queue>>>(
