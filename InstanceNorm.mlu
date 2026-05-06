@@ -1,99 +1,170 @@
-#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
-#include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <math.h>
 #include <torch/extension.h>
 
-#define CNNL_CHECK(expr)                                                        \
-  do {                                                                         \
-    cnnlStatus_t s__ = (expr);                                                 \
-    TORCH_CHECK(s__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s__);   \
-  } while (0)
+#define PARTS 2
+#define LOCAL_ELEMS 8192 * 4
 
-__mlu_entry__ void k0(half *__restrict__ a, half *__restrict__ b) {
-  if (taskId < 64) {
-    a[taskId] = (half)1.0f;
-    b[taskId] = (half)0.0f;
+__mlu_func__ float reduce_sum_float_small(float *buf, float *tmp, int n) {
+  int cur = n;
+  float *src = buf;
+  float *dst = tmp;
+
+  while (cur > 32) {
+    __bang_reduce_sum(dst, src, cur);
+    int groups = cur / 32;
+
+    for (int i = 0; i < groups; ++i) {
+      src[i] = dst[i * 32];
+    }
+
+    cur = groups;
   }
+
+  float s = 0.0f;
+  for (int i = 0; i < cur; ++i) {
+    s += src[i];
+  }
+  return s;
+}
+
+__mlu_entry__ void inst_norm_partial_kernel(const half *__restrict__ x,
+                                            float *__restrict__ partial,
+                                            int outer, int inner) {
+  int gid = taskId;
+  int total_tasks = outer * PARTS;
+  if (gid >= total_tasks)
+    return;
+
+  int idx = gid / PARTS;
+  int part = gid - idx * PARTS;
+
+  int chunk = inner / PARTS;
+  int offset = part * chunk;
+
+  const half *px = x + (int64_t)idx * inner + offset;
+
+  __nram__ half hbuf[LOCAL_ELEMS];
+  __nram__ float fbuf[LOCAL_ELEMS];
+  __nram__ float tbuf[LOCAL_ELEMS];
+
+  __memcpy(hbuf, px, chunk * sizeof(half), GDRAM2NRAM);
+
+  __bang_half2float(fbuf, hbuf, chunk);
+  float sum = reduce_sum_float_small(fbuf, tbuf, chunk);
+
+  __bang_half2float(fbuf, hbuf, chunk);
+  __bang_square(fbuf, fbuf, chunk);
+  float sq_sum = reduce_sum_float_small(fbuf, tbuf, chunk);
+
+  int base = idx * (PARTS * 2) + part;
+  partial[base] = sum;
+  partial[base + PARTS] = sq_sum;
+}
+
+__mlu_entry__ void inst_norm_stat_kernel(const float *__restrict__ partial,
+                                         float *__restrict__ stat, int outer,
+                                         int inner, float eps) {
+  int idx = taskId;
+  if (idx >= outer)
+    return;
+
+  const float *p = partial + idx * (PARTS * 2);
+
+  float sum = 0.0f;
+  float sq_sum = 0.0f;
+
+  for (int i = 0; i < PARTS; ++i) {
+    sum += p[i];
+    sq_sum += p[PARTS + i];
+  }
+
+  float inv_n = 1.0f / (float)inner;
+  float mean = sum * inv_n;
+  float var = sq_sum * inv_n - mean * mean;
+  if (var < 0.0f)
+    var = 0.0f;
+
+  stat[idx * 2 + 0] = mean;
+  stat[idx * 2 + 1] = 1.0f / sqrtf(var + eps);
+}
+
+__mlu_entry__ void inst_norm_apply_kernel(const half *__restrict__ x,
+                                          half *__restrict__ y,
+                                          const float *__restrict__ stat,
+                                          int outer, int inner) {
+  int gid = taskId;
+  int total_tasks = outer * PARTS;
+  if (gid >= total_tasks)
+    return;
+
+  int idx = gid / PARTS;
+  int part = gid - idx * PARTS;
+
+  int chunk = inner / PARTS;
+  int offset = part * chunk;
+
+  const half *px = x + (int64_t)idx * inner + offset;
+  half *py = y + (int64_t)idx * inner + offset;
+
+  float mean = stat[idx * 2 + 0];
+  float inv_std = stat[idx * 2 + 1];
+
+  __nram__ half hbuf[LOCAL_ELEMS];
+  __nram__ float fbuf[LOCAL_ELEMS];
+
+  __memcpy(hbuf, px, chunk * sizeof(half), GDRAM2NRAM);
+
+  __bang_half2float(fbuf, hbuf, chunk);
+  __bang_sub_scalar(fbuf, fbuf, mean, chunk);
+  __bang_mul_scalar(fbuf, fbuf, inv_std, chunk);
+
+  __bang_float2half_rn(hbuf, fbuf, chunk);
+  __memcpy(py, hbuf, chunk * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
   (void)num_features;
 
   auto y = torch::empty_like(x);
-  auto xh = torch::empty({16, 256, 256, 64}, x.options());
-  auto yh = torch::empty({16, 256, 256, 64}, x.options());
-  auto s = torch::empty({64}, x.options());
-  auto b = torch::empty({64}, x.options());
+
+  int n = (int)x.size(0);
+  int c = (int)x.size(1);
+  int h = (int)x.size(2);
+  int w = (int)x.size(3);
+
+  int outer = n * c;
+  int inner = h * w;
+
+  auto fopt = x.options().dtype(torch::kFloat32);
+  auto partial = torch::empty({outer, PARTS * 2}, fopt);
+  auto stat = torch::empty({outer, 2}, fopt);
+
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {64, 1, 1};
-  k0<<<g, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(s.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(b.data_ptr<at::Half>()));
 
-  static cnnlTensorDescriptor_t x_desc0 = nullptr;
-  static cnnlTensorDescriptor_t x_desc = nullptr;
-  static cnnlTensorDescriptor_t y_desc0 = nullptr;
-  static cnnlTransposeDescriptor_t td0 = nullptr;
-  static cnnlTransposeDescriptor_t td1 = nullptr;
-  static cnnlTensorDescriptor_t sb_desc = nullptr;
-  static cnnlTensorDescriptor_t mv_desc = nullptr;
-  static size_t ws0 = 0;
-  static size_t ws1 = 0;
-  static size_t ws_size = 0;
-  if (x_desc == nullptr) {
-    int s0[4] = {16, 64, 256, 256};
-    int s1[4] = {16, 256, 256, 64};
-    int p0[4] = {0, 2, 3, 1};
-    int p1[4] = {0, 3, 1, 2};
-    int s3[1] = {64};
-    int s2[2] = {16, 64};
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&x_desc0));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&x_desc));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&y_desc0));
-    CNNL_CHECK(cnnlCreateTransposeDescriptor(&td0));
-    CNNL_CHECK(cnnlCreateTransposeDescriptor(&td1));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&sb_desc));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&mv_desc));
-    CNNL_CHECK(cnnlSetTensorDescriptor(x_desc0, CNNL_LAYOUT_ARRAY,
-                                       CNNL_DTYPE_HALF, 4, s0));
-    CNNL_CHECK(cnnlSetTensorDescriptor(x_desc, CNNL_LAYOUT_NHWC,
-                                       CNNL_DTYPE_HALF, 4, s1));
-    CNNL_CHECK(cnnlSetTensorDescriptor(y_desc0, CNNL_LAYOUT_ARRAY,
-                                       CNNL_DTYPE_HALF, 4, s0));
-    CNNL_CHECK(cnnlSetTransposeDescriptor(td0, 4, p0));
-    CNNL_CHECK(cnnlSetTransposeDescriptor(td1, 4, p1));
-    CNNL_CHECK(cnnlSetTensorDescriptor(sb_desc, CNNL_LAYOUT_ARRAY,
-                                       CNNL_DTYPE_HALF, 1, s3));
-    CNNL_CHECK(cnnlSetTensorDescriptor(mv_desc, CNNL_LAYOUT_NC, CNNL_DTYPE_HALF,
-                                       2, s2));
-    CNNL_CHECK(cnnlGetTransposeWorkspaceSize(torch_mlu::getCurrentHandle(),
-                                             x_desc0, td0, &ws0));
-    CNNL_CHECK(cnnlGetTransposeWorkspaceSize(torch_mlu::getCurrentHandle(),
-                                             x_desc, td1, &ws1));
-    CNNL_CHECK(cnnlGetInstanceNormForwardWorkspaceSize(
-        torch_mlu::getCurrentHandle(), x_desc, &ws_size));
-    if (ws0 > ws_size)
-      ws_size = ws0;
-    if (ws1 > ws_size)
-      ws_size = ws1;
-  }
+  cnrtDim3_t dim_partial;
+  dim_partial.x = outer * PARTS;
+  dim_partial.y = 1;
+  dim_partial.z = 1;
 
-  auto ws = torch::empty({(int64_t)ws_size}, x.options().dtype(torch::kUInt8));
-  auto mean = torch::empty({16, 64}, x.options());
-  auto inv = torch::empty({16, 64}, x.options());
-  CNNL_CHECK(cnnlTranspose_v2(
-      torch_mlu::getCurrentHandle(), td0, x_desc0, x.data_ptr(), x_desc,
-      xh.data_ptr(), ws_size ? ws.data_ptr() : nullptr, ws_size));
-  CNNL_CHECK(cnnlInstanceNormForward(
-      torch_mlu::getCurrentHandle(), 1.0e-5f, 0.1f, sb_desc, s.data_ptr(),
-      x_desc, xh.data_ptr(), b.data_ptr(), mv_desc, nullptr, nullptr,
-      ws_size ? ws.data_ptr() : nullptr, ws_size, x_desc, yh.data_ptr(),
-      mean.data_ptr(), inv.data_ptr()));
-  CNNL_CHECK(cnnlTranspose_v2(
-      torch_mlu::getCurrentHandle(), td1, x_desc, yh.data_ptr(), y_desc0,
-      y.data_ptr(), ws_size ? ws.data_ptr() : nullptr, ws_size));
+  cnrtDim3_t dim_stat;
+  dim_stat.x = outer;
+  dim_stat.y = 1;
+  dim_stat.z = 1;
+
+  inst_norm_partial_kernel<<<dim_partial, cnrtFuncTypeBlock, queue>>>(
+      (const half *)x.data_ptr<at::Half>(), (float *)partial.data_ptr<float>(),
+      outer, inner);
+
+  inst_norm_stat_kernel<<<dim_stat, cnrtFuncTypeBlock, queue>>>(
+      (const float *)partial.data_ptr<float>(), (float *)stat.data_ptr<float>(),
+      outer, inner, 1.0e-5f);
+
+  inst_norm_apply_kernel<<<dim_partial, cnrtFuncTypeBlock, queue>>>(
+      (const half *)x.data_ptr<at::Half>(), (half *)y.data_ptr<at::Half>(),
+      (const float *)stat.data_ptr<float>(), outer, inner);
 
   return y;
 }
