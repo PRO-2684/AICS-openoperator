@@ -1,6 +1,10 @@
 #include <aten/cnnl/cnnlHandle.h>
+#include <bang.h>
 #include <cnnl.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
+
+#define E0 32768
 
 #define X(e)                                                                   \
   do {                                                                         \
@@ -8,16 +12,42 @@
     TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
   } while (0)
 
-static cnnlTensorDescriptor_t f(int n, cnnlDataType_t t) {
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y,
+                      int n) {
+  __nram__ half a[E0];
+  __nram__ float b[E0];
+  int step = taskDim * E0;
+  for (int p = taskId * E0; p < n; p += step) {
+    int m = n - p;
+    if (m > E0)
+      m = E0;
+    __memcpy(a, x + p, m * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(b, a, m);
+    __memcpy(y + p, b, m * sizeof(float), NRAM2GDRAM);
+  }
+}
+
+static cnnlTensorDescriptor_t f(int n) {
   int d[1] = {n};
   cnnlTensorDescriptor_t r;
   X(cnnlCreateTensorDescriptor(&r));
-  X(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, t, 1, d));
+  X(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT, 1, d));
   return r;
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto C = torch::empty({16, 1024, 768}, A.options().dtype(torch::kFloat));
+  auto Af = torch::empty({33554432}, A.options().dtype(torch::kFloat));
+  auto Bf = torch::empty({1572864}, B.options().dtype(torch::kFloat));
+
+  cnrtDim3_t dim = {4, 8, 1};
+  cnrtQueue_t q0 = torch_mlu::getCurMLUStream();
+  k0<<<dim, cnrtFuncTypeUnion1, q0>>>(
+      reinterpret_cast<const half *>(A.data_ptr<at::Half>()), Af.data_ptr<float>(),
+      33554432);
+  k0<<<dim, cnrtFuncTypeUnion1, q0>>>(
+      reinterpret_cast<const half *>(B.data_ptr<at::Half>()), Bf.data_ptr<float>(),
+      1572864);
 
   static cnnlTensorDescriptor_t a = nullptr;
   static cnnlTensorDescriptor_t b = nullptr;
@@ -50,9 +80,9 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   float be = 0.0f;
 
   if (d == nullptr) {
-    a = f(16 * 1024 * 2048, CNNL_DTYPE_HALF);
-    b = f(2048 * 768, CNNL_DTYPE_HALF);
-    c = f(16 * 1024 * 768, CNNL_DTYPE_FLOAT);
+    a = f(16 * 1024 * 2048);
+    b = f(2048 * 768);
+    c = f(16 * 1024 * 768);
 
     X(cnnlCreateStrideBatchMatMulDescriptor(&d));
     X(cnnlCreateStrideBatchMatMulAlgo(&e));
@@ -82,8 +112,8 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
 
   auto w = torch::empty({(int64_t)z}, A.options().dtype(torch::kUInt8));
 
-  X(cnnlStrideBatchMatMul_v3(h, d, e, ta, tb, m, n, k, bs, &al, a, A.data_ptr(),
-                             la, sa, b, B.data_ptr(), lb, sb, &be, c,
+  X(cnnlStrideBatchMatMul_v3(h, d, e, ta, tb, m, n, k, bs, &al, a,
+                             Af.data_ptr(), la, sa, b, Bf.data_ptr(), lb, sb, &be, c,
                              C.data_ptr(), lc, sc, z ? w.data_ptr() : nullptr,
                              z, c, C.data_ptr(), ld, sc));
 
