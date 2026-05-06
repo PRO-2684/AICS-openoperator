@@ -5,14 +5,15 @@
 #include <vector>
 
 #define E0 32768
-#define E1 1024
-#define E2 512
+#define E1 2048
+#define E2 1024
 #define E3 64
 #define E4 32
+#define E5 8
 
 __mlu_func__ void load_pair(half *a0, half *a1, const half *p) {
 #pragma unroll
-  for (int r = 0; r < 4; ++r) {
+  for (int r = 0; r < E5; ++r) {
 #pragma unroll
     for (int h = 0; h < 4; ++h) {
       int t = (r << 2) + h;
@@ -51,7 +52,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
                       const half *__restrict__ c, const half *__restrict__ s,
                       half *__restrict__ qo, half *__restrict__ ko) {
   int off = taskId * E1;
-  int p = (taskId & 15) << 2;
+  int p = (taskId & 7) << 3;
 
   __nram__ half a0[E2];
   __nram__ half a1[E2];
@@ -62,11 +63,11 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __nram__ half d0[E2];
   __nram__ half d1[E2];
   __nram__ half t[E2];
-  __nram__ half u[E3 * 4];
-  __nram__ half v[E3 * 4];
+  __nram__ half u[E3 * E5];
+  __nram__ half v[E3 * E5];
 
-  __memcpy(u, c + p * E3, E3 * 4 * sizeof(half), GDRAM2NRAM);
-  __memcpy(v, s + p * E3, E3 * 4 * sizeof(half), GDRAM2NRAM);
+  __memcpy(u, c + p * E3, E3 * E5 * sizeof(half), GDRAM2NRAM);
+  __memcpy(v, s + p * E3, E3 * E5 * sizeof(half), GDRAM2NRAM);
   load_pair(b0, b1, u);
   load_pair(d0, d1, v);
 
@@ -82,8 +83,8 @@ std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k,
   auto ko = torch::empty_like(k);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, queue>>>(
+  cnrtDim3_t d = {16, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(q.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(k.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(cos.data_ptr<at::Half>()),
