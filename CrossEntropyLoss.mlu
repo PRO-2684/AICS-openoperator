@@ -1,87 +1,74 @@
-#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
-#include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <math.h>
 #include <stdint.h>
 #include <torch/extension.h>
 
-#define CNNL_CHECK(expr)                                                        \
-  do {                                                                         \
-    cnnlStatus_t s__ = (expr);                                                 \
-    TORCH_CHECK(s__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s__);   \
-  } while (0)
+#define ROWS 4096
+#define COLS 10
+#define TASKS 64
+#define ROWS_PER_TASK (ROWS / TASKS)
+#define LOCAL_ELEMS (ROWS_PER_TASK * COLS)
 
-#define E0 4096
-#define E1 10
-#define E2 128
+__mlu_entry__ void k0(const half *__restrict__ predictions,
+                      const int64_t *__restrict__ targets,
+                      float *__restrict__ partial) {
+  int row0 = taskId * ROWS_PER_TASK;
+  int base = row0 * COLS;
 
-__mlu_entry__ void k0(const int64_t *__restrict__ x, int *__restrict__ y) {
-  int p = taskId * E2;
-  __nram__ int64_t a[E2];
-  __nram__ int b[E2];
-  __memcpy(a, x + p, E2 * sizeof(int64_t), GDRAM2NRAM);
-  for (int i = 0; i < E2; ++i) {
-    b[i] = (int)a[i];
+  __nram__ half hbuf[LOCAL_ELEMS];
+  __nram__ float fbuf[LOCAL_ELEMS];
+
+  __memcpy(hbuf, predictions + base, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(fbuf, hbuf, LOCAL_ELEMS);
+  __bang_active_exp(fbuf, fbuf, LOCAL_ELEMS);
+
+  float acc = 0.0f;
+
+#pragma unroll 1
+  for (int r = 0; r < ROWS_PER_TASK; ++r) {
+    int off = r * COLS;
+    float sum = 0.0f;
+
+#pragma unroll
+    for (int c = 0; c < COLS; ++c) {
+      sum += fbuf[off + c];
+    }
+
+    int64_t label = targets[row0 + r];
+    acc += logf(sum) - (float)hbuf[off + label];
   }
-  __memcpy(y + p, b, E2 * sizeof(int), NRAM2GDRAM);
+
+  partial[taskId] = acc;
 }
 
-__mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half h[E0];
-  __nram__ float a[E0];
-  __nram__ float b[E0];
-  __memcpy(h, x, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(a, h, E0);
-  __bang_reduce_sum(b, a, E0);
-  float s = 0.0f;
+__mlu_entry__ void k1(const float *__restrict__ partial, half *__restrict__ out) {
+  float acc = 0.0f;
+
 #pragma unroll
-  for (int i = 0; i < E0 / 32; ++i) {
-    s += b[i * 32];
+  for (int i = 0; i < TASKS; ++i) {
+    acc += partial[i];
   }
-  y[0] = (half)(s * 0.000244140625f);
+
+  out[0] = (half)(acc * (1.0f / (float)ROWS));
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   auto out = torch::empty({}, predictions.options());
-  auto lab = torch::empty({E0}, targets.options().dtype(torch::kInt32));
-  auto loss = torch::empty({E0}, predictions.options());
-  auto diff = torch::empty({E0, E1}, predictions.options());
+  auto partial =
+      torch::empty({TASKS}, predictions.options().dtype(torch::kFloat32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {32, 1, 1};
-  k0<<<g, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const int64_t *>(targets.data_ptr<int64_t>()),
-      reinterpret_cast<int *>(lab.data_ptr<int>()));
-
-  static cnnlTensorDescriptor_t xd = nullptr;
-  static cnnlTensorDescriptor_t id = nullptr;
-  static cnnlTensorDescriptor_t yd = nullptr;
-  static cnnlTensorDescriptor_t dd = nullptr;
-  if (xd == nullptr) {
-    int xs[2] = {E0, E1};
-    int ys[1] = {E0};
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&xd));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&id));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&yd));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&dd));
-    CNNL_CHECK(
-        cnnlSetTensorDescriptor(xd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, xs));
-    CNNL_CHECK(cnnlSetTensorDescriptor(id, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_INT32,
-                                       1, ys));
-    CNNL_CHECK(
-        cnnlSetTensorDescriptor(yd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 1, ys));
-    CNNL_CHECK(
-        cnnlSetTensorDescriptor(dd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, xs));
-  }
-
-  CNNL_CHECK(cnnlSparseSoftmaxCrossEntropyWithLogits(
-      torch_mlu::getCurrentHandle(), CNNL_SOFTMAX_MODE_LOW_DIMENSION, xd,
-      predictions.data_ptr(), id, lab.data_ptr(), yd, loss.data_ptr(), dd,
-      diff.data_ptr()));
+  cnrtDim3_t dim = {TASKS, 1, 1};
   cnrtDim3_t one = {1, 1, 1};
+
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
+      reinterpret_cast<const int64_t *>(targets.data_ptr<int64_t>()),
+      reinterpret_cast<float *>(partial.data_ptr<float>()));
   k1<<<one, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(loss.data_ptr<at::Half>()),
+      reinterpret_cast<const float *>(partial.data_ptr<float>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
 
   return out;
