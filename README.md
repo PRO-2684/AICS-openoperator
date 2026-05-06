@@ -130,8 +130,8 @@ python scripts/update_problems.py
 | 079 | [Global_sum](Global_sum.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/40319901ca05684cc5d64114fbc99ba0adfc9596) |   
 | 080 | [All_over_dim](All_over_dim.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/e80b7722eee7cea415aa88475513260221940a96) |
 | 081 | [Sum_2D_reduction](Sum_2D_reduction.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/1eda60594d6e0b532762d4a53c465437ad2d7e60) |
-| 082 | [Scaled_Dot_Product_Attention](Scaled_Dot_Product_Attention.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/bb3d345) |
-| 083 | [Causal_Self_Attention](Causal_Self_Attention.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/bb3d345) |
+| 082 | [Scaled_Dot_Product_Attention](Scaled_Dot_Product_Attention.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/86c5a39) |
+| 083 | [Causal_Self_Attention](Causal_Self_Attention.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/82fccb9) |
 | 084 | [Cross_Attention](Cross_Attention.mlu) | N/A | 🔴 |
 | 085 | [Linear](Linear.mlu) | N/A | 🔴 |
 | 086 | [Batch_outer_product](Batch_outer_product.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/7a1519e) |
@@ -178,7 +178,7 @@ python scripts/update_problems.py
 | 127 | [Cholesky_decomposition](Cholesky_decomposition.mlu) | N/A | 🔴 |
 | 128 | [Batch_norm_1D](Batch_norm_1D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/0eaf36f3db1f823ae6b99e52f9e5d6208c213218) |
 | 129 | [Attention_score_with_bias](Attention_score_with_bias.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/f979e3f) |
-| 130 | [Attention_kv_cache](Attention_kv_cache.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/e8865ec) |
+| 130 | [Attention_kv_cache](Attention_kv_cache.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/b724d07) |
 | 131 | [Relative_position_encoding](Relative_position_encoding.mlu) | N/A | 🔴 |
 | 132 | [Sparse_embedding](Sparse_embedding.mlu) | N/A | 🔴 |
 | 133 | [Triplet_loss](Triplet_loss.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/99356a7) |
