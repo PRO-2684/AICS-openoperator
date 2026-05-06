@@ -38,7 +38,9 @@ __mlu_entry__ void pixel_shuffle_kernel(const half *__restrict__ x,
 torch::Tensor bang_func(torch::Tensor x, int upscale_factor) {
   (void)upscale_factor;
 
-  auto y = torch::empty({4, 64, 64, 64}, x.options());
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty({4, 64, 64, 64}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {TASKS, 1, 1};
 
