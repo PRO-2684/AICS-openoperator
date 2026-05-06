@@ -29,9 +29,12 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ kc,
     __bang_mul_scalar(s0, s0, 0.125f, 128);
     __bang_active_exp(s0, s0, 128);
     __memcpy(s1, s0, 128 * sizeof(float), NRAM2NRAM);
-    __bang_reduce_sum(s0, s0, 128);
 
-    float ps = s0[0] + s0[32] + s0[64] + s0[96];
+    float ps = 0.0f;
+#pragma unroll
+    for (int i = 0; i < 128; ++i) {
+      ps += s1[i];
+    }
     __memcpy(a0, vc + h * 32768 + t * 64, 8192 * sizeof(half), GDRAM2NRAM);
     __bang_transpose(a1, a0, 128, 64);
     __memcpy(w0, a1, 8192 * sizeof(half), NRAM2WRAM);
