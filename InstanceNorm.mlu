@@ -4,86 +4,115 @@
 #include <math.h>
 #include <torch/extension.h>
 
-#define E0 1024
-#define E1 65536
-#define E2 16384
+#define LOCAL_ELEMS 65536
+#define TASK_COUNT 32
 
-__mlu_func__ float f0(float *a, float *b, int n) {
-  int c = n;
-  float *s = a;
-  float *d = b;
-  while (c > 32) {
-    __bang_reduce_sum(d, s, c);
-    int g = c / 32;
-    for (int i = 0; i < g; ++i) {
-      s[i] = d[i * 32];
+__mlu_func__ float reduce_sum_float(float *buf, float *tmp, int n) {
+  int cur = n;
+  float *src = buf;
+  float *dst = tmp;
+
+  while (cur > 32) {
+    __bang_reduce_sum(dst, src, cur);
+
+    int groups = cur / 32;
+    for (int i = 0; i < groups; ++i) {
+      src[i] = dst[i * 32];
     }
-    c = g;
+
+    cur = groups;
   }
-  float r = 0.0f;
-  for (int i = 0; i < c; ++i) {
-    r += s[i];
+
+  float s = 0.0f;
+  for (int i = 0; i < cur; ++i) {
+    s += src[i];
   }
-  return r;
+  return s;
 }
 
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  int t = taskIdY;
-  __mlu_shared__ float s0[10];
+__mlu_func__ float reduce_sum_half(half *buf, half *tmp, int n) {
+  int cur = n;
+  half *src = buf;
+  half *dst = tmp;
 
-  if (coreId == 0x80) {
-    __sync_cluster();
-    __sync_cluster();
-    return;
-  }
+  while (cur > 64) {
+    __bang_reduce_sum(dst, src, cur);
 
-  int c = coreId;
-  const half *px = x + (int64_t)t * E1 + c * E2;
-  half *py = y + (int64_t)t * E1 + c * E2;
-
-  __nram__ half h[E2];
-  __nram__ float a[E2];
-  __nram__ float b[E2];
-
-  __memcpy(h, px, E2 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(a, h, E2);
-  float s = f0(a, b, E2);
-
-  __bang_half2float(a, h, E2);
-  __bang_square(a, a, E2);
-  float q = f0(a, b, E2);
-
-  s0[c] = s;
-  s0[c + 4] = q;
-  __sync_cluster();
-
-  if (c == 0) {
-    float ss = s0[0] + s0[1] + s0[2] + s0[3];
-    float qq = s0[4] + s0[5] + s0[6] + s0[7];
-    float m = ss * 0.0000152587890625f;
-    float v = qq * 0.0000152587890625f - m * m;
-    if (v < 0.0f) {
-      v = 0.0f;
+    int groups = cur / 64;
+    for (int i = 0; i < groups; ++i) {
+      src[i] = dst[i * 64];
     }
-    s0[8] = m;
-    s0[9] = 1.0f / sqrtf(v + 1.0e-5f);
-  }
-  __sync_cluster();
 
-  __bang_half2float(a, h, E2);
-  __bang_sub_scalar(a, a, s0[8], E2);
-  __bang_mul_scalar(a, a, s0[9], E2);
-  __bang_float2half_rn(h, a, E2);
-  __memcpy(py, h, E2 * sizeof(half), NRAM2GDRAM);
+    cur = groups;
+  }
+
+  float s = 0.0f;
+  for (int i = 0; i < cur; ++i) {
+    s += (float)src[i];
+  }
+  return s;
+}
+
+__mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
+                                        half *__restrict__ y, int outer,
+                                        int inner, float eps) {
+  __nram__ half hbuf[LOCAL_ELEMS];
+  __nram__ float fbuf[LOCAL_ELEMS];
+  __nram__ float tbuf[LOCAL_ELEMS];
+
+  for (int idx = taskId; idx < outer; idx += taskDim) {
+    const half *px = x + (int64_t)idx * inner;
+    half *py = y + (int64_t)idx * inner;
+
+    __memcpy(hbuf, px, inner * sizeof(half), GDRAM2NRAM);
+
+    half *hwork = (half *)fbuf;
+    half *htmp = (half *)tbuf;
+    __memcpy(hwork, hbuf, inner * sizeof(half), NRAM2NRAM);
+    float sum = reduce_sum_half(hwork, htmp, inner);
+
+    __memcpy(hwork, hbuf, inner * sizeof(half), NRAM2NRAM);
+    __bang_square(hwork, hwork, inner);
+    float sq_sum = reduce_sum_half(hwork, htmp, inner);
+
+    float inv_n = 1.0f / (float)inner;
+    float mean = sum * inv_n;
+    float var = sq_sum * inv_n - mean * mean;
+    if (var < 0.0f)
+      var = 0.0f;
+    float inv_std = 1.0f / sqrtf(var + eps);
+
+    __bang_half2float(fbuf, hbuf, inner);
+    __bang_fusion(FUSION_FMA, fbuf, fbuf, inv_std, -mean * inv_std, inner);
+
+    __bang_float2half_rn(hbuf, fbuf, inner);
+    __memcpy(py, hbuf, inner * sizeof(half), NRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
   (void)num_features;
+
   auto y = torch::empty_like(x);
+
+  int n = (int)x.size(0);
+  int c = (int)x.size(1);
+  int h = (int)x.size(2);
+  int w = (int)x.size(3);
+
+  int outer = n * c;
+  int inner = h * w;
+
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {4, E0, 1};
-  k0<<<g, cnrtFuncTypeUnion1, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+
+  cnrtDim3_t dim;
+  dim.x = TASK_COUNT;
+  dim.y = 1;
+  dim.z = 1;
+
+  inst_norm_vec_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      (const half *)x.data_ptr<at::Half>(), (half *)y.data_ptr<at::Half>(),
+      outer, inner, 1.0e-5f);
+
   return y;
 }
