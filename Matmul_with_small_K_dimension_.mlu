@@ -69,7 +69,7 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   int64_t sa[1] = {524288};
   int64_t sb[1] = {524288};
   int64_t sc[1] = {268435456};
-  float al = 0.9995f;
+  float al = 1.0f;
   float be = 0.0f;
 
   if (d == nullptr) {
