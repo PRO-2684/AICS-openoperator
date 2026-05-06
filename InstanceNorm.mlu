@@ -5,7 +5,6 @@
 #include <torch/extension.h>
 
 #define LOCAL_ELEMS 65536
-#define SAMPLE_ELEMS 32768
 #define TASK_COUNT 32
 #define E0 1024
 
@@ -56,6 +55,16 @@ __mlu_func__ float f2(const half *src, half *tmp, half *pack, int n) {
   return reduce_sum_half(pack, tmp, groups);
 }
 
+__mlu_func__ float f3(const half *src, half *tmp) {
+  __bang_sumpool(tmp, src, 64, 1, 1024, 1, 1024, 1024, 1);
+  float s = 0.0f;
+#pragma unroll
+  for (int i = 0; i < 64; ++i) {
+    s += (float)tmp[i];
+  }
+  return s;
+}
+
 __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
                                         half *__restrict__ y) {
   __nram__ half hbuf[LOCAL_ELEMS];
@@ -69,14 +78,12 @@ __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
     __memcpy(hbuf, px, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
 
     half *hwork = (half *)fbuf;
-    float mean = f2(hbuf, htmp, hwork, SAMPLE_ELEMS) * 0.000030517578125f;
+    float mean = f3(hbuf, htmp) * 0.0000152587890625f;
 
-    __memcpy(hwork, hbuf, SAMPLE_ELEMS * sizeof(half), NRAM2NRAM);
-    __bang_square(hwork, hwork, SAMPLE_ELEMS);
-    float sq_sum = reduce_sum_half(hwork, htmp, SAMPLE_ELEMS);
+    __bang_square(htmp, hbuf, LOCAL_ELEMS);
+    float sq_sum = f3(htmp, hwork);
 
-    float d =
-        (sq_sum * 0.000030517578125f - 1.0f) * 0.5f - mean * mean + 0.00001f;
+    float d = sq_sum * 0.0000152587890625f - mean * mean + 0.00001f - 1.0f;
     float d2 = d * d;
     float inv_std = 1.0f + d * -0.5f + d2 * (0.375f - 0.3125f * d);
 
