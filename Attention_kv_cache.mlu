@@ -10,10 +10,9 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ kc,
   __nram__ half q0[512];
   __nram__ half a0[32768];
   __nram__ half a1[32768];
-  __nram__ half a2[32768];
-  __nram__ half a3[32768];
   __nram__ float s0[1024];
   __nram__ float s1[1024];
+  __nram__ float f0[32768];
   __nram__ float o0[64];
   __nram__ half o1[64];
   __wram__ half w0[32768];
@@ -41,13 +40,14 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ kc,
   }
   float inv = 1.0f / ss;
   __bang_mul_scalar(s1, s1, inv, 512);
-  __bang_float2half_rn(q0, s1, 512);
 
   __memcpy(a0, vc + h * 32768, 32768 * sizeof(half), GDRAM2NRAM);
-  __bang_transpose(a1, a0, 512, 64);
-  __bang_reshape_filter(a2, a1, 64, 1, 1, 512);
-  __memcpy(w0, a2, 32768 * sizeof(half), NRAM2WRAM);
-  __bang_matmul(o0, q0, w0, 1, 512, 64);
+  __bang_half2float(f0, a0, 32768);
+  __bang_write_value(o0, 64, 0.0f);
+#pragma unroll 512
+  for (int i = 0; i < 512; ++i) {
+    __bang_fusion(FUSION_FMA, o0, f0 + i * 64, s1[i], o0, 64, 64);
+  }
 
   float pn = sn * inv;
 #pragma unroll
