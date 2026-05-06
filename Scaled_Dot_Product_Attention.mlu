@@ -27,7 +27,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __bang_reduce_sum(f1, f0, 16384);
 
   __memcpy(a1, v + p * 8192, 8192 * sizeof(half), GDRAM2NRAM);
-  __bang_reshape_filter(a0, a1, 128, 1, 1, 64);
+  __bang_transpose(a0, a1, 128, 64);
   __memcpy(w0, a0, 8192 * sizeof(half), NRAM2WRAM);
   __bang_matmul(f2, a2, w0, 128, 128, 64);
 #pragma unroll
