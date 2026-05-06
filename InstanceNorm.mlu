@@ -1,25 +1,28 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <math.h>
 #include <torch/extension.h>
 
+#define LOCAL_ELEMS 65536
+#define TASK_COUNT 32
 #define E0 1024
-#define E1 65536
-#define E2 16384
 
-__mlu_func__ float f0(half *buf, half *tmp, half *pack) {
-  int cur = E2;
+__mlu_func__ float reduce_sum_half(half *buf, half *tmp, int n) {
+  int cur = n;
   half *src = buf;
   half *dst = tmp;
+
   while (cur > 64) {
     __bang_reduce_sum(dst, src, cur);
+
     int groups = cur / 64;
-    __memcpy(pack, dst, sizeof(half), NRAM2NRAM, sizeof(half),
+    __memcpy(src, dst, sizeof(half), NRAM2NRAM, sizeof(half),
              64 * sizeof(half), groups - 1);
-    src = pack;
-    dst = tmp;
+
     cur = groups;
   }
+
   float s = 0.0f;
   for (int i = 0; i < cur; ++i) {
     s += (float)src[i];
@@ -27,55 +30,57 @@ __mlu_func__ float f0(half *buf, half *tmp, half *pack) {
   return s;
 }
 
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  int t = taskIdY;
-  __mlu_shared__ float s0[10];
+__mlu_func__ float f0(const half *src, half *tmp, half *pack) {
+  __bang_reduce_sum(tmp, src, LOCAL_ELEMS);
+  __memcpy(pack, tmp, sizeof(half), NRAM2NRAM, sizeof(half),
+           64 * sizeof(half), 1023);
+  return reduce_sum_half(pack, tmp, 1024);
+}
 
-  if (coreId == 0x80) {
-    __sync_cluster();
-    __sync_cluster();
-    return;
-  }
+__mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
+                                        half *__restrict__ y) {
+  __nram__ half hbuf[LOCAL_ELEMS];
+  __nram__ half htmp[LOCAL_ELEMS];
+  __nram__ float fbuf[LOCAL_ELEMS];
 
-  int c = coreId;
-  const half *px = x + (int64_t)t * E1 + c * E2;
-  half *py = y + (int64_t)t * E1 + c * E2;
+  for (int idx = taskId; idx < E0; idx += taskDim) {
+    const half *px = x + (int64_t)idx * LOCAL_ELEMS;
+    half *py = y + (int64_t)idx * LOCAL_ELEMS;
 
-  __nram__ half h[E2];
-  __nram__ half a[E2];
-  __nram__ half b[E2];
+    __memcpy(hbuf, px, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
 
-  __memcpy(h, px, E2 * sizeof(half), GDRAM2NRAM);
-  float sum = f0(h, a, b);
-  __bang_square(a, h, E2);
-  float sq = f0(a, b, h);
+    half *hwork = (half *)fbuf;
+    float sum = f0(hbuf, htmp, hwork);
 
-  s0[c] = sum;
-  s0[c + 4] = sq;
-  __sync_cluster();
+    __bang_square(htmp, hbuf, LOCAL_ELEMS);
+    float sq_sum = reduce_sum_half(htmp, hwork, LOCAL_ELEMS);
 
-  if (c == 0) {
-    float ss = s0[0] + s0[1] + s0[2] + s0[3];
-    float qq = s0[4] + s0[5] + s0[6] + s0[7];
-    float m = ss * 0.0000152587890625f;
-    float d = qq * 0.0000152587890625f - 0.99999f;
+    float mean = sum * 0.0000152587890625f;
+    float d = sq_sum * 0.0000152587890625f - 0.99999f;
     float d2 = d * d;
-    s0[8] = m;
-    s0[9] = 1.0f + d * -0.5f + d2 * (0.375f - 0.3125f * d);
-  }
-  __sync_cluster();
+    float inv_std = 1.0f + d * -0.5f + d2 * (0.375f - 0.3125f * d);
 
-  __bang_fusion(FUSION_FMA, h, h, (half)s0[9], (half)(-s0[8] * s0[9]), E2);
-  __memcpy(py, h, E2 * sizeof(half), NRAM2GDRAM);
+    __bang_fusion(FUSION_FMA, hbuf, hbuf, (half)inv_std,
+                  (half)(-mean * inv_std),
+                  LOCAL_ELEMS);
+    __memcpy(py, hbuf, LOCAL_ELEMS * sizeof(half), NRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
   (void)num_features;
+
   auto y = torch::empty_like(x);
+
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {4, E0, 1};
-  k0<<<g, cnrtFuncTypeUnion1, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+
+  cnrtDim3_t dim;
+  dim.x = TASK_COUNT;
+  dim.y = 1;
+  dim.z = 1;
+
+  inst_norm_vec_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      (const half *)x.data_ptr<at::Half>(), (half *)y.data_ptr<at::Half>());
+
   return y;
 }
