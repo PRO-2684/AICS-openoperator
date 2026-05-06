@@ -3,49 +3,49 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 8192
-#define E1 128
+#define A (1 << 4)
+#define B (1 << 14)
+
+#define C (1 << 6)
+#define D (B / C)
 
 __mlu_entry__ void kernel(const half *__restrict__ input,
                           half *__restrict__ output) {
-  if (coreId == 0x80) {
-    return;
-  }
+  const int row = taskId;
 
-  int row = taskIdY * 2 + (coreId >> 1);
-  int part = coreId & 1;
-  int base = row * 16384 + part * E0;
+  __nram__ half xbuf[B];
+  __nram__ half tmp[D];
 
-  __mlu_shared__ half s[4];
-  __nram__ half xbuf[E0];
-  __nram__ half tmp[E1];
+  const half *row_in =
+      (const half *)__builtin_assume_aligned(input + row * B, 512);
+  half *row_out = (half *)__builtin_assume_aligned(output + row * B, 512);
 
-  __memcpy(xbuf, input + base, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_argmax(tmp, xbuf, E0);
-  s[coreId] = tmp[0];
-  __sync_cluster();
+  __memcpy(xbuf, row_in, B * sizeof(half), GDRAM2NRAM);
 
-  int pair = coreId & 2;
-  half row_max = s[pair] > s[pair + 1] ? s[pair] : s[pair + 1];
-  __bang_add_scalar(xbuf, xbuf, (half)(-row_max), E0);
-  __bang_active_exp_less_0(xbuf, xbuf, E0);
+  __bang_argmax(tmp, xbuf, B);
+  half row_max = tmp[0];
 
-  __bang_reduce_sum(xbuf, xbuf, E0);
+  __bang_add_scalar(xbuf, xbuf, (half)(-row_max), B);
+  __bang_active_exp_less_0(xbuf, xbuf, B);
+
+  __bang_reduce_sum(xbuf, xbuf, B);
+
   __memcpy(tmp, xbuf, sizeof(half), NRAM2NRAM, sizeof(half),
-           64 * sizeof(half), E1 - 1);
-  __bang_reduce_sum(tmp, tmp, E1);
-  s[coreId] = tmp[0] + tmp[64];
-  __sync_cluster();
+           C * sizeof(half), D - 1);
+  __bang_reduce_sum(tmp, tmp, D);
 
-  half inv_sum = (half)(1.0f / (float)(s[pair] + s[pair + 1]));
-  __bang_mul_scalar(xbuf, xbuf, inv_sum, E0);
-  __memcpy(output + base, xbuf, E0 * sizeof(half), NRAM2GDRAM);
+  half row_sum = tmp[0] + tmp[C] + tmp[C * 2] + tmp[C * 3];
+  half inv_sum = (half)(1.0f / (float)row_sum);
+
+  __bang_mul_scalar(xbuf, xbuf, inv_sum, B);
+
+  __memcpy(row_out, xbuf, B * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   auto y = torch::empty_like(x);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t kdim = {4, 8, 1};
+  cnrtDim3_t kdim = {A, 1, 1};
   kernel<<<kdim, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
