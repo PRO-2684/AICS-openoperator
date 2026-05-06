@@ -8,31 +8,56 @@
     TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
   } while (0)
 
-static cnnlTensorDescriptor_t f(int a, int b, cnnlDataType_t t) {
-  int d[2] = {a, b};
+static cnnlTensorDescriptor_t f2(int a, int b) {
+  int64_t d[2] = {a, b};
+  int64_t st[2] = {b, 1};
   cnnlTensorDescriptor_t r;
   X(cnnlCreateTensorDescriptor(&r));
-  X(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, t, 2, d));
+  X(cnnlSetTensorDescriptorEx_v2(r, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, d,
+                                 st));
   return r;
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  auto C = torch::empty({8205, 5921}, A.options().dtype(torch::kFloat));
+  auto C = torch::empty({8205, 5921}, A.options());
 
   static cnnlTensorDescriptor_t a = nullptr;
   static cnnlTensorDescriptor_t b = nullptr;
   static cnnlTensorDescriptor_t c = nullptr;
+  static cnnlMatMulDescriptor_t d = nullptr;
+  static cnnlMatMulAlgo_t e = nullptr;
+  static size_t z = 0;
+
+  cnnlHandle_t h = torch_mlu::getCurrentHandle();
   float al = 1.0f;
   float be = 0.0f;
 
-  if (a == nullptr) {
-    a = f(8205, 2949, CNNL_DTYPE_HALF);
-    b = f(2949, 5921, CNNL_DTYPE_HALF);
-    c = f(8205, 5921, CNNL_DTYPE_FLOAT);
+  if (d == nullptr) {
+    a = f2(8205, 2949);
+    b = f2(2949, 5921);
+    c = f2(8205, 5921);
+    X(cnnlMatMulDescCreate(&d));
+    X(cnnlCreateMatMulAlgo(&e));
+    cnnlMatMulHeuristicResult_t r;
+    X(cnnlCreateMatMulHeuristicResult(&r));
+    int v = 0;
+    int lda = 2949;
+    int ldb = 5921;
+    int ldc = 5921;
+    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_ALLOW_TF32, &v, sizeof(v)));
+    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDA, &lda, sizeof(lda)));
+    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDB, &ldb, sizeof(ldb)));
+    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDC, &ldc, sizeof(ldc)));
+    int q = 0;
+    X(cnnlGetMatMulAlgoHeuristic(h, d, a, b, c, c, nullptr, 1, &r, &q));
+    X(cnnlGetMatMulHeuristicResult(r, e, &z));
+    X(cnnlDestroyMatMulHeuristicResult(r));
   }
 
-  X(cnnlMatMul(torch_mlu::getCurrentHandle(), false, false, &al, a,
-               A.data_ptr(), b, B.data_ptr(), &be, c, C.data_ptr()));
+  auto w = torch::empty({(int64_t)z}, A.options().dtype(torch::kUInt8));
+  X(cnnlMatMul_v2(h, d, e, &al, a, A.data_ptr(), b, B.data_ptr(), &be, c,
+                  C.data_ptr(), z ? w.data_ptr() : nullptr, z, c,
+                  C.data_ptr()));
   return C;
 }
 
