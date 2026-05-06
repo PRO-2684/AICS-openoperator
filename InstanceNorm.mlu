@@ -31,6 +31,14 @@ __mlu_func__ float reduce_sum_half(half *buf, half *tmp, int n) {
   return s;
 }
 
+__mlu_func__ float f0(const half *src, half *tmp, half *pack) {
+  __bang_reduce_sum(tmp, src, LOCAL_ELEMS);
+  for (int i = 0; i < 1024; ++i) {
+    pack[i] = tmp[i * 64];
+  }
+  return reduce_sum_half(pack, tmp, 1024);
+}
+
 __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
                                         half *__restrict__ y) {
   __nram__ half hbuf[LOCAL_ELEMS];
@@ -44,8 +52,7 @@ __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
     __memcpy(hbuf, px, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
 
     half *hwork = (half *)fbuf;
-    __memcpy(hwork, hbuf, LOCAL_ELEMS * sizeof(half), NRAM2NRAM);
-    float sum = reduce_sum_half(hwork, htmp, LOCAL_ELEMS);
+    float sum = f0(hbuf, htmp, hwork);
 
     __memcpy(hwork, hbuf, LOCAL_ELEMS * sizeof(half), NRAM2NRAM);
     __bang_square(hwork, hwork, LOCAL_ELEMS);
