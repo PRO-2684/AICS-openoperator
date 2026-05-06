@@ -18,7 +18,7 @@ torch::Tensor bang_func(torch::Tensor A, int offset) {
   (void)offset;
   auto out = torch::empty({E1, E0}, A.options());
   cnrtDim3_t d = {E1, 1, 1};
-  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
