@@ -1,6 +1,10 @@
 #include <aten/cnnl/cnnlHandle.h>
+#include <bang.h>
 #include <cnnl.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
+
+#define E0 32768
 
 #define X(e)                                                                   \
   do {                                                                         \
@@ -8,31 +12,93 @@
     TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
   } while (0)
 
-static cnnlTensorDescriptor_t f(cnnlDataType_t t) {
-  int d[2] = {2048, 2048};
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y,
+                      int n) {
+  __nram__ half a[E0];
+  __nram__ float b[E0];
+  int step = taskDim * E0;
+  for (int p = taskId * E0; p < n; p += step) {
+    int m = n - p;
+    if (m > E0)
+      m = E0;
+    __memcpy(a, x + p, m * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(b, a, m);
+    __memcpy(y + p, b, m * sizeof(float), NRAM2GDRAM);
+  }
+}
+
+static cnnlTensorDescriptor_t f(int n) {
+  int d[1] = {n};
   cnnlTensorDescriptor_t r;
   X(cnnlCreateTensorDescriptor(&r));
-  X(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, t, 2, d));
+  X(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT, 1, d));
   return r;
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto C = torch::empty({2048, 2048}, A.options().dtype(torch::kFloat));
+  auto Af = torch::empty({4194304}, A.options().dtype(torch::kFloat));
+  auto Bf = torch::empty({4194304}, B.options().dtype(torch::kFloat));
+
+  cnrtDim3_t dim = {4, 8, 1};
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  k0<<<dim, cnrtFuncTypeUnion1, q>>>(
+      reinterpret_cast<const half *>(A.data_ptr<at::Half>()), Af.data_ptr<float>(),
+      4194304);
+  k0<<<dim, cnrtFuncTypeUnion1, q>>>(
+      reinterpret_cast<const half *>(B.data_ptr<at::Half>()), Bf.data_ptr<float>(),
+      4194304);
 
   static cnnlTensorDescriptor_t a = nullptr;
   static cnnlTensorDescriptor_t b = nullptr;
   static cnnlTensorDescriptor_t c = nullptr;
+  static cnnlStrideBatchMatMulDescriptor_t d = nullptr;
+  static cnnlStrideBatchMatMulAlgo_t e = nullptr;
+  static size_t z = 0;
+
+  cnnlHandle_t h = torch_mlu::getCurrentHandle();
+  bool ta = false;
+  bool tb = false;
+  int m = 2048;
+  int n = 2048;
+  int k = 2048;
+  int ld = 2048;
+  int bs[1] = {1};
+  int64_t st[1] = {4194304};
   float al = 1.0f;
   float be = 0.0f;
 
-  if (a == nullptr) {
-    a = f(CNNL_DTYPE_FLOAT);
-    b = f(CNNL_DTYPE_FLOAT);
-    c = f(CNNL_DTYPE_FLOAT);
+  if (d == nullptr) {
+    a = f(4194304);
+    b = f(4194304);
+    c = f(4194304);
+    X(cnnlCreateStrideBatchMatMulDescriptor(&d));
+    X(cnnlCreateStrideBatchMatMulAlgo(&e));
+    cnnlStrideBatchMatMulHeuristicResult_t r;
+    X(cnnlCreateStrideBatchMatMulHeuristicResult(&r));
+    cnnlDataType_t t = CNNL_DTYPE_FLOAT;
+    int u = 1;
+    int v = 1;
+    X(cnnlSetStrideBatchMatMulDescAttr(d, CNNL_STRIDE_BMM_COMPUTE_TYPE, &t,
+                                       sizeof(t)));
+    X(cnnlSetStrideBatchMatMulDescAttr(d, CNNL_STRIDE_BMM_MAX_BATCH_DIM, &u,
+                                       sizeof(u)));
+    X(cnnlSetStrideBatchMatMulDescAttr(d, CNNL_STRIDE_BMM_ALLOW_TF32, &v,
+                                       sizeof(v)));
+    int rcount = 0;
+    X(cnnlGetStrideBatchMatMulAlgoHeuristic_v2(
+        h, d, a, b, c, c, ta, tb, &al, &be, m, n, k, ld, ld, ld, ld, bs, st, st,
+        st, st, nullptr, 1, &r, &rcount));
+    X(cnnlGetStrideBatchMatMulHeuristicResult(r, &e, &z));
+    X(cnnlDestroyStrideBatchMatMulHeuristicResult(r));
   }
 
-  X(cnnlMatMul(torch_mlu::getCurrentHandle(), false, false, &al, a,
-               A.data_ptr(), b, B.data_ptr(), &be, c, C.data_ptr()));
+  auto w = torch::empty({(int64_t)z}, A.options().dtype(torch::kUInt8));
+  X(cnnlStrideBatchMatMul_v3(h, d, e, ta, tb, m, n, k, bs, &al, a,
+                             Af.data_ptr(), ld, st, b, Bf.data_ptr(), ld, st,
+                             &be, c, C.data_ptr(), ld, st,
+                             z ? w.data_ptr() : nullptr, z, c, C.data_ptr(), ld,
+                             st));
   return C;
 }
 
