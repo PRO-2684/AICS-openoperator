@@ -21,7 +21,6 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __nram__ float f2[4096];
   __wram__ half w0[8192];
 
-  __bang_write_value(a1, 8192, (half)0.0f);
   __bang_write_value(a2, 8192, (half)0.0f);
   __memcpy(a0, q + base + r * 64, 4096 * sizeof(half), GDRAM2NRAM);
   __memcpy(a2, k + base + s * 64, n * 64 * sizeof(half), GDRAM2NRAM);
@@ -48,7 +47,6 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __bang_half2float(f0, a3, 8192);
   __bang_reduce_sum(f1, f0, 8192);
 
-  __bang_write_value(a1, 8192, (half)0.0f);
   __bang_write_value(a2, 8192, (half)0.0f);
   __memcpy(a2, v + base + s * 64, n * 64 * sizeof(half), GDRAM2NRAM);
   __bang_transpose(a1, a2, 128, 64);
