@@ -1,6 +1,5 @@
 #include <aten/cnnl/cnnlHandle.h>
 #include <cnnl.h>
-#include <cnnl_extra.h>
 #include <torch/extension.h>
 
 #define CNNL_CHECK(expr)                                                        \
@@ -9,51 +8,133 @@
     TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
   } while (0)
 
-static cnnlTensorDescriptor_t d0(const torch::Tensor &x) {
-  int b = (int)x.size(0), h = (int)x.size(1), s = (int)x.size(2),
-      d = (int)x.size(3);
-  int dims[4] = {b, s, h, d};
-  int st[4] = {h * s * d, d, s * d, 1};
-  cnnlTensorDescriptor_t r;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&r));
-  CNNL_CHECK(
-      cnnlSetTensorDescriptorEx(r, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, dims,
-                                st));
-  return r;
+static cnnlTensorDescriptor_t d1(int64_t n) {
+  int dims[1] = {(int)n};
+  cnnlTensorDescriptor_t d;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 1,
+                                     dims));
+  return d;
 }
 
-static cnnlTensorDescriptor_t d1(const torch::Tensor &x) {
-  int dims[4] = {(int)x.size(0), (int)x.size(1), (int)x.size(2),
-                 (int)x.size(3)};
-  cnnlTensorDescriptor_t r;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&r));
-  CNNL_CHECK(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4,
+static cnnlTensorDescriptor_t d3(int a, int b, int c) {
+  int dims[3] = {a, b, c};
+  cnnlTensorDescriptor_t d;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3,
                                      dims));
-  return r;
+  return d;
+}
+
+static cnnlTensorDescriptor_t d4(int a, int b, int c, int e) {
+  int dims[4] = {a, b, c, e};
+  cnnlTensorDescriptor_t d;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4,
+                                     dims));
+  return d;
+}
+
+static void drop(cnnlTensorDescriptor_t d) {
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(d));
+}
+
+static void bmm(cnnlHandle_t handle, const void *a, const void *b, void *out,
+                int batch, int m, int n, int k, bool trans_b, float alpha) {
+  static cnnlTensorDescriptor_t ad0 = nullptr, bd0 = nullptr, od0 = nullptr;
+  static cnnlTensorDescriptor_t ad1 = nullptr, bd1 = nullptr, od1 = nullptr;
+  static cnnlStrideBatchMatMulDescriptor_t desc0 = nullptr, desc1 = nullptr;
+  static cnnlStrideBatchMatMulAlgo_t algo0 = nullptr, algo1 = nullptr;
+  static size_t ws0 = 0, ws1 = 0;
+  bool trans_a = false;
+  bool first = trans_b;
+  auto &ad = first ? ad0 : ad1;
+  auto &bd = first ? bd0 : bd1;
+  auto &od = first ? od0 : od1;
+  auto &desc = first ? desc0 : desc1;
+  auto &algo = first ? algo0 : algo1;
+  auto &ws_size = first ? ws0 : ws1;
+  int lda = k, ldb = trans_b ? k : n, ldc = n, ldd = n;
+  int batch_size[1] = {batch};
+  int64_t stride_a[1] = {(int64_t)m * k};
+  int64_t stride_b[1] = {(int64_t)(trans_b ? n * k : k * n)};
+  int64_t stride_o[1] = {(int64_t)m * n};
+  float beta = 0.0f;
+  if (desc == nullptr) {
+    ad = d1((int64_t)batch * m * k);
+    bd = d1((int64_t)batch * (trans_b ? n * k : k * n));
+    od = d1((int64_t)batch * m * n);
+    CNNL_CHECK(cnnlCreateStrideBatchMatMulDescriptor(&desc));
+    CNNL_CHECK(cnnlCreateStrideBatchMatMulAlgo(&algo));
+    cnnlStrideBatchMatMulHeuristicResult_t heur;
+    CNNL_CHECK(cnnlCreateStrideBatchMatMulHeuristicResult(&heur));
+    cnnlDataType_t compute_type = CNNL_DTYPE_FLOAT;
+    int max_batch_dim = 1;
+    int allow_tf32 = 0;
+    CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(
+        desc, CNNL_STRIDE_BMM_COMPUTE_TYPE, &compute_type,
+        sizeof(compute_type)));
+    CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(
+        desc, CNNL_STRIDE_BMM_MAX_BATCH_DIM, &max_batch_dim,
+        sizeof(max_batch_dim)));
+    CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(
+        desc, CNNL_STRIDE_BMM_ALLOW_TF32, &allow_tf32, sizeof(allow_tf32)));
+    int returned = 0;
+    CNNL_CHECK(cnnlGetStrideBatchMatMulAlgoHeuristic_v2(
+        handle, desc, ad, bd, od, od, trans_a, trans_b, &alpha, &beta, m, n, k,
+        lda, ldb, ldc, ldd, batch_size, stride_a, stride_b, stride_o, stride_o,
+        nullptr, 1, &heur, &returned));
+    CNNL_CHECK(cnnlGetStrideBatchMatMulHeuristicResult(heur, &algo, &ws_size));
+    CNNL_CHECK(cnnlDestroyStrideBatchMatMulHeuristicResult(heur));
+  }
+  auto ws = torch::empty({(int64_t)ws_size},
+                         torch::TensorOptions()
+                             .device(c10::Device(c10::DeviceType::PrivateUse1,
+                                                 0))
+                             .dtype(torch::kUInt8));
+  CNNL_CHECK(cnnlStrideBatchMatMul_v3(
+      handle, desc, algo, trans_a, trans_b, m, n, k, batch_size, &alpha, ad, a,
+      lda, stride_a, bd, b, ldb, stride_b, &beta, od, out, ldc, stride_o,
+      ws_size ? ws.data_ptr() : nullptr, ws_size, od, out, ldd, stride_o));
 }
 
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
                         torch::Tensor bias) {
+  auto scores = torch::empty({2, 8, 128, 128}, q.options());
+  auto probs = torch::empty_like(scores);
   auto out = torch::empty_like(q);
-  auto qd = d0(q), kd = d0(k), vd = d0(v), od = d0(out), bd = d1(bias);
   cnnlHandle_t handle = torch_mlu::getCurrentHandle();
-  size_t ws_size = 0;
-  CNNL_CHECK(cnnlGetScaledDotProductAttnWorkspaceSize_v3(
-      handle, nullptr, nullptr, qd, kd, vd, nullptr, nullptr, bd, nullptr,
-      nullptr, 128, 128, false, -1, -1, false, CNNL_COMPUTATION_HIGH_PRECISION,
-      CNNL_DTYPE_FLOAT, &ws_size));
-  auto ws = torch::empty({(int64_t)ws_size}, q.options().dtype(torch::kUInt8));
-  CNNL_CHECK(cnnlScaledDotProductAttn_v4(
-      handle, nullptr, nullptr, qd, q.data_ptr(), kd, k.data_ptr(), vd,
-      v.data_ptr(), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, bd,
-      bias.data_ptr(), nullptr, nullptr, nullptr, nullptr, 128, 128, false, -1,
-      -1, 0.125f, CNNL_COMPUTATION_HIGH_PRECISION, CNNL_DTYPE_FLOAT,
-      ws_size ? ws.data_ptr() : nullptr, ws_size, false, nullptr, nullptr, od,
-      out.data_ptr()));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(bd));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(od));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(vd));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(kd));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(qd));
+
+  bmm(handle, q.data_ptr(), k.data_ptr(), scores.data_ptr(), 16, 128, 128, 64,
+      true, 0.125f);
+
+  auto sd = d4(2, 8, 128, 128);
+  auto bd = d4(1, 8, 128, 128);
+  cnnlOpTensorDescriptor_t add_desc;
+  CNNL_CHECK(cnnlCreateOpTensorDescriptor(&add_desc));
+  CNNL_CHECK(cnnlSetOpTensorDescriptor(add_desc, CNNL_OP_TENSOR_ADD,
+                                       CNNL_DTYPE_HALF,
+                                       CNNL_NOT_PROPAGATE_NAN));
+  size_t add_ws_size = 0;
+  CNNL_CHECK(cnnlGetOpTensorWorkspaceSize(handle, sd, bd, sd, &add_ws_size));
+  auto add_ws = torch::empty({(int64_t)add_ws_size},
+                             q.options().dtype(torch::kUInt8));
+  float one = 1.0f, zero = 0.0f;
+  CNNL_CHECK(cnnlOpTensor(handle, add_desc, &one, sd, scores.data_ptr(), &one,
+                          bd, bias.data_ptr(),
+                          add_ws_size ? add_ws.data_ptr() : nullptr,
+                          add_ws_size, &zero, sd, scores.data_ptr()));
+  CNNL_CHECK(cnnlDestroyOpTensorDescriptor(add_desc));
+  drop(bd);
+  drop(sd);
+
+  auto soft = d3(16, 128, 128);
+  CNNL_CHECK(cnnlSoftmaxForward(
+      handle, CNNL_SOFTMAX_ACCURATE, CNNL_SOFTMAX_MODE_LOW_DIMENSION, &one,
+      soft, scores.data_ptr(), &zero, soft, probs.data_ptr()));
+  drop(soft);
+
+  bmm(handle, probs.data_ptr(), v.data_ptr(), out.data_ptr(), 16, 128, 64, 128,
+      false, 1.0f);
   return out;
 }
