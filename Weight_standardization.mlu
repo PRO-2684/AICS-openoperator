@@ -139,12 +139,13 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, int in_channels,
         cnnlSetTensorDescriptor(wd, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, ws));
     CNNL_CHECK(cnnlSetTensorDescriptor(yhd, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF,
                                        4, hs));
+    CNNL_CHECK(cnnlSetTensorDescriptorOnchipDataType(yhd, CNNL_DTYPE_FLOAT));
     CNNL_CHECK(
         cnnlSetTensorDescriptor(yd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, ys));
     CNNL_CHECK(cnnlSetTransposeDescriptor(td0, 4, p0));
     CNNL_CHECK(cnnlSetTransposeDescriptor(td1, 4, p1));
     CNNL_CHECK(cnnlSetConvolutionDescriptor(cd, 4, pad, stride, dilation, 1,
-                                            CNNL_DTYPE_HALF));
+                                            CNNL_DTYPE_FLOAT));
     CNNL_CHECK(cnnlGetTransposeWorkspaceSize(torch_mlu::getCurrentHandle(), xd,
                                              td0, &ws0));
     CNNL_CHECK(cnnlGetTransposeWorkspaceSize(torch_mlu::getCurrentHandle(), yhd,
