@@ -84,6 +84,9 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __wram__ half k1[2048];
   __wram__ half v1[2048];
 
+  __bang_write_value(p0, 384, (half)0.0f);
+  __bang_write_value(v2, 2048, (half)0.0f);
+
 #pragma unroll
   for (int r = 0; r < 12; ++r) {
     if (r < n) {
@@ -109,9 +112,6 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
         }
         p0[r * 32 + c] = (half)u;
       }
-      for (int c = 12; c < 32; ++c) {
-        p0[r * 32 + c] = (half)0.0f;
-      }
     }
   }
 
@@ -119,11 +119,6 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   for (int d = 0; d < 40; ++d) {
     __memcpy(v2 + d * 32, v + ((b * 2 + hk) * 40) + d, sizeof(half),
              GDRAM2NRAM, sizeof(half), 80 * sizeof(half), n - 1);
-    for (int c = 0; c < 32; ++c) {
-      if (c >= n) {
-        v2[d * 32 + c] = (half)0.0f;
-      }
-    }
   }
 
   __memcpy(v1, v2, 2048 * sizeof(half), NRAM2WRAM);
@@ -157,12 +152,7 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
   (void)context_expand;
   (void)label_lens;
   (void)preference;
-  static torch::Tensor y;
-  if (!y.defined()) {
-    y = torch::empty({22, 4, 40}, q.options());
-  } else {
-    y.resize_({22, 4, 40});
-  }
+  auto y = torch::empty({22, 4, 40}, q.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t g = {8, 1, 1};
   k0<<<g, cnrtFuncTypeBlock, queue>>>(
