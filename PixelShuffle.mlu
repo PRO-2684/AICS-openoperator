@@ -3,35 +3,35 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define ROWS (4 * 64 * 64)
-#define OUT_W 64
-#define IN_W 32
-#define TASKS 128
-#define ROWS_PER_TASK (ROWS / TASKS)
+#define E0 (4 * 64 * 32)
+#define E1 32
+#define E2 64
+#define E3 128
+#define E4 (E0 / E3)
 
-__mlu_entry__ void pixel_shuffle_kernel(const half *__restrict__ x,
-                                        half *__restrict__ y) {
-  __nram__ half row[OUT_W];
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[E2];
+  __nram__ half b[E2];
 
-  int row0 = taskId * ROWS_PER_TASK;
-  for (int r = 0; r < ROWS_PER_TASK; ++r) {
-    int oid = row0 + r;
-    int h2 = oid & 63;
-    int t0 = oid >> 6;
+  int p0 = taskId * E4;
+  for (int r = 0; r < E4; ++r) {
+    int oid = p0 + r;
+    int h = oid & 31;
+    int t0 = oid >> 5;
     int c = t0 & 63;
     int n = t0 >> 6;
-    int h = h2 >> 1;
-    int rh = h2 & 1;
-    int base0 = (((n * 256 + (c * 4 + rh * 2)) * 32 + h) * 32);
-    int base1 = base0 + 32 * 32;
+    int ib = (((n * 256 + c * 4) * 32 + h) * 32);
+    int ob = (((n * 64 + c) * 64 + h * 2) * 64);
 
-#pragma unroll
-    for (int w = 0; w < IN_W; ++w) {
-      row[w * 2 + 0] = x[base0 + w];
-      row[w * 2 + 1] = x[base1 + w];
-    }
+    __memcpy(a, x + ib, E1 * sizeof(half), GDRAM2NRAM);
+    __memcpy(a + E1, x + ib + 1024, E1 * sizeof(half), GDRAM2NRAM);
+    __bang_transpose(b, a, 2, E1);
+    __memcpy(y + ob, b, E2 * sizeof(half), NRAM2GDRAM);
 
-    __memcpy(y + oid * OUT_W, row, OUT_W * sizeof(half), NRAM2GDRAM);
+    __memcpy(a, x + ib + 2048, E1 * sizeof(half), GDRAM2NRAM);
+    __memcpy(a + E1, x + ib + 3072, E1 * sizeof(half), GDRAM2NRAM);
+    __bang_transpose(b, a, 2, E1);
+    __memcpy(y + ob + E2, b, E2 * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -40,9 +40,9 @@ torch::Tensor bang_func(torch::Tensor x, int upscale_factor) {
 
   auto y = torch::empty({4, 64, 64, 64}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {TASKS, 1, 1};
+  cnrtDim3_t dim = {E3, 1, 1};
 
-  pixel_shuffle_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
 
