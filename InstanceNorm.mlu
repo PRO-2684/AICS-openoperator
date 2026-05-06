@@ -17,8 +17,9 @@ __mlu_func__ float reduce_sum_half(half *buf, half *tmp, int n) {
     __bang_reduce_sum(dst, src, cur);
 
     int groups = cur / 64;
-    __memcpy(src, dst, sizeof(half), NRAM2NRAM, sizeof(half),
-             64 * sizeof(half), groups - 1);
+    for (int i = 0; i < groups; ++i) {
+      src[i] = dst[i * 64];
+    }
 
     cur = groups;
   }
@@ -52,9 +53,8 @@ __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
     half *hwork = (half *)fbuf;
     float sum = f0(hbuf, htmp, hwork);
 
-    __memcpy(hwork, hbuf, LOCAL_ELEMS * sizeof(half), NRAM2NRAM);
-    __bang_square(hwork, hwork, LOCAL_ELEMS);
-    float sq_sum = reduce_sum_half(hwork, htmp, LOCAL_ELEMS);
+    __bang_square(htmp, hbuf, LOCAL_ELEMS);
+    float sq_sum = reduce_sum_half(htmp, hwork, LOCAL_ELEMS);
 
     float mean = sum * 0.0000152587890625f;
     float inv_std = 1.0f / sqrtf(sq_sum * 0.0000152587890625f + 1.0e-5f);
