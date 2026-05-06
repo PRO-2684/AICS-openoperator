@@ -27,11 +27,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ h,
   __memcpy(p, b0, E1 * sizeof(half), GDRAM2NRAM);
   __memcpy(q, b1, E1 * sizeof(half), GDRAM2NRAM);
   __bang_add(p, p, q, E1);
-
-#pragma unroll
-  for (int r = 0; r < 16; ++r) {
-    __bang_add(a + r * E1, a + r * E1, p, E1);
-  }
+  __bang_cycle_add(a, a, p, E0, E1);
 
   __memcpy(i, a, E3 * sizeof(half), NRAM2NRAM, E3 * sizeof(half),
            E1 * sizeof(half), 15);
