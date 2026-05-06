@@ -25,12 +25,12 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __bang_write_value(a2, 8192, (half)0.0f);
   __memcpy(a0, q + base + r * 64, 4096 * sizeof(half), GDRAM2NRAM);
   __memcpy(a2, k + base + s * 64, n * 64 * sizeof(half), GDRAM2NRAM);
-  __bang_reshape_filter(a1, a2, 128, 1, 1, 64);
+  __bang_reshape_filter(a1, a2, n, 1, 1, 64);
   __memcpy(w0, a1, 8192 * sizeof(half), NRAM2WRAM);
-  __bang_matmul(f0, a0, w0, 64, 64, 128);
-  __bang_mul_scalar(f0, f0, 0.125f, 8192);
-  __bang_float2half_rn(a3, f0, 8192);
-  __bang_active_exp(a3, a3, 8192);
+  __bang_matmul(f0, a0, w0, 64, 64, n);
+  __bang_mul_scalar(f0, f0, 0.125f, 64 * n);
+  __bang_float2half_rn(a3, f0, 64 * n);
+  __bang_active_exp(a3, a3, 64 * n);
 #pragma unroll
   for (int i = 0; i < 64; ++i) {
     int left = r + i - 32 - s;
@@ -39,25 +39,27 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
       right = n;
     }
     if (left > 0) {
-      __bang_write_value(a3 + i * 128, left, (half)0.0f);
+      __bang_write_value(a3 + i * n, left, (half)0.0f);
     }
-    if (right < 128) {
-      __bang_write_value(a3 + i * 128 + right, 128 - right, (half)0.0f);
+    if (right < n) {
+      __bang_write_value(a3 + i * n + right, n - right, (half)0.0f);
     }
   }
-  __bang_half2float(f0, a3, 8192);
-  __bang_reduce_sum(f1, f0, 8192);
+  __bang_half2float(f0, a3, 64 * n);
+  __bang_reduce_sum(f1, f0, 64 * n);
 
   __bang_write_value(a1, 8192, (half)0.0f);
   __bang_write_value(a2, 8192, (half)0.0f);
   __memcpy(a2, v + base + s * 64, n * 64 * sizeof(half), GDRAM2NRAM);
-  __bang_transpose(a1, a2, 128, 64);
+  __bang_transpose(a1, a2, n, 64);
   __memcpy(w0, a1, 8192 * sizeof(half), NRAM2WRAM);
-  __bang_matmul(f2, a3, w0, 64, 128, 64);
+  __bang_matmul(f2, a3, w0, 64, n, 64);
 #pragma unroll
   for (int i = 0; i < 64; ++i) {
-    float z = f1[i * 128] + f1[i * 128 + 32] + f1[i * 128 + 64] +
-              f1[i * 128 + 96];
+    float z = f1[i * n] + f1[i * n + 32] + f1[i * n + 64];
+    if (n == 128) {
+      z += f1[i * n + 96];
+    }
     __bang_mul_scalar(f2 + i * 64, f2 + i * 64, 1.0f / z, 64);
   }
   __bang_float2half_rn(a0, f2, 4096);
