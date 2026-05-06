@@ -49,10 +49,10 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ kc,
 
   if (c == 0) {
     __memcpy(a0, r1, 256 * sizeof(half), SRAM2NRAM);
-    __bang_half2float(s0, a0, 256);
-    __bang_add(o0, s0, s0 + 64, 64);
-    __bang_add(o0, o0, s0 + 128, 64);
-    __bang_add(o0, o0, s0 + 192, 64);
+    __bang_add(a0, a0, a0 + 64, 64);
+    __bang_add(a0, a0, a0 + 128, 64);
+    __bang_add(a0, a0, a0 + 192, 64);
+    __bang_half2float(o0, a0, 64);
     __memcpy(s1, r0, 4 * sizeof(float), SRAM2NRAM);
 
     __memcpy(q0, kn + h * 64, 64 * sizeof(half), GDRAM2NRAM);
