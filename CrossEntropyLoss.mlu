@@ -7,18 +7,24 @@
 
 #define ROWS 4096
 #define COLS 10
-#define TASKS 64
+#define TASKS 32
 #define ROWS_PER_TASK (ROWS / TASKS)
 #define LOCAL_ELEMS (ROWS_PER_TASK * COLS)
 
-__mlu_entry__ void cross_entropy_partial_kernel(
-    const half *__restrict__ predictions, const int64_t *__restrict__ targets,
-    float *__restrict__ partial) {
+__mlu_entry__ void k0(const half *__restrict__ predictions,
+                      const int64_t *__restrict__ targets,
+                      float *__restrict__ partial, half *__restrict__ out) {
+  if (taskId == 0) {
+    partial[0] = 0.0f;
+  }
+  __sync_all_ipu();
+
   int row0 = taskId * ROWS_PER_TASK;
   int base = row0 * COLS;
 
   __nram__ half hbuf[LOCAL_ELEMS];
   __nram__ float fbuf[LOCAL_ELEMS];
+  __nram__ float tbuf[32];
 
   __memcpy(hbuf, predictions + base, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
   __bang_half2float(fbuf, hbuf, LOCAL_ELEMS);
@@ -40,35 +46,30 @@ __mlu_entry__ void cross_entropy_partial_kernel(
     acc += logf(sum) - (float)hbuf[off + label];
   }
 
-  partial[taskId] = acc;
-}
-
-__mlu_entry__ void cross_entropy_finish_kernel(const float *__restrict__ partial,
-                                               half *__restrict__ out) {
-  float acc = 0.0f;
-
-#pragma unroll
-  for (int i = 0; i < TASKS; ++i) {
-    acc += partial[i];
+  tbuf[0] = acc;
+  __bang_atomic_reduce_add(partial, tbuf, 1);
+  __sync_all_ipu();
+  if (taskId == TASKS - 1) {
+    __memcpy(tbuf, partial, sizeof(float), GDRAM2NRAM);
+    out[0] = (half)(tbuf[0] * (1.0f / (float)ROWS));
   }
-
-  out[0] = (half)(acc * (1.0f / (float)ROWS));
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
-  auto out = torch::empty({}, predictions.options());
-  auto partial = torch::empty({TASKS}, predictions.options().dtype(torch::kFloat32));
+  static torch::Tensor out;
+  static torch::Tensor partial;
+  if (!out.defined())
+    out = torch::empty({}, predictions.options());
+  if (!partial.defined())
+    partial = torch::empty({1}, predictions.options().dtype(torch::kFloat32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {TASKS, 1, 1};
-  cnrtDim3_t one = {1, 1, 1};
 
-  cross_entropy_partial_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+  k0<<<dim, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(targets.data_ptr<int64_t>()),
-      reinterpret_cast<float *>(partial.data_ptr<float>()));
-  cross_entropy_finish_kernel<<<one, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const float *>(partial.data_ptr<float>()),
+      reinterpret_cast<float *>(partial.data_ptr<float>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
 
   return out;
