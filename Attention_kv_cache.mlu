@@ -1,247 +1,97 @@
-#include <bang.h>
 #include <aten/cnnl/cnnlHandle.h>
+#include <bang.h>
 #include <cnnl.h>
+#include <cnnl_extra.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 130 130_Attention_kv_cache
-// Alternative fast path: concatenate KV, then CNNL BMM + softmax + BMM for 8 heads.
-
-#define CNNL_CHECK(expr) \
-  do { \
-    cnnlStatus_t s = (expr); \
-    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s); \
+#define CNNL_CHECK(expr)                                                        \
+  do {                                                                         \
+    cnnlStatus_t s = (expr);                                                    \
+    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
   } while (0)
 
-__mlu_entry__ void concat_kv_kernel(const half* k_cache, const half* v_cache,
-                                    const half* k_new, const half* v_new,
-                                    half* k_all, half* v_all) {
-  int idx = taskId;
-  const int total = 8 * 513 * 64;
-  const int step = taskDim;
-  for (; idx < total; idx += step) {
-    int d = idx % 64;
-    int t = (idx / 64) % 513;
-    int h = idx / (513 * 64);
+__mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
+                      const half *__restrict__ c, const half *__restrict__ d,
+                      half *__restrict__ e, half *__restrict__ f) {
+  for (int i = taskId; i < 262656; i += taskDim) {
+    int j = i & 63;
+    int h = (i >> 6) & 7;
+    int t = i >> 9;
+    int p = t * 512 + h * 64 + j;
     if (t < 512) {
-      int src = (h * 512 + t) * 64 + d;
-      k_all[idx] = k_cache[src];
-      v_all[idx] = v_cache[src];
+      int q = h * 32768 + t * 64 + j;
+      e[p] = a[q];
+      f[p] = b[q];
     } else {
-      int src = h * 64 + d;
-      k_all[idx] = k_new[src];
-      v_all[idx] = v_new[src];
+      int q = h * 64 + j;
+      e[p] = c[q];
+      f[p] = d[q];
     }
   }
 }
 
-__mlu_entry__ void score_new_kernel(const half* q, const half* k_new, half* scores) {
-  int h = taskId;
-  if (h >= 8) return;
-  const half* qh = q + h * 64;
-  const half* kh = k_new + h * 64;
-  float dot = 0.0f;
-  for (int d = 0; d < 64; ++d) dot += (float)qh[d] * (float)kh[d];
-  scores[h * 513 + 512] = (half)(dot * 0.125f);
-}
-
-__mlu_entry__ void add_new_value_kernel(const half* probs, const half* v_new, half* out) {
-  int idx = taskId;
-  const int total = 8 * 64;
-  for (; idx < total; idx += taskDim) {
-    int h = idx / 64;
-    int d = idx % 64;
-    float x = (float)out[idx] + (float)probs[h * 513 + 512] * (float)v_new[h * 64 + d];
-    out[idx] = (half)x;
+static cnnlTensorDescriptor_t d0() {
+  static cnnlTensorDescriptor_t d = nullptr;
+  if (d == nullptr) {
+    int dims[4] = {1, 1, 8, 64};
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+    CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4,
+                                       dims));
   }
-}
-
-__mlu_entry__ void init_new_value_kernel(const half* probs, const half* v_new, half* out) {
-  int idx = taskId;
-  const int total = 8 * 64;
-  for (; idx < total; idx += taskDim) {
-    int h = idx / 64;
-    int d = idx % 64;
-    out[idx] = (half)((float)probs[h * 513 + 512] * (float)v_new[h * 64 + d]);
-  }
-}
-
-static cnnlTensorDescriptor_t make_1d_desc(int64_t n) {
-  int dims[1] = {(int)n};
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 1, dims));
   return d;
 }
 
-static cnnlTensorDescriptor_t make_3d_desc(int a, int b, int c) {
-  int dims[3] = {a, b, c};
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, dims));
+static cnnlTensorDescriptor_t d1() {
+  static cnnlTensorDescriptor_t d = nullptr;
+  if (d == nullptr) {
+    int dims[4] = {1, 513, 8, 64};
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+    CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4,
+                                       dims));
+  }
   return d;
 }
 
-static void destroy(cnnlTensorDescriptor_t d) { CNNL_CHECK(cnnlDestroyTensorDescriptor(d)); }
-
-static void bmm(cnnlHandle_t handle, const void* a, const void* b, void* out,
-                int batch, int m, int n, int k, bool trans_b, float alpha) {
-  static cnnlTensorDescriptor_t qk_ad = nullptr, qk_bd = nullptr, qk_od = nullptr;
-  static cnnlTensorDescriptor_t pv_ad = nullptr, pv_bd = nullptr, pv_od = nullptr;
-  static cnnlStrideBatchMatMulDescriptor_t qk_desc = nullptr, pv_desc = nullptr;
-  static cnnlStrideBatchMatMulAlgo_t qk_algo = nullptr, pv_algo = nullptr;
-  static size_t qk_ws_size = 0, pv_ws_size = 0;
-  static torch::Tensor qk_ws, pv_ws;
-  const bool is_qk = trans_b;
-  cnnlTensorDescriptor_t& ad = is_qk ? qk_ad : pv_ad;
-  cnnlTensorDescriptor_t& bd = is_qk ? qk_bd : pv_bd;
-  cnnlTensorDescriptor_t& od = is_qk ? qk_od : pv_od;
-  cnnlStrideBatchMatMulDescriptor_t& desc = is_qk ? qk_desc : pv_desc;
-  cnnlStrideBatchMatMulAlgo_t& algo = is_qk ? qk_algo : pv_algo;
-  size_t& ws_size = is_qk ? qk_ws_size : pv_ws_size;
-  torch::Tensor& ws = is_qk ? qk_ws : pv_ws;
-  bool trans_a = false;
-  int lda = k, ldb = trans_b ? k : n, ldc = n, ldd = n;
-  int batch_size[1] = {batch};
-  int64_t stride_a[1] = {(int64_t)m * k};
-  int64_t stride_b[1] = {(int64_t)(trans_b ? n * k : k * n)};
-  int64_t stride_o[1] = {(int64_t)m * n};
-  float beta = 0.0f;
-  if (desc == nullptr) {
-    ad = make_1d_desc((int64_t)batch * m * k);
-    bd = make_1d_desc((int64_t)batch * (trans_b ? n * k : k * n));
-    od = make_1d_desc((int64_t)batch * m * n);
-    CNNL_CHECK(cnnlCreateStrideBatchMatMulDescriptor(&desc));
-    CNNL_CHECK(cnnlCreateStrideBatchMatMulAlgo(&algo));
-    cnnlStrideBatchMatMulHeuristicResult_t heur;
-    CNNL_CHECK(cnnlCreateStrideBatchMatMulHeuristicResult(&heur));
-    cnnlDataType_t compute_type = CNNL_DTYPE_FLOAT;
-    int max_batch_dim = 1;
-    int allow_tf32 = 0;
-    CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(desc, CNNL_STRIDE_BMM_COMPUTE_TYPE,
-                                                &compute_type, sizeof(compute_type)));
-    CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(desc, CNNL_STRIDE_BMM_MAX_BATCH_DIM,
-                                                &max_batch_dim, sizeof(max_batch_dim)));
-    CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(desc, CNNL_STRIDE_BMM_ALLOW_TF32,
-                                                &allow_tf32, sizeof(allow_tf32)));
-    int returned = 0;
-    CNNL_CHECK(cnnlGetStrideBatchMatMulAlgoHeuristic_v2(
-        handle, desc, ad, bd, od, od, trans_a, trans_b, &alpha, &beta,
-        m, n, k, lda, ldb, ldc, ldd, batch_size, stride_a, stride_b,
-        stride_o, stride_o, nullptr, 1, &heur, &returned));
-    CNNL_CHECK(cnnlGetStrideBatchMatMulHeuristicResult(heur, &algo, &ws_size));
-    CNNL_CHECK(cnnlDestroyStrideBatchMatMulHeuristicResult(heur));
-    ws = torch::empty({(int64_t)ws_size},
-                      torch::TensorOptions()
-                          .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
-                          .dtype(torch::kUInt8));
-  }
-  CNNL_CHECK(cnnlStrideBatchMatMul_v3(
-      handle, desc, algo, trans_a, trans_b, m, n, k, batch_size, &alpha,
-      ad, a, lda, stride_a, bd, b, ldb, stride_b, &beta, od, out, ldc,
-      stride_o, ws_size ? ws.data_ptr() : nullptr, ws_size, od, out, ldd,
-      stride_o));
-}
-
-static void bmm_cache512(cnnlHandle_t handle, const void* a, const void* b, void* out,
-                         bool is_qk, bool accumulate = false) {
-  static cnnlTensorDescriptor_t qk_ad = nullptr, qk_bd = nullptr, qk_od = nullptr;
-  static cnnlTensorDescriptor_t pv_ad = nullptr, pv_bd = nullptr, pv_od = nullptr;
-  static cnnlStrideBatchMatMulDescriptor_t qk_desc = nullptr, pv_desc = nullptr;
-  static cnnlStrideBatchMatMulAlgo_t qk_algo = nullptr, pv_algo = nullptr;
-  static size_t qk_ws_size = 0, pv_ws_size = 0;
-  static torch::Tensor qk_ws, pv_ws;
-  cnnlTensorDescriptor_t& ad = is_qk ? qk_ad : pv_ad;
-  cnnlTensorDescriptor_t& bd = is_qk ? qk_bd : pv_bd;
-  cnnlTensorDescriptor_t& od = is_qk ? qk_od : pv_od;
-  cnnlStrideBatchMatMulDescriptor_t& desc = is_qk ? qk_desc : pv_desc;
-  cnnlStrideBatchMatMulAlgo_t& algo = is_qk ? qk_algo : pv_algo;
-  size_t& ws_size = is_qk ? qk_ws_size : pv_ws_size;
-  torch::Tensor& ws = is_qk ? qk_ws : pv_ws;
-
-  const int batch = 8;
-  const int m = 1;
-  const int n = is_qk ? 512 : 64;
-  const int k = is_qk ? 64 : 512;
-  const bool trans_a = false;
-  const bool trans_b = is_qk;
-  const int lda = k;
-  const int ldb = is_qk ? 64 : 64;
-  const int ldc = n;
-  const int ldd = n;
-  int batch_size[1] = {batch};
-  int64_t stride_a[1] = {is_qk ? 64 : 513};
-  int64_t stride_b[1] = {512 * 64};
-  int64_t stride_o[1] = {is_qk ? 513 : 64};
-  float alpha = is_qk ? 0.125f : 1.0f;
-  float beta = accumulate ? 1.0f : 0.0f;
-
-  if (desc == nullptr) {
-    ad = make_1d_desc(is_qk ? 8 * 64 : 8 * 513);
-    bd = make_1d_desc(8 * 512 * 64);
-    od = make_1d_desc(is_qk ? 8 * 513 : 8 * 64);
-    CNNL_CHECK(cnnlCreateStrideBatchMatMulDescriptor(&desc));
-    CNNL_CHECK(cnnlCreateStrideBatchMatMulAlgo(&algo));
-    cnnlStrideBatchMatMulHeuristicResult_t heur;
-    CNNL_CHECK(cnnlCreateStrideBatchMatMulHeuristicResult(&heur));
-    cnnlDataType_t compute_type = CNNL_DTYPE_FLOAT;
-    int max_batch_dim = 1;
-    int allow_tf32 = 0;
-    CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(desc, CNNL_STRIDE_BMM_COMPUTE_TYPE,
-                                                &compute_type, sizeof(compute_type)));
-    CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(desc, CNNL_STRIDE_BMM_MAX_BATCH_DIM,
-                                                &max_batch_dim, sizeof(max_batch_dim)));
-    CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(desc, CNNL_STRIDE_BMM_ALLOW_TF32,
-                                                &allow_tf32, sizeof(allow_tf32)));
-    int returned = 0;
-    CNNL_CHECK(cnnlGetStrideBatchMatMulAlgoHeuristic_v2(
-        handle, desc, ad, bd, od, od, trans_a, trans_b, &alpha, &beta,
-        m, n, k, lda, ldb, ldc, ldd, batch_size, stride_a, stride_b,
-        stride_o, stride_o, nullptr, 1, &heur, &returned));
-    CNNL_CHECK(cnnlGetStrideBatchMatMulHeuristicResult(heur, &algo, &ws_size));
-    CNNL_CHECK(cnnlDestroyStrideBatchMatMulHeuristicResult(heur));
-    ws = torch::empty({(int64_t)ws_size},
-                      torch::TensorOptions()
-                          .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
-                          .dtype(torch::kUInt8));
-  }
-  CNNL_CHECK(cnnlStrideBatchMatMul_v3(
-      handle, desc, algo, trans_a, trans_b, m, n, k, batch_size, &alpha,
-      ad, a, lda, stride_a, bd, b, ldb, stride_b, &beta, od, out, ldc,
-      stride_o, ws_size ? ws.data_ptr() : nullptr, ws_size, od, out, ldd,
-      stride_o));
-}
-
-torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_cache,
-                        torch::Tensor k_new, torch::Tensor v_new) {
+torch::Tensor bang_func(torch::Tensor q, torch::Tensor kc, torch::Tensor vc,
+                        torch::Tensor kn, torch::Tensor vn) {
   auto out = torch::empty_like(q);
-  static torch::Tensor scores;
-  static torch::Tensor probs;
-  if (!scores.defined()) {
-    scores = torch::empty({8, 1, 513}, q.options());
-    probs = torch::empty_like(scores);
+  static torch::Tensor k2;
+  static torch::Tensor v2;
+  if (!k2.defined()) {
+    k2 = torch::empty({262656}, q.options());
+    v2 = torch::empty({262656}, q.options());
   }
+  cnrtDim3_t dim = {32, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(kc.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(vc.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(kn.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(vn.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(k2.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(v2.data_ptr<at::Half>()));
 
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-
+  auto qd = d0();
+  auto kd = d1();
   cnnlHandle_t handle = torch_mlu::getCurrentHandle();
-  bmm_cache512(handle, q.data_ptr(), k_cache.data_ptr(), scores.data_ptr(), true);
-  cnrtDim3_t small_dim = {8, 1, 1};
-  score_new_kernel<<<small_dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half*>(q.data_ptr<at::Half>()),
-      reinterpret_cast<const half*>(k_new.data_ptr<at::Half>()),
-      reinterpret_cast<half*>(scores.data_ptr<at::Half>()));
-  static cnnlTensorDescriptor_t sd = nullptr;
-  if (sd == nullptr) sd = make_3d_desc(8, 1, 513);
-  float one = 1.0f, zero = 0.0f;
-  CNNL_CHECK(cnnlSoftmaxForward(handle, CNNL_SOFTMAX_ACCURATE, CNNL_SOFTMAX_MODE_LOW_DIMENSION,
-                                &one, sd, scores.data_ptr(), &zero, sd, probs.data_ptr()));
-  cnrtDim3_t init_dim = {16, 1, 1};
-  init_new_value_kernel<<<init_dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half*>(probs.data_ptr<at::Half>()),
-      reinterpret_cast<const half*>(v_new.data_ptr<at::Half>()),
-      reinterpret_cast<half*>(out.data_ptr<at::Half>()));
-  bmm_cache512(handle, probs.data_ptr(), v_cache.data_ptr(), out.data_ptr(), false, true);
+  static size_t ws_size = 0;
+  if (ws_size == 0) {
+    CNNL_CHECK(cnnlGetScaledDotProductAttnWorkspaceSize_v3(
+        handle, nullptr, nullptr, qd, kd, kd, nullptr, nullptr, nullptr,
+        nullptr, nullptr, 1, 513, false, -1, -1, false,
+        CNNL_COMPUTATION_FAST, CNNL_DTYPE_HALF, &ws_size));
+  }
+  static torch::Tensor ws;
+  if (!ws.defined()) {
+    ws = torch::empty({(int64_t)ws_size}, q.options().dtype(torch::kUInt8));
+  }
+  CNNL_CHECK(cnnlScaledDotProductAttn_v4(
+      handle, nullptr, nullptr, qd, q.data_ptr(), kd, k2.data_ptr(), kd,
+      v2.data_ptr(), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 1, 513, false, -1,
+      -1, 0.125f, CNNL_COMPUTATION_FAST, CNNL_DTYPE_HALF,
+      ws_size ? ws.data_ptr() : nullptr, ws_size, false, nullptr, nullptr, qd,
+      out.data_ptr()));
   return out;
 }
