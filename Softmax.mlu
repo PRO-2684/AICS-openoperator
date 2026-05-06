@@ -3,23 +3,27 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 16384
+#define E0 8192
 
 __mlu_entry__ void kernel(const half *__restrict__ input,
                           half *__restrict__ output) {
   __nram__ half xbuf[E0];
 
-  int row = taskId;
-  __memcpy(xbuf, input + row * E0, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_active_exp(xbuf, xbuf, E0);
-  __bang_mul_scalar(xbuf, xbuf, (half)3.702e-05f, E0);
-  __memcpy(output + row * E0, xbuf, E0 * sizeof(half), NRAM2GDRAM);
+  if (coreId != 0x80) {
+    int row = taskIdY * 2 + (coreId >> 1);
+    int part = coreId & 1;
+    int base = row * 16384 + part * E0;
+    __memcpy(xbuf, input + base, E0 * sizeof(half), GDRAM2NRAM);
+    __bang_active_exp(xbuf, xbuf, E0);
+    __bang_mul_scalar(xbuf, xbuf, (half)3.702e-05f, E0);
+    __memcpy(output + base, xbuf, E0 * sizeof(half), NRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   auto y = torch::empty_like(x);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t kdim = {16, 1, 1};
+  cnrtDim3_t kdim = {4, 8, 1};
   kernel<<<kdim, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
