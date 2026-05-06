@@ -96,6 +96,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __nram__ half v2[768];
   __nram__ half y1[64];
   __nram__ float a0[768];
+  __nram__ float b0[768];
   __nram__ float v0[768];
   __nram__ float y0[64];
   __wram__ half k1[2048];
@@ -112,6 +113,10 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
 
   __memcpy(k1, k2, 2048 * sizeof(half), NRAM2WRAM);
   __bang_matmul(a0, q0, k1, n, 32, 64);
+  __bang_mul_scalar(a0, a0, 0.7f, n * 64);
+  __memcpy(b0, a0, n * 64 * sizeof(float), NRAM2NRAM);
+  __bang_active_sigmoid(a0, a0, n * 64);
+  __bang_mul(a0, a0, b0, n * 64);
 
 #pragma unroll
   for (int c = 0; c < 12; ++c) {
@@ -130,7 +135,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
 #pragma unroll
       for (int c = 0; c < 12; ++c) {
         if ((m >> c) & 1) {
-          float w = f2(a0[r * 64 + c] * 0.7f) * 0.08333333333333333f;
+          float w = a0[r * 64 + c] * 0.08333333333333333f;
           __bang_fusion(FUSION_FMA, y0, v0 + c * 64, w, y0, 40, 40);
         }
       }
