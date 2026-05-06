@@ -17,13 +17,7 @@ __mlu_func__ float f0(float x) {
     uint32_t u;
   } v;
   v.f = x;
-  int e = (int)((v.u >> 23) & 255) - 127;
-  v.u = (v.u & 0x007fffff) | 0x3f800000;
-  float m = v.f;
-  float y = (m - 1.0f) / (m + 1.0f);
-  float y2 = y * y;
-  float p = 2.0f * y;
-  return (float)e * 0.6931471805599453f + p;
+  return (float)v.u * 8.2373533703e-08f - 87.7089122400f;
 }
 
 __mlu_entry__ void k0(const half *__restrict__ predictions,
