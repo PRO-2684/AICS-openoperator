@@ -60,7 +60,12 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor hidden,
                         torch::Tensor cx, int hsz, int totalElements) {
   (void)hsz;
   (void)totalElements;
-  auto y = torch::empty({E2}, input.options());
+  static torch::Tensor y;
+  if (!y.defined()) {
+    y = torch::empty({E2}, input.options());
+  } else {
+    y.resize_({E2});
+  }
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {1, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, queue>>>(
