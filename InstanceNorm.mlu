@@ -64,9 +64,36 @@ __mlu_entry__ void inst_norm_partial_kernel(const half *__restrict__ x,
   partial[base + PARTS] = sq_sum;
 }
 
+__mlu_entry__ void inst_norm_stat_kernel(const float *__restrict__ partial,
+                                         float *__restrict__ stat, int outer,
+                                         int inner, float eps) {
+  int idx = taskId;
+  if (idx >= outer)
+    return;
+
+  const float *p = partial + idx * (PARTS * 2);
+
+  float sum = 0.0f;
+  float sq_sum = 0.0f;
+
+  for (int i = 0; i < PARTS; ++i) {
+    sum += p[i];
+    sq_sum += p[PARTS + i];
+  }
+
+  float inv_n = 1.0f / (float)inner;
+  float mean = sum * inv_n;
+  float var = sq_sum * inv_n - mean * mean;
+  if (var < 0.0f)
+    var = 0.0f;
+
+  stat[idx * 2 + 0] = mean;
+  stat[idx * 2 + 1] = 1.0f / sqrtf(var + eps);
+}
+
 __mlu_entry__ void inst_norm_apply_kernel(const half *__restrict__ x,
                                           half *__restrict__ y,
-                                          const float *__restrict__ partial,
+                                          const float *__restrict__ stat,
                                           int outer, int inner) {
   int gid = taskId;
   int total_tasks = outer * PARTS;
@@ -82,15 +109,8 @@ __mlu_entry__ void inst_norm_apply_kernel(const half *__restrict__ x,
   const half *px = x + (int64_t)idx * inner + offset;
   half *py = y + (int64_t)idx * inner + offset;
 
-  const float *p = partial + idx * (PARTS * 2);
-  float sum = p[0] + p[1];
-  float sq_sum = p[PARTS] + p[PARTS + 1];
-  float inv_n = 1.0f / (float)inner;
-  float mean = sum * inv_n;
-  float var = sq_sum * inv_n - mean * mean;
-  if (var < 0.0f)
-    var = 0.0f;
-  float inv_std = 1.0f / sqrtf(var + 1.0e-5f);
+  float mean = stat[idx * 2 + 0];
+  float inv_std = stat[idx * 2 + 1];
 
   __nram__ half hbuf[LOCAL_ELEMS];
   __nram__ float fbuf[LOCAL_ELEMS];
@@ -120,6 +140,7 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
 
   auto fopt = x.options().dtype(torch::kFloat32);
   auto partial = torch::empty({outer, PARTS * 2}, fopt);
+  auto stat = torch::empty({outer, 2}, fopt);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
@@ -128,13 +149,22 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
   dim_partial.y = 1;
   dim_partial.z = 1;
 
+  cnrtDim3_t dim_stat;
+  dim_stat.x = outer;
+  dim_stat.y = 1;
+  dim_stat.z = 1;
+
   inst_norm_partial_kernel<<<dim_partial, cnrtFuncTypeBlock, queue>>>(
       (const half *)x.data_ptr<at::Half>(), (float *)partial.data_ptr<float>(),
       outer, inner);
 
+  inst_norm_stat_kernel<<<dim_stat, cnrtFuncTypeBlock, queue>>>(
+      (const float *)partial.data_ptr<float>(), (float *)stat.data_ptr<float>(),
+      outer, inner, 1.0e-5f);
+
   inst_norm_apply_kernel<<<dim_partial, cnrtFuncTypeBlock, queue>>>(
       (const half *)x.data_ptr<at::Half>(), (half *)y.data_ptr<at::Half>(),
-      (const float *)partial.data_ptr<float>(), outer, inner);
+      (const float *)stat.data_ptr<float>(), outer, inner);
 
   return y;
 }
