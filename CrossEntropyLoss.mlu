@@ -11,6 +11,26 @@
 #define ROWS_PER_TASK (ROWS / TASKS)
 #define LOCAL_ELEMS (ROWS_PER_TASK * COLS)
 
+__mlu_func__ float f0(float x) {
+  union {
+    float f;
+    uint32_t u;
+  } v;
+  v.f = x;
+  int e = (int)((v.u >> 23) & 255) - 127;
+  v.u = (v.u & 0x007fffff) | 0x3f800000;
+  float m = v.f;
+  float y = (m - 1.0f) / (m + 1.0f);
+  float y2 = y * y;
+  float p = 2.0f * y *
+            (1.0f +
+             y2 * (0.3333333333333333f +
+                   y2 * (0.2f +
+                         y2 * (0.14285714285714285f +
+                               y2 * 0.1111111111111111f))));
+  return (float)e * 0.6931471805599453f + p;
+}
+
 __mlu_entry__ void k0(const half *__restrict__ predictions,
                       const int64_t *__restrict__ targets,
                       float *__restrict__ partial, half *__restrict__ out) {
@@ -37,7 +57,7 @@ __mlu_entry__ void k0(const half *__restrict__ predictions,
     }
 
     int64_t label = targets[row0 + r];
-    acc += logf(sum) - (float)hbuf[off + label];
+    acc += f0(sum) - (float)hbuf[off + label];
   }
 
   partial[taskId] = acc;
