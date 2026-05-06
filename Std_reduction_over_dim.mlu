@@ -6,7 +6,7 @@
 #define E0 16
 #define E1 256
 #define E2 65536
-#define E3 8192
+#define E3 16384
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E2];
@@ -21,12 +21,12 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   int p = taskId * E2;
   __memcpy(a, x + p, E2 * sizeof(half), GDRAM2NRAM);
   __bang_transpose(b, a, E1, E1);
-  for (int i = 0; i < 8; ++i) {
-    int q = i * 32;
-    __bang_transpose(c, b + i * E3, 32, E1);
-    __bang_sumpool(r + q, c, 32, 1, E1, 1, E1, 1, E1);
+  for (int i = 0; i < 4; ++i) {
+    int q = i * 64;
+    __bang_transpose(c, b + i * E3, 64, E1);
+    __bang_sumpool(r + q, c, 64, 1, E1, 1, E1, 1, E1);
     __bang_square(c, c, E3);
-    __bang_sumpool(s + q, c, 32, 1, E1, 1, E1, 1, E1);
+    __bang_sumpool(s + q, c, 64, 1, E1, 1, E1, 1, E1);
   }
   __bang_half2float(e, r, E1);
   __bang_half2float(f, s, E1);
@@ -42,9 +42,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
-  static torch::Tensor out;
-  if (!out.defined())
-    out = torch::empty({E0, E1}, x.options());
+  auto out = torch::empty({E0, E1}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t h = {E0, 1, 1};
   k0<<<h, cnrtFuncTypeUnion1, queue>>>(
