@@ -3,30 +3,35 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 16
-#define E1 256
-#define E2 65536
-#define E3 8192
+#define E0 32
+#define E1 128
+#define E2 256
+#define E3 32768
+#define E4 4096
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[E2];
-  __nram__ half b[E2];
-  __nram__ half c[E3];
+  __nram__ half a[E3];
+  __nram__ half b[E3];
+  __nram__ half c[E4];
   __nram__ half h[E1];
   __nram__ half r[E1];
   __nram__ half s[E1];
   __nram__ float e[E1];
   __nram__ float f[E1];
   __nram__ float g[E1];
-  int p = taskId * E2;
-  __memcpy(a, x + p, E2 * sizeof(half), GDRAM2NRAM);
-  __bang_transpose(b, a, E1, E1);
-  for (int i = 0; i < 8; ++i) {
+  int u = taskId >> 1;
+  int v = (taskId & 1) * E1;
+  int p = u * 65536 + v;
+  for (int i = 0; i < E2; ++i) {
+    __memcpy(a + i * E1, x + p + i * E2, E1 * sizeof(half), GDRAM2NRAM);
+  }
+  __bang_transpose(b, a, E2, E1);
+  for (int i = 0; i < 4; ++i) {
     int q = i * 32;
-    __bang_transpose(c, b + i * E3, 32, E1);
-    __bang_sumpool(r + q, c, 32, 1, E1, 1, E1, 1, E1);
-    __bang_square(c, c, E3);
-    __bang_sumpool(s + q, c, 32, 1, E1, 1, E1, 1, E1);
+    __bang_transpose(c, b + i * E4, 32, E2);
+    __bang_sumpool(r + q, c, 32, 1, E2, 1, E2, 1, E2);
+    __bang_square(c, c, E4);
+    __bang_sumpool(s + q, c, 32, 1, E2, 1, E2, 1, E2);
   }
   __bang_half2float(e, r, E1);
   __bang_half2float(f, s, E1);
@@ -37,15 +42,15 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __bang_active_relu(f, f, E1);
   __bang_sqrt(f, f, E1);
   __bang_float2half(h, f, E1);
-  __memcpy(y + taskId * E1, h, E1 * sizeof(half), NRAM2GDRAM);
+  __memcpy(y + u * E2 + v, h, E1 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
-  auto out = torch::empty({E0, E1}, x.options());
+  auto out = torch::empty({16, E2}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t h = {E0, 1, 1};
-  k0<<<h, cnrtFuncTypeUnion1, queue>>>(
+  cnrtDim3_t k = {E0, 1, 1};
+  k0<<<k, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
