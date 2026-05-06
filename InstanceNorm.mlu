@@ -59,11 +59,9 @@ __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
     float mean = sum * 0.0000152587890625f;
     float inv_std = 1.0f / sqrtf(sq_sum * 0.0000152587890625f + 1.0e-5f);
 
-    __bang_half2float(fbuf, hbuf, LOCAL_ELEMS);
-    __bang_fusion(FUSION_FMA, fbuf, fbuf, inv_std, -mean * inv_std,
+    __bang_fusion(FUSION_FMA, hbuf, hbuf, (half)inv_std,
+                  (half)(-mean * inv_std),
                   LOCAL_ELEMS);
-
-    __bang_float2half_rn(hbuf, fbuf, LOCAL_ELEMS);
     __memcpy(py, hbuf, LOCAL_ELEMS * sizeof(half), NRAM2GDRAM);
   }
 }
