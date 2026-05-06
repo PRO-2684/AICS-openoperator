@@ -5,7 +5,7 @@
 
 #define E0 32
 #define E1 16384
-#define E2 64
+#define E2 128
 
 __mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y, int n) {
   int q = n / E2;
@@ -15,7 +15,7 @@ __mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y, int n) {
     __bang_add(y, y, x + q * E2, r);
   }
   __bang_reduce_sum(y, y, E2);
-  return y[0] + y[32];
+  return y[0] + y[32] + y[64] + y[96];
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ z,
