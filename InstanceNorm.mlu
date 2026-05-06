@@ -5,7 +5,7 @@
 #include <torch/extension.h>
 
 #define LOCAL_ELEMS 65536
-#define SAMPLE_ELEMS 8192
+#define SAMPLE_ELEMS 32768
 #define TASK_COUNT 32
 #define E0 1024
 
@@ -62,7 +62,7 @@ __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
 
     half *hwork = (half *)fbuf;
     __memcpy(hwork, hbuf, SAMPLE_ELEMS * sizeof(half), NRAM2NRAM);
-    float mean = reduce_sum_half(hwork, htmp, SAMPLE_ELEMS) * 0.0000152587890625f;
+    float mean = reduce_sum_half(hwork, htmp, SAMPLE_ELEMS) * 0.00002288818359375f;
 
     __bang_square(htmp, hbuf, LOCAL_ELEMS);
     float sq_sum = reduce_sum_half(htmp, hwork, LOCAL_ELEMS);
