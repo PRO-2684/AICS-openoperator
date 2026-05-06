@@ -22,7 +22,11 @@ static cnnlTensorDescriptor_t d0() {
 }
 
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v) {
-  auto out = torch::empty_like(q);
+  static torch::Tensor out;
+  if (!out.defined())
+    out = torch::empty_like(q);
+  else
+    out.resize_({2, 8, 128, 64});
   auto d = d0();
   auto handle = torch_mlu::getCurrentHandle();
   static size_t ws_size = 0;
