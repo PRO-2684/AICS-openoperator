@@ -10,15 +10,15 @@
 #define E3 64
 #define E4 32
 
-__mlu_func__ void load_pair(half *a0, half *a1, const half *p, int s) {
+__mlu_func__ void load_pair(half *a0, half *a1, const half *p) {
 #pragma unroll
   for (int r = 0; r < 4; ++r) {
 #pragma unroll
     for (int h = 0; h < 4; ++h) {
       int t = (r << 2) + h;
-      const half *src = p + (s + r) * E3;
-      __memcpy(a0 + t * E4, src, E4 * sizeof(half), GDRAM2NRAM);
-      __memcpy(a1 + t * E4, src + E4, E4 * sizeof(half), GDRAM2NRAM);
+      const half *src = p + r * E3;
+      __memcpy(a0 + t * E4, src, E4 * sizeof(half), NRAM2NRAM);
+      __memcpy(a1 + t * E4, src + E4, E4 * sizeof(half), NRAM2NRAM);
     }
   }
 }
@@ -62,9 +62,13 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __nram__ half d0[E2];
   __nram__ half d1[E2];
   __nram__ half t[E2];
+  __nram__ half u[E3 * 4];
+  __nram__ half v[E3 * 4];
 
-  load_pair(b0, b1, c, p);
-  load_pair(d0, d1, s, p);
+  __memcpy(u, c + p * E3, E3 * 4 * sizeof(half), GDRAM2NRAM);
+  __memcpy(v, s + p * E3, E3 * 4 * sizeof(half), GDRAM2NRAM);
+  load_pair(b0, b1, u);
+  load_pair(d0, d1, v);
 
   apply_one(q + off, qo + off, a0, a1, b0, b1, c0, c1, d0, d1, t);
   apply_one(k + off, ko + off, a0, a1, b0, b1, c0, c1, d0, d1, t);
