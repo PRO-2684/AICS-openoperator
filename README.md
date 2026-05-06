@@ -94,7 +94,7 @@ python scripts/update_problems.py
 | 043 | [GroupNorm_](GroupNorm_.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/4d42bc5) |
 | 044 | [HingeLoss](HingeLoss.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/fcde4ebc3da8bdca80a43d5a305f1ef0db0e1ea9) |
 | 045 | [HuberLoss](HuberLoss.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/dc27df2) |
-| 046 | [InstanceNorm](InstanceNorm.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/13a9ac0) |
+| 046 | [InstanceNorm](InstanceNorm.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/6e490cb) |
 | 047 | [Max_Pooling_1D](Max_Pooling_1D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/4ec9eae) |
 | 048 | [Max_Pooling_2D](Max_Pooling_2D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/c3395ac) |
 | 049 | [Max_Pooling_3D](Max_Pooling_3D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/d9c335a) |
@@ -117,7 +117,7 @@ python scripts/update_problems.py
 | 066 | [transform_vals](transform_vals.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/79922f384d13008e49f64356b20e9e153742bdba) |
 | 067 | [renormRowsL1](renormRowsL1.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/cfb29f0) |
 | 068 | [upsample_bilinear2d_out_frame](upsample_bilinear2d_out_frame.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/d679ca9) |
-| 069 | [lstm_cell_forward](lstm_cell_forward.mlu) | N/A | 🔴 |
+| 069 | [lstm_cell_forward](lstm_cell_forward.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/6e490cb) |
 | 070 | [Sqrt](Sqrt.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/12910514b2c8a3b84745ef8f80da6607ed18562e) |
 | 071 | [Cos](Cos.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/484f12fd3b34ef23698a8a39bf61948b93dbd03e) |
 | 072 | [ElementwiseAdd](ElementwiseAdd.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/1eda60594d6e0b532762d4a53c465437ad2d7e60) |
