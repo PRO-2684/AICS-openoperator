@@ -108,7 +108,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
 #pragma unroll
   for (int r = 0; r < 12; ++r) {
     if (r < n) {
-      __bang_write_value(y0, 64, 0.0f);
+      __bang_write_value(y0, 40, 0.0f);
       int mr = f0(s, r);
 #pragma unroll
       for (int c = 0; c < 12; ++c) {
