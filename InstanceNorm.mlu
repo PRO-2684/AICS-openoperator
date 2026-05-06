@@ -5,7 +5,7 @@
 #include <torch/extension.h>
 
 #define LOCAL_ELEMS 65536
-#define SAMPLE_ELEMS 16384
+#define SAMPLE_ELEMS 8192
 #define TASK_COUNT 32
 #define E0 1024
 
