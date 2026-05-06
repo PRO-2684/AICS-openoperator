@@ -66,10 +66,10 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ kc,
     sn = expf(sn * 0.125f);
     float inv = 1.0f / (s1[0] + s1[1] + s1[2] + s1[3] + sn);
     __memcpy(q0, vn + h * 64, 64 * sizeof(half), GDRAM2NRAM);
-#pragma unroll
-    for (int i = 0; i < 64; ++i) {
-      o0[i] = (o0[i] + sn * (float)q0[i]) * inv;
-    }
+    __bang_half2float(s0, q0, 64);
+    __bang_mul_scalar(o0, o0, inv, 64);
+    __bang_mul_scalar(s0, s0, sn * inv, 64);
+    __bang_add(o0, o0, s0, 64);
     __bang_float2half_rn(o1, o0, 64);
     __memcpy(y + h * 64, o1, 64 * sizeof(half), NRAM2GDRAM);
   }
