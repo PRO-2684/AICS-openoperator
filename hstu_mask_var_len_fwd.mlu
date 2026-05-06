@@ -36,6 +36,31 @@ __mlu_func__ int f1(int s, int c) {
   return 12;
 }
 
+__mlu_func__ float f2(float x) {
+  if (x > 5.0f) {
+    return x;
+  }
+  if (x < -5.0f) {
+    return (((((-3.9377729667e-06f * x - 2.1530944077e-04f) * x -
+                4.6987578760e-03f) *
+                   x -
+               5.1289317024e-02f) *
+                  x -
+              2.8100360417e-01f) *
+                 x -
+             6.2104583656e-01f);
+  }
+  float x2 = x * x;
+  return (((((3.4089972912e-07f * x2 - 2.7184362012e-05f) * x2 +
+             8.8719797916e-04f) *
+                x2 -
+            1.6275454549e-02f) *
+               x2 +
+           2.4274524207e-01f) *
+              x2 +
+          5.0000000000e-01f * x + 2.0006736876e-03f);
+}
+
 __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
                       const half *__restrict__ v, half *__restrict__ y) {
   int t = taskId;
@@ -84,7 +109,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
     }
   }
 
-  __bang_reshape_filter(k1, k2, 64, 1, 1, 32, NRAM2WRAM);
+  __memcpy(k1, k2, 2048 * sizeof(half), NRAM2WRAM);
   __bang_matmul(a0, q0, k1, n, 32, 64);
 
 #pragma unroll
@@ -95,8 +120,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
       for (int c = 0; c < 12; ++c) {
         float u = 0.0f;
         if (c < n && mr >= c && mr < f1(s, c)) {
-          float z = a0[r * 64 + c] * 0.7f;
-          u = z / (1.0f + expf(-z)) * 0.08333333333333333f;
+          u = f2(a0[r * 64 + c] * 0.7f) * 0.08333333333333333f;
         }
         p0[r * 32 + c] = (half)u;
       }
@@ -115,7 +139,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
     }
   }
 
-  __bang_reshape_filter(v1, v2, 64, 1, 1, 32, NRAM2WRAM);
+  __memcpy(v1, v2, 2048 * sizeof(half), NRAM2WRAM);
   __bang_matmul(y0, p0, v1, n, 32, 64);
   __bang_float2half_rn(y1, y0, n * 64);
 
