@@ -19,30 +19,25 @@ __mlu_entry__ void k0(const half *__restrict__ predictions,
 
   __nram__ half hbuf[LOCAL_ELEMS];
   __nram__ float fbuf[LOCAL_ELEMS];
-  __nram__ float sbuf[ROWS_PER_TASK];
-  __nram__ float tbuf[ROWS_PER_TASK];
 
   __memcpy(hbuf, predictions + base, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
   __bang_half2float(fbuf, hbuf, LOCAL_ELEMS);
   __bang_active_exp(fbuf, fbuf, LOCAL_ELEMS);
-
-  __memcpy(sbuf, fbuf, sizeof(float), NRAM2NRAM, sizeof(float),
-           COLS * sizeof(float), ROWS_PER_TASK - 1);
-#pragma unroll
-  for (int c = 1; c < COLS; ++c) {
-    __memcpy(tbuf, fbuf + c, sizeof(float), NRAM2NRAM, sizeof(float),
-             COLS * sizeof(float), ROWS_PER_TASK - 1);
-    __bang_add(sbuf, sbuf, tbuf, ROWS_PER_TASK);
-  }
-  __bang_active_log(sbuf, sbuf, ROWS_PER_TASK);
 
   float acc = 0.0f;
 
 #pragma unroll 1
   for (int r = 0; r < ROWS_PER_TASK; ++r) {
     int off = r * COLS;
+    float sum = 0.0f;
+
+#pragma unroll
+    for (int c = 0; c < COLS; ++c) {
+      sum += fbuf[off + c];
+    }
+
     int64_t label = targets[row0 + r];
-    acc += sbuf[r] - (float)hbuf[off + label];
+    acc += logf(sum) - (float)hbuf[off + label];
   }
 
   partial[taskId] = acc;
