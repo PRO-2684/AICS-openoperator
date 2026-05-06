@@ -76,6 +76,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
 
   __nram__ half q0[384];
   __nram__ half p0[384];
+  __nram__ half k2[2048];
   __nram__ half v2[2048];
   __nram__ half y1[768];
   __nram__ float a0[768];
@@ -91,11 +92,12 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
     if (r < n) {
       __memcpy(q0 + r * 32, q + (((b + r) * 4 + h) * 32),
                32 * sizeof(half), GDRAM2NRAM);
+      __memcpy(k2 + r * 32, k + (((b + r) * 2 + hk) * 32),
+               32 * sizeof(half), GDRAM2NRAM);
     }
   }
 
-  __memcpy(k1, k + ((b * 2 + hk) * 32), 32 * sizeof(half), GDRAM2WRAM,
-           32 * sizeof(half), 64 * sizeof(half), n - 1);
+  __memcpy(k1, k2, 2048 * sizeof(half), NRAM2WRAM);
   __bang_matmul(a0, q0, k1, n, 32, 64);
 
 #pragma unroll
