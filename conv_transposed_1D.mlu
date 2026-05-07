@@ -15,6 +15,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ float b1[130];
   __nram__ float b2[130];
   __memcpy(kh, w, 576 * sizeof(half), GDRAM2NRAM);
+  if (coreId == 0x80) {
+    return;
+  }
   int c = coreId;
   for (int n = clusterId; n < E0; n += taskDimY) {
     __bang_write_value(b0, 130, 0.0f);
