@@ -3,9 +3,9 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 384
-#define E1 8192
-#define E2 8704
+#define E0 288
+#define E1 11008
+#define E2 11520
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
@@ -15,11 +15,12 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ half k[27];
   __memcpy(k, w, 27 * sizeof(half), GDRAM2NRAM);
   for (int g = taskId; g < E0; g += taskDim) {
-    int n = g / 24;
-    int r0 = g - n * 24;
-    int c = r0 >> 3;
-    int q = (r0 & 7) << 5;
-    int rows = q == 224 ? 30 : 32;
+    int n = g / 18;
+    int r0 = g - n * 18;
+    int c = r0 / 6;
+    int s = r0 - c * 6;
+    int q = s * 43;
+    int rows = s == 5 ? 39 : 43;
     int m = rows << 8;
     const half *p = x + n * 196608 + c * 65536 + q * 256;
     __memcpy(a, p, (rows + 2) * 256 * sizeof(half), GDRAM2NRAM);
