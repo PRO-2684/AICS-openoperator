@@ -4,20 +4,30 @@
 #include <torch/extension.h>
 
 #define E0 16
+#define E1 6240
+
+__mlu_entry__ void k2(float *__restrict__ y) {
+  __nram__ float a[390];
+  __bang_write_value(a, 390, 0.0f);
+  for (int i = taskId * 390; i < E1; i += taskDim * 390) {
+    __memcpy(y + i, a, 390 * sizeof(float), NRAM2GDRAM);
+  }
+}
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
-                      half *__restrict__ y) {
-  __mlu_shared__ float s[1560];
+                      float *__restrict__ y) {
+  if (coreId == 0x80) {
+    return;
+  }
   __nram__ half h[130];
   __nram__ half kh[576];
   __nram__ float a[128];
   __nram__ float b0[130];
   __nram__ float b1[130];
   __nram__ float b2[130];
-  int n = taskIdY;
+  __memcpy(kh, w, 576 * sizeof(half), GDRAM2NRAM);
   int lane = taskIdX;
-  if (coreId != 0x80) {
-    __memcpy(kh, w, 576 * sizeof(half), GDRAM2NRAM);
+  for (int n = taskIdY; n < E0; n += taskDimY) {
     __bang_write_value(b0, 130, 0.0f);
     __bang_write_value(b1, 130, 0.0f);
     __bang_write_value(b2, 130, 0.0f);
@@ -41,41 +51,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
       __bang_fusion(FUSION_FMA, b2 + 2, a, (float)kh[o + 8], b2 + 2, 128,
                     128);
     }
-    __memcpy(s + lane * 390, b0, 130 * sizeof(float), NRAM2SRAM);
-    __memcpy(s + lane * 390 + 130, b1, 130 * sizeof(float), NRAM2SRAM);
-    __memcpy(s + lane * 390 + 260, b2, 130 * sizeof(float), NRAM2SRAM);
-  }
-  __sync_cluster();
-  if (taskIdX == 0 && coreId != 0x80) {
-    __memcpy(b0, s + 1170, 130 * sizeof(float), SRAM2NRAM);
-    __memcpy(a, s + 780, 130 * sizeof(float), SRAM2NRAM);
-    __bang_add(b0, b0, a, 130);
-    __memcpy(a, s + 390, 130 * sizeof(float), SRAM2NRAM);
-    __bang_add(b0, b0, a, 130);
-    __memcpy(a, s, 130 * sizeof(float), SRAM2NRAM);
-    __bang_add(b0, b0, a, 130);
-    __bang_float2half_rn(h, b0, 130);
-    __memcpy(y + n * 390, h, 130 * sizeof(half), NRAM2GDRAM);
-
-    __memcpy(b1, s + 1300, 130 * sizeof(float), SRAM2NRAM);
-    __memcpy(a, s + 910, 130 * sizeof(float), SRAM2NRAM);
-    __bang_add(b1, b1, a, 130);
-    __memcpy(a, s + 520, 130 * sizeof(float), SRAM2NRAM);
-    __bang_add(b1, b1, a, 130);
-    __memcpy(a, s + 130, 130 * sizeof(float), SRAM2NRAM);
-    __bang_add(b1, b1, a, 130);
-    __bang_float2half_rn(h, b1, 130);
-    __memcpy(y + n * 390 + 130, h, 130 * sizeof(half), NRAM2GDRAM);
-
-    __memcpy(b2, s + 1430, 130 * sizeof(float), SRAM2NRAM);
-    __memcpy(a, s + 1040, 130 * sizeof(float), SRAM2NRAM);
-    __bang_add(b2, b2, a, 130);
-    __memcpy(a, s + 650, 130 * sizeof(float), SRAM2NRAM);
-    __bang_add(b2, b2, a, 130);
-    __memcpy(a, s + 260, 130 * sizeof(float), SRAM2NRAM);
-    __bang_add(b2, b2, a, 130);
-    __bang_float2half_rn(h, b2, 130);
-    __memcpy(y + n * 390 + 260, h, 130 * sizeof(half), NRAM2GDRAM);
+    __bang_atomic_reduce_add(y + n * 390, b0, 130);
+    __bang_atomic_reduce_add(y + n * 390 + 130, b1, 130);
+    __bang_atomic_reduce_add(y + n * 390 + 260, b2, 130);
   }
 }
 
@@ -93,14 +71,16 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)bias;
   static torch::Tensor y;
   if (!y.defined())
-    y = torch::empty({16, 3, 130}, x.options());
+    y = torch::empty({16, 3, 130}, x.options().dtype(torch::kFloat32));
   else
     y.resize_({16, 3, 130});
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d0 = {4, 16, 1};
+  cnrtDim3_t dc = {16, 1, 1};
+  k2<<<dc, cnrtFuncTypeBlock, queue>>>(y.data_ptr<float>());
+  cnrtDim3_t d0 = {4, 8, 1};
   k0<<<d0, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+      y.data_ptr<float>());
   return y;
 }
