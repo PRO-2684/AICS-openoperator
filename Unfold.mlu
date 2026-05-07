@@ -8,25 +8,26 @@
 #define E2 (E1 * E1)
 #define E3 27
 #define E4 16
-#define E5 127
+#define E5 64
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E1 * E5];
-  int total = E4 * E3 * 2;
+  int total = E4 * E3 * 4;
   for (int g = taskId; g < total; g += taskDim) {
-    int h = g & 1;
-    int u = g >> 1;
+    int h = g & 3;
+    int u = g >> 2;
     int n = u / E3;
     int b = u - n * E3;
     int kw = b % 3;
     int kh = (b / 3) % 3;
     int c = b / 9;
     int r = h * E5;
+    int m = h == 3 ? 62 : E5;
     const half *src = x + ((n * 3 + c) * 256 + kh + r) * 256 + kw;
     half *dst = y + (n * E3 + b) * E2 + r * E1;
     __memcpy(a, src, E1 * sizeof(half), GDRAM2NRAM, E1 * sizeof(half),
-             256 * sizeof(half), E5 - 1);
-    __memcpy(dst, a, E1 * E5 * sizeof(half), NRAM2GDRAM);
+             256 * sizeof(half), m - 1);
+    __memcpy(dst, a, E1 * m * sizeof(half), NRAM2GDRAM);
   }
 }
 
