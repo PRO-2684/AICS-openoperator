@@ -10,14 +10,14 @@ __mlu_entry__ void k0(half *__restrict__ x, float v) {
   __nram__ half a[B];
   for (int p = taskId * B; p < A; p += taskDim * B) {
     __memcpy(a, x + p, B * sizeof(half), GDRAM2NRAM);
-    __bang_mul_scalar(a, a, v, B);
+    __bang_fusion(FUSION_FMA, a, a, (half)(v - 1.0f), a, B, B);
     __memcpy(x + p, a, B * sizeof(half), NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x, double s) {
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()), (float)s);
   return x;
 }
