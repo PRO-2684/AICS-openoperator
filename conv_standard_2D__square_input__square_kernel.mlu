@@ -24,40 +24,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   }
 }
 
-__mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[130048];
-  __nram__ half b[130048];
-  for (int g = taskId; g < 512; g += taskDim) {
-    int n = g >> 5;
-    int r = (g & 31) << 3;
-    int rows = r == 248 ? 6 : 8;
-    int m = rows * 254;
-    __memcpy(a, x + n * 4129024 + r * 16256, m * 64 * sizeof(half),
-             GDRAM2NRAM);
-    __bang_transpose(b, a, m, 64);
-    half *dst = y + n * 4129024 + r * 254;
-    for (int c = 0; c < 64; ++c) {
-      __memcpy(dst + c * 64516, b + c * m, m * sizeof(half), NRAM2GDRAM);
-    }
-  }
-}
-
-__mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[49152];
-  __nram__ half b[49152];
-  for (int g = taskId; g < 64; g += taskDim) {
-    int n = g >> 2;
-    int r = (g & 3) << 6;
-    int m = 16384;
-    const half *src = x + n * 196608 + r * 256;
-    __memcpy(a, src, m * sizeof(half), GDRAM2NRAM);
-    __memcpy(a + m, src + 65536, m * sizeof(half), GDRAM2NRAM);
-    __memcpy(a + m * 2, src + 131072, m * sizeof(half), GDRAM2NRAM);
-    __bang_transpose(b, a, 3, m);
-    __memcpy(y + n * 196608 + r * 768, b, m * 3 * sizeof(half), NRAM2GDRAM);
-  }
-}
-
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
                         int out_channels, int kernel_size, int stride,
                         int padding, int dilation, int groups, bool bias) {
@@ -98,37 +64,59 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
         reinterpret_cast<half *>(w.data_ptr<at::Half>()));
     last = kernel.data_ptr();
   }
+  static cnnlTensorDescriptor_t xd = nullptr;
   static cnnlTensorDescriptor_t xhd = nullptr;
   static cnnlTensorDescriptor_t wd = nullptr;
   static cnnlTensorDescriptor_t yhd = nullptr;
   static cnnlTensorDescriptor_t yd = nullptr;
+  static cnnlTransposeDescriptor_t td0 = nullptr;
+  static cnnlTransposeDescriptor_t td1 = nullptr;
   static cnnlConvolutionDescriptor_t cd = nullptr;
   static cnnlConvolutionForwardAlgo_t algo = CNNL_CONVOLUTION_FWD_ALGO_DIRECT;
   static size_t ws_size = 0;
   if (xd == nullptr) {
+    int xs[4] = {16, 3, 256, 256};
     int xhs[4] = {16, 256, 256, 3};
     int ws[4] = {64, 3, 3, 3};
     int yhs[4] = {16, 254, 254, 64};
+    int ys[4] = {16, 64, 254, 254};
+    int p0[4] = {0, 2, 3, 1};
+    int p1[4] = {0, 3, 1, 2};
     int pad0[4] = {0, 0, 0, 0};
     int st[2] = {1, 1};
     int dil[2] = {1, 1};
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&xd));
     CNNL_CHECK(cnnlCreateTensorDescriptor(&xhd));
     CNNL_CHECK(cnnlCreateTensorDescriptor(&wd));
     CNNL_CHECK(cnnlCreateTensorDescriptor(&yhd));
     CNNL_CHECK(cnnlCreateTensorDescriptor(&yd));
+    CNNL_CHECK(cnnlCreateTransposeDescriptor(&td0));
+    CNNL_CHECK(cnnlCreateTransposeDescriptor(&td1));
     CNNL_CHECK(cnnlCreateConvolutionDescriptor(&cd));
+    CNNL_CHECK(
+        cnnlSetTensorDescriptor(xd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, xs));
     CNNL_CHECK(cnnlSetTensorDescriptor(xhd, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF,
                                        4, xhs));
     CNNL_CHECK(
         cnnlSetTensorDescriptor(wd, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, ws));
     CNNL_CHECK(cnnlSetTensorDescriptor(yhd, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF,
                                        4, yhs));
+    CNNL_CHECK(
+        cnnlSetTensorDescriptor(yd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, ys));
+    CNNL_CHECK(cnnlSetTransposeDescriptor(td0, 4, p0));
+    CNNL_CHECK(cnnlSetTransposeDescriptor(td1, 4, p1));
     CNNL_CHECK(cnnlSetConvolutionDescriptor(cd, 4, pad0, st, dil, 1,
                                             CNNL_DTYPE_FLOAT));
-    size_t b = 0;
+    size_t a = 0, b = 0, c = 0;
+    CNNL_CHECK(cnnlGetTransposeWorkspaceSize(torch_mlu::getCurrentHandle(), xd,
+                                             td0, &a));
     CNNL_CHECK(cnnlGetConvolutionForwardWorkspaceSize(
         torch_mlu::getCurrentHandle(), xhd, wd, yhd, nullptr, cd, algo, &b));
-    ws_size = b;
+    CNNL_CHECK(cnnlGetTransposeWorkspaceSize(torch_mlu::getCurrentHandle(), yhd,
+                                             td1, &c));
+    ws_size = a > b ? a : b;
+    if (c > ws_size)
+      ws_size = c;
   }
   static torch::Tensor work;
   if (!work.defined())
@@ -136,16 +124,13 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   else
     work.resize_({(int64_t)ws_size});
   void *wp = ws_size ? work.data_ptr() : nullptr;
-  cnrtDim3_t d0 = {4, 8, 1};
-  k2<<<d0, cnrtFuncTypeUnion1, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(xh.data_ptr<at::Half>()));
+  CNNL_CHECK(cnnlTranspose_v2(torch_mlu::getCurrentHandle(), td0, xd,
+                              x.data_ptr(), xhd, xh.data_ptr(), wp, ws_size));
   CNNL_CHECK(cnnlConvolutionForward(
       torch_mlu::getCurrentHandle(), cd, algo, nullptr, xhd, xh.data_ptr(), wd,
       w.data_ptr(), nullptr, nullptr, wp, ws_size, nullptr, yhd,
       yh.data_ptr()));
-  k1<<<d0, cnrtFuncTypeUnion1, queue>>>(
-      reinterpret_cast<const half *>(yh.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  CNNL_CHECK(cnnlTranspose_v2(torch_mlu::getCurrentHandle(), td1, yhd,
+                              yh.data_ptr(), yd, y.data_ptr(), wp, ws_size));
   return y;
 }
