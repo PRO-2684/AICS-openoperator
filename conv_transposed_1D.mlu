@@ -11,7 +11,7 @@ __mlu_entry__ void k1(const float *__restrict__ z, half *__restrict__ y) {
   __nram__ half h[390];
   for (int i = taskId * 390; i < E1; i += taskDim * 390) {
     __memcpy(a, z + i, 390 * sizeof(float), GDRAM2NRAM);
-    __bang_float2half_rd(h, a, 390);
+    __bang_float2half_rm(h, a, 390);
     __memcpy(y + i, h, 390 * sizeof(half), NRAM2GDRAM);
   }
 }
