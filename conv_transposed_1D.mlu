@@ -6,18 +6,8 @@
 #define E0 16
 #define E1 6240
 
-__mlu_entry__ void k1(const float *__restrict__ z, half *__restrict__ y) {
-  __nram__ float a[390];
-  __nram__ half h[390];
-  for (int i = taskId * 390; i < E1; i += taskDim * 390) {
-    __memcpy(a, z + i, 390 * sizeof(float), GDRAM2NRAM);
-    __bang_float2half_rn(h, a, 390);
-    __memcpy(y + i, h, 390 * sizeof(half), NRAM2GDRAM);
-  }
-}
-
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
-                      float *__restrict__ z) {
+                      float *__restrict__ z, half *__restrict__ y) {
   __nram__ half h[130];
   __nram__ half kh[576];
   __nram__ float a[128];
@@ -63,6 +53,17 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
       __bang_atomic_reduce_add(z + n * 390 + 260, b2, 130);
     }
     __sync_cluster();
+    if (lane == 0 && coreId != 0x80) {
+      __memcpy(b0, z + n * 390, 130 * sizeof(float), GDRAM2NRAM);
+      __bang_float2half_rn(h, b0, 130);
+      __memcpy(y + n * 390, h, 130 * sizeof(half), NRAM2GDRAM);
+      __memcpy(b0, z + n * 390 + 130, 130 * sizeof(float), GDRAM2NRAM);
+      __bang_float2half_rn(h, b0, 130);
+      __memcpy(y + n * 390 + 130, h, 130 * sizeof(half), NRAM2GDRAM);
+      __memcpy(b0, z + n * 390 + 260, 130 * sizeof(float), GDRAM2NRAM);
+      __bang_float2half_rn(h, b0, 130);
+      __memcpy(y + n * 390 + 260, h, 130 * sizeof(half), NRAM2GDRAM);
+    }
   }
 }
 
@@ -89,13 +90,10 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   else
     z.resize_({16, 3, 130});
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dc = {16, 1, 1};
   cnrtDim3_t d0 = {4, 8, 1};
   k0<<<d0, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
-      z.data_ptr<float>());
-  k1<<<dc, cnrtFuncTypeBlock, queue>>>(
       z.data_ptr<float>(), reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
