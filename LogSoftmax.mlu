@@ -10,6 +10,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __mlu_shared__ float s[4];
   __nram__ half a[E1];
   __nram__ half b[E1];
+  __nram__ half t[128];
   int c = coreId;
   if (c != 0x80) {
     int r = taskIdY * 2 + (c >> 1);
@@ -18,9 +19,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     __memcpy(b, a, E1 * sizeof(half), NRAM2NRAM);
     __bang_sub_scalar(b, b, (half)8.0f, E1);
     __bang_active_exp_less_0(b, b, E1);
-    for (int n = E1 >> 1; n > 0; n >>= 1)
-      __bang_add(b, b, b + n, n);
-    s[c] = (float)b[0];
+    __bang_sumpool(t, b, 1, 1, E1, 1, 64, 64, 1);
+    for (int n = 64; n > 0; n >>= 1)
+      __bang_add(t, t, t + n, n);
+    s[c] = (float)t[0];
   }
   __sync_cluster();
   if (c != 0x80) {
