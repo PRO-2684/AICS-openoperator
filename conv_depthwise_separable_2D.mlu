@@ -13,6 +13,7 @@
 
 #define E0 8192
 #define E1 1032256
+#define E2 128
 
 __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ c) {
   for (int i = taskId; i < 27; i += taskDim) {
@@ -37,8 +38,11 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ float f2[E0];
   __nram__ float fo[E0];
   __memcpy(kw, w, 192 * sizeof(half), GDRAM2NRAM);
-  for (int p = taskId * E0; p < E1; p += taskDim * E0) {
-    int m = E1 - p;
+  for (int g = taskId; g < E2; g += taskDim) {
+    int n = g >> 3;
+    int r = (g & 7) * E0;
+    int p = n * 64516 + r;
+    int m = 64516 - r;
     if (m > E0)
       m = E0;
     __memcpy(h0, x + p * 3, sizeof(half), GDRAM2NRAM, sizeof(half),
@@ -50,8 +54,6 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     __bang_half2float(f0, h0, m);
     __bang_half2float(f1, h1, m);
     __bang_half2float(f2, h2, m);
-    int n = p / 64516;
-    int r = p - n * 64516;
     for (int c = 0; c < 64; ++c) {
       int o = c * 3;
       __bang_mul_scalar(fo, f0, (float)kw[o], m);
