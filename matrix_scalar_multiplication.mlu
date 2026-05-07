@@ -8,12 +8,20 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
                       float v) {
-  __nram__ half a[B];
-  for (int p = taskId * B; p < A; p += taskDim * B) {
+  __nram__ half a[B * 2];
+  int p = taskId * B;
+  int s = taskDim * B;
+  if (p < A)
     __memcpy_async(a, x + p, B * sizeof(half), GDRAM2NRAM);
-    __asm__ volatile("sync;");
-    __bang_mul_scalar(a, a, v, B);
-    __memcpy_async(y + p, a, B * sizeof(half), NRAM2GDRAM);
+  __asm__ volatile("sync;");
+  for (int i = 0; p < A; p += s, ++i) {
+    int q = i & 1;
+    int n = q ^ 1;
+    int r = p + s;
+    if (r < A)
+      __memcpy_async(a + n * B, x + r, B * sizeof(half), GDRAM2NRAM);
+    __bang_mul_scalar(a + q * B, a + q * B, v, B);
+    __memcpy_async(y + p, a + q * B, B * sizeof(half), NRAM2GDRAM);
     __asm__ volatile("sync;");
   }
 }
