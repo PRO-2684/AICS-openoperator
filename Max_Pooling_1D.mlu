@@ -31,9 +31,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
       __memcpy(pd, p + 7, sizeof(half), NRAM2NRAM, sizeof(half),
                2 * sizeof(half), 60);
     }
-    __bang_max(a, a, b, 1984);
-    __bang_max(c, c, d, 1984);
-    __bang_max(a, a, c, 1984);
+    __bang_maxequal(a, a, b, 1984);
+    __bang_maxequal(c, c, d, 1984);
+    __bang_maxequal(a, a, c, 1984);
     __memcpy(y + base * 62, a, 1984 * sizeof(half), NRAM2GDRAM);
   }
 }

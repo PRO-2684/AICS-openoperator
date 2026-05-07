@@ -21,19 +21,19 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
       half *p = t + (2 * i - 1) * 128;
       __memcpy(a + i * 64 + 1, p + 1, sizeof(half), NRAM2NRAM,
                sizeof(half), 2 * sizeof(half), 62);
-      __memcpy(b + i * 64, p + 2, sizeof(half), NRAM2NRAM,
-               sizeof(half), 2 * sizeof(half), 62);
+      __memcpy(b + i * 64, p + 2, sizeof(half), NRAM2NRAM, sizeof(half),
+               2 * sizeof(half), 62);
     }
     for (int i = 0; i < 63; ++i) {
       half *p = t + (2 * i + 2) * 128;
       __memcpy(c + i * 64 + 1, p + 1, sizeof(half), NRAM2NRAM,
                sizeof(half), 2 * sizeof(half), 62);
-      __memcpy(d + i * 64, p + 2, sizeof(half), NRAM2NRAM,
-               sizeof(half), 2 * sizeof(half), 62);
+      __memcpy(d + i * 64, p + 2, sizeof(half), NRAM2NRAM, sizeof(half),
+               2 * sizeof(half), 62);
     }
-    __bang_max(a, a, b, 4096);
-    __bang_max(c, c, d, 4096);
-    __bang_max(a, a, c, 4096);
+    __bang_maxequal(a, a, b, 4096);
+    __bang_maxequal(c, c, d, 4096);
+    __bang_maxequal(a, a, c, 4096);
     __memcpy(y + r * 4096, a, 4096 * sizeof(half), NRAM2GDRAM);
   }
 }
