@@ -16,7 +16,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     int p = r * E0 + (c & 1) * E1;
     __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
     __memcpy(b, a, E1 * sizeof(half), NRAM2NRAM);
-    __bang_sub_scalar(b, b, (half)6.0f, E1);
+    __bang_sub_scalar(b, b, (half)8.0f, E1);
     __bang_active_exp_less_0(b, b, E1);
     for (int n = E1 >> 1; n > 0; n >>= 1)
       __bang_add(b, b, b + n, n);
@@ -27,7 +27,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     int r = taskIdY * 2 + (c >> 1);
     int p = r * E0 + (c & 1) * E1;
     int q = c & 2;
-    float v = logf(s[q] + s[q + 1]) + 6.0f;
+    float v = logf(s[q] + s[q + 1]) + 8.0f;
     __bang_sub_scalar(a, a, v, E1);
     __memcpy(y + p, a, E1 * sizeof(half), NRAM2GDRAM);
   }
