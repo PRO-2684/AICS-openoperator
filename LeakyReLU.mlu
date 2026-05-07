@@ -4,17 +4,15 @@
 #include <torch/extension.h>
 
 #define E0 262144
-#define E1 16384
+#define E1 8192
 
 __mlu_entry__ void k0(half *__restrict__ x, float s) {
   __nram__ half a[E1];
   __nram__ half b[E1];
   for (int p = taskId * E1; p < E0; p += taskDim * E1) {
     __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-    __bang_active_relu(b, a, E1);
-    __bang_sub(a, a, b, E1);
-    __bang_mul_scalar(a, a, s, E1);
-    __bang_add(a, a, b, E1);
+    __bang_mul_scalar(b, a, s, E1);
+    __bang_maximum(a, a, b, E1);
     __memcpy(x + p, a, E1 * sizeof(half), NRAM2GDRAM);
   }
 }
