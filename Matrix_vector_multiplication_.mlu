@@ -5,7 +5,7 @@
 
 #define E0 256
 #define E1 131072
-#define E2 32768
+#define E2 16384
 #define E3 8
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
