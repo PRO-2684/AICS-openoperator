@@ -1,60 +1,14 @@
+#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
+#include <cnnl.h>
 #include <cnrt.h>
-#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 256
-#define E1 4064
-#define E2 4608
-
-__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
-                      half *__restrict__ y) {
-  __nram__ half h[E1];
-  __nram__ half hk[1728];
-  __nram__ half a0h[E2];
-  __nram__ half a1h[E2];
-  __nram__ half a2h[E2];
-  __nram__ float a0[E2];
-  __nram__ float a1[E2];
-  __nram__ float a2[E2];
-  __nram__ float b[E1];
-  __nram__ float t[E1];
-  __memcpy(hk, w, 1728 * sizeof(half), GDRAM2NRAM);
-  for (int g = taskId; g < E0; g += taskDim) {
-    int n = g >> 4;
-    int q = (g & 15) << 4;
-    int rows = q == 240 ? 14 : 16;
-    int m = rows * 254;
-    const half *p = x + n * 196608 + q * 256;
-    __memcpy(a0h, p, (rows + 2) * 256 * sizeof(half), GDRAM2NRAM);
-    __memcpy(a1h, p + 65536, (rows + 2) * 256 * sizeof(half), GDRAM2NRAM);
-    __memcpy(a2h, p + 131072, (rows + 2) * 256 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(a0, a0h, (rows + 2) * 256);
-    __bang_half2float(a1, a1h, (rows + 2) * 256);
-    __bang_half2float(a2, a2h, (rows + 2) * 256);
-    for (int c = 0; c < 64; ++c) {
-      int ko = c * 27;
-      __memcpy(b, a0, 254 * sizeof(float), NRAM2NRAM, 254 * sizeof(float),
-               256 * sizeof(float), rows - 1);
-      __bang_mul_scalar(b, b, (float)hk[ko], m);
-      for (int ic = 0; ic < 3; ++ic) {
-        float *pa = ic == 0 ? a0 : (ic == 1 ? a1 : a2);
-        int io = ko + ic * 9;
-        int st = ic == 0 ? 1 : 0;
-        for (int i = st; i < 9; ++i) {
-          int dy = i / 3;
-          int dx = i - dy * 3;
-          __memcpy(t, pa + dy * 256 + dx, 254 * sizeof(float), NRAM2NRAM,
-                   254 * sizeof(float), 256 * sizeof(float), rows - 1);
-          __bang_fusion(FUSION_FMA, b, t, (float)hk[io + i], b, m, m);
-        }
-      }
-      __bang_float2half_rn(h, b, m);
-      __memcpy(y + n * 4129024 + c * 64516 + q * 254, h, m * sizeof(half),
-               NRAM2GDRAM);
-    }
-  }
-}
+#define CNNL_CHECK(expr)                                                      \
+  do {                                                                        \
+    cnnlStatus_t s = (expr);                                                  \
+    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);      \
+  } while (0)
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
                         int out_channels, int kernel_size, int stride,
@@ -68,10 +22,39 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)groups;
   (void)bias;
   auto y = torch::empty({16, 64, 254, 254}, x.options());
-  cnrtDim3_t dim = {4, 8, 1};
-  k0<<<dim, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  static cnnlTensorDescriptor_t xd = nullptr;
+  static cnnlTensorDescriptor_t wd = nullptr;
+  static cnnlTensorDescriptor_t yd = nullptr;
+  static cnnlConvolutionDescriptor_t cd = nullptr;
+  static cnnlConvolutionForwardAlgo_t algo = CNNL_CONVOLUTION_FWD_ALGO_DIRECT;
+  static size_t ws_size = 0;
+  if (xd == nullptr) {
+    int xs[4] = {16, 3, 256, 256};
+    int ws[4] = {64, 3, 3, 3};
+    int ys[4] = {16, 64, 254, 254};
+    int pad0[4] = {0, 0, 0, 0};
+    int st[2] = {1, 1};
+    int dil[2] = {1, 1};
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&xd));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&wd));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&yd));
+    CNNL_CHECK(cnnlCreateConvolutionDescriptor(&cd));
+    CNNL_CHECK(cnnlSetTensorDescriptor(xd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF,
+                                       4, xs));
+    CNNL_CHECK(cnnlSetTensorDescriptor(wd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF,
+                                       4, ws));
+    CNNL_CHECK(cnnlSetTensorDescriptor(yd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF,
+                                       4, ys));
+    CNNL_CHECK(cnnlSetConvolutionDescriptor(cd, 4, pad0, st, dil, 1,
+                                            CNNL_DTYPE_HALF));
+    CNNL_CHECK(cnnlGetConvolutionForwardWorkspaceSize(
+        torch_mlu::getCurrentHandle(), xd, wd, yd, nullptr, cd, algo,
+        &ws_size));
+  }
+  auto ws = torch::empty({(int64_t)ws_size}, x.options().dtype(torch::kUInt8));
+  CNNL_CHECK(cnnlConvolutionForward(
+      torch_mlu::getCurrentHandle(), cd, algo, nullptr, xd, x.data_ptr(), wd,
+      kernel.data_ptr(), nullptr, nullptr, ws_size ? ws.data_ptr() : nullptr,
+      ws_size, nullptr, yd, y.data_ptr()));
   return y;
 }
