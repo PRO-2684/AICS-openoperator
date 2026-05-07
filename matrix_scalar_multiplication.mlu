@@ -6,35 +6,18 @@
 #define A 268435456
 #define B 32768
 
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
-                      float v) {
-  __nram__ half a[B * 2];
-  int p = taskId * B;
-  int s = taskDim * B;
-  if (p < A)
-    __memcpy_async(a, x + p, B * sizeof(half), GDRAM2NRAM);
-  __asm__ volatile("sync;");
-  for (int i = 0; p < A; p += s, ++i) {
-    int q = i & 1;
-    int n = q ^ 1;
-    int r = p + s;
-    if (r < A)
-      __memcpy_async(a + n * B, x + r, B * sizeof(half), GDRAM2NRAM);
-    __bang_mul_scalar(a + q * B, a + q * B, v, B);
-    __memcpy_async(y + p, a + q * B, B * sizeof(half), NRAM2GDRAM);
-    __asm__ volatile("sync;");
+__mlu_entry__ void k0(half *__restrict__ x, float v) {
+  __nram__ half a[B];
+  for (int p = taskId * B; p < A; p += taskDim * B) {
+    __memcpy(a, x + p, B * sizeof(half), GDRAM2NRAM);
+    __bang_mul_scalar(a, a, v, B);
+    __memcpy(x + p, a, B * sizeof(half), NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x, double v) {
-  static torch::Tensor y;
-  if (!y.defined())
-    y = torch::empty_like(x);
-  else
-    y.resize_({16384, 16384});
   cnrtDim3_t d = {2, 16, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()), (float)v);
-  return y;
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()), (float)v);
+  return x;
 }
