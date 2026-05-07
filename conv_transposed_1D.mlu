@@ -7,6 +7,7 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
+  __mlu_shared__ float s[1560];
   __nram__ half h[130];
   __nram__ half kh[576];
   __nram__ float a[128];
@@ -14,11 +15,12 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ float b1[130];
   __nram__ float b2[130];
   __memcpy(kh, w, 576 * sizeof(half), GDRAM2NRAM);
-  for (int n = taskId; n < E0; n += taskDim) {
+  int c = coreId;
+  for (int n = clusterId; n < E0; n += taskDimY) {
     __bang_write_value(b0, 130, 0.0f);
     __bang_write_value(b1, 130, 0.0f);
     __bang_write_value(b2, 130, 0.0f);
-    for (int i = 0; i < 64; ++i) {
+    for (int i = c * 16; i < c * 16 + 16; ++i) {
       __memcpy(h, x + n * 8192 + i * 128, 128 * sizeof(half), GDRAM2NRAM);
       __bang_half2float(a, h, 128);
       int o = i * 9;
@@ -38,12 +40,42 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
       __bang_fusion(FUSION_FMA, b2 + 2, a, (float)kh[o + 8], b2 + 2, 128,
                     128);
     }
-    __bang_float2half_rn(h, b0, 130);
-    __memcpy(y + n * 390, h, 130 * sizeof(half), NRAM2GDRAM);
-    __bang_float2half_rn(h, b1, 130);
-    __memcpy(y + n * 390 + 130, h, 130 * sizeof(half), NRAM2GDRAM);
-    __bang_float2half_rn(h, b2, 130);
-    __memcpy(y + n * 390 + 260, h, 130 * sizeof(half), NRAM2GDRAM);
+    __memcpy(s + c * 390, b0, 130 * sizeof(float), NRAM2SRAM);
+    __memcpy(s + c * 390 + 130, b1, 130 * sizeof(float), NRAM2SRAM);
+    __memcpy(s + c * 390 + 260, b2, 130 * sizeof(float), NRAM2SRAM);
+    __sync_cluster();
+    if (c == 0) {
+      __memcpy(b0, s, 390 * sizeof(float), SRAM2NRAM);
+      __memcpy(a, s + 390, 130 * sizeof(float), SRAM2NRAM);
+      __bang_add(b0, b0, a, 130);
+      __memcpy(a, s + 780, 130 * sizeof(float), SRAM2NRAM);
+      __bang_add(b0, b0, a, 130);
+      __memcpy(a, s + 1170, 130 * sizeof(float), SRAM2NRAM);
+      __bang_add(b0, b0, a, 130);
+      __bang_float2half_rn(h, b0, 130);
+      __memcpy(y + n * 390, h, 130 * sizeof(half), NRAM2GDRAM);
+
+      __memcpy(b1, s + 130, 130 * sizeof(float), SRAM2NRAM);
+      __memcpy(a, s + 520, 130 * sizeof(float), SRAM2NRAM);
+      __bang_add(b1, b1, a, 130);
+      __memcpy(a, s + 910, 130 * sizeof(float), SRAM2NRAM);
+      __bang_add(b1, b1, a, 130);
+      __memcpy(a, s + 1300, 130 * sizeof(float), SRAM2NRAM);
+      __bang_add(b1, b1, a, 130);
+      __bang_float2half_rn(h, b1, 130);
+      __memcpy(y + n * 390 + 130, h, 130 * sizeof(half), NRAM2GDRAM);
+
+      __memcpy(b2, s + 260, 130 * sizeof(float), SRAM2NRAM);
+      __memcpy(a, s + 650, 130 * sizeof(float), SRAM2NRAM);
+      __bang_add(b2, b2, a, 130);
+      __memcpy(a, s + 1040, 130 * sizeof(float), SRAM2NRAM);
+      __bang_add(b2, b2, a, 130);
+      __memcpy(a, s + 1430, 130 * sizeof(float), SRAM2NRAM);
+      __bang_add(b2, b2, a, 130);
+      __bang_float2half_rn(h, b2, 130);
+      __memcpy(y + n * 390 + 260, h, 130 * sizeof(half), NRAM2GDRAM);
+    }
+    __sync_cluster();
   }
 }
 
@@ -60,8 +92,8 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)groups;
   (void)bias;
   auto y = torch::empty({16, 3, 130}, x.options());
-  cnrtDim3_t dim = {16, 1, 1};
-  k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t dim = {4, 8, 1};
+  k0<<<dim, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
