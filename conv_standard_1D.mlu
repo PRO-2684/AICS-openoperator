@@ -10,8 +10,9 @@
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
   __nram__ half a[1542];
-  __nram__ half b[E2];
-  __nram__ half c[E2];
+  __nram__ float b[E2];
+  __nram__ float c[E2];
+  __nram__ half d[E2];
   for (int g = taskId; g < E0; g += taskDim) {
     int o = g & 63;
     int n = g >> 6;
@@ -26,14 +27,16 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     a[1027] = (half)0.0f;
     a[1540] = (half)0.0f;
     a[1541] = (half)0.0f;
-    __bang_write_value(b, E2, (half)0.0f);
+    __bang_write_value(b, E2, 0.0f);
     for (int q = 0; q < 9; ++q) {
       int r = q / 3;
       int s = q - r * 3;
-      __bang_mul_scalar(c, a + r * 514 + s, (float)pw[q], E2);
+      __bang_half2float(c, a + r * 514 + s, E2);
+      __bang_mul_scalar(c, c, (float)pw[q], E2);
       __bang_add(b, b, c, E2);
     }
-    __memcpy(y + g * E1, b, E1 * sizeof(half), NRAM2GDRAM);
+    __bang_float2half_rn(d, b, E2);
+    __memcpy(y + g * E1, d, E1 * sizeof(half), NRAM2GDRAM);
   }
 }
 
