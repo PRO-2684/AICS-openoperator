@@ -7,22 +7,16 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half t[4096];
-  __nram__ half b[1920];
-  __nram__ half c[2048];
+  __nram__ half a[4224];
+  __nram__ half b[2048];
+  __bang_write_value(a, 4224, (half)-65504.0f);
   for (int r = taskId; r < E0; r += taskDim) {
     int base = r << 5;
     __memcpy(t, x + base * 128, 4096 * sizeof(half), GDRAM2NRAM);
-    __bang_maxpool(b, t, 1, 32, 128, 1, 4, 2, 1, 1, 3, 1, 1);
-    for (int i = 0; i < 32; ++i) {
-      half *p = t + i * 128;
-      half *q = c + i * 62;
-      half v0 = p[1] > p[4] ? p[1] : p[4];
-      q[0] = v0 > p[7] ? v0 : p[7];
-      half v1 = p[120] > p[123] ? p[120] : p[123];
-      q[61] = v1 > p[126] ? v1 : p[126];
-      __memcpy(q + 1, b + i * 60, 60 * sizeof(half), NRAM2NRAM);
-    }
-    __memcpy(y + base * 62, c, 1984 * sizeof(half), NRAM2GDRAM);
+    __memcpy(a + 2, t, 128 * sizeof(half), NRAM2NRAM, 132 * sizeof(half),
+             128 * sizeof(half), 31);
+    __bang_maxpool(b, a, 1, 32, 132, 1, 4, 2, 1, 1, 3, 1, 1);
+    __memcpy(y + base * 62, b, 1984 * sizeof(half), NRAM2GDRAM);
   }
 }
 
