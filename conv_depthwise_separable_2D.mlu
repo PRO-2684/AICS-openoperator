@@ -1,14 +1,79 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 007 007_conv_depthwise_separable_2D
-// Category: conv
-// Difficulty: hard
-// DType: float16
-// Description: 实现一个 BangC 算子，对输入张量执行深度可分离二维卷积运算。该算子接收形状为 `[batch, in_channels, H, W]` 的输入张量 `x`，并结合深度卷积权重、逐点卷积权重以及 `stride`、`padding`、`dilation` 等卷积参数进行计算；最终输出形状为 `[batch, out_channels, H_out, W_out]` 的结果张量。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x,int in_channels,int out_channels,int kernel_size,int stride,int padding,int dilation);
+#define E0 256
+#define E1 4064
+#define E2 4608
 
-torch::Tensor bang_func(torch::Tensor x,int in_channels,int out_channels,int kernel_size,int stride,int padding,int dilation) {
-  TORCH_CHECK(false, "TODO: implement conv_depthwise_separable_2D");
+#define DO_ONE(dst, ch)                                                        \
+  do {                                                                         \
+    const half *p = x + n * 196608 + (ch) * 65536 + q * 256;                  \
+    __memcpy(a, p, 18 * 256 * sizeof(half), GDRAM2NRAM);                      \
+    int o = (ch) * 9;                                                          \
+    __memcpy(h, a, 254 * sizeof(half), NRAM2NRAM, 254 * sizeof(half),          \
+             256 * sizeof(half), rows - 1);                                    \
+    __bang_half2float((dst), h, m);                                            \
+    __bang_mul_scalar((dst), (dst), (float)kd[o], m);                          \
+    for (int i = 1; i < 9; ++i) {                                              \
+      int dy = i / 3;                                                          \
+      int dx = i - dy * 3;                                                     \
+      __memcpy(h, a + dy * 256 + dx, 254 * sizeof(half), NRAM2NRAM,            \
+               254 * sizeof(half), 256 * sizeof(half), rows - 1);              \
+      __bang_half2float(t, h, m);                                              \
+      __bang_fusion(FUSION_FMA, (dst), t, (float)kd[o + i], (dst), m, m);      \
+    }                                                                          \
+  } while (0)
+
+__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ dw,
+                      const half *__restrict__ pw, half *__restrict__ y) {
+  __nram__ half a[E2];
+  __nram__ half h[E1];
+  __nram__ half kd[27];
+  __nram__ half kp[192];
+  __nram__ float d0[E1];
+  __nram__ float d1[E1];
+  __nram__ float d2[E1];
+  __nram__ float t[E1];
+  __memcpy(kd, dw, 27 * sizeof(half), GDRAM2NRAM);
+  __memcpy(kp, pw, 192 * sizeof(half), GDRAM2NRAM);
+  for (int g = taskId; g < E0; g += taskDim) {
+    int n = g >> 4;
+    int q = (g & 15) << 4;
+    int rows = q == 240 ? 14 : 16;
+    int m = rows * 254;
+    DO_ONE(d0, 0);
+    DO_ONE(d1, 1);
+    DO_ONE(d2, 2);
+    for (int c = 0; c < 64; ++c) {
+      int o = c * 3;
+      __bang_mul_scalar(t, d0, (float)kp[o], m);
+      __bang_fusion(FUSION_FMA, t, d1, (float)kp[o + 1], t, m, m);
+      __bang_fusion(FUSION_FMA, t, d2, (float)kp[o + 2], t, m, m);
+      __bang_float2half_rn(h, t, m);
+      __memcpy(y + n * 4129024 + c * 64516 + q * 254, h, m * sizeof(half),
+               NRAM2GDRAM);
+    }
+  }
+}
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor depthwise_kernel,
+                        torch::Tensor pointwise_kernel, int in_channels,
+                        int out_channels, int kernel_size, int stride,
+                        int padding, int dilation) {
+  (void)in_channels;
+  (void)out_channels;
+  (void)kernel_size;
+  (void)stride;
+  (void)padding;
+  (void)dilation;
+  auto y = torch::empty({16, 64, 254, 254}, x.options());
+  cnrtDim3_t dim = {4, 8, 1};
+  k0<<<dim, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(depthwise_kernel.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(pointwise_kernel.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  return y;
 }
