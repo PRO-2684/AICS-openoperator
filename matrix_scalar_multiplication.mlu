@@ -1,84 +1,26 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <torch/extension.h>
 #include <framework/core/MLUStream.h>
+#include <torch/extension.h>
 
-#define CHUNK_SIZE 4096
-#define TASK_COUNT 32
+#define A 268435456
+#define B 49152
 
-__mlu_entry__ void matrix_scalar_mul_float_kernel(const float *input,
-                                                  float *output,
-                                                  uint32_t total,
-                                                  float scalar) {
-  if (__is_mpu()) return;
-
-  uint32_t task_id = taskId;
-  uint32_t task_num = taskDim;
-  uint32_t per_task = total / task_num;
-  uint32_t remainder = total % task_num;
-  uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
-  uint32_t count = per_task + (task_id < remainder ? 1 : 0);
-
-  __nram__ float nram_buf[CHUNK_SIZE];
-
-  for (uint32_t offset = 0; offset < count; offset += CHUNK_SIZE) {
-    uint32_t len = (offset + CHUNK_SIZE <= count) ? CHUNK_SIZE : (count - offset);
-    __memcpy(nram_buf, input + start + offset, len * sizeof(float), GDRAM2NRAM);
-    __bang_mul_scalar(nram_buf, nram_buf, scalar, len);
-
-    __memcpy(output + start + offset, nram_buf, len * sizeof(float), NRAM2GDRAM);
+__mlu_entry__ void k0(half *__restrict__ x, float v) {
+  __nram__ half a[B];
+  for (int p = taskId * B; p < A; p += taskDim * B) {
+    int n = A - p;
+    if (n > B)
+      n = B;
+    __memcpy(a, x + p, n * sizeof(half), GDRAM2NRAM);
+    __bang_mul_scalar(a, a, v, n);
+    __memcpy(x + p, a, n * sizeof(half), NRAM2GDRAM);
   }
 }
 
-__mlu_entry__ void matrix_scalar_mul_half_kernel(const half *input,
-                                                 half *output,
-                                                 uint32_t total,
-                                                 half scalar) {
-  if (__is_mpu()) return;
-
-  uint32_t task_id = taskId;
-  uint32_t task_num = taskDim;
-  uint32_t per_task = total / task_num;
-  uint32_t remainder = total % task_num;
-  uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
-  uint32_t count = per_task + (task_id < remainder ? 1 : 0);
-
-  __nram__ half nram_buf[CHUNK_SIZE * 2];
-
-  for (uint32_t offset = 0; offset < count; offset += CHUNK_SIZE) {
-    uint32_t len = (offset + CHUNK_SIZE <= count) ? CHUNK_SIZE : (count - offset);
-    __memcpy(nram_buf, input + start + offset, len * sizeof(half), GDRAM2NRAM);
-    __bang_mul_scalar(nram_buf, nram_buf, scalar, len);
-
-    __memcpy(output + start + offset, nram_buf, len * sizeof(half), NRAM2GDRAM);
-  }
-}
-
-torch::Tensor bang_func(torch::Tensor input, double scalar) {
-  TORCH_CHECK(input.is_contiguous(), "input must be contiguous");
-  TORCH_CHECK(input.scalar_type() == at::kFloat || input.scalar_type() == at::kHalf,
-              "input must be float32 or float16");
-
-  auto output = torch::empty_like(input);
-  uint32_t total = static_cast<uint32_t>(input.numel());
-  float scalar_f = static_cast<float>(scalar);
-
-  if (total == 0) {
-    return output;
-  }
-
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {TASK_COUNT, 1, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
-
-  if (input.scalar_type() == at::kFloat) {
-    matrix_scalar_mul_float_kernel<<<dim, ktype, queue>>>(
-        input.data_ptr<float>(), output.data_ptr<float>(), total, scalar_f);
-  } else {
-    matrix_scalar_mul_half_kernel<<<dim, ktype, queue>>>(
-        reinterpret_cast<half *>(input.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(output.data_ptr<at::Half>()), total, scalar_f);
-  }
-
-  return output;
+torch::Tensor bang_func(torch::Tensor x, double s) {
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()), (float)s);
+  return x;
 }
