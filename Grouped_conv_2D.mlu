@@ -37,8 +37,8 @@ __mlu_entry__ void k0(const half *__restrict__ w, half *__restrict__ z) {
     t /= 3;
     int kh = t % 3;
     t /= 3;
-    int co = t & 63;
-    int g = t >> 6;
+    int co = t & 15;
+    int g = t >> 4;
     half v = (half)0.0f;
     if (co < 16 && ci < 8) {
       int oc = g * 16 + co;
