@@ -82,7 +82,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
     CNNL_CHECK(cnnlSetTensorDescriptorEx(yd, CNNL_LAYOUT_NHWC,
                                          CNNL_DTYPE_HALF, 4, ys, yst));
     CNNL_CHECK(cnnlSetConvolutionDescriptor(cd, 4, pad, st, dil, 8,
-                                            CNNL_DTYPE_HALF));
+                                            CNNL_DTYPE_FLOAT));
     CNNL_CHECK(cnnlGetConvolutionForwardWorkspaceSize(
         torch_mlu::getCurrentHandle(), xd, wd, yd, nullptr, cd, algo,
         &ws_size));

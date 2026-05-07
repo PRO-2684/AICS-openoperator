@@ -15,10 +15,10 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       half *__restrict__ c, half *__restrict__ d) {
   for (int i = taskId; i < 27; i += taskDim) {
     int t = i;
-    int w = t % 3;
+    int o = t % 3;
     t /= 3;
-    int h = t % 3;
-    int o = t / 3;
+    int w = t % 3;
+    int h = t / 3;
     c[i] = a[o * 9 + h * 3 + w];
   }
   for (int i = taskId; i < 192; i += taskDim) {
@@ -78,7 +78,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor depthwise_kernel,
     CNNL_CHECK(cnnlCreateConvolutionDescriptor(&cd1));
     CNNL_CHECK(cnnlSetTensorDescriptorEx(xd, CNNL_LAYOUT_NHWC,
                                          CNNL_DTYPE_HALF, 4, xs, xst));
-    CNNL_CHECK(cnnlSetTensorDescriptor(w0d, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF,
+    CNNL_CHECK(cnnlSetTensorDescriptor(w0d, CNNL_LAYOUT_HWCN, CNNL_DTYPE_HALF,
                                        4, w0s));
     CNNL_CHECK(
         cnnlSetTensorDescriptor(md, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, ms));
@@ -87,9 +87,9 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor depthwise_kernel,
     CNNL_CHECK(cnnlSetTensorDescriptorEx(yd, CNNL_LAYOUT_NHWC,
                                          CNNL_DTYPE_HALF, 4, ys, yst));
     CNNL_CHECK(cnnlSetConvolutionDescriptor(cd0, 4, pad0, st, dil, 3,
-                                            CNNL_DTYPE_HALF));
+                                            CNNL_DTYPE_FLOAT));
     CNNL_CHECK(cnnlSetConvolutionDescriptor(cd1, 4, pad0, st, dil, 1,
-                                            CNNL_DTYPE_HALF));
+                                            CNNL_DTYPE_FLOAT));
     CNNL_CHECK(cnnlGetConvolutionForwardWorkspaceSize(
         torch_mlu::getCurrentHandle(), xd, w0d, md, nullptr, cd0, algo, &ws0));
     CNNL_CHECK(cnnlGetConvolutionForwardWorkspaceSize(
