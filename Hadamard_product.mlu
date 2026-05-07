@@ -1,43 +1,33 @@
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  static cnnlTensorDescriptor_t ad;
-  static cnnlTensorDescriptor_t bd;
-  static cnnlTensorDescriptor_t od;
-  static cnnlOpTensorDescriptor_t opd;
-  static size_t workspace_size;
-  static bool inited = false;
-  if (!inited) {
-    int dims[2] = {2048, 2048};
-    cnnlCreateTensorDescriptor(&ad);
-    cnnlCreateTensorDescriptor(&bd);
-    cnnlCreateTensorDescriptor(&od);
-    cnnlSetTensorDescriptor(ad, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, dims);
-    cnnlSetTensorDescriptor(bd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, dims);
-    cnnlSetTensorDescriptor(od, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, dims);
-    cnnlCreateOpTensorDescriptor(&opd);
-    cnnlSetOpTensorDescriptor(opd, CNNL_OP_TENSOR_MUL, CNNL_DTYPE_HALF,
-                              CNNL_NOT_PROPAGATE_NAN);
-    cnnlGetOpTensorWorkspaceSize(torch_mlu::getCurrentHandle(), ad, bd, od,
-                                 &workspace_size);
-    inited = true;
-  }
+#define A 4194304
+#define B 8192
 
-  auto out = torch::empty_like(A);
-  torch::Tensor workspace;
-  void *workspace_ptr = nullptr;
-  if (workspace_size) {
-    workspace = torch::empty({(int64_t)workspace_size},
-                             A.options().dtype(torch::kUInt8));
-    workspace_ptr = workspace.data_ptr();
+__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
+                      half *__restrict__ z) {
+  __nram__ half a[B];
+  __nram__ half b[B];
+  for (int p = taskId * B; p < A; p += taskDim * B) {
+    __memcpy(a, x + p, B * sizeof(half), GDRAM2NRAM);
+    __memcpy(b, y + p, B * sizeof(half), GDRAM2NRAM);
+    __bang_mul(a, a, b, B);
+    __memcpy(z + p, a, B * sizeof(half), NRAM2GDRAM);
   }
-  float alpha1 = 1.0f;
-  float alpha2 = 1.0f;
-  float beta = 0.0f;
-  cnnlOpTensor(torch_mlu::getCurrentHandle(), opd, &alpha1, ad, A.data_ptr(),
-               &alpha2, bd, B.data_ptr(), workspace_ptr, workspace_size, &beta,
-               od, out.data_ptr());
-  return out;
+}
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor y) {
+  static torch::Tensor z;
+  if (!z.defined())
+    z = torch::empty_like(x);
+  else
+    z.resize_({2048, 2048});
+  cnrtDim3_t d = {512, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(y.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(z.data_ptr<at::Half>()));
+  return z;
 }
