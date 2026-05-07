@@ -51,7 +51,7 @@ __mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ y) {
     int m = 1024;
     __memcpy(a, x + n * 2097152 + r * 16384, m * 128 * sizeof(half),
              GDRAM2NRAM);
-    __bang_transpose(b, a, m, 128);
+    __bang_reshape_nhwc2nchw(b, a, 1, 8, 128, 128);
     half *dst = y + n * 2097152 + r * 128;
     for (int c = 0; c < 128; ++c) {
       __memcpy(dst + c * 16384, b + c * m, m * sizeof(half), NRAM2GDRAM);
@@ -70,7 +70,7 @@ __mlu_entry__ void k3(const half *__restrict__ x, half *__restrict__ y) {
       __memcpy(a + c * m, x + n * 1048576 + c * 16384 + r * 128,
                m * sizeof(half), GDRAM2NRAM);
     }
-    __bang_transpose(b, a, 64, m);
+    __bang_reshape_nchw2nhwc(b, a, 1, 8, 128, 64);
     __memcpy(y + n * 1048576 + r * 8192, b, m * 64 * sizeof(half), NRAM2GDRAM);
   }
 }
