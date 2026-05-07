@@ -12,16 +12,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   int p = taskId * E1;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_half2float(b, a, E1);
-  for (int n = E1 >> 1; n > 0; n >>= 1)
-    __bang_maximum(b, b, b + n, n);
-  float m = b[0];
-  __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(b, a, E1);
-  __bang_sub_scalar(b, b, m, E1);
   __bang_active_exp(b, b, E1);
   for (int n = E1 >> 1; n > 0; n >>= 1)
     __bang_add(b, b, b + n, n);
-  float v = logf(b[0]) + m;
+  float v = logf(b[0]);
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_half2float(b, a, E1);
   __bang_sub_scalar(b, b, v, E1);
