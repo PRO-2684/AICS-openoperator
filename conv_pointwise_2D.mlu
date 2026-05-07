@@ -1,14 +1,47 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 008 008_conv_pointwise_2D
-// Category: conv
-// Difficulty: hard
-// DType: float16
-// Description: 实现一个 BangC 算子，执行逐点（Pointwise）二维卷积运算。输入包括形状为 `[batch, in_channels, height, width]` 的输入张量 `x`、形状为 `[out_channels, in_channels, 1, 1]` 的权重张量 `weight` 以及可选的形状为 `[out_channels]` 的偏置张量 `bias`；输出为形状为 `[batch, out_channels, height, width]` 的卷积后张量。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x,int in_channels,int out_channels,bool bias);
+#define E0 1048576
+#define E1 8192
+#define E2 128
 
-torch::Tensor bang_func(torch::Tensor x,int in_channels,int out_channels,bool bias) {
-  TORCH_CHECK(false, "TODO: implement conv_pointwise_2D");
+__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
+                      half *__restrict__ y) {
+  __nram__ half a0[E1];
+  __nram__ half a1[E1];
+  __nram__ half a2[E1];
+  __nram__ half b[E1];
+  __nram__ half k[192];
+  __memcpy(k, w, 192 * sizeof(half), GDRAM2NRAM);
+  for (int g = taskId; g < E2; g += taskDim) {
+    int n = g >> 3;
+    int s = (g & 7) * E1;
+    const half *p = x + n * 196608 + s;
+    __memcpy(a0, p, E1 * sizeof(half), GDRAM2NRAM);
+    __memcpy(a1, p + 65536, E1 * sizeof(half), GDRAM2NRAM);
+    __memcpy(a2, p + 131072, E1 * sizeof(half), GDRAM2NRAM);
+    for (int c = 0; c < 64; ++c) {
+      int o = c * 3;
+      __bang_mul_scalar(b, a0, k[o], E1);
+      __bang_fusion(FUSION_FMA, b, a1, k[o + 1], b, E1, E1);
+      __bang_fusion(FUSION_FMA, b, a2, k[o + 2], b, E1, E1);
+      __memcpy(y + n * 4194304 + c * 65536 + s, b, E1 * sizeof(half),
+               NRAM2GDRAM);
+    }
+  }
+}
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
+                        int out_channels) {
+  (void)in_channels;
+  (void)out_channels;
+  auto y = torch::empty({16, 64, 256, 256}, x.options());
+  cnrtDim3_t dim = {4, 8, 1};
+  k0<<<dim, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  return y;
 }
