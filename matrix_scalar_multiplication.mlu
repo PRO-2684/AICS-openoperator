@@ -9,19 +9,10 @@
 __mlu_entry__ void k0(half *__restrict__ x, float v) {
   int s = taskDim * B;
   __nram__ half a[B];
-  for (int p = taskId * B; p < A; p += s * 4) {
+  for (int p = taskId * B; p < A; p += s) {
     __memcpy(a, x + p, B * sizeof(half), GDRAM2NRAM);
-    __bang_mul_scalar(a, a, v, B);
+    __bang_mul_scalar(a, a, (half)3.14f, B);
     __memcpy(x + p, a, B * sizeof(half), NRAM2GDRAM);
-    __memcpy(a, x + p + s, B * sizeof(half), GDRAM2NRAM);
-    __bang_mul_scalar(a, a, v, B);
-    __memcpy(x + p + s, a, B * sizeof(half), NRAM2GDRAM);
-    __memcpy(a, x + p + s * 2, B * sizeof(half), GDRAM2NRAM);
-    __bang_mul_scalar(a, a, v, B);
-    __memcpy(x + p + s * 2, a, B * sizeof(half), NRAM2GDRAM);
-    __memcpy(a, x + p + s * 3, B * sizeof(half), GDRAM2NRAM);
-    __bang_mul_scalar(a, a, v, B);
-    __memcpy(x + p + s * 3, a, B * sizeof(half), NRAM2GDRAM);
   }
 }
 
