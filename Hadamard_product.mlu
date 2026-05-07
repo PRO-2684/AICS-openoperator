@@ -4,17 +4,25 @@
 #include <torch/extension.h>
 
 #define A 4194304
-#define B 131072
+#define B 65536
 
 __mlu_entry__ void k0(half *__restrict__ x, const half *__restrict__ y) {
-  __nram__ half a[B];
-  __nram__ half b[B];
-  for (int p = taskId * B; p < A; p += taskDim * B) {
-    __memcpy(a, x + p, B * sizeof(half), GDRAM2NRAM);
-    __memcpy(b, y + p, B * sizeof(half), GDRAM2NRAM);
-    __bang_mul(a, a, b, B);
-    __memcpy(x + p, a, B * sizeof(half), NRAM2GDRAM);
-  }
+  __nram__ half a[B * 2];
+  __nram__ half b[B * 2];
+  int p0 = taskId * B;
+  int p1 = p0 + taskDim * B;
+  __memcpy_async(a, x + p0, B * sizeof(half), GDRAM2NRAM);
+  __memcpy_async(b, y + p0, B * sizeof(half), GDRAM2NRAM);
+  __asm__ volatile("sync;");
+  __memcpy_async(a + B, x + p1, B * sizeof(half), GDRAM2NRAM);
+  __memcpy_async(b + B, y + p1, B * sizeof(half), GDRAM2NRAM);
+  __bang_mul(a, a, b, B);
+  __asm__ volatile("sync;");
+  __memcpy_async(x + p0, a, B * sizeof(half), NRAM2GDRAM);
+  __bang_mul(a + B, a + B, b + B, B);
+  __asm__ volatile("sync;");
+  __memcpy_async(x + p1, a + B, B * sizeof(half), NRAM2GDRAM);
+  __asm__ volatile("sync;");
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor y) {
