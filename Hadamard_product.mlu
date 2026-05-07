@@ -4,34 +4,16 @@
 #include <torch/extension.h>
 
 #define A 4194304
-#define B 16384
-#define C 65536
+#define B 131072
 
 __mlu_entry__ void k0(half *__restrict__ x, const half *__restrict__ y) {
-  __mlu_shared__ half s[C * 4];
   __nram__ half a[B];
   __nram__ half b[B];
-  half *s0 = s;
-  half *s1 = s + C;
-  half *s2 = s + C * 2;
-  int q = taskIdY * C * 8;
-  for (int i = 0; i < 8; ++i) {
-    int r = q + i * C;
-    __memcpy_async(s0, x + r, C * sizeof(half), GDRAM2SRAM);
-    __memcpy_async(s1, y + r, C * sizeof(half), GDRAM2SRAM);
-    __sync_cluster();
-    int p = taskIdX * B;
-    __memcpy_async(a, s0 + p, B * sizeof(half), SRAM2NRAM);
-    __memcpy_async(b, s1 + p, B * sizeof(half), SRAM2NRAM);
-    __asm__ volatile("sync;");
+  for (int p = taskId * B; p < A; p += taskDim * B) {
+    __memcpy(a, x + p, B * sizeof(half), GDRAM2NRAM);
+    __memcpy(b, y + p, B * sizeof(half), GDRAM2NRAM);
     __bang_mul(a, a, b, B);
-    __memcpy_async(s2 + p, a, B * sizeof(half), NRAM2SRAM);
-    __asm__ volatile("sync;");
-    __sync_cluster();
-    if (taskIdX == 0)
-      __memcpy_async(x + r, s2, C * sizeof(half), SRAM2GDRAM);
-    __asm__ volatile("sync;");
-    __sync_cluster();
+    __memcpy(x + p, a, B * sizeof(half), NRAM2GDRAM);
   }
 }
 
