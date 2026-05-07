@@ -47,7 +47,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     }
     __sync_cluster();
     if (c == 0) {
-      __memcpy(b0, s, 390 * sizeof(float), SRAM2NRAM);
+      __memcpy(b0, s, 130 * sizeof(float), SRAM2NRAM);
       __memcpy(a, s + 390, 130 * sizeof(float), SRAM2NRAM);
       __bang_add(b0, b0, a, 130);
       __memcpy(a, s + 780, 130 * sizeof(float), SRAM2NRAM);
