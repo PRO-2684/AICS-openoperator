@@ -3,30 +3,47 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 48
+#define E0 16
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
   __nram__ half h[130];
   __nram__ half kh[576];
   __nram__ float a[128];
-  __nram__ float b[130];
-  __nram__ float t[128];
+  __nram__ float b0[130];
+  __nram__ float b1[130];
+  __nram__ float b2[130];
   __memcpy(kh, w, 576 * sizeof(half), GDRAM2NRAM);
-  for (int g = taskId; g < E0; g += taskDim) {
-    int n = g / 3;
-    int c = g - n * 3;
-    __bang_write_value(b, 130, 0.0f);
-    for (int j = 0; j < 3; ++j) {
-      for (int i = 0; i < 64; ++i) {
-        __memcpy(h, x + n * 8192 + i * 128, 128 * sizeof(half), GDRAM2NRAM);
-        __bang_half2float(a, h, 128);
-        int o = i * 9 + c * 3 + j;
-        __bang_fusion(FUSION_FMA, b + j, a, (float)kh[o], b + j, 128, 128);
-      }
+  for (int n = taskId; n < E0; n += taskDim) {
+    __bang_write_value(b0, 130, 0.0f);
+    __bang_write_value(b1, 130, 0.0f);
+    __bang_write_value(b2, 130, 0.0f);
+    for (int i = 0; i < 64; ++i) {
+      __memcpy(h, x + n * 8192 + i * 128, 128 * sizeof(half), GDRAM2NRAM);
+      __bang_half2float(a, h, 128);
+      int o = i * 9;
+      __bang_fusion(FUSION_FMA, b0, a, (float)kh[o], b0, 128, 128);
+      __bang_fusion(FUSION_FMA, b1, a, (float)kh[o + 3], b1, 128, 128);
+      __bang_fusion(FUSION_FMA, b2, a, (float)kh[o + 6], b2, 128, 128);
+      __bang_fusion(FUSION_FMA, b0 + 1, a, (float)kh[o + 1], b0 + 1, 128,
+                    128);
+      __bang_fusion(FUSION_FMA, b1 + 1, a, (float)kh[o + 4], b1 + 1, 128,
+                    128);
+      __bang_fusion(FUSION_FMA, b2 + 1, a, (float)kh[o + 7], b2 + 1, 128,
+                    128);
+      __bang_fusion(FUSION_FMA, b0 + 2, a, (float)kh[o + 2], b0 + 2, 128,
+                    128);
+      __bang_fusion(FUSION_FMA, b1 + 2, a, (float)kh[o + 5], b1 + 2, 128,
+                    128);
+      __bang_fusion(FUSION_FMA, b2 + 2, a, (float)kh[o + 8], b2 + 2, 128,
+                    128);
     }
-    __bang_float2half_rn(h, b, 130);
-    __memcpy(y + n * 390 + c * 130, h, 130 * sizeof(half), NRAM2GDRAM);
+    __bang_float2half_rn(h, b0, 130);
+    __memcpy(y + n * 390, h, 130 * sizeof(half), NRAM2GDRAM);
+    __bang_float2half_rn(h, b1, 130);
+    __memcpy(y + n * 390 + 130, h, 130 * sizeof(half), NRAM2GDRAM);
+    __bang_float2half_rn(h, b2, 130);
+    __memcpy(y + n * 390 + 260, h, 130 * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -43,8 +60,8 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)groups;
   (void)bias;
   auto y = torch::empty({16, 3, 130}, x.options());
-  cnrtDim3_t dim = {4, 8, 1};
-  k0<<<dim, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t dim = {16, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
