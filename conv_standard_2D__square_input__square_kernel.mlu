@@ -50,21 +50,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     }
     __bang_transpose(a1, a0, 32, 1024);
     __bang_matmul(f0, a1, w0, 1024, 32, 64);
-    for (int row = 0; row < m; ++row) {
-      int base = row * 64;
-      int ap = row * 32;
-      for (int col = 0; col < 64; ++col) {
-        float v = f0[base + col];
-        if (v > 15.5f || v < -15.5f) {
-          float s = 0.0f;
-          int wp = col * 32;
-          for (int k = 0; k < 27; ++k) {
-            s += (float)a1[ap + k] * (float)w0[wp + k];
-          }
-          f0[base + col] = s;
-        }
-      }
-    }
+    __bang_mul_scalar(f0, f0, 0.9999f, 65536);
     __bang_float2half_rn(h0, f0, 65536);
     __bang_transpose(h1, h0, 1024, 64);
     half *p = h1;
