@@ -23,7 +23,7 @@ if not hasattr(torch.nn.Conv2d, "_aics_grp_init"):
 
 #define E0 2048
 #define E1 41600
-#define E2 65536
+#define E2 16384
 #define E3 9216
 #define E4 1024
 #define E5 36864
@@ -52,6 +52,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
   __nram__ half a[E1];
   __nram__ float f[E2];
+  __nram__ float t[E4];
   __nram__ half h[E4];
   __wram__ half wk[E5];
   __memcpy(wk, w, E5 * sizeof(half), GDRAM2WRAM);
@@ -66,15 +67,17 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     __bang_write_value(a, E1, (half)0.0f);
     for (int ci = 0; ci < 8; ++ci) {
       const half *px = x + n * 1048576 + (rg * 8 + ci) * 16384 + src0 * 128;
-      half *pa = a + ci * 1300 + dst0 * 130 + 1;
+      half *pa = a + dst0 * 4160 + 32 + ci;
       for (int rr = 0; rr < rows; ++rr) {
-        __memcpy(pa + rr * 130, px + rr * 128, 128 * sizeof(half),
-                 GDRAM2NRAM);
+        __memcpy(pa + rr * 4160, px + rr * 128, sizeof(half), GDRAM2NRAM,
+                 32 * sizeof(half), sizeof(half), 127);
       }
     }
-    __bang_conv(f, a, wk + rg * 4608, 32, 10, 130, 3, 3, 1, 1, 64);
+    __bang_conv(f, a, wk + rg * 4608, 32, 10, 130, 3, 3, 1, 1, 16);
     for (int co = 0; co < 16; ++co) {
-      __bang_float2half_rn(h, f + co * E4, E4);
+      __memcpy(t, f + co, sizeof(float), NRAM2NRAM, sizeof(float),
+               16 * sizeof(float), E4 - 1);
+      __bang_float2half_rn(h, t, E4);
       __memcpy(y + n * 2097152 + (rg * 16 + co) * 16384 + q * 128, h,
                E4 * sizeof(half), NRAM2GDRAM);
     }
