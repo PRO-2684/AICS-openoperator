@@ -12,7 +12,7 @@ __mlu_entry__ void k0(half *__restrict__ x, float s) {
   for (int p = taskId * E1; p < E0; p += taskDim * E1) {
     __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
     __bang_mineq_scalar(b, a, (half)0.0f, E1);
-    __bang_fusion(FUSION_FMA, a, b, s - 1.0f, a, E1, E1);
+    __bang_fusion(FUSION_FMA, a, b, (half)(s - 1.0f), a, E1, E1);
     __memcpy(x + p, a, E1 * sizeof(half), NRAM2GDRAM);
   }
 }
