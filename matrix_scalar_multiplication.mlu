@@ -5,12 +5,10 @@
 
 #define A 268435456
 #define B 32768
-#define C 8388608
 
 __mlu_entry__ void k0(half *__restrict__ x, float v) {
   __nram__ half a[B];
-  int e = (taskId + 1) * C;
-  for (int p = taskId * C; p < e; p += B) {
+  for (int p = taskId * B; p < A; p += taskDim * B) {
     __memcpy(a, x + p, B * sizeof(half), GDRAM2NRAM);
     __bang_mul_scalar(a, a, v, B);
     __memcpy(x + p, a, B * sizeof(half), NRAM2GDRAM);
@@ -18,7 +16,7 @@ __mlu_entry__ void k0(half *__restrict__ x, float v) {
 }
 
 torch::Tensor bang_func(torch::Tensor x, double s) {
-  cnrtDim3_t d = {32, 1, 1};
+  cnrtDim3_t d = {2, 8, 2};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()), (float)s);
   return x;
