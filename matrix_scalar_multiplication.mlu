@@ -7,21 +7,15 @@
 #define B 32768
 
 __mlu_entry__ void k0(half *__restrict__ x, float v) {
-  __nram__ half a[B * 2];
-  int p = taskId * B;
   int s = taskDim * B;
-  if (p < A)
-    __memcpy_async(a, x + p, B * sizeof(half), GDRAM2NRAM);
-  __sync();
-  for (int t = 0; p < A; p += s, ++t) {
-    int q = t & 1;
-    int n = q ^ 1;
-    int r = p + s;
-    __bang_mul_scalar(a + q * B, a + q * B, v, B);
-    __memcpy_async(x + p, a + q * B, B * sizeof(half), NRAM2GDRAM);
-    if (r < A)
-      __memcpy_async(a + n * B, x + r, B * sizeof(half), GDRAM2NRAM);
-    __sync();
+  __nram__ half a[B];
+  for (int p = taskId * B; p < A; p += s * 2) {
+    __memcpy(a, x + p, B * sizeof(half), GDRAM2NRAM);
+    __bang_mul_scalar(a, a, v, B);
+    __memcpy(x + p, a, B * sizeof(half), NRAM2GDRAM);
+    __memcpy(a, x + p + s, B * sizeof(half), GDRAM2NRAM);
+    __bang_mul_scalar(a, a, v, B);
+    __memcpy(x + p + s, a, B * sizeof(half), NRAM2GDRAM);
   }
 }
 
