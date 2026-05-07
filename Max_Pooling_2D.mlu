@@ -6,27 +6,34 @@
 #define E0 128
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half t[65536];
-  __nram__ half u[65536];
-  __nram__ half a[67600];
+  __nram__ half t[73728];
+  __nram__ half u[73728];
+  __nram__ half a[74880];
   __nram__ half b[16384];
-  __bang_write_value(a, 67600, (half)-65504.0f);
+  __nram__ half c[16384];
   for (int r = taskId; r < E0; r += taskDim) {
-    int p = r << 2;
-    __memcpy(t, x + p * 16384, 65536 * sizeof(half), GDRAM2NRAM);
-    __bang_transpose(u, t, 4, 16384);
-    __memcpy(a + 524, u, 512 * sizeof(half), NRAM2NRAM, 1040 * sizeof(half),
-             1024 * sizeof(half), 127);
-    __bang_maxpool(b, a, 4, 130, 130, 2, 2, 2, 2, 3, 3, 1, 1);
-    __memcpy(y + (p >> 5) * 131072 + (p & 31), b, 8 * sizeof(half),
-             NRAM2GDRAM, 64 * sizeof(half), 8 * sizeof(half), 4095);
+    int n = r >> 3;
+    int m = r & 7;
+    int s = m * 16 - 1;
+    int vs = s < 0 ? 0 : s;
+    int off = s < 0 ? 1 : 0;
+    int rows = (m == 0 || m == 7) ? 17 : 18;
+    __bang_write_value(a, 74880, (half)-65504.0f);
+    __memcpy(t, x + n * 524288 + vs * 128, rows * 128 * sizeof(half),
+             GDRAM2NRAM, rows * 128 * sizeof(half), 16384 * sizeof(half), 31);
+    __bang_transpose(u, t, 32, rows * 128);
+    __memcpy(a + (off * 130 + 1) * 32, u, 4096 * sizeof(half), NRAM2NRAM,
+             4160 * sizeof(half), 4096 * sizeof(half), rows - 1);
+    __bang_maxpool(b, a, 32, 18, 130, 2, 2, 2, 2, 3, 3, 1, 1);
+    __bang_transpose(c, b, 512, 32);
+    __memcpy(y + n * 131072 + m * 512, c, 1024 * sizeof(half), NRAM2GDRAM,
+             8192 * sizeof(half), 1024 * sizeof(half), 31);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
                         int padding, int dilation) {
-  auto y =
-      torch::empty_strided({16, 32, 64, 64}, {131072, 1, 2048, 32}, x.options());
+  auto y = torch::empty({16, 32, 64, 64}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t g = {4, 8, 1};
   k0<<<g, cnrtFuncTypeUnion1, queue>>>(
