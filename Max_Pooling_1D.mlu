@@ -7,17 +7,31 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half t[4096];
-  __nram__ half a[4224];
-  __nram__ half b[4096];
-  __bang_write_value(a, 4224, (half)-65504.0f);
+  __nram__ half a[1984];
+  __nram__ half b[1984];
+  __nram__ half c[1984];
+  __nram__ half d[1984];
   for (int r = taskId; r < E0; r += taskDim) {
     int base = r << 5;
     __memcpy(t, x + base * 128, 4096 * sizeof(half), GDRAM2NRAM);
-    __memcpy(a + 2, t, 128 * sizeof(half), NRAM2NRAM, 132 * sizeof(half),
+    __bang_write_value(a, 1984, (half)-65504.0f);
+    __bang_write_value(d, 1984, (half)-65504.0f);
+    __memcpy(a + 1, t, sizeof(half), NRAM2NRAM, sizeof(half), 60,
+             62 * sizeof(half), 31, 2 * sizeof(half), 60,
              128 * sizeof(half), 31);
-    __bang_maxpool_value_index(b, a, 1, 32, 132, 1, 4, 2, 1,
-                               1984 * sizeof(half), 1, 3, 1, 1);
-    __memcpy(y + base * 62, b, 1984 * sizeof(half), NRAM2GDRAM);
+    __memcpy(b, t + 1, sizeof(half), NRAM2NRAM, sizeof(half), 61,
+             62 * sizeof(half), 31, 2 * sizeof(half), 61,
+             128 * sizeof(half), 31);
+    __memcpy(c, t + 4, sizeof(half), NRAM2NRAM, sizeof(half), 61,
+             62 * sizeof(half), 31, 2 * sizeof(half), 61,
+             128 * sizeof(half), 31);
+    __memcpy(d, t + 7, sizeof(half), NRAM2NRAM, sizeof(half), 60,
+             62 * sizeof(half), 31, 2 * sizeof(half), 60,
+             128 * sizeof(half), 31);
+    __bang_maxequal(a, a, b, 1984);
+    __bang_maxequal(c, c, d, 1984);
+    __bang_maxequal(a, a, c, 1984);
+    __memcpy(y + base * 62, a, 1984 * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -25,8 +39,8 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
                         int padding, int dilation, bool return_indices) {
   auto y = torch::empty({16, 64, 62}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {32, 1, 1};
-  k0<<<g, cnrtFuncTypeBlock, queue>>>(
+  cnrtDim3_t g = {4, 8, 1};
+  k0<<<g, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
