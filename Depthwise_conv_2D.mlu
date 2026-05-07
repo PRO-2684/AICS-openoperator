@@ -21,9 +21,9 @@ if not hasattr(torch.nn.Conv2d, "_aics_dw_init"):
   PyGILState_Release(s);
 }
 
-#define E0 8192
-#define E1 2048
-#define E2 2340
+#define E0 1024
+#define E1 16384
+#define E2 16900
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
@@ -35,31 +35,25 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ half k[576];
   __memcpy(k, w, 576 * sizeof(half), GDRAM2NRAM);
   for (int g = taskId; g < E0; g += taskDim) {
-    int n = g >> 9;
-    int r0 = g & 511;
-    int c = r0 >> 3;
-    int q = (r0 & 7) << 4;
+    int n = g >> 6;
+    int c = g & 63;
     __bang_write_value(a, E2, (half)0.0f);
-    int rs = q == 0 ? 0 : q - 1;
-    int off = q == 0 ? 131 : 1;
-    int rr = q == 112 ? 17 : (q == 0 ? 17 : 18);
-    __memcpy(a + off, x + n * 1048576 + c * 16384 + rs * 128,
-             128 * sizeof(half), GDRAM2NRAM, 130 * sizeof(half),
-             128 * sizeof(half), rr - 1);
+    __memcpy(a + 131, x + n * 1048576 + c * 16384, 128 * sizeof(half),
+             GDRAM2NRAM, 130 * sizeof(half), 128 * sizeof(half), 127);
     __bang_half2float(af, a, E2);
     int o = c * 9;
     __memcpy(b, af, 128 * sizeof(float), NRAM2NRAM, 128 * sizeof(float),
-             130 * sizeof(float), 15);
+             130 * sizeof(float), 127);
     __bang_mul_scalar(b, b, (float)k[o], E1);
     for (int i = 1; i < 9; ++i) {
       int dy = i / 3;
       int dx = i - dy * 3;
       __memcpy(t, af + dy * 130 + dx, 128 * sizeof(float), NRAM2NRAM,
-               128 * sizeof(float), 130 * sizeof(float), 15);
+               128 * sizeof(float), 130 * sizeof(float), 127);
       __bang_fusion(FUSION_FMA, b, t, (float)k[o + i], b, E1, E1);
     }
     __bang_float2half_rn(h, b, E1);
-    __memcpy(y + n * 1048576 + c * 16384 + q * 128, h, E1 * sizeof(half),
+    __memcpy(y + n * 1048576 + c * 16384, h, E1 * sizeof(half),
              NRAM2GDRAM);
   }
 }
