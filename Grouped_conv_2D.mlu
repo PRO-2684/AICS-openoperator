@@ -23,10 +23,10 @@ if not hasattr(torch.nn.Conv2d, "_aics_grp_init"):
 
 #define E0 2048
 #define E1 41600
-#define E2 16384
+#define E2 65536
 #define E3 9216
 #define E4 1024
-#define E5 36864
+#define E5 147456
 
 __mlu_entry__ void k0(const half *__restrict__ w, half *__restrict__ z) {
   for (int i = taskId; i < E5; i += taskDim) {
@@ -37,8 +37,8 @@ __mlu_entry__ void k0(const half *__restrict__ w, half *__restrict__ z) {
     t /= 3;
     int kh = t % 3;
     t /= 3;
-    int co = t & 15;
-    int g = t >> 4;
+    int co = t & 63;
+    int g = t >> 6;
     half v = (half)0.0f;
     if (co < 16 && ci < 8) {
       int oc = g * 16 + co;
@@ -54,7 +54,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ float f[E2];
   __nram__ float t[E4];
   __nram__ half h[E4];
-  __wram__ half wk[4608];
+  __wram__ half wk[18432];
   for (int g = taskId; g < E0; g += taskDim) {
     int n = g >> 7;
     int r = g & 127;
@@ -63,7 +63,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     int src0 = q == 0 ? 0 : q - 1;
     int dst0 = q == 0 ? 1 : 0;
     int rows = q == 0 || q == 120 ? 9 : 10;
-    __memcpy(wk, w + rg * 4608, 4608 * sizeof(half), GDRAM2WRAM);
+    __memcpy(wk, w + rg * 18432, 18432 * sizeof(half), GDRAM2WRAM);
     __bang_write_value(a, E1, (half)0.0f);
     for (int ci = 0; ci < 8; ++ci) {
       const half *px = x + n * 1048576 + (rg * 8 + ci) * 16384 + src0 * 128;
@@ -73,10 +73,10 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                  32 * sizeof(half), sizeof(half), 127);
       }
     }
-    __bang_conv(f, a, wk, 32, 10, 130, 3, 3, 1, 1, 16);
+    __bang_conv(f, a, wk, 32, 10, 130, 3, 3, 1, 1, 64);
     for (int co = 0; co < 16; ++co) {
       __memcpy(t, f + co, sizeof(float), NRAM2NRAM, sizeof(float),
-               16 * sizeof(float), E4 - 1);
+               64 * sizeof(float), E4 - 1);
       __bang_float2half_rn(h, t, E4);
       __memcpy(y + n * 2097152 + (rg * 16 + co) * 16384 + q * 128, h,
                E4 * sizeof(half), NRAM2GDRAM);
