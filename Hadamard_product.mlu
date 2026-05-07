@@ -12,8 +12,8 @@ __mlu_entry__ void k0(half *__restrict__ x, const half *__restrict__ y) {
   for (int p = taskId * B; p < A; p += taskDim * B) {
     __memcpy(a, x + p, B * sizeof(half), GDRAM2NRAM);
     __memcpy(b, y + p, B * sizeof(half), GDRAM2NRAM);
-    __bang_mul(b, a, b, B);
-    __memcpy(x + p, b, B * sizeof(half), NRAM2GDRAM);
+    __bang_mul(a, a, b, B);
+    __memcpy(x + p, a, B * sizeof(half), NRAM2GDRAM);
   }
 }
 
