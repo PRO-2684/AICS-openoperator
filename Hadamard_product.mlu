@@ -4,21 +4,16 @@
 #include <torch/extension.h>
 
 #define A 4194304
-#define B 262144
-#define C 131072
+#define B 131072
 
 __mlu_entry__ void k0(half *__restrict__ x, const half *__restrict__ y) {
   __nram__ half a[B];
-  __nram__ half b[C];
-  int p = taskId * B;
-  if (taskId < 16) {
+  __nram__ half b[B];
+  for (int p = taskId * B; p < A; p += taskDim * B) {
     __memcpy(a, x + p, B * sizeof(half), GDRAM2NRAM);
-    __memcpy(b, y + p, C * sizeof(half), GDRAM2NRAM);
-    __bang_mul(a, a, b, C);
-    __memcpy(x + p, a, C * sizeof(half), NRAM2GDRAM);
-    __memcpy(b, y + p + C, C * sizeof(half), GDRAM2NRAM);
-    __bang_mul(a + C, a + C, b, C);
-    __memcpy(x + p + C, a + C, C * sizeof(half), NRAM2GDRAM);
+    __memcpy(b, y + p, B * sizeof(half), GDRAM2NRAM);
+    __bang_mul(a, a, b, B);
+    __memcpy(x + p, a, B * sizeof(half), NRAM2GDRAM);
   }
 }
 

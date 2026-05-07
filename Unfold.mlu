@@ -9,10 +9,6 @@
 #define E3 27
 #define E4 16
 #define E5 64
-#define F0(d, s)                                                              \
-  __bang_move(d, s, 384, E1 * sizeof(half), 256 * sizeof(half), m - 1);       \
-  __memcpy((d) + 192, (s) + 192, 124, NRAM2NRAM, E1 * sizeof(half),           \
-           256 * sizeof(half), m - 1)
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[256 * (E5 + 2)];
@@ -32,15 +28,24 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     const half *src = x + ((n * 3 + c) * 256 + r) * 256;
     __memcpy(a, src, 256 * (m + 2) * sizeof(half), GDRAM2NRAM);
     int p = n * E3 + c * 9;
-    F0(d, a);
-    F0(d + E1 * E5, a + 1);
-    F0(d + E1 * E5 * 2, a + 2);
-    F0(d + E1 * E5 * 3, a + 256);
-    F0(d + E1 * E5 * 4, a + 257);
-    F0(d + E1 * E5 * 5, a + 258);
-    F0(d + E1 * E5 * 6, a + 512);
-    F0(d + E1 * E5 * 7, a + 513);
-    F0(d + E1 * E5 * 8, a + 514);
+    __memcpy(d, a, E1 * sizeof(half), NRAM2NRAM, E1 * sizeof(half),
+             256 * sizeof(half), m - 1);
+    __memcpy(d + E1 * E5, a + 1, E1 * sizeof(half), NRAM2NRAM,
+             E1 * sizeof(half), 256 * sizeof(half), m - 1);
+    __memcpy(d + E1 * E5 * 2, a + 2, E1 * sizeof(half), NRAM2NRAM,
+             E1 * sizeof(half), 256 * sizeof(half), m - 1);
+    __memcpy(d + E1 * E5 * 3, a + 256, E1 * sizeof(half), NRAM2NRAM,
+             E1 * sizeof(half), 256 * sizeof(half), m - 1);
+    __memcpy(d + E1 * E5 * 4, a + 257, E1 * sizeof(half), NRAM2NRAM,
+             E1 * sizeof(half), 256 * sizeof(half), m - 1);
+    __memcpy(d + E1 * E5 * 5, a + 258, E1 * sizeof(half), NRAM2NRAM,
+             E1 * sizeof(half), 256 * sizeof(half), m - 1);
+    __memcpy(d + E1 * E5 * 6, a + 512, E1 * sizeof(half), NRAM2NRAM,
+             E1 * sizeof(half), 256 * sizeof(half), m - 1);
+    __memcpy(d + E1 * E5 * 7, a + 513, E1 * sizeof(half), NRAM2NRAM,
+             E1 * sizeof(half), 256 * sizeof(half), m - 1);
+    __memcpy(d + E1 * E5 * 8, a + 514, E1 * sizeof(half), NRAM2NRAM,
+             E1 * sizeof(half), 256 * sizeof(half), m - 1);
     __memcpy_async(y + p * E2 + r * E1, d, E1 * m * sizeof(half), NRAM2GDRAM);
     __memcpy_async(y + (p + 1) * E2 + r * E1, d + E1 * E5,
                    E1 * m * sizeof(half), NRAM2GDRAM);
