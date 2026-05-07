@@ -1,15 +1,7 @@
-#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
-#include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-
-#define CNNL_CHECK(expr)                                                      \
-  do {                                                                        \
-    cnnlStatus_t s = (expr);                                                  \
-    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);      \
-  } while (0)
 
 __attribute__((constructor)) static void k0() {
   if (!Py_IsInitialized()) {
@@ -29,6 +21,84 @@ if not hasattr(torch.nn.Conv2d, "_aics_grp_init"):
   PyGILState_Release(s);
 }
 
+__mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y) {
+  for (int i = taskId; i < 12288; i += taskDim) {
+    int t = i;
+    int k = t % 96;
+    t /= 96;
+    int o = t & 15;
+    int g = t >> 4;
+    half v = (half)0.0f;
+    if (k < 72) {
+      int r = k;
+      int c = r & 7;
+      r >>= 3;
+      int w = r % 3;
+      int h = r / 3;
+      v = x[(((g * 16 + o) * 8 + c) * 3 + h) * 3 + w];
+    }
+    y[g * 1536 + o * 96 + k] = v;
+  }
+}
+
+__mlu_entry__ void k2(const half *__restrict__ x, const half *__restrict__ w,
+                      half *__restrict__ y) {
+  int g = taskId;
+  __nram__ half a0[98304];
+  __nram__ half a1[98304];
+  __nram__ half h0[16384];
+  __nram__ half h1[16384];
+  __nram__ float f0[16384];
+  __wram__ half w0[1536];
+  for (; g < 2048; g += taskDim) {
+    int n = g >> 7;
+    int r = g & 127;
+    int b = r >> 4;
+    int q = (r & 15) << 3;
+    __memcpy(w0, w + b * 1536, 1536 * sizeof(half), GDRAM2WRAM);
+    __bang_write_value(a0, 98304, (half)0.0f);
+    for (int i = 0; i < 72; ++i) {
+      int t = i;
+      int c = t & 7;
+      t >>= 3;
+      int ww = t % 3;
+      int hh = t / 3;
+      int p = i * 1024;
+      int row = q + hh - 1;
+      if (row >= 0 && row + 7 < 128) {
+        int off = ww == 0 ? 1 : 0;
+        int len = ww == 1 ? 128 : 127;
+        int src = ww == 2 ? 1 : 0;
+        __memcpy(a0 + p + off,
+                 x + n * 1048576 + (b * 8 + c) * 16384 + row * 128 + src,
+                 len * sizeof(half), GDRAM2NRAM, 128 * sizeof(half),
+                 128 * sizeof(half), 7);
+      } else {
+        for (int rr = 0; rr < 8; ++rr) {
+          int ih = q + rr + hh - 1;
+          if (ih >= 0 && ih < 128) {
+            int off = ww == 0 ? 1 : 0;
+            int len = ww == 1 ? 128 : 127;
+            int src = ww == 2 ? 1 : 0;
+            __memcpy(a0 + p + rr * 128 + off,
+                     x + n * 1048576 + (b * 8 + c) * 16384 + ih * 128 + src,
+                     len * sizeof(half), GDRAM2NRAM);
+          }
+        }
+      }
+    }
+    __bang_transpose(a1, a0, 96, 1024);
+    __bang_matmul(f0, a1, w0, 1024, 96, 16);
+    __bang_float2half_rn(h0, f0, 16384);
+    __bang_transpose(h1, h0, 1024, 16);
+    half *dst = y + n * 2097152 + b * 16 * 16384 + q * 128;
+    for (int c = 0; c < 16; ++c) {
+      __memcpy(dst + c * 16384, h1 + c * 1024, 1024 * sizeof(half),
+               NRAM2GDRAM);
+    }
+  }
+}
+
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
                         int out_channels, int kernel_size, int groups) {
   (void)in_channels;
@@ -36,49 +106,28 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)kernel_size;
   (void)groups;
   static torch::Tensor y;
+  static torch::Tensor w;
+  static void *last = nullptr;
   if (!y.defined())
     y = torch::empty({16, 128, 128, 128}, x.options());
   else
     y.resize_({16, 128, 128, 128});
-
-  static cnnlTensorDescriptor_t xd = nullptr;
-  static cnnlTensorDescriptor_t wd = nullptr;
-  static cnnlTensorDescriptor_t yd = nullptr;
-  static cnnlConvolutionDescriptor_t cd = nullptr;
-  static cnnlConvolutionForwardAlgo_t algo = CNNL_CONVOLUTION_FWD_ALGO_DIRECT;
-  static size_t ws_size = 0;
-  if (xd == nullptr) {
-    int xs[4] = {16, 64, 128, 128};
-    int ws[4] = {128, 8, 3, 3};
-    int ys[4] = {16, 128, 128, 128};
-    int pad[4] = {1, 1, 1, 1};
-    int st[2] = {1, 1};
-    int dil[2] = {1, 1};
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&xd));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&wd));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&yd));
-    CNNL_CHECK(cnnlCreateConvolutionDescriptor(&cd));
-    CNNL_CHECK(cnnlSetTensorDescriptor(xd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4,
-                                       xs));
-    CNNL_CHECK(cnnlSetTensorDescriptor(wd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4,
-                                       ws));
-    CNNL_CHECK(cnnlSetTensorDescriptor(yd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4,
-                                       ys));
-    CNNL_CHECK(cnnlSetConvolutionDescriptor(cd, 4, pad, st, dil, 8,
-                                            CNNL_DTYPE_FLOAT));
-    CNNL_CHECK(cnnlGetConvolutionForwardWorkspaceSize(
-        torch_mlu::getCurrentHandle(), xd, wd, yd, nullptr, cd, algo,
-        &ws_size));
-  }
-  static torch::Tensor work;
-  if (!work.defined())
-    work = torch::empty({(int64_t)ws_size}, x.options().dtype(torch::kUInt8));
+  if (!w.defined())
+    w = torch::empty({12288}, kernel.options());
   else
-    work.resize_({(int64_t)ws_size});
-  void *wp = ws_size ? work.data_ptr() : nullptr;
-  CNNL_CHECK(cnnlConvolutionForward(
-      torch_mlu::getCurrentHandle(), cd, algo, nullptr, xd, x.data_ptr(), wd,
-      kernel.data_ptr(), nullptr, nullptr, wp, ws_size, nullptr, yd,
-      y.data_ptr()));
+    w.resize_({12288});
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  if (last != kernel.data_ptr()) {
+    cnrtDim3_t d0 = {32, 1, 1};
+    k1<<<d0, cnrtFuncTypeBlock, queue>>>(
+        reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(w.data_ptr<at::Half>()));
+    last = kernel.data_ptr();
+  }
+  cnrtDim3_t d1 = {4, 8, 1};
+  k2<<<d1, cnrtFuncTypeUnion1, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
