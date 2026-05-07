@@ -3,24 +3,63 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 432
+#define E0 288
 #define E1 254
 #define E2 (E1 * E1)
 #define E3 27
 #define E4 16
+#define E5 64
+
+__mlu_func__ void f0(const half *__restrict__ a, half *__restrict__ b,
+                     half *__restrict__ y, int g) {
+  int h = g & 3;
+  int u = g >> 2;
+  int kh = u % 3;
+  int v = u / 3;
+  int c = v % 3;
+  int n = v / 3;
+  int r = h * E5;
+  int m = h == 3 ? 62 : E5;
+  int p = n * E3 + c * 9 + kh * 3;
+  __memcpy(b, a, E1 * sizeof(half), NRAM2NRAM, E1 * sizeof(half),
+           256 * sizeof(half), m - 1);
+  __memcpy(b + E1 * E5, a + 1, E1 * sizeof(half), NRAM2NRAM,
+           E1 * sizeof(half), 256 * sizeof(half), m - 1);
+  __memcpy(b + E1 * E5 * 2, a + 2, E1 * sizeof(half), NRAM2NRAM,
+           E1 * sizeof(half), 256 * sizeof(half), m - 1);
+  __memcpy(y + p * E2 + r * E1, b, E1 * m * sizeof(half), NRAM2GDRAM);
+  __memcpy(y + (p + 1) * E2 + r * E1, b + E1 * E5,
+           E1 * m * sizeof(half), NRAM2GDRAM);
+  __memcpy(y + (p + 2) * E2 + r * E1, b + E1 * E5 * 2,
+           E1 * m * sizeof(half), NRAM2GDRAM);
+}
+
+__mlu_func__ const half *f1(const half *__restrict__ x, int g) {
+  int h = g & 3;
+  int u = g >> 2;
+  int kh = u % 3;
+  int v = u / 3;
+  int c = v % 3;
+  int n = v / 3;
+  return x + ((n * 3 + c) * 256 + kh + h * E5) * 256;
+}
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  int total = E4 * E3;
-  for (int g = taskId; g < total; g += taskDim) {
-    int n = g / E3;
-    int b = g - n * E3;
-    int kw = b % 3;
-    int kh = (b / 3) % 3;
-    int c = b / 9;
-    const half *src = x + ((n * 3 + c) * 256 + kh) * 256 + kw;
-    __memcpy(y + g * E2, src, E1 * sizeof(half), GDRAM2GDRAM,
-             E1 * sizeof(half), 256 * sizeof(half), E1 - 1);
-  }
+  __nram__ half a[256 * E5 * 2];
+  __nram__ half b[E1 * E5 * 3];
+  int g = taskId;
+  int h = g & 3;
+  int m = h == 3 ? 62 : E5;
+  __memcpy_async(a, f1(x, g), 256 * m * sizeof(half), GDRAM2NRAM);
+  __asm__ volatile("sync;");
+  int g1 = g + E0;
+  h = g1 & 3;
+  m = h == 3 ? 62 : E5;
+  __memcpy_async(a + 256 * E5, f1(x, g1), 256 * m * sizeof(half),
+                 GDRAM2NRAM);
+  f0(a, b, y, g);
+  __asm__ volatile("sync;");
+  f0(a + 256 * E5, b, y, g1);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
