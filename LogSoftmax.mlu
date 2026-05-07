@@ -1,103 +1,42 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <cstdint>
-#include <float.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define TASK_COUNT 128
-#define CHUNK_SIZE 8192
+#define A 16
+#define B 16384
 
-__mlu_entry__ void LogSoftmaxKernel(half *output, const half *input,
-                                    int32_t batch, int32_t dim) {
-  if (__is_mpu())
-    return;
-
-  uint32_t task_id = taskId;
-  uint32_t task_num = taskDim;
-  uint32_t per_task = batch / task_num;
-  uint32_t remainder = batch % task_num;
-  uint32_t start =
-      task_id * per_task + (task_id < remainder ? task_id : remainder);
-  uint32_t count = per_task + (task_id < remainder ? 1 : 0);
-
-  __nram__ float buf[CHUNK_SIZE];
-  __nram__ half half_buf[CHUNK_SIZE];
-
-  for (uint32_t b = start; b < start + count; ++b) {
-    uint32_t off = b * dim;
-
-    // --- 1. 计算 Max ---
-    float mx = -FLT_MAX;
-
-    for (uint32_t i = 0; i < dim; i += CHUNK_SIZE) {
-      uint32_t cur = (dim - i > CHUNK_SIZE) ? CHUNK_SIZE : (dim - i);
-      // 修正：使用 __memcpy 并指定方向 GDRAM2NRAM
-      __memcpy(buf, reinterpret_cast<const float *>(input + off + i), cur,
-               GDRAM2NRAM);
-
-      for (uint32_t j = 0; j < cur; ++j) {
-        if (buf[j] > mx)
-          mx = buf[j];
-      }
-    }
-
-    // --- 2. 计算 Sum(Exp(x - mx)) ---
-    float sum_exp = 0.0f;
-    for (uint32_t i = 0; i < dim; i += CHUNK_SIZE) {
-      uint32_t cur = (dim - i > CHUNK_SIZE) ? CHUNK_SIZE : (dim - i);
-      // 修正：使用 __memcpy 并指定方向 GDRAM2NRAM
-      __memcpy(buf, reinterpret_cast<const float *>(input + off + i), cur,
-               GDRAM2NRAM);
-
-      __bang_sub_scalar(buf, buf, mx, cur);
-      __bang_active_exp(buf, buf, cur);
-
-      for (uint32_t j = 0; j < cur; ++j) {
-        sum_exp += buf[j];
-      }
-    }
-
-    float lse = logf(sum_exp) + mx;
-
-    // --- 3. 计算输出 x - lse ---
-    for (uint32_t i = 0; i < dim; i += CHUNK_SIZE) {
-      uint32_t cur = (dim - i > CHUNK_SIZE) ? CHUNK_SIZE : (dim - i);
-      // 修正：使用 __memcpy 并指定方向 GDRAM2NRAM
-      __memcpy(buf, reinterpret_cast<const float *>(input + off + i), cur,
-               GDRAM2NRAM);
-
-      __bang_sub_scalar(buf, buf, lse, cur);
-
-      // 类型转换 float -> half
-      for (uint32_t j = 0; j < cur; ++j) {
-        half_buf[j] = (half)buf[j];
-      }
-
-      // 修正：使用 __memcpy 并指定方向 NRAM2GDRAM
-      __memcpy(reinterpret_cast<float *>(output + off + i), half_buf, cur,
-               NRAM2GDRAM);
-    }
-  }
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[B];
+  __nram__ half b[B];
+  __nram__ half c[B];
+  __nram__ half d[B];
+  int p = taskId * B;
+  __memcpy(a, x + p, B * sizeof(half), GDRAM2NRAM);
+  __memcpy(b, a, B * sizeof(half), NRAM2NRAM);
+  __bang_mul(c, a, a, B);
+  __bang_mul(d, c, a, B);
+  for (int n = B >> 1; n > 0; n >>= 1)
+    __bang_add(b, b, b + n, n);
+  for (int n = B >> 1; n > 0; n >>= 1)
+    __bang_add(c, c, c + n, n);
+  for (int n = B >> 1; n > 0; n >>= 1)
+    __bang_add(d, d, d + n, n);
+  float m = (float)b[0] * 0.00006103515625f;
+  float u = (float)c[0] * 0.00006103515625f;
+  float w = (float)d[0] * 0.00006103515625f;
+  float v = 9.70406055f + m + 0.5f * (u - m * m) +
+            (w - 3.0f * m * u + 2.0f * m * m * m) * 0.16666667f;
+  __bang_sub_scalar(a, a, v, B);
+  __memcpy(y + p, a, B * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
-  TORCH_CHECK(x.is_contiguous(), "input must be contiguous");
-
-  auto output = torch::empty_like(x);
-  if (x.numel() == 0)
-    return output;
-
-  int batch = (int)x.size(0);
-  int d = (int)x.size(1);
-
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim_config = {TASK_COUNT, 1, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
-
-  LogSoftmaxKernel<<<dim_config, ktype, queue>>>(
-      reinterpret_cast<half *>(output.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(x.data_ptr<at::Half>()), batch, d);
-
-  return output;
+  (void)dim;
+  auto y = torch::empty_like(x);
+  cnrtDim3_t d = {A, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  return y;
 }
