@@ -8,8 +8,6 @@
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a0[17152];
   __nram__ half a1[17152];
-  __nram__ half h0[8320];
-  __nram__ half h1[8320];
   __nram__ half b0[4096];
   __nram__ half b1[4096];
   __bang_write_value(a0, 17152, (half)-65504.0f);
@@ -35,16 +33,13 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
       }
     }
     half *a = q == 0 ? a0 : a1;
-    half *h = q == 0 ? h0 : h1;
     half *b = q == 0 ? b0 : b1;
-    __bang_maxpool(h, a, 1, 130, 130, 1, 2, 2, 1, 1, 3, 1, 1);
-    __bang_maxpool(b, h, 1, 130, 64, 2, 1, 1, 2, 3, 1, 1, 1);
-    __memcpy(y + r * 4096, b, 4096 * sizeof(half), NRAM2GDRAM);
-    if (nr < E0) {
-      __asm__ volatile("sync;");
-    }
+    __bang_maxpool(b, a, 1, 130, 130, 2, 2, 2, 2, 3, 3, 1, 1);
+    __asm__ volatile("sync;");
+    __memcpy_async(y + r * 4096, b, 4096 * sizeof(half), NRAM2GDRAM);
     q ^= 1;
   }
+  __asm__ volatile("sync;");
 }
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
