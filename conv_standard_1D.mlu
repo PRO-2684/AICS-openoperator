@@ -1,62 +1,14 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 1024
-#define E1 510
-#define E2 512
+// Task: 009 009_conv_standard_1D
+// Category: conv
+// Difficulty: basic
+// DType: float16
+// Description: 实现一个 BangC 算子，执行标准的一维卷积运算。输入包括形状为 `[batch, in_channels, length]` 的数据张量 `x`、形状为 `[out_channels, in_channels/groups, kernel_size]` 的权重张量 `weight` 以及形状为 `[out_channels]` 的可选偏置张量 `bias`。算子还需支持通过 `stride`、`padding`、`dilation` 和 `groups` 等参数配置卷积行为，并输出形状为 `[batch, out_channels, length_out]` 的张量。
+// Wrapper: torch::Tensor bang_func(torch::Tensor x,int in_channels,int out_channels,int kernel_size,int stride,int padding,int dilation, int groups,int bias);
 
-__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
-                      half *__restrict__ y) {
-  __nram__ half a[1542];
-  __nram__ float af[1542];
-  __nram__ float b[E2];
-  __nram__ float c[E2];
-  __nram__ half d[E2];
-  for (int g = taskId; g < E0; g += taskDim) {
-    int o = g & 63;
-    int n = g >> 6;
-    const half *px = x + n * 1536;
-    const half *pw = w + o * 9;
-    __memcpy(a, px, 512 * sizeof(half), GDRAM2NRAM);
-    __memcpy(a + 514, px + 512, 512 * sizeof(half), GDRAM2NRAM);
-    __memcpy(a + 1028, px + 1024, 512 * sizeof(half), GDRAM2NRAM);
-    a[512] = (half)0.0f;
-    a[513] = (half)0.0f;
-    a[1026] = (half)0.0f;
-    a[1027] = (half)0.0f;
-    a[1540] = (half)0.0f;
-    a[1541] = (half)0.0f;
-    __bang_half2float(af, a, 1542);
-    __bang_write_value(b, E2, 0.0f);
-    for (int q = 0; q < 9; ++q) {
-      int r = q / 3;
-      int s = q - r * 3;
-      __bang_mul_scalar(c, af + r * 514 + s, (float)pw[q], E2);
-      __bang_add(b, b, c, E2);
-    }
-    __bang_float2half_rn(d, b, E2);
-    __memcpy(y + g * E1, d, E1 * sizeof(half), NRAM2GDRAM);
-  }
-}
-
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
-                        int out_channels, int kernel_size, int stride,
-                        int padding, int dilation, int groups, int bias) {
-  (void)in_channels;
-  (void)out_channels;
-  (void)kernel_size;
-  (void)stride;
-  (void)padding;
-  (void)dilation;
-  (void)groups;
-  (void)bias;
-  auto y = torch::empty({16, 64, 510}, x.options());
-  cnrtDim3_t d = {32, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-  return y;
+torch::Tensor bang_func(torch::Tensor x,int in_channels,int out_channels,int kernel_size,int stride,int padding,int dilation, int groups,int bias) {
+  TORCH_CHECK(false, "TODO: implement conv_standard_1D");
 }

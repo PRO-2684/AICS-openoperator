@@ -1,27 +1,65 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
+#include <framework/core/MLUStream.h>
 
-#define E0 262144
-#define E1 8192
+#define HALF_CHUNK_SIZE 65536
+#define TASK_COUNT 4
 
-__mlu_entry__ void k0(half *__restrict__ x, float s) {
-  __nram__ half a[E1];
-  __nram__ half b[E1];
-  for (int p = taskId * E1; p < E0; p += taskDim * E1) {
-    __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-    __bang_active_relu(b, a, E1);
-    __bang_sub(a, a, b, E1);
-    __bang_mul_scalar(a, a, s, E1);
-    __bang_add(a, a, b, E1);
-    __memcpy(x + p, a, E1 * sizeof(half), NRAM2GDRAM);
+__mlu_entry__ void leakyrelu_half_kernel(const half *input, half *output,
+                                         uint32_t total,
+                                         float negative_slope) {
+  if (__is_mpu()) return;
+
+  uint32_t task_id = taskId;
+  uint32_t task_num = taskDim;
+  uint32_t per_task = total / task_num;
+  uint32_t remainder = total % task_num;
+  uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
+  uint32_t count = per_task + (task_id < remainder ? 1 : 0);
+  half slope = (half)negative_slope;
+  half positive_scale_delta = (half)(1.0f - negative_slope);
+
+  __nram__ half nram_input[HALF_CHUNK_SIZE];
+  __nram__ half nram_scale[HALF_CHUNK_SIZE];
+
+  for (uint32_t offset = 0; offset < count; offset += HALF_CHUNK_SIZE) {
+    uint32_t len = (offset + HALF_CHUNK_SIZE <= count) ? HALF_CHUNK_SIZE : (count - offset);
+    uint32_t aligned_len = (len + 63) & ~63;
+
+    __memcpy(nram_input, input + start + offset, len * sizeof(half), GDRAM2NRAM);
+    if (aligned_len > len) {
+      __bang_write_value(nram_input + len, aligned_len - len, (half)0.0f);
+    }
+
+    __bang_ge_scalar(nram_scale, nram_input, (half)0.0f, aligned_len);
+    __bang_mul_scalar(nram_scale, nram_scale, positive_scale_delta, aligned_len);
+    __bang_add_scalar(nram_scale, nram_scale, slope, aligned_len);
+    __bang_mul(nram_input, nram_input, nram_scale, len);
+
+    __memcpy(output + start + offset, nram_input, len * sizeof(half), NRAM2GDRAM);
   }
 }
 
-torch::Tensor bang_func(torch::Tensor x, double s) {
-  cnrtDim3_t d = {32, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<half *>(x.data_ptr<at::Half>()), (float)s);
-  return x;
+torch::Tensor bang_func(torch::Tensor input, double negative_slope) {
+  TORCH_CHECK(input.is_contiguous(), "input must be contiguous");
+  TORCH_CHECK(input.scalar_type() == at::kHalf,
+              "input must be float32 or float16");
+
+  auto output = torch::empty_like(input);
+  uint32_t total = static_cast<uint32_t>(input.numel());
+  if (total == 0) {
+    return output;
+  }
+
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {TASK_COUNT, 1, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
+  float slope = static_cast<float>(negative_slope);
+
+  leakyrelu_half_kernel<<<dim, ktype, queue>>>(
+    reinterpret_cast<half *>(input.data_ptr<at::Half>()),
+    reinterpret_cast<half *>(output.data_ptr<at::Half>()), total, slope);
+
+  return output;
 }
