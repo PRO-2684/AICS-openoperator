@@ -40,7 +40,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     }
     for (int co = 0; co < 8; ++co) {
       int oc = ocb * 8 + co;
-      __bang_float2half_rd(h, b + co * m, m);
+      __bang_float2half_rm(h, b + co * m, m);
       __memcpy(y + n * 4129024 + oc * 64516 + q * 254, h,
                254 * sizeof(half), NRAM2GDRAM, 254 * sizeof(half),
                256 * sizeof(half), rows - 1);
