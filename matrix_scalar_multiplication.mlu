@@ -4,7 +4,7 @@
 #include <torch/extension.h>
 
 #define A 268435456
-#define B 4096
+#define B 2048
 
 __mlu_entry__ void k0(half *__restrict__ x, float v) {
   __nram__ half a[B];
@@ -16,7 +16,7 @@ __mlu_entry__ void k0(half *__restrict__ x, float v) {
 }
 
 torch::Tensor bang_func(torch::Tensor x, double v) {
-  cnrtDim3_t d = {16384, 1, 1};
+  cnrtDim3_t d = {32768, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()), (float)v);
   return x;
