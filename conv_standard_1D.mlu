@@ -39,7 +39,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
                         int out_channels, int kernel_size, int stride,
-                        int padding, int dilation, int groups, bool bias) {
+                        int padding, int dilation, int groups, int bias) {
   (void)in_channels;
   (void)out_channels;
   (void)kernel_size;
