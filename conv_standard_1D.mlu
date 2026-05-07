@@ -7,33 +7,33 @@
 #define E1 510
 #define E2 512
 
-__mlu_entry__ void k0(const float *__restrict__ x, const float *__restrict__ w,
-                      float *__restrict__ y) {
-  __nram__ float a[1542];
-  __nram__ float b[E2];
-  __nram__ float c[E2];
+__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
+                      half *__restrict__ y) {
+  __nram__ half a[1542];
+  __nram__ half b[E2];
+  __nram__ half c[E2];
   for (int g = taskId; g < E0; g += taskDim) {
     int o = g & 63;
     int n = g >> 6;
-    const float *px = x + n * 1536;
-    const float *pw = w + o * 9;
-    __memcpy(a, px, 512 * sizeof(float), GDRAM2NRAM);
-    __memcpy(a + 514, px + 512, 512 * sizeof(float), GDRAM2NRAM);
-    __memcpy(a + 1028, px + 1024, 512 * sizeof(float), GDRAM2NRAM);
-    a[512] = 0.0f;
-    a[513] = 0.0f;
-    a[1026] = 0.0f;
-    a[1027] = 0.0f;
-    a[1540] = 0.0f;
-    a[1541] = 0.0f;
-    __bang_write_value(b, E2, 0.0f);
+    const half *px = x + n * 1536;
+    const half *pw = w + o * 9;
+    __memcpy(a, px, 512 * sizeof(half), GDRAM2NRAM);
+    __memcpy(a + 514, px + 512, 512 * sizeof(half), GDRAM2NRAM);
+    __memcpy(a + 1028, px + 1024, 512 * sizeof(half), GDRAM2NRAM);
+    a[512] = (half)0.0f;
+    a[513] = (half)0.0f;
+    a[1026] = (half)0.0f;
+    a[1027] = (half)0.0f;
+    a[1540] = (half)0.0f;
+    a[1541] = (half)0.0f;
+    __bang_write_value(b, E2, (half)0.0f);
     for (int q = 0; q < 9; ++q) {
       int r = q / 3;
       int s = q - r * 3;
-      __bang_mul_scalar(c, a + r * 514 + s, pw[q], E2);
+      __bang_mul_scalar(c, a + r * 514 + s, (float)pw[q], E2);
       __bang_add(b, b, c, E2);
     }
-    __memcpy(y + g * E1, b, E1 * sizeof(float), NRAM2GDRAM);
+    __memcpy(y + g * E1, b, E1 * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -51,6 +51,8 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   auto y = torch::empty({16, 64, 510}, x.options());
   cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      x.data_ptr<float>(), kernel.data_ptr<float>(), y.data_ptr<float>());
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
