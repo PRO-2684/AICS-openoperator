@@ -15,37 +15,36 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ float b1[130];
   __nram__ float b2[130];
   __memcpy(kh, w, 576 * sizeof(half), GDRAM2NRAM);
-  if (coreId == 0x80) {
-    return;
-  }
   int c = coreId;
   for (int n = clusterId; n < E0; n += taskDimY) {
-    __bang_write_value(b0, 130, 0.0f);
-    __bang_write_value(b1, 130, 0.0f);
-    __bang_write_value(b2, 130, 0.0f);
-    for (int i = c * 16; i < c * 16 + 16; ++i) {
-      __memcpy(h, x + n * 8192 + i * 128, 128 * sizeof(half), GDRAM2NRAM);
-      __bang_half2float(a, h, 128);
-      int o = i * 9;
-      __bang_fusion(FUSION_FMA, b0, a, (float)kh[o], b0, 128, 128);
-      __bang_fusion(FUSION_FMA, b1, a, (float)kh[o + 3], b1, 128, 128);
-      __bang_fusion(FUSION_FMA, b2, a, (float)kh[o + 6], b2, 128, 128);
-      __bang_fusion(FUSION_FMA, b0 + 1, a, (float)kh[o + 1], b0 + 1, 128,
-                    128);
-      __bang_fusion(FUSION_FMA, b1 + 1, a, (float)kh[o + 4], b1 + 1, 128,
-                    128);
-      __bang_fusion(FUSION_FMA, b2 + 1, a, (float)kh[o + 7], b2 + 1, 128,
-                    128);
-      __bang_fusion(FUSION_FMA, b0 + 2, a, (float)kh[o + 2], b0 + 2, 128,
-                    128);
-      __bang_fusion(FUSION_FMA, b1 + 2, a, (float)kh[o + 5], b1 + 2, 128,
-                    128);
-      __bang_fusion(FUSION_FMA, b2 + 2, a, (float)kh[o + 8], b2 + 2, 128,
-                    128);
+    if (c != 0x80) {
+      __bang_write_value(b0, 130, 0.0f);
+      __bang_write_value(b1, 130, 0.0f);
+      __bang_write_value(b2, 130, 0.0f);
+      for (int i = c * 16; i < c * 16 + 16; ++i) {
+        __memcpy(h, x + n * 8192 + i * 128, 128 * sizeof(half), GDRAM2NRAM);
+        __bang_half2float(a, h, 128);
+        int o = i * 9;
+        __bang_fusion(FUSION_FMA, b0, a, (float)kh[o], b0, 128, 128);
+        __bang_fusion(FUSION_FMA, b1, a, (float)kh[o + 3], b1, 128, 128);
+        __bang_fusion(FUSION_FMA, b2, a, (float)kh[o + 6], b2, 128, 128);
+        __bang_fusion(FUSION_FMA, b0 + 1, a, (float)kh[o + 1], b0 + 1, 128,
+                      128);
+        __bang_fusion(FUSION_FMA, b1 + 1, a, (float)kh[o + 4], b1 + 1, 128,
+                      128);
+        __bang_fusion(FUSION_FMA, b2 + 1, a, (float)kh[o + 7], b2 + 1, 128,
+                      128);
+        __bang_fusion(FUSION_FMA, b0 + 2, a, (float)kh[o + 2], b0 + 2, 128,
+                      128);
+        __bang_fusion(FUSION_FMA, b1 + 2, a, (float)kh[o + 5], b1 + 2, 128,
+                      128);
+        __bang_fusion(FUSION_FMA, b2 + 2, a, (float)kh[o + 8], b2 + 2, 128,
+                      128);
+      }
+      __memcpy(s + c * 390, b0, 130 * sizeof(float), NRAM2SRAM);
+      __memcpy(s + c * 390 + 130, b1, 130 * sizeof(float), NRAM2SRAM);
+      __memcpy(s + c * 390 + 260, b2, 130 * sizeof(float), NRAM2SRAM);
     }
-    __memcpy(s + c * 390, b0, 130 * sizeof(float), NRAM2SRAM);
-    __memcpy(s + c * 390 + 130, b1, 130 * sizeof(float), NRAM2SRAM);
-    __memcpy(s + c * 390 + 260, b2, 130 * sizeof(float), NRAM2SRAM);
     __sync_cluster();
     if (c == 0) {
       __memcpy(b0, s, 390 * sizeof(float), SRAM2NRAM);
