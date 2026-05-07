@@ -20,7 +20,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     int p = r * E0 + (c & 1) * E1;
     __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
     __memcpy(b, a, E1 * sizeof(half), NRAM2NRAM);
-    __bang_mul(d, a, a, E1);
+    __bang_square(d, a, E1);
     __bang_mul(e, d, a, E1);
     for (int n = E1 >> 1; n > 0; n >>= 1)
       __bang_add(b, b, b + n, n);
