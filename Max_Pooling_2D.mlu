@@ -10,7 +10,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half u[65536];
   __nram__ half a[67600];
   __nram__ half b[16384];
-  __nram__ half c[16384];
   __bang_write_value(a, 67600, (half)-65504.0f);
   for (int r = taskId; r < E0; r += taskDim) {
     int p = r << 2;
@@ -19,14 +18,15 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     __memcpy(a + 524, u, 512 * sizeof(half), NRAM2NRAM, 1040 * sizeof(half),
              1024 * sizeof(half), 127);
     __bang_maxpool(b, a, 4, 130, 130, 2, 2, 2, 2, 3, 3, 1, 1);
-    __bang_transpose(c, b, 4096, 4);
-    __memcpy(y + p * 4096, c, 16384 * sizeof(half), NRAM2GDRAM);
+    __memcpy(y + (p >> 5) * 131072 + (p & 31), b, 8 * sizeof(half),
+             NRAM2GDRAM, 64 * sizeof(half), 8 * sizeof(half), 4095);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
                         int padding, int dilation) {
-  auto y = torch::empty({16, 32, 64, 64}, x.options());
+  auto y =
+      torch::empty_strided({16, 32, 64, 64}, {131072, 1, 2048, 32}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t g = {4, 8, 1};
   k0<<<g, cnrtFuncTypeUnion1, queue>>>(
