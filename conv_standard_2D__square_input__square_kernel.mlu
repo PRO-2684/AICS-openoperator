@@ -3,17 +3,19 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
+#pragma bang walign(16)
+
 #define E0 512
-#define E1 81920
+#define E1 20480
 #define E2 130048
-#define E3 18432
+#define E3 4608
 #define E4 2048
 
 __mlu_entry__ void k0(const half *__restrict__ w, half *__restrict__ z) {
   for (int i = taskId; i < E3; i += taskDim) {
     int t = i;
-    int ci = t & 31;
-    t >>= 5;
+    int ci = t & 7;
+    t >>= 3;
     int kw = t % 3;
     t /= 3;
     int kh = t % 3;
@@ -39,14 +41,14 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     int rows = q == 248 ? 6 : 8;
     int in_rows = rows + 2;
     const half *p = x + n * 196608 + q * 256;
-    __bang_write_value(a, in_rows * 8192, (half)0.0f);
-    __memcpy(a, p, sizeof(half), GDRAM2NRAM, 32 * sizeof(half), sizeof(half),
+    __bang_write_value(a, in_rows * 2048, (half)0.0f);
+    __memcpy(a, p, sizeof(half), GDRAM2NRAM, 8 * sizeof(half), sizeof(half),
              in_rows * 256 - 1);
-    __memcpy(a + 1, p + 65536, sizeof(half), GDRAM2NRAM, 32 * sizeof(half),
+    __memcpy(a + 1, p + 65536, sizeof(half), GDRAM2NRAM, 8 * sizeof(half),
              sizeof(half), in_rows * 256 - 1);
-    __memcpy(a + 2, p + 131072, sizeof(half), GDRAM2NRAM, 32 * sizeof(half),
+    __memcpy(a + 2, p + 131072, sizeof(half), GDRAM2NRAM, 8 * sizeof(half),
              sizeof(half), in_rows * 256 - 1);
-    __bang_conv(f, a, wk, 32, in_rows, 256, 3, 3, 1, 1, 64);
+    __bang_conv(f, a, wk, 8, in_rows, 256, 3, 3, 1, 1, 64);
     for (int c = 0; c < 64; ++c) {
       __memcpy(t, f + c, sizeof(float), NRAM2NRAM, sizeof(float),
                64 * sizeof(float), rows * 254 - 1);
