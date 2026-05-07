@@ -10,7 +10,6 @@
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
   __nram__ half a[E2];
-  __nram__ half h[E1];
   __nram__ float af[E2];
   __nram__ float b[E1];
   __nram__ half k[27];
@@ -31,8 +30,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
       __bang_fusion(FUSION_FMA, b, af + dy * 256 + dx, (float)k[o + i], b, m,
                     m);
     }
-    __bang_float2half_rn(h, b, m);
-    __memcpy(y + n * 193548 + c * 64516, h, 254 * sizeof(half),
+    __bang_float2half_rn(a, b, m);
+    __memcpy(y + n * 193548 + c * 64516, a, 254 * sizeof(half),
              NRAM2GDRAM, 254 * sizeof(half), 256 * sizeof(half), rows - 1);
   }
 }
