@@ -22,14 +22,14 @@ if not hasattr(torch.nn.Conv2d, "_aics_grp_init"):
 }
 
 __mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y) {
-  for (int i = taskId; i < 12288; i += taskDim) {
+  for (int i = taskId; i < 49152; i += taskDim) {
     int t = i;
     int k = t % 96;
     t /= 96;
-    int o = t & 15;
-    int g = t >> 4;
+    int o = t & 63;
+    int g = t >> 6;
     half v = (half)0.0f;
-    if (k < 72) {
+    if (o < 16 && k < 72) {
       int r = k;
       int c = r & 7;
       r >>= 3;
@@ -37,44 +37,44 @@ __mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y) {
       int h = r / 3;
       v = x[(((g * 16 + o) * 8 + c) * 3 + h) * 3 + w];
     }
-    y[g * 1536 + o * 96 + k] = v;
+    y[g * 6144 + o * 96 + k] = v;
   }
 }
 
 __mlu_entry__ void k2(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
   int g = taskId;
-  __nram__ half a0[98304];
-  __nram__ half a1[98304];
-  __nram__ half h0[16384];
-  __nram__ half h1[16384];
-  __nram__ float f0[16384];
-  __wram__ half w0[1536];
-  for (; g < 2048; g += taskDim) {
-    int n = g >> 7;
-    int r = g & 127;
-    int b = r >> 4;
-    int q = (r & 15) << 3;
-    __memcpy(w0, w + b * 1536, 1536 * sizeof(half), GDRAM2WRAM);
-    __bang_write_value(a0, 98304, (half)0.0f);
+  __nram__ half a0[49152];
+  __nram__ half a1[49152];
+  __nram__ half h0[32768];
+  __nram__ half h1[32768];
+  __nram__ float f0[32768];
+  __wram__ half w0[6144];
+  for (; g < 4096; g += taskDim) {
+    int n = g >> 8;
+    int r = g & 255;
+    int b = r >> 5;
+    int q = (r & 31) << 2;
+    __memcpy(w0, w + b * 6144, 6144 * sizeof(half), GDRAM2WRAM);
+    __bang_write_value(a0, 49152, (half)0.0f);
     for (int i = 0; i < 72; ++i) {
       int t = i;
       int c = t & 7;
       t >>= 3;
       int ww = t % 3;
       int hh = t / 3;
-      int p = i * 1024;
+      int p = i * 512;
       int row = q + hh - 1;
-      if (row >= 0 && row + 7 < 128) {
+      if (row >= 0 && row + 3 < 128) {
         int off = ww == 0 ? 1 : 0;
         int len = ww == 1 ? 128 : 127;
         int src = ww == 2 ? 1 : 0;
         __memcpy(a0 + p + off,
                  x + n * 1048576 + (b * 8 + c) * 16384 + row * 128 + src,
                  len * sizeof(half), GDRAM2NRAM, 128 * sizeof(half),
-                 128 * sizeof(half), 7);
+                 128 * sizeof(half), 3);
       } else {
-        for (int rr = 0; rr < 8; ++rr) {
+        for (int rr = 0; rr < 4; ++rr) {
           int ih = q + rr + hh - 1;
           if (ih >= 0 && ih < 128) {
             int off = ww == 0 ? 1 : 0;
@@ -87,13 +87,13 @@ __mlu_entry__ void k2(const half *__restrict__ x, const half *__restrict__ w,
         }
       }
     }
-    __bang_transpose(a1, a0, 96, 1024);
-    __bang_matmul(f0, a1, w0, 1024, 96, 16);
-    __bang_float2half_rn(h0, f0, 16384);
-    __bang_transpose(h1, h0, 1024, 16);
+    __bang_transpose(a1, a0, 96, 512);
+    __bang_matmul(f0, a1, w0, 512, 96, 64);
+    __bang_float2half_rn(h0, f0, 32768);
+    __bang_transpose(h1, h0, 512, 64);
     half *dst = y + n * 2097152 + b * 16 * 16384 + q * 128;
     for (int c = 0; c < 16; ++c) {
-      __memcpy(dst + c * 16384, h1 + c * 1024, 1024 * sizeof(half),
+      __memcpy(dst + c * 16384, h1 + c * 512, 512 * sizeof(half),
                NRAM2GDRAM);
     }
   }
@@ -113,9 +113,9 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   else
     y.resize_({16, 128, 128, 128});
   if (!w.defined())
-    w = torch::empty({12288}, kernel.options());
+    w = torch::empty({49152}, kernel.options());
   else
-    w.resize_({12288});
+    w.resize_({49152});
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   if (last != kernel.data_ptr()) {
     cnrtDim3_t d0 = {32, 1, 1};
