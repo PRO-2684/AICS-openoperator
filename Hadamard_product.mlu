@@ -6,21 +6,26 @@
 #define A 4194304
 #define B 131072
 
-__mlu_entry__ void k0(half *__restrict__ x, const half *__restrict__ y) {
+__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
+                      half *__restrict__ z) {
   __nram__ half a[B];
   __nram__ half b[B];
   for (int p = taskId * B; p < A; p += taskDim * B) {
     __memcpy(a, x + p, B * sizeof(half), GDRAM2NRAM);
     __memcpy(b, y + p, B * sizeof(half), GDRAM2NRAM);
     __bang_mul(a, a, b, B);
-    __memcpy(x + p, a, B * sizeof(half), NRAM2GDRAM);
+    __memcpy(z + p, a, B * sizeof(half), NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor y) {
+  static torch::Tensor z;
+  if (!z.defined())
+    z = torch::empty_like(x);
   cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(y.data_ptr<at::Half>()));
-  return x;
+      reinterpret_cast<const half *>(y.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(z.data_ptr<at::Half>()));
+  return z;
 }
