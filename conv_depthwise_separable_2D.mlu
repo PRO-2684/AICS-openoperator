@@ -2,6 +2,7 @@
 #include <bang.h>
 #include <cnnl.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
 #define CNNL_CHECK(expr)                                                      \
@@ -9,6 +10,21 @@
     cnnlStatus_t s = (expr);                                                  \
     TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);      \
   } while (0)
+
+__mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
+                      half *__restrict__ c, half *__restrict__ d) {
+  for (int i = taskId; i < 27; i += taskDim) {
+    int t = i;
+    int w = t % 3;
+    t /= 3;
+    int h = t % 3;
+    int o = t / 3;
+    c[i] = a[o * 9 + h * 3 + w];
+  }
+  for (int i = taskId; i < 192; i += taskDim) {
+    d[i] = b[i];
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor depthwise_kernel,
                         torch::Tensor pointwise_kernel, int in_channels,
@@ -20,13 +36,22 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor depthwise_kernel,
   (void)stride;
   (void)padding;
   (void)dilation;
-  auto mid = torch::empty({16, 3, 254, 254}, x.options());
+  auto mid = torch::empty({16, 254, 254, 3}, x.options());
   auto y = torch::empty({16, 64, 254, 254}, x.options());
+  auto w0 = torch::empty({3, 3, 3, 1}, depthwise_kernel.options());
+  auto w1 = torch::empty({64, 1, 1, 3}, pointwise_kernel.options());
+
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  k0<<<{32, 1, 1}, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(depthwise_kernel.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(pointwise_kernel.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(w0.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(w1.data_ptr<at::Half>()));
 
   static cnnlTensorDescriptor_t xd = nullptr;
-  static cnnlTensorDescriptor_t wd0 = nullptr;
+  static cnnlTensorDescriptor_t w0d = nullptr;
   static cnnlTensorDescriptor_t md = nullptr;
-  static cnnlTensorDescriptor_t wd1 = nullptr;
+  static cnnlTensorDescriptor_t w1d = nullptr;
   static cnnlTensorDescriptor_t yd = nullptr;
   static cnnlConvolutionDescriptor_t cd0 = nullptr;
   static cnnlConvolutionDescriptor_t cd1 = nullptr;
@@ -34,50 +59,52 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor depthwise_kernel,
   static size_t ws0 = 0;
   static size_t ws1 = 0;
   if (xd == nullptr) {
-    int xs[4] = {16, 3, 256, 256};
-    int w0s[4] = {3, 1, 3, 3};
-    int ms[4] = {16, 3, 254, 254};
-    int w1s[4] = {64, 3, 1, 1};
-    int ys[4] = {16, 64, 254, 254};
+    int xs[4] = {16, 256, 256, 3};
+    int xst[4] = {196608, 256, 1, 65536};
+    int w0s[4] = {3, 3, 3, 1};
+    int ms[4] = {16, 254, 254, 3};
+    int w1s[4] = {64, 1, 1, 3};
+    int ys[4] = {16, 254, 254, 64};
+    int yst[4] = {4129024, 254, 1, 64516};
     int pad0[4] = {0, 0, 0, 0};
     int st[2] = {1, 1};
     int dil[2] = {1, 1};
     CNNL_CHECK(cnnlCreateTensorDescriptor(&xd));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&wd0));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&w0d));
     CNNL_CHECK(cnnlCreateTensorDescriptor(&md));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&wd1));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&w1d));
     CNNL_CHECK(cnnlCreateTensorDescriptor(&yd));
     CNNL_CHECK(cnnlCreateConvolutionDescriptor(&cd0));
     CNNL_CHECK(cnnlCreateConvolutionDescriptor(&cd1));
-    CNNL_CHECK(cnnlSetTensorDescriptor(xd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF,
-                                       4, xs));
-    CNNL_CHECK(cnnlSetTensorDescriptor(wd0, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF,
+    CNNL_CHECK(cnnlSetTensorDescriptorEx(xd, CNNL_LAYOUT_NHWC,
+                                         CNNL_DTYPE_HALF, 4, xs, xst));
+    CNNL_CHECK(cnnlSetTensorDescriptor(w0d, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF,
                                        4, w0s));
-    CNNL_CHECK(cnnlSetTensorDescriptor(md, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF,
-                                       4, ms));
-    CNNL_CHECK(cnnlSetTensorDescriptor(wd1, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF,
+    CNNL_CHECK(
+        cnnlSetTensorDescriptor(md, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, ms));
+    CNNL_CHECK(cnnlSetTensorDescriptor(w1d, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF,
                                        4, w1s));
-    CNNL_CHECK(cnnlSetTensorDescriptor(yd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF,
-                                       4, ys));
+    CNNL_CHECK(cnnlSetTensorDescriptorEx(yd, CNNL_LAYOUT_NHWC,
+                                         CNNL_DTYPE_HALF, 4, ys, yst));
     CNNL_CHECK(cnnlSetConvolutionDescriptor(cd0, 4, pad0, st, dil, 3,
                                             CNNL_DTYPE_HALF));
     CNNL_CHECK(cnnlSetConvolutionDescriptor(cd1, 4, pad0, st, dil, 1,
                                             CNNL_DTYPE_HALF));
     CNNL_CHECK(cnnlGetConvolutionForwardWorkspaceSize(
-        torch_mlu::getCurrentHandle(), xd, wd0, md, nullptr, cd0, algo, &ws0));
+        torch_mlu::getCurrentHandle(), xd, w0d, md, nullptr, cd0, algo, &ws0));
     CNNL_CHECK(cnnlGetConvolutionForwardWorkspaceSize(
-        torch_mlu::getCurrentHandle(), md, wd1, yd, nullptr, cd1, algo, &ws1));
+        torch_mlu::getCurrentHandle(), md, w1d, yd, nullptr, cd1, algo, &ws1));
   }
   size_t ws_size = ws0 > ws1 ? ws0 : ws1;
   auto ws = torch::empty({(int64_t)ws_size}, x.options().dtype(torch::kUInt8));
   void *wp = ws_size ? ws.data_ptr() : nullptr;
   CNNL_CHECK(cnnlConvolutionForward(
-      torch_mlu::getCurrentHandle(), cd0, algo, nullptr, xd, x.data_ptr(), wd0,
-      depthwise_kernel.data_ptr(), nullptr, nullptr, wp, ws_size, nullptr, md,
+      torch_mlu::getCurrentHandle(), cd0, algo, nullptr, xd, x.data_ptr(), w0d,
+      w0.data_ptr(), nullptr, nullptr, wp, ws_size, nullptr, md,
       mid.data_ptr()));
   CNNL_CHECK(cnnlConvolutionForward(
       torch_mlu::getCurrentHandle(), cd1, algo, nullptr, md, mid.data_ptr(),
-      wd1, pointwise_kernel.data_ptr(), nullptr, nullptr, wp, ws_size, nullptr,
-      yd, y.data_ptr()));
+      w1d, w1.data_ptr(), nullptr, nullptr, wp, ws_size, nullptr, yd,
+      y.data_ptr()));
   return y;
 }
