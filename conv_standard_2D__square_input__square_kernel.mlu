@@ -50,7 +50,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     }
     __bang_transpose(a1, a0, 32, 1024);
     __bang_matmul(f0, a1, w0, 1024, 32, 64);
-    __bang_float2half_rn(h0, f0, 65536);
+    __bang_float2half(h0, f0, 65536);
     __bang_transpose(h1, h0, 1024, 64);
     half *p = h1;
     half *dst = y + n * 4129024 + q * 254;
