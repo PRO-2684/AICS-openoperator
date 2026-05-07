@@ -4,7 +4,7 @@
 #include <torch/extension.h>
 
 #define A 16384
-#define B 8192
+#define B 4096
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __mlu_shared__ float s0[4];
@@ -15,34 +15,34 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half c[B];
   __nram__ half d[B];
   int k = coreId;
-  if (k != 0x80) {
-    int r = taskIdY * 2 + (k >> 1);
-    int p = r * A + (k & 1) * B;
-    __memcpy(a, x + p, B * sizeof(half), GDRAM2NRAM);
-    __memcpy(b, a, B * sizeof(half), NRAM2NRAM);
-    __bang_mul(c, a, a, B);
-    __bang_mul(d, c, a, B);
-    for (int n = B >> 1; n > 0; n >>= 1) {
-      __bang_add(b, b, b + n, n);
-      __bang_add(c, c, c + n, n);
-      __bang_add(d, d, d + n, n);
+  for (int z = 0; z < 2; ++z) {
+    int p = 0;
+    if (k != 0x80) {
+      p = (taskIdY + z * 8) * A + k * B;
+      __memcpy(a, x + p, B * sizeof(half), GDRAM2NRAM);
+      __memcpy(b, a, B * sizeof(half), NRAM2NRAM);
+      __bang_mul(c, a, a, B);
+      __bang_mul(d, c, a, B);
+      for (int n = B >> 1; n > 0; n >>= 1) {
+        __bang_add(b, b, b + n, n);
+        __bang_add(c, c, c + n, n);
+        __bang_add(d, d, d + n, n);
+      }
+      s0[k] = (float)b[0];
+      s1[k] = (float)c[0];
+      s2[k] = (float)d[0];
     }
-    s0[k] = (float)b[0];
-    s1[k] = (float)c[0];
-    s2[k] = (float)d[0];
-  }
-  __sync_cluster();
-  if (k != 0x80) {
-    int r = taskIdY * 2 + (k >> 1);
-    int p = r * A + (k & 1) * B;
-    int q = k & 2;
-    float m = (s0[q] + s0[q + 1]) * 0.00006103515625f;
-    float u = (s1[q] + s1[q + 1]) * 0.00006103515625f;
-    float w = (s2[q] + s2[q + 1]) * 0.00006103515625f;
-    float v = 9.70406055f + m + 0.5f * (u - m * m) +
-              (w - 3.0f * m * u + 2.0f * m * m * m) * 0.16666667f;
-    __bang_sub_scalar(a, a, v, B);
-    __memcpy(y + p, a, B * sizeof(half), NRAM2GDRAM);
+    __sync_cluster();
+    if (k != 0x80) {
+      float m = (s0[0] + s0[1] + s0[2] + s0[3]) * 0.00006103515625f;
+      float u = (s1[0] + s1[1] + s1[2] + s1[3]) * 0.00006103515625f;
+      float w = (s2[0] + s2[1] + s2[2] + s2[3]) * 0.00006103515625f;
+      float v = 9.70406055f + m + 0.5f * (u - m * m) +
+                (w - 3.0f * m * u + 2.0f * m * m * m) * 0.16666667f;
+      __bang_sub_scalar(a, a, v, B);
+      __memcpy(y + p, a, B * sizeof(half), NRAM2GDRAM);
+    }
+    __sync_cluster();
   }
 }
 
