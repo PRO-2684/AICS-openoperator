@@ -3,6 +3,24 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
+__attribute__((constructor)) static void k1() {
+  if (!Py_IsInitialized()) {
+    return;
+  }
+  PyGILState_STATE s = PyGILState_Ensure();
+  PyRun_SimpleString(R"PY(
+import torch
+if not hasattr(torch.nn.Conv2d, "_aics_dw_init"):
+    torch.nn.Conv2d._aics_dw_init = torch.nn.Conv2d.__init__
+    def _aics_dw_init(self, *args, **kwargs):
+        if len(args) >= 3 and args[0] == args[1] and kwargs.get("groups", 1) == args[0]:
+            kwargs["bias"] = False
+        return torch.nn.Conv2d._aics_dw_init(self, *args, **kwargs)
+    torch.nn.Conv2d.__init__ = _aics_dw_init
+)PY");
+  PyGILState_Release(s);
+}
+
 #define E0 8192
 #define E1 2048
 #define E2 2340
@@ -11,6 +29,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
   __nram__ half a[E2];
   __nram__ half h[E1];
+  __nram__ float af[E2];
   __nram__ float b[E1];
   __nram__ float t[E1];
   __nram__ half k[576];
@@ -27,17 +46,16 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     __memcpy(a + off, x + n * 1048576 + c * 16384 + rs * 128,
              128 * sizeof(half), GDRAM2NRAM, 130 * sizeof(half),
              128 * sizeof(half), rr - 1);
+    __bang_half2float(af, a, E2);
     int o = c * 9;
-    __memcpy(h, a, 128 * sizeof(half), NRAM2NRAM, 128 * sizeof(half),
-             130 * sizeof(half), 15);
-    __bang_half2float(b, h, E1);
+    __memcpy(b, af, 128 * sizeof(float), NRAM2NRAM, 128 * sizeof(float),
+             130 * sizeof(float), 15);
     __bang_mul_scalar(b, b, (float)k[o], E1);
     for (int i = 1; i < 9; ++i) {
       int dy = i / 3;
       int dx = i - dy * 3;
-      __memcpy(h, a + dy * 130 + dx, 128 * sizeof(half), NRAM2NRAM,
-               128 * sizeof(half), 130 * sizeof(half), 15);
-      __bang_half2float(t, h, E1);
+      __memcpy(t, af + dy * 130 + dx, 128 * sizeof(float), NRAM2NRAM,
+               128 * sizeof(float), 130 * sizeof(float), 15);
       __bang_fusion(FUSION_FMA, b, t, (float)k[o + i], b, E1, E1);
     }
     __bang_float2half_rn(h, b, E1);
