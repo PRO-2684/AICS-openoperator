@@ -41,9 +41,11 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
     s.resize_({32});
   auto y = torch::empty_like(x);
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  k0<<<{32, 1, 1}, cnrtFuncTypeBlock, q>>>(
+  cnrtDim3_t d0 = {32, 1, 1};
+  cnrtDim3_t d1 = {E0, 1, 1};
+  k0<<<d0, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()), s.data_ptr<float>());
-  k1<<<{E0, 1, 1}, cnrtFuncTypeBlock, q>>>(
+  k1<<<d1, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()), s.data_ptr<float>(),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
