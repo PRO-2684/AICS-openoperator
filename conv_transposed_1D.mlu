@@ -14,8 +14,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ float b0[130];
   __nram__ float b1[130];
   __nram__ float b2[130];
-  int n = taskId;
-  int lane = coreId;
+  int n = taskIdY;
+  int lane = taskIdX;
   if (coreId != 0x80) {
     __memcpy(kh, w, 576 * sizeof(half), GDRAM2NRAM);
     __bang_write_value(b0, 130, 0.0f);
@@ -46,7 +46,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     __memcpy(s + lane * 390 + 260, b2, 130 * sizeof(float), NRAM2SRAM);
   }
   __sync_cluster();
-  if (coreId == 0) {
+  if (taskIdX == 0 && coreId != 0x80) {
     __memcpy(b0, s + 1170, 130 * sizeof(float), SRAM2NRAM);
     __memcpy(a, s + 780, 130 * sizeof(float), SRAM2NRAM);
     __bang_add(b0, b0, a, 130);
@@ -97,8 +97,8 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   else
     y.resize_({16, 3, 130});
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d0 = {16, 1, 1};
-  k0<<<d0, cnrtFuncTypeUnion4, queue>>>(
+  cnrtDim3_t d0 = {4, 16, 1};
+  k0<<<d0, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
