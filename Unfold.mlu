@@ -3,7 +3,7 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 96
+#define E0 64
 #define E1 254
 #define E2 (E1 * E1)
 #define E3 27
@@ -73,8 +73,8 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
   else
     y.resize_({16, 27, 254 * 254});
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {12, 8, 1};
-  k0<<<dim, cnrtFuncTypeUnion1, queue>>>(
+  cnrtDim3_t dim = {E0, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
