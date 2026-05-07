@@ -5,7 +5,7 @@
 
 #define E0 16
 #define E1 16384
-#define E2 8192
+#define E2 4096
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __mlu_shared__ float s[4];
@@ -13,8 +13,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half b[E2];
   int c = coreId;
   if (c != 0x80) {
-    int r = taskIdY * 2 + (c >> 1);
-    int part = c & 1;
+    int r = taskIdZ * 8 + taskIdY;
+    int part = c;
     int p = r * E1 + part * E2;
     __memcpy(a, x + p, E2 * sizeof(half), GDRAM2NRAM);
     __memcpy(b, a, E2 * sizeof(half), NRAM2NRAM);
@@ -25,11 +25,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   }
   __sync_cluster();
   if (c != 0x80) {
-    int r = taskIdY * 2 + (c >> 1);
-    int part = c & 1;
+    int r = taskIdZ * 8 + taskIdY;
+    int part = c;
     int p = r * E1 + part * E2;
-    int q = c & 2;
-    float v = logf(s[q] + s[q + 1]);
+    float v = logf(s[0] + s[1] + s[2] + s[3]);
     __bang_sub_scalar(a, a, v, E2);
     __memcpy(y + p, a, E2 * sizeof(half), NRAM2GDRAM);
   }
@@ -38,7 +37,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
   auto y = torch::empty_like(x);
-  cnrtDim3_t d = {4, 8, 1};
+  cnrtDim3_t d = {4, 8, 2};
   k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
