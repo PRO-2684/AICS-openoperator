@@ -3,7 +3,7 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 256
+#define E0 128
 #define E1 510
 #define E2 512
 
@@ -15,8 +15,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ float c[E2];
   __nram__ half d[E2];
   for (int g = taskId; g < E0; g += taskDim) {
-    int o = (g & 15) << 2;
-    int n = g >> 4;
+    int o = (g & 7) << 3;
+    int n = g >> 3;
     const half *px = x + n * 1536;
     __memcpy(a, px, 512 * sizeof(half), GDRAM2NRAM);
     __memcpy(a + 514, px + 512, 512 * sizeof(half), GDRAM2NRAM);
@@ -28,7 +28,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     a[1540] = (half)0.0f;
     a[1541] = (half)0.0f;
     __bang_half2float(af, a, 1542);
-    for (int u = 0; u < 4; ++u) {
+    for (int u = 0; u < 8; ++u) {
       const half *pw = w + (o + u) * 9;
       __bang_write_value(b, E2, 0.0f);
       for (int q = 0; q < 9; ++q) {
