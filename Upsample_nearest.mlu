@@ -11,7 +11,6 @@
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E2 * 2];
   __nram__ half b[8192 * 2];
-  __nram__ half c[E3 * 2];
   int g = taskId;
   if (g < E1)
     __memcpy_async(a, x + g * E2, E2 * sizeof(half), GDRAM2NRAM);
@@ -26,16 +25,14 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
                      GDRAM2NRAM);
     half *pa = a + q * E2;
     half *pb = b + q * 8192;
-    half *pc = c + q * E3;
     __memcpy(pb, pa, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
              sizeof(half), E2 - 1);
     __memcpy(pb + 1, pa, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
              sizeof(half), E2 - 1);
-    __memcpy(pc, pb, 128 * sizeof(half), NRAM2NRAM, 256 * sizeof(half),
-             128 * sizeof(half), 63);
-    __memcpy(pc + 128, pb, 128 * sizeof(half), NRAM2NRAM, 256 * sizeof(half),
-             128 * sizeof(half), 63);
-    __memcpy_async(y + g * E3, pc, E3 * sizeof(half), NRAM2GDRAM);
+    __memcpy(y + g * E3, pb, 128 * sizeof(half), NRAM2GDRAM,
+             256 * sizeof(half), 128 * sizeof(half), 63);
+    __memcpy_async(y + g * E3 + 128, pb, 128 * sizeof(half), NRAM2GDRAM,
+                   256 * sizeof(half), 128 * sizeof(half), 63);
     __asm__ volatile("sync;");
   }
 }
@@ -45,7 +42,7 @@ torch::Tensor bang_func(torch::Tensor x, int scale_factor) {
   auto y = torch::empty({4, 64, 128, 128}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {E0, 1, 1};
-  k0<<<dim, cnrtFuncTypeUnion1, queue>>>(
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
