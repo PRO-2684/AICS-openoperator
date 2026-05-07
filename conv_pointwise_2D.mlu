@@ -34,9 +34,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
-                        int out_channels) {
+                        int out_channels, bool bias) {
   (void)in_channels;
   (void)out_channels;
+  (void)bias;
   auto y = torch::empty({16, 64, 256, 256}, x.options());
   cnrtDim3_t dim = {4, 8, 1};
   k0<<<dim, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
