@@ -19,19 +19,19 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     __memcpy(a, x + p, E2 * sizeof(half), GDRAM2NRAM);
     __memcpy(b, a, E2 * sizeof(half), NRAM2NRAM);
     __bang_active_exp(b, b, E2);
-    __bang_reduce_sum(b, b, E2);
-    __memcpy(b, b, sizeof(half), NRAM2NRAM, sizeof(half), 64 * sizeof(half),
-             127);
-    __bang_reduce_sum(b, b, 128);
-    s[c] = (float)b[0] + (float)b[64];
+    for (int n = E2 >> 1; n > 0; n >>= 1)
+      __bang_add(b, b, b + n, n);
+    s[c] = (float)b[0];
   }
   __sync_cluster();
   if (c != 0x80) {
+    if ((c & 1) == 0)
+      s[c] = logf(s[c] + s[c + 1]);
+    __sync_cluster();
     int r = taskIdY * 2 + (c >> 1);
     int part = c & 1;
     int p = r * E1 + part * E2;
-    int q = c & 2;
-    float v = logf(s[q] + s[q + 1]);
+    float v = s[c & 2];
     __bang_sub_scalar(a, a, v, E2);
     __memcpy(y + p, a, E2 * sizeof(half), NRAM2GDRAM);
   }
