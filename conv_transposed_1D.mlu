@@ -17,15 +17,13 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     int n = g / 3;
     int c = g - n * 3;
     __bang_write_value(b, 130, 0.0f);
-    for (int i = 0; i < 64; ++i) {
-      __memcpy(h, x + n * 8192 + i * 128, 128 * sizeof(half), GDRAM2NRAM);
-      __bang_half2float(a, h, 128);
-      int o = i * 9 + c * 3;
-      __bang_fusion(FUSION_FMA, b, a, (float)kh[o], b, 128, 128);
-      __bang_fusion(FUSION_FMA, b + 1, a, (float)kh[o + 1], b + 1, 128,
-                    128);
-      __bang_fusion(FUSION_FMA, b + 2, a, (float)kh[o + 2], b + 2, 128,
-                    128);
+    for (int j = 0; j < 3; ++j) {
+      for (int i = 0; i < 64; ++i) {
+        __memcpy(h, x + n * 8192 + i * 128, 128 * sizeof(half), GDRAM2NRAM);
+        __bang_half2float(a, h, 128);
+        int o = i * 9 + c * 3 + j;
+        __bang_fusion(FUSION_FMA, b + j, a, (float)kh[o], b + j, 128, 128);
+      }
     }
     __bang_float2half_rn(h, b, 130);
     __memcpy(y + n * 390 + c * 130, h, 130 * sizeof(half), NRAM2GDRAM);
