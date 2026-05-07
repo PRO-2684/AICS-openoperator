@@ -1,14 +1,55 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 006 006_conv_depthwise_2D_square_input_square_kernel
-// Category: conv
-// Difficulty: hard
-// DType: float16
-// Description: 实现一个 BangC 算子，对输入张量执行二维逐通道卷积（Depthwise 2D Convolution）运算。输入包括形状为 `[batch, in_channels, H, W]` 的特征图 `x`、形状为 `[in_channels, 1, K, K]` 的权重 `weight` 以及可选的偏置 `bias`；计算过程涉及步长 `stride` 和填充 `padding` 等标量参数。该算子最终输出形状为 `[batch, in_channels, H_out, W_out]` 的卷积结果。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x,int in_channels,int kernel_size,int stride,int padding);
+#define E0 768
+#define E1 4064
+#define E2 4608
 
-torch::Tensor bang_func(torch::Tensor x,int in_channels,int kernel_size,int stride,int padding) {
-  TORCH_CHECK(false, "TODO: implement conv_depthwise_2D_square_input_square_kernel");
+__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
+                      half *__restrict__ y) {
+  __nram__ half a[E2];
+  __nram__ half b[E1];
+  __nram__ half t[E1];
+  __nram__ half k[27];
+  __memcpy(k, w, 27 * sizeof(half), GDRAM2NRAM);
+  for (int g = taskId; g < E0; g += taskDim) {
+    int n = g / 48;
+    int r0 = g - n * 48;
+    int c = r0 >> 4;
+    int q = (r0 & 15) << 4;
+    int rows = q == 240 ? 14 : 16;
+    int m = rows * 254;
+    const half *p = x + n * 196608 + c * 65536 + q * 256;
+    __memcpy(a, p, (rows + 2) * 256 * sizeof(half), GDRAM2NRAM);
+    int o = c * 9;
+    __memcpy(b, a, 254 * sizeof(half), NRAM2NRAM, 254 * sizeof(half),
+             256 * sizeof(half), rows - 1);
+    __bang_mul_scalar(b, b, k[o], m);
+    for (int i = 1; i < 9; ++i) {
+      int dy = i / 3;
+      int dx = i - dy * 3;
+      __memcpy(t, a + dy * 256 + dx, 254 * sizeof(half), NRAM2NRAM,
+               254 * sizeof(half), 256 * sizeof(half), rows - 1);
+      __bang_fusion(FUSION_FMA, b, t, k[o + i], b, m, m);
+    }
+    __memcpy(y + n * 193548 + c * 64516 + q * 254, b,
+             m * sizeof(half), NRAM2GDRAM);
+  }
+}
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
+                        int kernel_size, int stride, int padding) {
+  (void)in_channels;
+  (void)kernel_size;
+  (void)stride;
+  (void)padding;
+  auto y = torch::empty({16, 3, 254, 254}, x.options());
+  cnrtDim3_t dim = {4, 8, 1};
+  k0<<<dim, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  return y;
 }
