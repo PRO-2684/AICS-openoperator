@@ -5,11 +5,12 @@
 
 #define E0 256
 #define E1 131072
-#define E2 8192
+#define E2 32768
 #define E3 8
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       half *__restrict__ c) {
+  __mlu_shared__ half sb[E2];
   __nram__ half hx[E2];
   __nram__ half hy[E2];
   __nram__ half hc[E3];
@@ -21,18 +22,19 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
     s[r] = 0.0f;
   int base = taskId * E3;
   for (int p = 0; p < E1; p += E2) {
-    __memcpy(hy, b + p, E2 * sizeof(half), GDRAM2NRAM);
+    if (coreId == 0)
+      __memcpy(sb, b + p, E2 * sizeof(half), GDRAM2SRAM);
+    __sync_cluster();
+    __memcpy(hy, sb, E2 * sizeof(half), SRAM2NRAM);
     __bang_half2float(y, hy, E2);
     for (int r = 0; r < E3; ++r) {
       int row = base + r;
       __memcpy(hx, a + row * E1 + p, E2 * sizeof(half), GDRAM2NRAM);
       __bang_half2float(x, hx, E2);
       __bang_mul(z, x, y, E2);
-      for (int n = 2048; n > 0; n >>= 1) {
+      for (int n = E2 >> 1; n > 0; n >>= 1)
         __bang_add(z, z, z + n, n);
-        __bang_add(z + 4096, z + 4096, z + 4096 + n, n);
-      }
-      s[r] += z[0] + z[4096];
+      s[r] += z[0];
     }
   }
   for (int r = 0; r < E3; ++r)
