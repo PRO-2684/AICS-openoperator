@@ -30,6 +30,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ dw,
                       const half *__restrict__ pw, half *__restrict__ y) {
   __nram__ half a[E2];
   __nram__ half h[E1];
+  __nram__ half h0[E1];
+  __nram__ half h1[E1];
+  __nram__ half h2[E1];
   __nram__ half kd[27];
   __nram__ half kp[192];
   __nram__ float d0[E1];
@@ -46,18 +49,14 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ dw,
     DO_ONE(d0, 0);
     DO_ONE(d1, 1);
     DO_ONE(d2, 2);
-    __bang_float2half_rn(h, d0, m);
-    __bang_half2float(d0, h, m);
-    __bang_float2half_rn(h, d1, m);
-    __bang_half2float(d1, h, m);
-    __bang_float2half_rn(h, d2, m);
-    __bang_half2float(d2, h, m);
+    __bang_float2half_rn(h0, d0, m);
+    __bang_float2half_rn(h1, d1, m);
+    __bang_float2half_rn(h2, d2, m);
     for (int c = 0; c < 64; ++c) {
       int o = c * 3;
-      __bang_mul_scalar(t, d0, (float)kp[o], m);
-      __bang_fusion(FUSION_FMA, t, d1, (float)kp[o + 1], t, m, m);
-      __bang_fusion(FUSION_FMA, t, d2, (float)kp[o + 2], t, m, m);
-      __bang_float2half_rn(h, t, m);
+      __bang_mul_scalar(h, h0, kp[o], m);
+      __bang_fusion(FUSION_FMA, h, h1, kp[o + 1], h, m, m);
+      __bang_fusion(FUSION_FMA, h, h2, kp[o + 2], h, m, m);
       __memcpy(y + n * 4129024 + c * 64516 + q * 254, h, m * sizeof(half),
                NRAM2GDRAM);
     }
