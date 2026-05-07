@@ -109,8 +109,8 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
         reinterpret_cast<half *>(w.data_ptr<at::Half>()));
     ready = true;
   }
-  cnrtDim3_t d1 = {4, 8, 1};
-  k1<<<d1, cnrtFuncTypeUnion1, queue>>>(
+  cnrtDim3_t d1 = {32, 1, 1};
+  k1<<<d1, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
