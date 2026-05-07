@@ -8,8 +8,11 @@
 #define E2 4096
 #define E3 8
 
-__mlu_entry__ void k0(const float *__restrict__ a, const float *__restrict__ b,
-                      float *__restrict__ c) {
+__mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
+                      half *__restrict__ c) {
+  __nram__ half hx[E2];
+  __nram__ half hy[E2];
+  __nram__ half hc[E3];
   __nram__ float x[E2];
   __nram__ float y[E2];
   __nram__ float z[E2];
@@ -18,10 +21,12 @@ __mlu_entry__ void k0(const float *__restrict__ a, const float *__restrict__ b,
     s[r] = 0.0f;
   int base = taskId * E3;
   for (int p = 0; p < E1; p += E2) {
-    __memcpy(y, b + p, E2 * sizeof(float), GDRAM2NRAM);
+    __memcpy(hy, b + p, E2 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(y, hy, E2);
     for (int r = 0; r < E3; ++r) {
       int row = base + r;
-      __memcpy(x, a + row * E1 + p, E2 * sizeof(float), GDRAM2NRAM);
+      __memcpy(hx, a + row * E1 + p, E2 * sizeof(half), GDRAM2NRAM);
+      __bang_half2float(x, hx, E2);
       __bang_mul(z, x, y, E2);
       for (int n = E2 >> 1; n > 0; n >>= 1)
         __bang_add(z, z, z + n, n);
@@ -29,13 +34,16 @@ __mlu_entry__ void k0(const float *__restrict__ a, const float *__restrict__ b,
     }
   }
   for (int r = 0; r < E3; ++r)
-    c[base + r] = s[r];
+    hc[r] = (half)s[r];
+  __memcpy(c + base, hc, E3 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto C = torch::empty({E0, 1}, A.options());
   cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      A.data_ptr<float>(), B.data_ptr<float>(), C.data_ptr<float>());
+      reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(C.data_ptr<at::Half>()));
   return C;
 }
