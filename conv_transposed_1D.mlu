@@ -19,6 +19,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ float b2[130];
   __memcpy(kh, w, 576 * sizeof(half), GDRAM2NRAM);
   int lane = taskIdX;
+  if (lane >= 2) {
+    return;
+  }
   for (int n = taskIdY; n < E0; n += taskDimY) {
     __bang_write_value(b0, 130, 0.0f);
     __bang_write_value(b1, 130, 0.0f);
@@ -89,7 +92,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   else
     z.resize_({E1});
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d0 = {2, 16, 1};
+  cnrtDim3_t d0 = {4, 8, 1};
   k0<<<d0, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
