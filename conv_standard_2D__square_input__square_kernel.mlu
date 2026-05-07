@@ -9,10 +9,10 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
-  __nram__ half a[3][E2];
+  __nram__ half a[E2];
   __nram__ half h[4096];
   __nram__ half kh[1728];
-  __nram__ float af[3][E2];
+  __nram__ float af[E2];
   __nram__ float b[E1];
   __memcpy(kh, w, 1728 * sizeof(half), GDRAM2NRAM);
   for (int g = taskId; g < E0; g += taskDim) {
@@ -25,17 +25,15 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     __bang_write_value(b, E1, 0.0f);
     for (int ci = 0; ci < 3; ++ci) {
       const half *p = x + n * 196608 + ci * 65536 + q * 256;
-      __memcpy(a[ci], p, (rows + 2) * 256 * sizeof(half), GDRAM2NRAM);
-      __bang_half2float(af[ci], a[ci], (rows + 2) * 256);
-    }
-    for (int i = 0; i < 9; ++i) {
-      int dy = i / 3;
-      int dx = i - dy * 3;
-      for (int ci = 0; ci < 3; ++ci) {
+      __memcpy(a, p, (rows + 2) * 256 * sizeof(half), GDRAM2NRAM);
+      __bang_half2float(af, a, (rows + 2) * 256);
+      for (int i = 0; i < 9; ++i) {
+        int dy = i / 3;
+        int dx = i - dy * 3;
         for (int co = 0; co < 8; ++co) {
           int oc = ocb * 8 + co;
           int o = ((oc * 3 + ci) * 3 + dy) * 3 + dx;
-          __bang_fusion(FUSION_FMA, b + co * m, af[ci] + dy * 256 + dx,
+          __bang_fusion(FUSION_FMA, b + co * m, af + dy * 256 + dx,
                         (float)kh[o], b + co * m, m, m);
         }
       }
