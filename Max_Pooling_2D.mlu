@@ -39,7 +39,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     __memcpy_async(y + r * 4096, b, 4096 * sizeof(half), NRAM2GDRAM);
     q ^= 1;
   }
-  __asm__ volatile("sync;");
 }
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
