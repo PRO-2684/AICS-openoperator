@@ -4,15 +4,18 @@
 #include <torch/extension.h>
 
 #define A 268435456
-#define B 16384
+#define B 32768
+#define C 1048576
+#define D 65536
 
 __mlu_entry__ void k0(half *__restrict__ x, float v) {
-  int s = taskDim * B;
-  __nram__ half a[B];
-  for (int p = taskId * B; p < A; p += s) {
-    __memcpy(a, x + p, B * sizeof(half), GDRAM2NRAM);
-    __bang_mul_scalar(a, a, v, B);
-    __memcpy(x + p, a, B * sizeof(half), NRAM2GDRAM);
+  __nram__ half a[D];
+  for (int p = taskId * B; p < A; p += C * 2) {
+    __memcpy(a, x + p, B * sizeof(half), GDRAM2NRAM, B * sizeof(half),
+             C * sizeof(half), 1);
+    __bang_mul_scalar(a, a, v, D);
+    __memcpy(x + p, a, B * sizeof(half), NRAM2GDRAM, C * sizeof(half),
+             B * sizeof(half), 1);
   }
 }
 
