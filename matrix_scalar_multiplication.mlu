@@ -4,9 +4,9 @@
 #include <torch/extension.h>
 
 #define E0 268435456
-#define E1 65536
+#define E1 32768
 
-__mlu_entry__ void k0(half *__restrict__ x, float v) {
+__mlu_entry__ void k0(half *__restrict__ x, half v) {
   __nram__ half a[E1];
   for (int p = taskId * E1; p < E0; p += taskDim * E1) {
     __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
@@ -16,8 +16,8 @@ __mlu_entry__ void k0(half *__restrict__ x, float v) {
 }
 
 torch::Tensor bang_func(torch::Tensor x, double s) {
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<half *>(x.data_ptr<at::Half>()), (float)s);
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()), (half)s);
   return x;
 }
