@@ -22,16 +22,14 @@ if not hasattr(torch.nn.Conv2d, "_aics_dw_init"):
 }
 
 #define E0 1024
-#define E1 16384
+#define E1 16640
 #define E2 16900
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
   __nram__ half a[E2];
-  __nram__ half h[E1];
   __nram__ float af[E2];
   __nram__ float b[E1];
-  __nram__ float t[E1];
   __nram__ half k[576];
   __memcpy(k, w, 576 * sizeof(half), GDRAM2NRAM);
   for (int g = taskId; g < E0; g += taskDim) {
@@ -42,19 +40,16 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
              GDRAM2NRAM, 130 * sizeof(half), 128 * sizeof(half), 127);
     __bang_half2float(af, a, E2);
     int o = c * 9;
-    __memcpy(b, af, 128 * sizeof(float), NRAM2NRAM, 128 * sizeof(float),
-             130 * sizeof(float), 127);
-    __bang_mul_scalar(b, b, (float)k[o], E1);
+    __bang_mul_scalar(b, af, (float)k[o], E1);
     for (int i = 1; i < 9; ++i) {
       int dy = i / 3;
       int dx = i - dy * 3;
-      __memcpy(t, af + dy * 130 + dx, 128 * sizeof(float), NRAM2NRAM,
-               128 * sizeof(float), 130 * sizeof(float), 127);
-      __bang_fusion(FUSION_FMA, b, t, (float)k[o + i], b, E1, E1);
+      __bang_fusion(FUSION_FMA, b, af + dy * 130 + dx, (float)k[o + i], b, E1,
+                    E1);
     }
-    __bang_float2half_rn(h, b, E1);
-    __memcpy(y + n * 1048576 + c * 16384, h, E1 * sizeof(half),
-             NRAM2GDRAM);
+    __bang_float2half_rn(a, b, E1);
+    __memcpy(y + n * 1048576 + c * 16384, a, 128 * sizeof(half), NRAM2GDRAM,
+             128 * sizeof(half), 130 * sizeof(half), 127);
   }
 }
 
