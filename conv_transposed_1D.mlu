@@ -11,7 +11,7 @@ __mlu_entry__ void k1(const float *__restrict__ z, half *__restrict__ y) {
   __nram__ half h[390];
   for (int i = taskId * 390; i < E1; i += taskDim * 390) {
     __memcpy(a, z + i, 390 * sizeof(float), GDRAM2NRAM);
-    __bang_float2half_tz(h, a, 390);
+    __bang_float2half_rn(h, a, 390);
     __memcpy(y + i, h, 390 * sizeof(half), NRAM2GDRAM);
   }
 }
@@ -25,9 +25,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ float b1[130];
   __nram__ float b2[130];
   int lane = taskIdX;
-  if (coreId != 0x80) {
-    __memcpy(kh, w, 576 * sizeof(half), GDRAM2NRAM);
-  }
   for (int n = taskIdY; n < E0; n += taskDimY) {
     if (lane == 0 && coreId != 0x80) {
       __bang_write_value(b0, 130, 0.0f);
@@ -37,6 +34,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     }
     __sync_cluster();
     if (coreId != 0x80) {
+      __memcpy(kh, w, 576 * sizeof(half), GDRAM2NRAM);
       __bang_write_value(b0, 130, 0.0f);
       __bang_write_value(b1, 130, 0.0f);
       __bang_write_value(b2, 130, 0.0f);
@@ -64,6 +62,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
       __bang_atomic_reduce_add(z + n * 390 + 130, b1, 130);
       __bang_atomic_reduce_add(z + n * 390 + 260, b2, 130);
     }
+    __sync_cluster();
   }
 }
 
