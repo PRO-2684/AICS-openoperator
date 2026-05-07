@@ -4,10 +4,10 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  for (int i = taskId; i < 2048; i += taskDim) {
+  for (int i = taskId; i < 4096; i += taskDim) {
     int t = i;
-    int k = t & 31;
-    int o = t >> 5;
+    int k = t & 63;
+    int o = t >> 6;
     half v = (half)0.0f;
     if (k < 27) {
       int r = k;
@@ -17,26 +17,26 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
       int h = r / 3;
       v = x[((o * 3 + c) * 3 + h) * 3 + w];
     }
-    y[o * 32 + k] = v;
+    y[o * 64 + k] = v;
   }
 }
 
 __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
   int g = taskId;
-  __nram__ half a0[32768];
-  __nram__ half a1[32768];
+  __nram__ half a0[65536];
+  __nram__ half a1[65536];
   __nram__ half h0[65536];
   __nram__ half h1[65536];
   __nram__ float f0[65536];
-  __wram__ half w0[2048];
-  __memcpy(w0, w, 2048 * sizeof(half), GDRAM2WRAM);
+  __wram__ half w0[4096];
+  __memcpy(w0, w, 4096 * sizeof(half), GDRAM2WRAM);
   for (; g < 1024; g += taskDim) {
     int n = g >> 6;
     int q = (g & 63) << 2;
     int rnum = q == 252 ? 2 : 4;
     int m = rnum * 254;
-    __bang_write_value(a0, 32768, (half)0.0f);
+    __bang_write_value(a0, 65536, (half)0.0f);
     for (int i = 0; i < 27; ++i) {
       int r = i;
       int c = r % 3;
@@ -48,9 +48,8 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                254 * sizeof(half), GDRAM2NRAM, 254 * sizeof(half),
                256 * sizeof(half), rnum - 1);
     }
-    __bang_transpose(a1, a0, 32, 1024);
-    __bang_matmul(f0, a1, w0, 1024, 32, 64);
-    __bang_mul_scalar(f0, f0, 1.0001f, 65536);
+    __bang_transpose(a1, a0, 64, 1024);
+    __bang_matmul(f0, a1, w0, 1024, 64, 64);
     __bang_float2half_rn(h0, f0, 65536);
     __bang_transpose(h1, h0, 1024, 64);
     half *p = h1;
@@ -80,9 +79,9 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   else
     y.resize_({16, 64, 254, 254});
   if (!w.defined())
-    w = torch::empty({2048}, kernel.options());
+    w = torch::empty({4096}, kernel.options());
   else
-    w.resize_({2048});
+    w.resize_({4096});
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   if (last != kernel.data_ptr()) {
     cnrtDim3_t d0 = {32, 1, 1};
