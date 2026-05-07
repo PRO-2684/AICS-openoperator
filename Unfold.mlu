@@ -73,8 +73,8 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
   else
     y.resize_({16, 27, 254 * 254});
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {E0, 1, 1};
-  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+  cnrtDim3_t dim = {12, 8, 1};
+  k0<<<dim, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
