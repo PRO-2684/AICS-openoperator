@@ -14,6 +14,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ float b[E2];
   __nram__ float c[E2];
   __nram__ half d[E2];
+  __nram__ half kh[36];
   for (int g = taskId; g < E0; g += taskDim) {
     int o = (g & 15) << 2;
     int n = g >> 4;
@@ -28,8 +29,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     a[1540] = (half)0.0f;
     a[1541] = (half)0.0f;
     __bang_half2float(af, a, 1542);
+    __memcpy(kh, w + o * 9, 36 * sizeof(half), GDRAM2NRAM);
     for (int u = 0; u < 4; ++u) {
-      const half *pw = w + (o + u) * 9;
+      const half *pw = kh + u * 9;
       __bang_write_value(b, E2, 0.0f);
       __bang_fusion(FUSION_FMA, b, af, (float)pw[0], b, E2, E2);
       __bang_fusion(FUSION_FMA, b, af + 1, (float)pw[1], b, E2, E2);
