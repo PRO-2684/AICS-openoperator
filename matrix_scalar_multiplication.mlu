@@ -4,9 +4,9 @@
 #include <torch/extension.h>
 
 #define A 268435456
-#define B 32768
-#define C 131072
-#define D 1048576
+#define B 65536
+#define C 262144
+#define D 2097152
 
 __mlu_entry__ void k0(half *__restrict__ x, float v) {
   __mlu_shared__ half s[C];
