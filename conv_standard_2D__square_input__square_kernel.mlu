@@ -3,8 +3,8 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 1024
-#define E1 65536
+#define E0 2048
+#define E1 32768
 #define E2 4608
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
@@ -16,8 +16,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ float b[E1];
   __memcpy(kh, w, 1728 * sizeof(half), GDRAM2NRAM);
   for (int g = taskId; g < E0; g += taskDim) {
-    int n = g >> 6;
-    int r = g & 63;
+    int n = g >> 7;
+    int r = g & 127;
     int ocb = r >> 4;
     int q = (r & 15) << 4;
     int rows = q == 240 ? 14 : 16;
@@ -30,16 +30,16 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
       for (int i = 0; i < 9; ++i) {
         int dy = i / 3;
         int dx = i - dy * 3;
-        for (int co = 0; co < 16; ++co) {
-          int oc = ocb * 16 + co;
+        for (int co = 0; co < 8; ++co) {
+          int oc = ocb * 8 + co;
           int o = ((oc * 3 + ci) * 3 + dy) * 3 + dx;
           __bang_fusion(FUSION_FMA, b + co * m, af + dy * 256 + dx,
                         (float)kh[o], b + co * m, m, m);
         }
       }
     }
-    for (int co = 0; co < 16; ++co) {
-      int oc = ocb * 16 + co;
+    for (int co = 0; co < 8; ++co) {
+      int oc = ocb * 8 + co;
       __bang_float2half_rn(h, b + co * m, m);
       __memcpy(y + n * 4129024 + oc * 64516 + q * 254, h,
                254 * sizeof(half), NRAM2GDRAM, 254 * sizeof(half),
