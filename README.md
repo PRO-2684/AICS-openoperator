@@ -59,7 +59,7 @@ python scripts/update_problems.py
 | 008 | [conv_pointwise_2D](conv_pointwise_2D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/6b0a073) |
 | 009 | [conv_standard_1D](conv_standard_1D.mlu) | N/A | 🔴 |
 | 010 | [conv_standard_2D__square_input__square_kernel](conv_standard_2D__square_input__square_kernel.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/c68a42d) |
-| 011 | [conv_transposed_1D](conv_transposed_1D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/7cd13fd) |
+| 011 | [conv_transposed_1D](conv_transposed_1D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/284a301) |
 | 012 | [conv_transposed_2D__asymmetric_input__square_kernel](conv_transposed_2D__asymmetric_input__square_kernel.mlu) | N/A | 🔴 |
 | 013 | [3D_tensor_matrix_multiplication](3D_tensor_matrix_multiplication.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/68e7544) |
 | 014 | [4D_tensor_matrix_multiplication](4D_tensor_matrix_multiplication.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/ac6e6b1) |
@@ -184,7 +184,7 @@ python scripts/update_problems.py
 | 133 | [Triplet_loss](Triplet_loss.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/99356a7) |
 | 134 | [Depthwise_conv_2D](Depthwise_conv_2D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/d49d802) |
 | 135 | [Dilated_conv_2D](Dilated_conv_2D.mlu) | N/A | 🔴 |
-| 136 | [Grouped_conv_2D](Grouped_conv_2D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/c68a42d) |
+| 136 | [Grouped_conv_2D](Grouped_conv_2D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/016ebe2) |
 | 137 | [LSTM_forward](LSTM_forward.mlu) | N/A | 🔴 |
 | 138 | [GRU_forward](GRU_forward.mlu) | N/A | 🔴 |
 | 139 | [Sparse_attention_mask](Sparse_attention_mask.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/1865287) |
