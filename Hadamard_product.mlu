@@ -14,7 +14,6 @@ __mlu_entry__ void k0(half *__restrict__ x, const half *__restrict__ y) {
   half *s0 = s;
   half *s1 = s + C;
   half *s2 = s + C * 2;
-  half *s3 = s + C * 3;
   int q = taskIdY * C * 8;
   for (int i = 0; i < 8; ++i) {
     int r = q + i * C;
@@ -27,9 +26,11 @@ __mlu_entry__ void k0(half *__restrict__ x, const half *__restrict__ y) {
     __asm__ volatile("sync;");
     __bang_mul(a, a, b, B);
     __memcpy_async(s2 + p, a, B * sizeof(half), NRAM2SRAM);
+    __asm__ volatile("sync;");
     __sync_cluster();
     if (taskIdX == 0)
       __memcpy_async(x + r, s2, C * sizeof(half), SRAM2GDRAM);
+    __asm__ volatile("sync;");
     __sync_cluster();
   }
 }
