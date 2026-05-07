@@ -9,12 +9,13 @@
 __mlu_entry__ void k0(half *__restrict__ x, const half *__restrict__ y) {
   __nram__ half a[B];
   __nram__ half b[B];
-  for (int p = taskId * B; p < A; p += taskDim * B) {
-    __memcpy(a, x + p, B * sizeof(half), GDRAM2NRAM);
-    __memcpy(b, y + p, B * sizeof(half), GDRAM2NRAM);
-    __bang_mul(a, a, b, B);
-    __memcpy(x + p, a, B * sizeof(half), NRAM2GDRAM);
-  }
+  int p = taskId * B;
+  __memcpy_async(a, x + p, B * sizeof(half), GDRAM2NRAM);
+  __memcpy_async(b, y + p, B * sizeof(half), GDRAM2NRAM);
+  __asm__ volatile("sync;");
+  __bang_mul(a, a, b, B);
+  __memcpy_async(x + p, a, B * sizeof(half), NRAM2GDRAM);
+  __asm__ volatile("sync;");
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor y) {
