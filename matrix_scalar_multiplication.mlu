@@ -16,7 +16,7 @@ __mlu_entry__ void k0(half *__restrict__ x, float v) {
 }
 
 torch::Tensor bang_func(torch::Tensor x, double v) {
-  cnrtDim3_t d = {3, 8, 1};
+  cnrtDim3_t d = {2, 8, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()), (float)v);
   return x;
