@@ -13,9 +13,9 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   auto y = torch::empty_like(x);
   static cnnlTensorDescriptor_t d = nullptr;
   if (d == nullptr) {
-    int dims[2] = {16, 16384};
+    int dims[3] = {16, 1, 16384};
     X(cnnlCreateTensorDescriptor(&d));
-    X(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, dims));
+    X(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, dims));
   }
   half a = (half)1.0f;
   half b = (half)0.0f;
