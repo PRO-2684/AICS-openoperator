@@ -5,15 +5,23 @@
 
 #define A 268435456
 #define B 32768
+#define C 1048576
 
 __mlu_entry__ void k0(half *__restrict__ x, float v) {
   __nram__ half a[B];
-  for (int p = taskId * B; p < A; p += taskDim * B) {
-    __memcpy_async(a, x + p, B * sizeof(half), GDRAM2NRAM);
-    __asm__ volatile("sync;");
+  for (int p = taskId * B; p < A; p += C * 4) {
+    __memcpy(a, x + p, B * sizeof(half), GDRAM2NRAM);
     __bang_mul_scalar(a, a, v, B);
-    __memcpy_async(x + p, a, B * sizeof(half), NRAM2GDRAM);
-    __asm__ volatile("sync;");
+    __memcpy(x + p, a, B * sizeof(half), NRAM2GDRAM);
+    __memcpy(a, x + p + C, B * sizeof(half), GDRAM2NRAM);
+    __bang_mul_scalar(a, a, v, B);
+    __memcpy(x + p + C, a, B * sizeof(half), NRAM2GDRAM);
+    __memcpy(a, x + p + C * 2, B * sizeof(half), GDRAM2NRAM);
+    __bang_mul_scalar(a, a, v, B);
+    __memcpy(x + p + C * 2, a, B * sizeof(half), NRAM2GDRAM);
+    __memcpy(a, x + p + C * 3, B * sizeof(half), GDRAM2NRAM);
+    __bang_mul_scalar(a, a, v, B);
+    __memcpy(x + p + C * 3, a, B * sizeof(half), NRAM2GDRAM);
   }
 }
 
