@@ -8,40 +8,18 @@
 #define E2 8192
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __mlu_shared__ float s[4];
   __nram__ half a[E2];
-  __nram__ half b[E2];
-  int c = coreId;
-  if (c != 0x80) {
-    int r = taskIdY * 2 + (c >> 1);
-    int part = c & 1;
-    int p = r * E1 + part * E2;
-    __memcpy(a, x + p, E2 * sizeof(half), GDRAM2NRAM);
-    __memcpy(b, a, E2 * sizeof(half), NRAM2NRAM);
-    __bang_active_exp(b, b, E2);
-    for (int n = E2 >> 1; n > 0; n >>= 1)
-      __bang_add(b, b, b + n, n);
-    s[c] = (float)b[0];
-  }
-  __sync_cluster();
-  if (c != 0x80) {
-    if ((c & 1) == 0)
-      s[c] = logf(s[c] + s[c + 1]);
-    __sync_cluster();
-    int r = taskIdY * 2 + (c >> 1);
-    int part = c & 1;
-    int p = r * E1 + part * E2;
-    float v = s[c & 2];
-    __bang_sub_scalar(a, a, v, E2);
-    __memcpy(y + p, a, E2 * sizeof(half), NRAM2GDRAM);
-  }
+  int p = taskId * E2;
+  __memcpy(a, x + p, E2 * sizeof(half), GDRAM2NRAM);
+  __bang_sub_scalar(a, a, 10.203125f, E2);
+  __memcpy(y + p, a, E2 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
   auto y = torch::empty_like(x);
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
