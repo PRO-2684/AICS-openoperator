@@ -3,9 +3,9 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 48
-#define E1 65024
-#define E2 65536
+#define E0 192
+#define E1 16384
+#define E2 16896
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
@@ -15,11 +15,13 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ half k[27];
   __memcpy(k, w, 27 * sizeof(half), GDRAM2NRAM);
   for (int g = taskId; g < E0; g += taskDim) {
-    int n = g / 3;
-    int c = g - n * 3;
-    int rows = 254;
+    int n = g / 12;
+    int r0 = g - n * 12;
+    int c = r0 >> 2;
+    int q = (r0 & 3) << 6;
+    int rows = q == 192 ? 62 : 64;
     int m = rows << 8;
-    const half *p = x + n * 196608 + c * 65536;
+    const half *p = x + n * 196608 + c * 65536 + q * 256;
     __memcpy(a, p, (rows + 2) * 256 * sizeof(half), GDRAM2NRAM);
     __bang_half2float(af, a, (rows + 2) * 256);
     int o = c * 9;
@@ -31,7 +33,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                     m);
     }
     __bang_float2half_rn(a, b, m);
-    __memcpy(y + n * 193548 + c * 64516, a, 254 * sizeof(half),
+    __memcpy(y + n * 193548 + c * 64516 + q * 254, a, 254 * sizeof(half),
              NRAM2GDRAM, 254 * sizeof(half), 256 * sizeof(half), rows - 1);
   }
 }
