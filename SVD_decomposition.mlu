@@ -95,31 +95,11 @@ std::vector<torch::Tensor> bang_func(torch::Tensor A) {
     CNNL_CHECK(cnnlGetSvdWorkspaceSize(torch_mlu::getCurrentHandle(), ad, true,
                                        true, &ws));
   }
-  static torch::Tensor af;
-  static torch::Tensor u;
-  static torch::Tensor sv;
-  static torch::Tensor v;
-  static torch::Tensor info;
-  if (!af.defined())
-    af = torch::empty({E0, E1, E2}, A.options().dtype(torch::kFloat32));
-  else
-    af.resize_({E0, E1, E2});
-  if (!u.defined())
-    u = torch::empty({E0, E1, E2}, A.options().dtype(torch::kFloat32));
-  else
-    u.resize_({E0, E1, E2});
-  if (!sv.defined())
-    sv = torch::empty({E0, E2}, A.options().dtype(torch::kFloat32));
-  else
-    sv.resize_({E0, E2});
-  if (!v.defined())
-    v = torch::empty({E0, E2, E2}, A.options().dtype(torch::kFloat32));
-  else
-    v.resize_({E0, E2, E2});
-  if (!info.defined())
-    info = torch::empty({E0, 1}, A.options().dtype(torch::kInt32));
-  else
-    info.resize_({E0, 1});
+  auto af = torch::empty({E0, E1, E2}, A.options().dtype(torch::kFloat32));
+  auto u = torch::empty({E0, E1, E2}, A.options().dtype(torch::kFloat32));
+  auto sv = torch::empty({E0, E2}, A.options().dtype(torch::kFloat32));
+  auto v = torch::empty({E0, E2, E2}, A.options().dtype(torch::kFloat32));
+  auto info = torch::empty({E0, 1}, A.options().dtype(torch::kInt32));
   static torch::Tensor work;
   if (!work.defined())
     work = torch::empty({(int64_t)ws}, A.options().dtype(torch::kUInt8));
