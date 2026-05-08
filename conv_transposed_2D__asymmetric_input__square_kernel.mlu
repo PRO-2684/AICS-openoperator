@@ -31,6 +31,7 @@ __mlu_entry__ void k0(const half *__restrict__ w, half *__restrict__ z) {
 __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
   __nram__ half a[E10];
+  __nram__ half aa[E10];
   __nram__ float b[E11];
   __nram__ half c[E11];
   __nram__ half d[E11];
@@ -55,7 +56,8 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
         }
       }
     }
-    __bang_conv(b, a, e, E1, ih, E7, 3, 3, 1, 1, E2);
+    __bang_reshape_nchw2nhwc(aa, a, 1, ih, E7, E1);
+    __bang_conv(b, aa, e, E1, ih, E7, 3, 3, 1, 1, E2);
     int num = h * E6 * E2;
     __bang_float2half_rn(c, b, num);
     __bang_reshape_nhwc2nchw(d, c, 1, h, E6, E2);
