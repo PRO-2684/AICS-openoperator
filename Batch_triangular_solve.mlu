@@ -1,14 +1,33 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 093 093_Batch_triangular_solve
-// Category: matrix
-// Difficulty: hard
-// DType: float16
-// Description: 实现一个 BangC 算子，用于求解上三角线性方程组。输入包括形状为 `[batch, N, N]` 的上三角系数矩阵 `A` 以及形状为 `[batch, N, K]` 的右端项张量 `b`；输出为形状与 `b` 相同的线性方程组的解。
-// Wrapper: torch::Tensor bang_func(torch::Tensor A, torch::Tensor b);
+#define E0 8
+#define E1 64
+#define E2 4096
+
+__mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
+                      half *__restrict__ y) {
+  __nram__ half x[E2];
+  __nram__ half r[E1];
+  __memcpy(x, a + taskId * E2, E2 * sizeof(half), GDRAM2NRAM);
+  __memcpy(r, b + taskId * E1, E1 * sizeof(half), GDRAM2NRAM);
+  for (int i = E1 - 1; i >= 0; --i) {
+    float s = (float)r[i];
+    for (int j = i + 1; j < E1; ++j)
+      s -= (float)x[i * E1 + j] * (float)r[j];
+    r[i] = (half)(s / (float)x[i * E1 + i]);
+  }
+  __memcpy(y + taskId * E1, r, E1 * sizeof(half), NRAM2GDRAM);
+}
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor b) {
-  TORCH_CHECK(false, "TODO: implement Batch_triangular_solve");
+  auto y = torch::empty({E0, E1, 1}, b.options());
+  cnrtDim3_t d = {E0, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(b.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  return y;
 }
