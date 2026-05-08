@@ -23,7 +23,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ w,
   __nram__ float d[E1];
   __nram__ int e[E2];
   __nram__ int f[128];
-  __bang_write_value(b, E4, 0.0f);
   for (int i = 0; i < E2; ++i)
     e[i] = 0;
   int n = 0;
@@ -32,6 +31,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ w,
     if (e[q] == 0) {
       e[q] = 1;
       f[n++] = q;
+      __bang_write_value(b + q * E1, E1, 0.0f);
     }
     __memcpy(c, x + r * E1, E1 * sizeof(half), GDRAM2NRAM);
     __bang_half2float(d, c, E1);
