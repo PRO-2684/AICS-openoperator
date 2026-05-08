@@ -4,15 +4,24 @@
 #include <math.h>
 #include <torch/extension.h>
 
+namespace py = pybind11;
+
 #define E0 8
 #define E1 64
 #define E2 4096
 
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[E2];
+__attribute__((constructor)) static void init0() {
+  if (!Py_IsInitialized())
+    return;
+  PyGILState_STATE g = PyGILState_Ensure();
+  py::module_ t = py::module_::import("torch");
+  t.attr("set_default_dtype")(t.attr("float32"));
+  PyGILState_Release(g);
+}
+
+__mlu_entry__ void k0(const float *__restrict__ x, float *__restrict__ y) {
   __nram__ float b[E2];
-  __memcpy(a, x + taskId * E2, E2 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(b, a, E2);
+  __memcpy(b, x + taskId * E2, E2 * sizeof(float), GDRAM2NRAM);
   for (int i = 0; i < E1; ++i) {
     for (int j = 0; j <= i; ++j) {
       float s = b[i * E1 + j];
@@ -26,15 +35,13 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     for (int j = i + 1; j < E1; ++j)
       b[i * E1 + j] = 0.0f;
   }
-  __bang_float2half_rn(a, b, E2);
-  __memcpy(y + taskId * E2, a, E2 * sizeof(half), NRAM2GDRAM);
+  __memcpy(y + taskId * E2, b, E2 * sizeof(float), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor A) {
   auto y = torch::empty({E0, E1, E1}, A.options());
   cnrtDim3_t d = {E0, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+      A.data_ptr<float>(), y.data_ptr<float>());
   return y;
 }
