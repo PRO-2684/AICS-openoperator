@@ -6,38 +6,86 @@
 #define E0 16
 #define E1 1024
 #define E2 10
+#define E3 512
+#define E4 20
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
-                      int64_t *__restrict__ z) {
-  __nram__ half a[E1 + 128];
+                      int64_t *__restrict__ z, half *__restrict__ w,
+                      int64_t *__restrict__ u) {
+  __nram__ half a[E3 + 64];
   __nram__ half b[128];
-  __nram__ half c[E1];
+  __nram__ half c[E3];
+  int r = taskId >> 1;
+  int s = taskId & 1;
+  if (r >= E0)
+    return;
+  __memcpy(a, x + r * E1 + s * E3, E3 * sizeof(half), GDRAM2NRAM);
+  for (int i = 0; i < E2; ++i) {
+    __bang_argmax(b, a, E3);
+    half v = b[0];
+    int p = 0;
+    for (int j = 0; j < E3; ++j) {
+      if (a[j] == v) {
+        p = j;
+        break;
+      }
+    }
+    w[r * E4 + s * E2 + i] = v;
+    u[r * E4 + s * E2 + i] = (int64_t)(s * E3 + p);
+    __bang_ne_scalar(c, a, v, E3);
+    __bang_mul(a, a, c, E3);
+    __bang_add_scalar(c, c, (half)-1.0f, E3);
+    __bang_mul_scalar(c, c, (half)65504.0f, E3);
+    __bang_add(a, a, c, E3);
+  }
+}
+
+__mlu_entry__ void k1(const half *__restrict__ w, const int64_t *__restrict__ u,
+                      half *__restrict__ y, int64_t *__restrict__ z) {
+  __nram__ half a[E4 + 64];
+  __nram__ int64_t b[E4];
   int r = taskId;
   if (r >= E0)
     return;
-  __memcpy(a, x + r * E1, E1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(a, w + r * E4, E4 * sizeof(half), GDRAM2NRAM);
+  __memcpy(b, u + r * E4, E4 * sizeof(int64_t), GDRAM2NRAM);
   for (int i = 0; i < E2; ++i) {
-    __bang_argmax(b, a, E1);
-    half v = b[0];
+    half v = a[0];
+    int p = 0;
+    for (int j = 1; j < E4; ++j) {
+      if (a[j] > v) {
+        v = a[j];
+        p = j;
+      }
+    }
     y[r * E2 + i] = v;
-    z[r * E2 + i] = (int64_t)(*((unsigned long *)(b + 64)));
-    __bang_ne_scalar(c, a, v, E1);
-    __bang_mul(a, a, c, E1);
-    __bang_add_scalar(c, c, (half)-1.0f, E1);
-    __bang_mul_scalar(c, c, (half)65504.0f, E1);
-    __bang_add(a, a, c, E1);
+    z[r * E2 + i] = b[p];
+    a[p] = (half)-65504.0f;
   }
 }
 
 std::vector<torch::Tensor> bang_func(torch::Tensor x, int k, int dim) {
   (void)k;
   (void)dim;
+  static torch::Tensor w;
+  static torch::Tensor u;
+  if (!w.defined())
+    w = torch::empty({E0, E4}, x.options());
+  if (!u.defined())
+    u = torch::empty({E0, E4}, x.options().dtype(torch::kInt64));
   auto y = torch::empty({E0, E2}, x.options());
   auto z = torch::empty({E0, E2}, x.options().dtype(torch::kInt64));
-  cnrtDim3_t d = {E0, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  cnrtDim3_t d = {E0 * 2, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()),
-      z.data_ptr<int64_t>());
+      z.data_ptr<int64_t>(), reinterpret_cast<half *>(w.data_ptr<at::Half>()),
+      u.data_ptr<int64_t>());
+  cnrtDim3_t e = {E0, 1, 1};
+  k1<<<e, cnrtFuncTypeBlock, q>>>(reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
+                                  u.data_ptr<int64_t>(),
+                                  reinterpret_cast<half *>(y.data_ptr<at::Half>()),
+                                  z.data_ptr<int64_t>());
   return {y, z};
 }
