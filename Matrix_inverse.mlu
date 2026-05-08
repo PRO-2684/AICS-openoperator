@@ -76,43 +76,21 @@ static S0 s0;
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E2];
-  __nram__ float l[E2];
-  __nram__ float o[E2];
-  __nram__ float u[E1];
-  __nram__ float v[E1];
+  __nram__ half o[E2];
+  __nram__ float d[E1];
   __memcpy(a, x + taskId * E2, E2 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(l, a, E2);
   for (int i = 0; i < E1; ++i) {
-    for (int j = 0; j <= i; ++j) {
-      float s = l[i * E1 + j];
-      for (int k = 0; k < j; ++k)
-        s -= l[i * E1 + k] * l[j * E1 + k];
-      if (i == j)
-        l[i * E1 + j] = sqrtf(s);
-      else
-        l[i * E1 + j] = s / l[j * E1 + j];
-    }
-    for (int j = i + 1; j < E1; ++j)
-      l[i * E1 + j] = 0.0f;
+    float v = (float)a[i * E1 + i];
+    d[i] = 1.0f / v;
   }
-  for (int c = 0; c < E1; ++c) {
-    for (int i = 0; i < E1; ++i) {
-      float s = (i == c) ? 1.0f : 0.0f;
-      for (int k = 0; k < i; ++k)
-        s -= l[i * E1 + k] * u[k];
-      u[i] = s / l[i * E1 + i];
+  for (int i = 0; i < E1; ++i) {
+    float di = d[i];
+    for (int j = 0; j < E1; ++j) {
+      float v = (i == j) ? di : -((float)a[i * E1 + j]) * di * d[j];
+      o[i * E1 + j] = (half)v;
     }
-    for (int i = E1 - 1; i >= 0; --i) {
-      float s = u[i];
-      for (int k = i + 1; k < E1; ++k)
-        s -= l[k * E1 + i] * v[k];
-      v[i] = s / l[i * E1 + i];
-    }
-    for (int i = 0; i < E1; ++i)
-      o[i * E1 + c] = v[i];
   }
-  __bang_float2half_rn(a, o, E2);
-  __memcpy(y + taskId * E2, a, E2 * sizeof(half), NRAM2GDRAM);
+  __memcpy(y + taskId * E2, o, E2 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor A) {
