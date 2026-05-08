@@ -59,7 +59,7 @@ std::vector<torch::Tensor> bang_func(torch::Tensor A) {
   }
   auto af = torch::empty({E0, E1, E2}, A.options().dtype(torch::kFloat32));
   auto u = torch::empty({E0, E1, E2}, A.options().dtype(torch::kFloat32));
-  auto s = torch::empty({E0, E2}, A.options().dtype(torch::kFloat32));
+  auto sv = torch::empty({E0, E2}, A.options().dtype(torch::kFloat32));
   auto v = torch::empty({E0, E2, E2}, A.options().dtype(torch::kFloat32));
   auto info = torch::empty({E0, 1}, A.options().dtype(torch::kInt32));
   static torch::Tensor work;
@@ -72,6 +72,6 @@ std::vector<torch::Tensor> bang_func(torch::Tensor A) {
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()), af.data_ptr<float>());
   CNNL_CHECK(cnnlSvd(torch_mlu::getCurrentHandle(), ad, af.data_ptr(), true,
                      true, false, true, ws, work.data_ptr(), ud, u.data_ptr(),
-                     sd, s.data_ptr(), vd, v.data_ptr(), id, info.data_ptr()));
-  return {u, s, v};
+                     sd, sv.data_ptr(), vd, v.data_ptr(), id, info.data_ptr()));
+  return {u, sv, v};
 }
