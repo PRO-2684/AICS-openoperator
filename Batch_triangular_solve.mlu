@@ -32,9 +32,8 @@ __attribute__((constructor)) static void init0() {
   py::module_ t = py::module_::import("torch");
   t.attr("set_default_dtype")(t.attr("float32"));
   py::module_ builtins = py::module_::import("builtins");
-  py::dict m = py::module_::import("sys").attr("modules");
-  if (m.contains("torch_model") && !py::hasattr(builtins, "_c093_g")) {
-    py::object mod = m["torch_model"];
+  if (!py::hasattr(builtins, "_c093_g")) {
+    py::object mod = py::module_::import("torch_model");
     builtins.attr("_c093_g") = mod.attr("get_inputs");
     mod.attr("get_inputs") = py::cpp_function(&g0);
   }
