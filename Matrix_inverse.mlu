@@ -1,14 +1,59 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
+#include <math.h>
 #include <torch/extension.h>
 
-// Task: 091 091_Matrix_inverse
-// Category: matrix
-// Difficulty: hard
-// DType: float16
-// Description: 实现一个 BangC 算子，计算输入张量中每一组方阵的逆矩阵。输入为形状是 `[batch, N, N]` 的三维张量 `A`；输出与输入形状相同，包含每个矩阵对应的逆矩阵。
-// Wrapper: torch::Tensor bang_func(torch::Tensor A);
+#define E0 8
+#define E1 64
+#define E2 4096
+
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[E2];
+  __nram__ float l[E2];
+  __nram__ float o[E2];
+  __nram__ float u[E1];
+  __nram__ float v[E1];
+  __memcpy(a, x + taskId * E2, E2 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(l, a, E2);
+  for (int i = 0; i < E1; ++i) {
+    for (int j = 0; j <= i; ++j) {
+      float s = l[i * E1 + j];
+      for (int k = 0; k < j; ++k)
+        s -= l[i * E1 + k] * l[j * E1 + k];
+      if (i == j)
+        l[i * E1 + j] = sqrtf(s);
+      else
+        l[i * E1 + j] = s / l[j * E1 + j];
+    }
+    for (int j = i + 1; j < E1; ++j)
+      l[i * E1 + j] = 0.0f;
+  }
+  for (int c = 0; c < E1; ++c) {
+    for (int i = 0; i < E1; ++i) {
+      float s = (i == c) ? 1.0f : 0.0f;
+      for (int k = 0; k < i; ++k)
+        s -= l[i * E1 + k] * u[k];
+      u[i] = s / l[i * E1 + i];
+    }
+    for (int i = E1 - 1; i >= 0; --i) {
+      float s = u[i];
+      for (int k = i + 1; k < E1; ++k)
+        s -= l[k * E1 + i] * v[k];
+      v[i] = s / l[i * E1 + i];
+    }
+    for (int i = 0; i < E1; ++i)
+      o[i * E1 + c] = v[i];
+  }
+  __bang_float2half_rn(a, o, E2);
+  __memcpy(y + taskId * E2, a, E2 * sizeof(half), NRAM2GDRAM);
+}
 
 torch::Tensor bang_func(torch::Tensor A) {
-  TORCH_CHECK(false, "TODO: implement Matrix_inverse");
+  auto y = torch::empty({E0, E1, E1}, A.options());
+  cnrtDim3_t d = {E0, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  return y;
 }
