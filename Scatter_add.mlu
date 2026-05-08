@@ -6,26 +6,40 @@
 #define E0 4096
 #define E1 256
 #define E2 512
-#define E3 64
-#define E4 4096
+#define E3 4096
+#define E4 131072
 
 __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ w,
                       float *__restrict__ y) {
-  __nram__ float z[E4];
-  __bang_write_value(z, E4, 0.0f);
-  for (int p = taskId * E4; p < E2 * E1; p += taskDim * E4) {
-    __memcpy(y + p, z, E4 * sizeof(float), NRAM2GDRAM);
+  __nram__ float a[E3];
+  __bang_write_value(a, E3, 0.0f);
+  for (int p = taskId * E3; p < E2 * E1; p += taskDim * E3) {
+    __memcpy(y + p, a, E3 * sizeof(float), NRAM2GDRAM);
   }
   __sync_all_ipu();
-  __nram__ half a[E3];
-  __nram__ float b[E3];
-  int c = (taskId & 3) * E3;
-  int t = taskId >> 2;
-  for (int r = t; r < E0; r += 8) {
-    __memcpy(a, x + r * E1 + c, E3 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(b, a, E3);
-    int64_t q = w[r];
-    __bang_atomic_reduce_add(y + q * E1 + c, b, E3);
+
+  __nram__ float b[E4];
+  __nram__ half c[E1];
+  __nram__ float d[E1];
+  __nram__ int e[E2];
+  __nram__ int f[128];
+  __bang_write_value(b, E4, 0.0f);
+  for (int i = 0; i < E2; ++i)
+    e[i] = 0;
+  int n = 0;
+  for (int r = taskId; r < E0; r += taskDim) {
+    int q = (int)w[r];
+    if (e[q] == 0) {
+      e[q] = 1;
+      f[n++] = q;
+    }
+    __memcpy(c, x + r * E1, E1 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(d, c, E1);
+    __bang_add(b + q * E1, b + q * E1, d, E1);
+  }
+  for (int i = 0; i < n; ++i) {
+    int q = f[i];
+    __bang_atomic_reduce_add(y + q * E1, b + q * E1, E1);
   }
 }
 
