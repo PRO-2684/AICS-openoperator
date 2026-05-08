@@ -98,10 +98,13 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
         float v1 = s[j * E1 + k + 1];
         float v2 = s[j * E1 + k + 2];
         float v3 = s[j * E1 + k + 3];
-        v -= v0 * v0 + v1 * v1 + v2 * v2 + v3 * v3;
+        v = fmaf(-v0, v0, v);
+        v = fmaf(-v1, v1, v);
+        v = fmaf(-v2, v2, v);
+        v = fmaf(-v3, v3, v);
       }
       for (; k < m; ++k)
-        v -= s[j * E1 + k] * s[j * E1 + k];
+        v = fmaf(-s[j * E1 + k], s[j * E1 + k], v);
       s[j * E1 + j] = sqrtf(v);
     }
     __sync_cluster();
@@ -112,13 +115,13 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
         int k = 0;
         int m = j;
         for (; k + 3 < m; k += 4) {
-          v -= s[i * E1 + k] * s[j * E1 + k] +
-               s[i * E1 + k + 1] * s[j * E1 + k + 1] +
-               s[i * E1 + k + 2] * s[j * E1 + k + 2] +
-               s[i * E1 + k + 3] * s[j * E1 + k + 3];
+          v = fmaf(-s[i * E1 + k], s[j * E1 + k], v);
+          v = fmaf(-s[i * E1 + k + 1], s[j * E1 + k + 1], v);
+          v = fmaf(-s[i * E1 + k + 2], s[j * E1 + k + 2], v);
+          v = fmaf(-s[i * E1 + k + 3], s[j * E1 + k + 3], v);
         }
         for (; k < m; ++k)
-          v -= s[i * E1 + k] * s[j * E1 + k];
+          v = fmaf(-s[i * E1 + k], s[j * E1 + k], v);
         s[i * E1 + j] = v / d;
       }
     }
