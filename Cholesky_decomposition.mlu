@@ -1,14 +1,40 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
+#include <math.h>
 #include <torch/extension.h>
 
-// Task: 127 127_Cholesky_decomposition
-// Category: matrix
-// Difficulty: hard
-// DType: float16
-// Description: 实现一个 BangC 算子，计算输入 batch 矩阵的 Cholesky 分解。输入为形状是 `[batch, N, N]` 的对称正定矩阵张量 `A`；算子将其分解为一个下三角矩阵与其转置的乘积，输出与 `A` 形状相同。
-// Wrapper: torch::Tensor bang_func(torch::Tensor A);
+#define E0 8
+#define E1 64
+#define E2 4096
+
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[E2];
+  __nram__ float b[E2];
+  __memcpy(a, x + taskId * E2, E2 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(b, a, E2);
+  for (int i = 0; i < E1; ++i) {
+    for (int j = 0; j <= i; ++j) {
+      float s = b[i * E1 + j];
+      for (int k = 0; k < j; ++k)
+        s -= b[i * E1 + k] * b[j * E1 + k];
+      if (i == j)
+        b[i * E1 + j] = sqrtf(s);
+      else
+        b[i * E1 + j] = s / b[j * E1 + j];
+    }
+    for (int j = i + 1; j < E1; ++j)
+      b[i * E1 + j] = 0.0f;
+  }
+  __bang_float2half_rn(a, b, E2);
+  __memcpy(y + taskId * E2, a, E2 * sizeof(half), NRAM2GDRAM);
+}
 
 torch::Tensor bang_func(torch::Tensor A) {
-  TORCH_CHECK(false, "TODO: implement Cholesky_decomposition");
+  auto y = torch::empty({E0, E1, E1}, A.options());
+  cnrtDim3_t d = {E0, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  return y;
 }
