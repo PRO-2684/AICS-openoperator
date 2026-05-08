@@ -77,6 +77,7 @@ static S0 s0;
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __mlu_shared__ float s[E2];
+  __mlu_shared__ float p[4];
   __nram__ half a[E3];
   __nram__ float b[E3];
   int n = taskIdY;
@@ -89,22 +90,16 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   }
   __sync_cluster();
   for (int j = 0; j < E1; ++j) {
+    if (c < 4) {
+      float u = 0.0f;
+      for (int k = c; k < j; k += 4)
+        u = fmaf(s[j * E1 + k], s[j * E1 + k], u);
+      p[c] = u;
+    }
+    __sync_cluster();
     if (c == 0) {
       float v = s[j * E1 + j];
-      int k = 0;
-      int m = j;
-      for (; k + 3 < m; k += 4) {
-        float v0 = s[j * E1 + k];
-        float v1 = s[j * E1 + k + 1];
-        float v2 = s[j * E1 + k + 2];
-        float v3 = s[j * E1 + k + 3];
-        v = fmaf(-v0, v0, v);
-        v = fmaf(-v1, v1, v);
-        v = fmaf(-v2, v2, v);
-        v = fmaf(-v3, v3, v);
-      }
-      for (; k < m; ++k)
-        v = fmaf(-s[j * E1 + k], s[j * E1 + k], v);
+      v -= p[0] + p[1] + p[2] + p[3];
       s[j * E1 + j] = sqrtf(v);
     }
     __sync_cluster();
