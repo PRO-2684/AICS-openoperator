@@ -7,9 +7,16 @@
 #define E1 256
 #define E2 512
 #define E3 64
+#define E4 4096
 
 __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ w,
                       float *__restrict__ y) {
+  __nram__ float z[E4];
+  __bang_write_value(z, E4, 0.0f);
+  for (int p = taskId * E4; p < E2 * E1; p += taskDim * E4) {
+    __memcpy(y + p, z, E4 * sizeof(float), NRAM2GDRAM);
+  }
+  __sync_all_ipu();
   __nram__ half a[E3];
   __nram__ float b[E3];
   int c = (taskId & 3) * E3;
@@ -26,7 +33,6 @@ torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
   (void)dim_size;
   auto y = torch::empty({E2, E1}, src.options().dtype(torch::kFloat32));
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtMemsetAsync(y.data_ptr(), 0, E2 * E1 * sizeof(float), q);
   cnrtDim3_t d = {4, 8, 1};
   k0<<<d, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(src.data_ptr<at::Half>()),
