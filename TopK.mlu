@@ -20,7 +20,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
     __bang_argmax(b, a, E1);
     half v = b[0];
     y[r * E2 + i] = v;
-    z[r * E2 + i] = (int64_t)(*((unsigned long *)(b + 2)));
+    z[r * E2 + i] = (int64_t)(*((unsigned long *)(b + 3)));
     __bang_ne_scalar(c, a, v, E1);
     __bang_mul(a, a, c, E1);
     __bang_add_scalar(c, c, (half)-1.0f, E1);
