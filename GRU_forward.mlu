@@ -34,8 +34,8 @@ if not hasattr(builtins, "_c138_o"):
 
 static torch::Tensor wt(int i) {
   PyGILState_STATE g = PyGILState_Ensure();
-  py::object w = py::module_::import("builtins").attr("_c138_w");
-  torch::Tensor t = py::cast<torch::Tensor>(w[i]);
+  py::list w = py::module_::import("builtins").attr("_c138_w");
+  torch::Tensor t = py::cast<torch::Tensor>(w[py::int_(i)]);
   PyGILState_Release(g);
   return t;
 }
