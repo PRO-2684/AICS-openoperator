@@ -91,7 +91,15 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   for (int j = 0; j < E1; ++j) {
     if (c == 0) {
       float v = s[j * E1 + j];
-      for (int k = 0; k < j; ++k)
+      int k = 0;
+      for (; k + 3 < j; k += 4) {
+        float v0 = s[j * E1 + k];
+        float v1 = s[j * E1 + k + 1];
+        float v2 = s[j * E1 + k + 2];
+        float v3 = s[j * E1 + k + 3];
+        v -= v0 * v0 + v1 * v1 + v2 * v2 + v3 * v3;
+      }
+      for (; k < j; ++k)
         v -= s[j * E1 + k] * s[j * E1 + k];
       s[j * E1 + j] = sqrtf(v);
     }
@@ -100,7 +108,14 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
       float d = s[j * E1 + j];
       for (int i = j + 1 + c; i < E1; i += 4) {
         float v = s[i * E1 + j];
-        for (int k = 0; k < j; ++k)
+        int k = 0;
+        for (; k + 3 < j; k += 4) {
+          v -= s[i * E1 + k] * s[j * E1 + k] +
+               s[i * E1 + k + 1] * s[j * E1 + k + 1] +
+               s[i * E1 + k + 2] * s[j * E1 + k + 2] +
+               s[i * E1 + k + 3] * s[j * E1 + k + 3];
+        }
+        for (; k < j; ++k)
           v -= s[i * E1 + k] * s[j * E1 + k];
         s[i * E1 + j] = v / d;
       }
