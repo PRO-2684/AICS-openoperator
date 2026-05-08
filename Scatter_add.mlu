@@ -1,57 +1,14 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 4096
-#define E1 256
-#define E2 512
-#define E3 4096
-
-__mlu_entry__ void k0(float *__restrict__ y) {
-  __nram__ float a[E3];
-  __bang_write_value(a, E3, 0.0f);
-  for (int p = taskId * E3; p < E2 * E1; p += taskDim * E3) {
-    __memcpy(y + p, a, E3 * sizeof(float), NRAM2GDRAM);
-  }
-}
-
-__mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
-                      float *__restrict__ y) {
-  __nram__ half a[E1];
-  __nram__ float b[E1];
-  for (int r = taskId; r < E0; r += taskDim) {
-    __memcpy(a, x + r * E1, E1 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(b, a, E1);
-    int64_t q = w[r];
-    __bang_atomic_reduce_add(y + q * E1, b, E1);
-  }
-}
-
-__mlu_entry__ void k2(const float *__restrict__ x, half *__restrict__ y) {
-  __nram__ float a[E3];
-  __nram__ half b[E3];
-  for (int p = taskId * E3; p < E2 * E1; p += taskDim * E3) {
-    __memcpy(a, x + p, E3 * sizeof(float), GDRAM2NRAM);
-    __bang_float2half_rn(b, a, E3);
-    __memcpy(y + p, b, E3 * sizeof(half), NRAM2GDRAM);
-  }
-}
+// Task: 109 109_Scatter_add
+// Category: io
+// Difficulty: basic
+// DType: float16
+// Description: 实现一个 BangC 算子，根据索引张量将源张量的数据累加到目标张量的对应位置。输入包括形状为 `[N, D]` 的源张量 `src`、形状为 `[N]` 的索引张量 `index` 以及指定输出首维长度的整数 `dim_size`；输出张量的形状为 `[dim_size, D]`。
+// Wrapper: torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size);
 
 torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
-  (void)dim_size;
-  static torch::Tensor buf;
-  if (!buf.defined())
-    buf = torch::empty({E2, E1}, src.options().dtype(torch::kFloat32));
-  auto y = torch::empty({E2, E1}, src.options());
-  cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, q>>>(buf.data_ptr<float>());
-  k1<<<d, cnrtFuncTypeUnion1, q>>>(
-      reinterpret_cast<const half *>(src.data_ptr<at::Half>()),
-      index.data_ptr<int64_t>(),
-      buf.data_ptr<float>());
-  k2<<<d, cnrtFuncTypeUnion1, q>>>(buf.data_ptr<float>(),
-                                   reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-  return y;
+  TORCH_CHECK(false, "TODO: implement Scatter_add");
 }
