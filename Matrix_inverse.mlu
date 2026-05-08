@@ -47,6 +47,11 @@ __attribute__((constructor)) static void init0() {
   PyGILState_Release(g);
 }
 
+struct S0 {
+  S0() { init0(); }
+};
+static S0 s0;
+
 __mlu_entry__ void k0(const float *__restrict__ x, float *__restrict__ y) {
   __nram__ float l[E2];
   __nram__ float o[E2];
