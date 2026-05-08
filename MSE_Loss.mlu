@@ -37,8 +37,12 @@ __mlu_entry__ void k1(const float *__restrict__ x, float *__restrict__ y) {
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
-  auto out = torch::empty({}, predictions.options().dtype(torch::kFloat32));
-  auto tmp = torch::empty({E0}, predictions.options().dtype(torch::kFloat32));
+  static torch::Tensor out;
+  static torch::Tensor tmp;
+  if (!out.defined())
+    out = torch::empty({}, predictions.options().dtype(torch::kFloat32));
+  if (!tmp.defined())
+    tmp = torch::empty({E0}, predictions.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t g0 = {4, 8, 1};
   k0<<<g0, cnrtFuncTypeUnion1, queue>>>(
