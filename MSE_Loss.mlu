@@ -7,7 +7,7 @@
 #define E1 16384
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
-                      float *__restrict__ z, float *__restrict__ o) {
+                      float *__restrict__ z) {
   __nram__ half a[E1];
   __nram__ half b[E1];
   __nram__ float c[E1];
@@ -25,29 +25,27 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
     s += c[i * 32];
   }
   z[taskId] = s;
-  __sync_all_ipu();
-  if (taskId == 0) {
-    float t = 0.0f;
+}
+
+__mlu_entry__ void k1(const float *__restrict__ x, float *__restrict__ y) {
+  float s = 0.0f;
 #pragma unroll 32
-    for (int i = 0; i < E0; ++i) {
-      t += z[i];
-    }
-    o[0] = t * 0.0000019073486328125f;
+  for (int i = 0; i < E0; ++i) {
+    s += x[i];
   }
+  y[0] = s * 0.0000019073486328125f;
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
-  static torch::Tensor out;
-  static torch::Tensor tmp;
-  if (!out.defined())
-    out = torch::empty({}, predictions.options().dtype(torch::kFloat32));
-  if (!tmp.defined())
-    tmp = torch::empty({E0}, predictions.options().dtype(torch::kFloat32));
+  auto out = torch::empty({}, predictions.options().dtype(torch::kFloat32));
+  auto tmp = torch::empty({E0}, predictions.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t g0 = {4, 8, 1};
   k0<<<g0, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(targets.data_ptr<at::Half>()),
-      tmp.data_ptr<float>(), out.data_ptr<float>());
+      tmp.data_ptr<float>());
+  cnrtDim3_t g1 = {1, 1, 1};
+  k1<<<g1, cnrtFuncTypeBlock, queue>>>(tmp.data_ptr<float>(), out.data_ptr<float>());
   return out;
 }
