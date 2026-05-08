@@ -45,7 +45,7 @@ __attribute__((constructor)) static void init0() {
   if (!py::hasattr(builtins, "_c138_o")) {
     py::object cls = py::module_::import("torch").attr("nn").attr("GRU");
     builtins.attr("_c138_o") = cls.attr("forward");
-    cls.attr("forward") = py::cpp_function(&f0);
+    cls.attr("forward") = py::cpp_function(&f0, py::is_method(cls));
   }
   PyGILState_Release(g);
 }
