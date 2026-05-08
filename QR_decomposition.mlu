@@ -1,14 +1,49 @@
+#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
+#include <cnnl.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 126 126_QR_decomposition
-// Category: matrix
-// Difficulty: hard
-// DType: float16
-// Description: 实现一个 BangC 算子，对输入的三维批量矩阵执行 QR 分解，将其分解为一个正交矩阵 Q 和一个上三角矩阵 R。输入为形状为 `[batch, M, N]` 的张量 `A`；输出为 QR 分解得到的张量 Q 与 R。
-// Wrapper: std::vector<torch::Tensor> bang_func(torch::Tensor A);
+#define E0 8
+#define E1 128
+#define E2 64
+
+#define CNNL_CHECK(expr)                                                      \
+  do {                                                                        \
+    cnnlStatus_t s = (expr);                                                  \
+    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);      \
+  } while (0)
 
 std::vector<torch::Tensor> bang_func(torch::Tensor A) {
-  TORCH_CHECK(false, "TODO: implement QR_decomposition");
+  static cnnlTensorDescriptor_t ad = nullptr;
+  static cnnlTensorDescriptor_t qd = nullptr;
+  static cnnlTensorDescriptor_t rd = nullptr;
+  static size_t ws = 0;
+  if (ad == nullptr) {
+    int as[3] = {E0, E1, E2};
+    int qs[3] = {E0, E1, E2};
+    int rs[3] = {E0, E2, E2};
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&ad));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&qd));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&rd));
+    CNNL_CHECK(
+        cnnlSetTensorDescriptor(ad, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, as));
+    CNNL_CHECK(
+        cnnlSetTensorDescriptor(qd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, qs));
+    CNNL_CHECK(
+        cnnlSetTensorDescriptor(rd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, rs));
+    CNNL_CHECK(cnnlGetQRWorkspaceSize(torch_mlu::getCurrentHandle(), ad, true,
+                                      &ws));
+  }
+  auto q = torch::empty({E0, E1, E2}, A.options());
+  auto r = torch::empty({E0, E2, E2}, A.options());
+  static torch::Tensor work;
+  if (!work.defined())
+    work = torch::empty({(int64_t)ws}, A.options().dtype(torch::kUInt8));
+  else
+    work.resize_({(int64_t)ws});
+  CNNL_CHECK(cnnlQR(torch_mlu::getCurrentHandle(), ad, A.data_ptr(), qd,
+                    q.data_ptr(), rd, r.data_ptr(), work.data_ptr(), ws, true));
+  return {q, r};
 }
