@@ -21,13 +21,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
     half v = b[0];
     y[r * E2 + i] = v;
     __bang_eq_scalar(c, a, v, E1);
-    z[r * E2 + i] = (int64_t)__bang_findfirst1(c, E1);
-    __bang_mul_scalar(c, c, (half)-1.0f, E1);
-    __bang_add_scalar(c, c, (half)1.0f, E1);
-    __bang_mul(a, a, c, E1);
-    __bang_add_scalar(c, c, (half)-1.0f, E1);
-    __bang_mul_scalar(c, c, (half)65504.0f, E1);
-    __bang_add(a, a, c, E1);
+    unsigned int p = __bang_findfirst1(c, E1);
+    z[r * E2 + i] = (int64_t)p;
+    a[p] = (half)-65504.0f;
   }
 }
 
