@@ -75,25 +75,44 @@ struct S0 {
 static S0 s0;
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __mlu_shared__ float s[E2];
   __nram__ half a[E2];
   __nram__ float b[E2];
-  __memcpy(a, x + taskId * E2, E2 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(b, a, E2);
-  for (int i = 0; i < E1; ++i) {
-    for (int j = 0; j <= i; ++j) {
-      float s = b[i * E1 + j];
-      for (int k = 0; k < j; ++k)
-        s -= b[i * E1 + k] * b[j * E1 + k];
-      if (i == j)
-        b[i * E1 + j] = sqrtf(s);
-      else
-        b[i * E1 + j] = s / b[j * E1 + j];
-    }
-    for (int j = i + 1; j < E1; ++j)
-      b[i * E1 + j] = 0.0f;
+  int n = taskIdY;
+  int c = coreId;
+  if (c == 0) {
+    __memcpy(a, x + n * E2, E2 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(b, a, E2);
+    __memcpy(s, b, E2 * sizeof(float), NRAM2SRAM);
   }
-  __bang_float2half_rn(a, b, E2);
-  __memcpy(y + taskId * E2, a, E2 * sizeof(half), NRAM2GDRAM);
+  __sync_cluster();
+  for (int j = 0; j < E1; ++j) {
+    if (c == 0) {
+      float v = s[j * E1 + j];
+      for (int k = 0; k < j; ++k)
+        v -= s[j * E1 + k] * s[j * E1 + k];
+      s[j * E1 + j] = sqrtf(v);
+    }
+    __sync_cluster();
+    if (c < 4) {
+      float d = s[j * E1 + j];
+      for (int i = j + 1 + c; i < E1; i += 4) {
+        float v = s[i * E1 + j];
+        for (int k = 0; k < j; ++k)
+          v -= s[i * E1 + k] * s[j * E1 + k];
+        s[i * E1 + j] = v / d;
+      }
+    }
+    __sync_cluster();
+  }
+  if (c == 0) {
+    __memcpy(b, s, E2 * sizeof(float), SRAM2NRAM);
+    for (int i = 0; i < E1; ++i)
+      for (int j = i + 1; j < E1; ++j)
+        b[i * E1 + j] = 0.0f;
+    __bang_float2half_rn(a, b, E2);
+    __memcpy(y + n * E2, a, E2 * sizeof(half), NRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor A) {
@@ -102,8 +121,8 @@ torch::Tensor bang_func(torch::Tensor A) {
     y = torch::empty({E0, E1, E1}, A.options());
   else
     y.resize_({E0, E1, E1});
-  cnrtDim3_t d = {E0, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {4, E0, 1};
+  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
