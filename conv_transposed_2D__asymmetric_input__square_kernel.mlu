@@ -11,10 +11,10 @@
 #define E5 130
 #define E6 258
 #define E7 260
-#define E8 4
+#define E8 3
 #define E9 18432
-#define E10 49920
-#define E11 66048
+#define E10 41600
+#define E11 49536
 
 __mlu_entry__ void k0(const half *__restrict__ w, half *__restrict__ z) {
   for (int p = taskId; p < E9; p += taskDim) {
@@ -37,9 +37,9 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ half d[E11];
   __wram__ half e[E9];
   __memcpy(e, w, E9 * sizeof(half), GDRAM2WRAM);
-  for (int g = taskId; g < E0 * 33; g += taskDim) {
-    int n = g / 33;
-    int r = (g - n * 33) * E8;
+  for (int g = taskId; g < E0 * 44; g += taskDim) {
+    int n = g / 44;
+    int r = (g - n * 44) * E8;
     int h = E8;
     if (r + h > E5)
       h = E5 - r;
