@@ -24,8 +24,6 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, int c0, int c1,
   static torch::Tensor y;
   if (!y.defined())
     y = torch::empty({16, 64, 130, 258}, x.options());
-  else
-    y.resize_({16, 64, 130, 258});
   static cnnlTensorDescriptor_t xd = nullptr;
   static cnnlTensorDescriptor_t wd = nullptr;
   static cnnlTensorDescriptor_t yd = nullptr;
@@ -61,8 +59,6 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, int c0, int c1,
   static torch::Tensor work;
   if (!work.defined())
     work = torch::empty({(int64_t)ws_size}, x.options().dtype(torch::kUInt8));
-  else
-    work.resize_({(int64_t)ws_size});
   void *wp = ws_size ? work.data_ptr() : nullptr;
   CNNL_CHECK(cnnlDeconvolution(torch_mlu::getCurrentHandle(), nullptr, xd,
                                x.data_ptr(), wd, w.data_ptr(), nullptr,
