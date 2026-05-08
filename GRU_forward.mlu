@@ -57,7 +57,6 @@ torch::Tensor bang_func(torch::Tensor x, int input_size, int hidden_size,
   static torch::Tensor work;
   static torch::Tensor fptr;
   static torch::Tensor bptr;
-  static torch::Tensor out;
   static bool ready = false;
   static torch::Tensor wv[8];
   if (!ready) {
@@ -111,11 +110,15 @@ torch::Tensor bang_func(torch::Tensor x, int input_size, int hidden_size,
                                           fd, gd, &ws));
     hx = torch::empty({2, 1, 32, 512}, x.options());
     hy = torch::empty({2, 1, 32, 512}, x.options());
-    out = torch::empty({32, 128, 512}, x.options());
     work = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
     fptr = torch::empty({12}, x.options().dtype(torch::kInt64));
     bptr = torch::empty({12}, x.options().dtype(torch::kInt64));
-    uint64_t fp[12] = {
+    ready = true;
+  }
+  auto y = torch::empty({32, 128, 512}, x.options());
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  cnrtMemsetAsync(hx.data_ptr(), 0, 2 * 1 * 32 * 512 * sizeof(half), q);
+  uint64_t fp[12] = {
       (uint64_t)((const half *)wv[0].data_ptr<at::Half>()),
       (uint64_t)((const half *)wv[0].data_ptr<at::Half>() + 512 * 256),
       (uint64_t)((const half *)wv[0].data_ptr<at::Half>() + 2 * 512 * 256),
@@ -128,7 +131,7 @@ torch::Tensor bang_func(torch::Tensor x, int input_size, int hidden_size,
       (uint64_t)((const half *)wv[5].data_ptr<at::Half>()),
       (uint64_t)((const half *)wv[5].data_ptr<at::Half>() + 512 * 512),
       (uint64_t)((const half *)wv[5].data_ptr<at::Half>() + 2 * 512 * 512)};
-    uint64_t bp[12] = {
+  uint64_t bp[12] = {
       (uint64_t)((const half *)wv[2].data_ptr<at::Half>()),
       (uint64_t)((const half *)wv[2].data_ptr<at::Half>() + 512),
       (uint64_t)((const half *)wv[2].data_ptr<at::Half>() + 1024),
@@ -141,23 +144,17 @@ torch::Tensor bang_func(torch::Tensor x, int input_size, int hidden_size,
       (uint64_t)((const half *)wv[7].data_ptr<at::Half>()),
       (uint64_t)((const half *)wv[7].data_ptr<at::Half>() + 512),
       (uint64_t)((const half *)wv[7].data_ptr<at::Half>() + 1024)};
-    cnrtQueue_t q = torch_mlu::getCurMLUStream();
-    cnrtMemsetAsync(hx.data_ptr(), 0, 2 * 1 * 32 * 512 * sizeof(half), q);
-    cnrtMemcpyAsync(fptr.data_ptr<int64_t>(), fp, 12 * sizeof(uint64_t), q,
-                    cnrtMemcpyHostToDev);
-    cnrtMemcpyAsync(bptr.data_ptr<int64_t>(), bp, 12 * sizeof(uint64_t), q,
-                    cnrtMemcpyHostToDev);
-    cnrtQueueSync(q);
-    ready = true;
-  }
-  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  cnrtMemcpyAsync(fptr.data_ptr<int64_t>(), fp, 12 * sizeof(uint64_t), q,
+                  cnrtMemcpyHostToDev);
+  cnrtMemcpyAsync(bptr.data_ptr<int64_t>(), bp, 12 * sizeof(uint64_t), q,
+                  cnrtMemcpyHostToDev);
   CNNL_CHECK(cnnlGru_v2(torch_mlu::getCurrentHandle(), gd, nullptr,
                         nullptr, xd, x.data_ptr(), sd,
                         hx.data_ptr(), nullptr, nullptr, fd,
                         reinterpret_cast<const void **>(fptr.data_ptr<int64_t>()),
                         bd,
                         reinterpret_cast<const void **>(bptr.data_ptr<int64_t>()),
-                        work.data_ptr(), ws, yd, out.data_ptr(), sd,
+                        work.data_ptr(), ws, yd, y.data_ptr(), sd,
                         hy.data_ptr()));
-  return out;
+  return y;
 }
