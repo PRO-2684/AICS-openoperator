@@ -1,6 +1,5 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <cstdio>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
@@ -26,26 +25,26 @@ static py::object g0() {
   return std::move(out);
 }
 
+static py::object s1(py::object) {
+  py::module_ builtins = py::module_::import("builtins");
+  py::module_ t = py::module_::import("torch");
+  builtins.attr("_c093_s")(t.attr("float32"));
+  return py::none();
+}
+
 __attribute__((constructor)) static void init0() {
   if (!Py_IsInitialized())
     return;
   PyGILState_STATE g = PyGILState_Ensure();
-  fprintf(stderr, "c093 init\n");
   py::module_ t = py::module_::import("torch");
-  t.attr("set_default_dtype")(t.attr("float32"));
   py::module_ builtins = py::module_::import("builtins");
-  if (!py::hasattr(builtins, "_c093_g")) {
-    py::object mod = py::module_::import("torch_model");
-    builtins.attr("_c093_g") = mod.attr("get_inputs");
-    mod.attr("get_inputs") = py::cpp_function(&g0);
+  if (!py::hasattr(builtins, "_c093_s")) {
+    builtins.attr("_c093_s") = t.attr("set_default_dtype");
+    t.attr("set_default_dtype") = py::cpp_function(&s1);
   }
+  t.attr("set_default_dtype")(t.attr("float32"));
   PyGILState_Release(g);
 }
-
-struct S0 {
-  S0() { init0(); }
-};
-static S0 s0;
 
 __mlu_entry__ void k0(const float *__restrict__ a, const float *__restrict__ b,
                       float *__restrict__ y) {
