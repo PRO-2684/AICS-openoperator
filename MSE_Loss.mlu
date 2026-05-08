@@ -29,7 +29,7 @@ torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   static torch::Tensor work;
   if (!work.defined())
     work = torch::empty({(int64_t)ws}, predictions.options().dtype(torch::kUInt8));
-  auto out = torch::empty({1}, predictions.options());
+  auto out = torch::empty({}, predictions.options());
   CNNL_CHECK(cnnlMSELoss_v2(torch_mlu::getCurrentHandle(), CNNL_MSE_LOSS_MEAN,
                             xd, predictions.data_ptr(), xd, targets.data_ptr(),
                             work.data_ptr(), ws, yd, out.data_ptr()));
