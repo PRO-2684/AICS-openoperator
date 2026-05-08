@@ -52,12 +52,9 @@ torch::Tensor bang_func(torch::Tensor x, int input_size, int hidden_size,
   static cnnlTensorDescriptor_t fd[12];
   static cnnlTensorDescriptor_t bd[12];
   static size_t ws = 0;
-  static size_t es = 0;
-  static std::vector<uint8_t> eh;
   static torch::Tensor hx;
   static torch::Tensor hy;
   static torch::Tensor work;
-  static torch::Tensor extra;
   static bool ready = false;
   static torch::Tensor wv[8];
   if (!ready) {
@@ -109,21 +106,14 @@ torch::Tensor bang_func(torch::Tensor x, int input_size, int hidden_size,
     }
     CNNL_CHECK(cnnlGetGruWorkspaceSize_v3(torch_mlu::getCurrentHandle(), xd, sd,
                                           fd, gd, &ws));
-    CNNL_CHECK(cnnlGetGruExtraInputSize(torch_mlu::getCurrentHandle(), gd, &es));
-    eh.resize(es);
-    CNNL_CHECK(cnnlInitGruExtraInput(torch_mlu::getCurrentHandle(), gd, fd,
-                                     eh.data()));
     hx = torch::empty({2, 1, 32, 512}, x.options());
     hy = torch::empty({2, 1, 32, 512}, x.options());
     work = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
-    extra = torch::empty({(int64_t)es}, x.options().dtype(torch::kUInt8));
     ready = true;
   }
   auto y = torch::empty({32, 128, 512}, x.options());
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtMemsetAsync(hx.data_ptr(), 0, 2 * 1 * 32 * 512 * sizeof(half), q);
-  if (es)
-    cnrtMemcpyAsync(extra.data_ptr(), eh.data(), es, q, cnrtMemcpyHostToDev);
   const void *fp[12] = {
       (const half *)wv[0].data_ptr<at::Half>(),
       (const half *)wv[0].data_ptr<at::Half>() + 512 * 256,
@@ -151,7 +141,7 @@ torch::Tensor bang_func(torch::Tensor x, int input_size, int hidden_size,
       (const half *)wv[7].data_ptr<at::Half>() + 512,
       (const half *)wv[7].data_ptr<at::Half>() + 1024};
   CNNL_CHECK(cnnlGru_v2(torch_mlu::getCurrentHandle(), gd, nullptr,
-                        es ? extra.data_ptr() : nullptr, xd, x.data_ptr(), sd,
+                        nullptr, xd, x.data_ptr(), sd,
                         hx.data_ptr(), nullptr, nullptr, fd, fp, bd, bp,
                         work.data_ptr(), ws, yd, y.data_ptr(), sd,
                         hy.data_ptr()));
