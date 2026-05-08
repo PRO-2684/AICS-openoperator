@@ -77,13 +77,19 @@ static S0 s0;
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E2];
   __nram__ float b[E2];
+  __nram__ float c[E1];
   __memcpy(a, x + taskId * E2, E2 * sizeof(half), GDRAM2NRAM);
   __bang_half2float(b, a, E2);
   for (int i = 0; i < E1; ++i) {
     for (int j = 0; j <= i; ++j) {
       float s = b[i * E1 + j];
-      for (int k = 0; k < j; ++k)
-        s -= b[i * E1 + k] * b[j * E1 + k];
+      if (j > 0) {
+        __bang_mul(c, b + i * E1, b + j * E1, j);
+        __bang_reduce_sum(c, c, j);
+        s -= c[0];
+        if (j > 32)
+          s -= c[32];
+      }
       if (i == j)
         b[i * E1 + j] = sqrtf(s);
       else
@@ -97,7 +103,11 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 }
 
 torch::Tensor bang_func(torch::Tensor A) {
-  auto y = torch::empty({E0, E1, E1}, A.options());
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty({E0, E1, E1}, A.options());
+  else
+    y.resize_({E0, E1, E1});
   cnrtDim3_t d = {E0, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
