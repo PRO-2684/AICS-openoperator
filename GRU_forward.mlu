@@ -147,6 +147,7 @@ torch::Tensor bang_func(torch::Tensor x, int input_size, int hidden_size,
                     cnrtMemcpyHostToDev);
     cnrtMemcpyAsync(bptr.data_ptr<int64_t>(), bp, 12 * sizeof(uint64_t), q,
                     cnrtMemcpyHostToDev);
+    cnrtQueueSync(q);
     ready = true;
   }
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
