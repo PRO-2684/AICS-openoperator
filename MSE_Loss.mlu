@@ -1,37 +1,45 @@
-#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
-#include <cnnl.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define CNNL_CHECK(expr)                                                      \
-  do {                                                                        \
-    cnnlStatus_t s = (expr);                                                  \
-    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);      \
-  } while (0)
+#define E0 32
+#define E1 16384
+
+__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
+                      float *__restrict__ z) {
+  if (taskId == 0)
+    z[0] = 0.0f;
+  __sync_all_ipu();
+  __nram__ half a[E1];
+  __nram__ half b[E1];
+  __nram__ float c[E1];
+  __nram__ float d[E1];
+  int p = taskId * E1;
+  __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(b, y + p, E1 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(c, a, E1);
+  __bang_half2float(d, b, E1);
+  __bang_sub(c, c, d, E1);
+  __bang_mul(c, c, c, E1);
+  __bang_reduce_sum(c, c, E1);
+  float s = 0.0f;
+#pragma unroll 512
+  for (int i = 0; i < 512; ++i)
+    s += c[i * 32];
+  d[0] = s * 0.0000019073486328125f;
+  __bang_atomic_reduce_add(z, d, 1);
+}
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
-  static cnnlTensorDescriptor_t xd = nullptr;
-  static cnnlTensorDescriptor_t yd = nullptr;
-  static size_t ws = 0;
-  if (xd == nullptr) {
-    int xs[2] = {128, 4096};
-    int os[1] = {1};
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&xd));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&yd));
-    CNNL_CHECK(
-        cnnlSetTensorDescriptor(xd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, xs));
-    CNNL_CHECK(
-        cnnlSetTensorDescriptor(yd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 1, os));
-    CNNL_CHECK(cnnlGetMSELossWorkspaceSize(torch_mlu::getCurrentHandle(), xd,
-                                           &ws));
-  }
-  static torch::Tensor work;
-  if (!work.defined())
-    work = torch::empty({(int64_t)ws}, predictions.options().dtype(torch::kUInt8));
-  auto out = torch::empty({}, predictions.options());
-  CNNL_CHECK(cnnlMSELoss_v2(torch_mlu::getCurrentHandle(), CNNL_MSE_LOSS_MEAN,
-                            xd, predictions.data_ptr(), xd, targets.data_ptr(),
-                            work.data_ptr(), ws, yd, out.data_ptr()));
+  static torch::Tensor out;
+  if (!out.defined())
+    out = torch::empty({}, predictions.options().dtype(torch::kFloat32));
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t g0 = {4, 8, 1};
+  k0<<<g0, cnrtFuncTypeUnion1, queue>>>(
+      reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(targets.data_ptr<at::Half>()),
+      out.data_ptr<float>());
   return out;
 }
