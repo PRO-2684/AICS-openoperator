@@ -36,7 +36,6 @@ std::vector<torch::Tensor> bang_func(torch::Tensor A) {
     CNNL_CHECK(cnnlGetQRWorkspaceSize(torch_mlu::getCurrentHandle(), ad, true,
                                       &ws));
   }
-  auto q = torch::empty({E0, E1, E2}, A.options());
   auto r = torch::empty({E0, E2, E2}, A.options());
   static torch::Tensor work;
   if (!work.defined())
@@ -44,6 +43,6 @@ std::vector<torch::Tensor> bang_func(torch::Tensor A) {
   else
     work.resize_({(int64_t)ws});
   CNNL_CHECK(cnnlQR(torch_mlu::getCurrentHandle(), ad, A.data_ptr(), qd,
-                    q.data_ptr(), rd, r.data_ptr(), work.data_ptr(), ws, true));
-  return {q, r};
+                    A.data_ptr(), rd, r.data_ptr(), work.data_ptr(), ws, true));
+  return {A, r};
 }
