@@ -51,7 +51,9 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, int c0, int c1,
         cnnlSetTensorDescriptor(yd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4, ys));
     CNNL_CHECK(cnnlSetDeconvolutionDescriptor(dd, 4, pad, st, dil, 1,
                                               CNNL_DTYPE_FLOAT));
-    algo = CNNL_CONVOLUTION_BWD_DATA_ALGO_DIRECT;
+    CNNL_CHECK(cnnlGetDeconvolutionAlgo(
+        torch_mlu::getCurrentHandle(), xd, wd, nullptr, dd, yd,
+        CNNL_CONVOLUTION_BWD_DATA_FASTEST, &algo));
     CNNL_CHECK(cnnlGetDeconvolutionWorkspaceSize_v2(
         torch_mlu::getCurrentHandle(), xd, wd, nullptr, dd, yd, algo,
         &ws_size));
