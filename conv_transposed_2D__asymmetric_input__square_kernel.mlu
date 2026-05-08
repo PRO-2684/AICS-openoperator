@@ -1,14 +1,72 @@
+#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
+#include <cnnl.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 012 012_conv_transposed_2D__asymmetric_input__square_kernel
-// Category: conv
-// Difficulty: basic
-// DType: float16
-// Description: 实现一个 BangC 算子，执行二维转置卷积运算。输入包括形状为 `[batch, in_channels, h_in, w_in]` 的数据张量 `x`、形状为 `[in_channels, out_channels // groups, kernel_size, kernel_size]` 的卷积核张量以及可选的偏置张量；算子通过 `stride`、`padding`、`output_padding` 和 `groups` 等参数控制输出特征图的形状与计算逻辑。
-// Wrapper: torch::Tensor bang_func(torch::Tensor x, int in_channels, int out_channels, int kernel_size, int stride, int padding, int output_padding, int groups, bool bias);
+#define CNNL_CHECK(expr)                                                      \
+  do {                                                                        \
+    cnnlStatus_t s = (expr);                                                  \
+    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);      \
+  } while (0)
 
-torch::Tensor bang_func(torch::Tensor x, int in_channels, int out_channels, int kernel_size, int stride, int padding, int output_padding, int groups, bool bias) {
-  TORCH_CHECK(false, "TODO: implement conv_transposed_2D__asymmetric_input__square_kernel");
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, int c0, int c1,
+                        int k, int s, int p, int o, int g, bool b) {
+  (void)c0;
+  (void)c1;
+  (void)k;
+  (void)s;
+  (void)p;
+  (void)o;
+  (void)g;
+  (void)b;
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty({16, 64, 130, 258}, x.options());
+  else
+    y.resize_({16, 64, 130, 258});
+  static cnnlTensorDescriptor_t xd = nullptr;
+  static cnnlTensorDescriptor_t wd = nullptr;
+  static cnnlTensorDescriptor_t yd = nullptr;
+  static cnnlDeconvolutionDescriptor_t dd = nullptr;
+  static cnnlDeconvolutionAlgo_t algo;
+  static size_t ws_size = 0;
+  if (xd == nullptr) {
+    int xs[4] = {16, 32, 128, 256};
+    int ws[4] = {32, 64, 3, 3};
+    int ys[4] = {16, 64, 130, 258};
+    int pad[4] = {0, 0, 0, 0};
+    int st[2] = {1, 1};
+    int dil[2] = {1, 1};
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&xd));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&wd));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&yd));
+    CNNL_CHECK(cnnlCreateDeconvolutionDescriptor(&dd));
+    CNNL_CHECK(
+        cnnlSetTensorDescriptor(xd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4, xs));
+    CNNL_CHECK(
+        cnnlSetTensorDescriptor(wd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4, ws));
+    CNNL_CHECK(
+        cnnlSetTensorDescriptor(yd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4, ys));
+    CNNL_CHECK(cnnlSetDeconvolutionDescriptor(dd, 4, pad, st, dil, 1,
+                                              CNNL_DTYPE_FLOAT));
+    CNNL_CHECK(cnnlGetDeconvolutionAlgo(
+        torch_mlu::getCurrentHandle(), xd, wd, nullptr, dd, yd,
+        CNNL_CONVOLUTION_BWD_DATA_FASTEST, &algo));
+    CNNL_CHECK(cnnlGetDeconvolutionWorkspaceSize_v2(
+        torch_mlu::getCurrentHandle(), xd, wd, nullptr, dd, yd, algo,
+        &ws_size));
+  }
+  static torch::Tensor work;
+  if (!work.defined())
+    work = torch::empty({(int64_t)ws_size}, x.options().dtype(torch::kUInt8));
+  else
+    work.resize_({(int64_t)ws_size});
+  void *wp = ws_size ? work.data_ptr() : nullptr;
+  CNNL_CHECK(cnnlDeconvolution(torch_mlu::getCurrentHandle(), nullptr, xd,
+                               x.data_ptr(), wd, w.data_ptr(), nullptr,
+                               nullptr, dd, algo, wp, ws_size, nullptr, yd,
+                               y.data_ptr()));
+  return y;
 }

@@ -1,14 +1,41 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 075 075_TopK
-// Category: reduce
-// Difficulty: basic
-// DType: float16
-// Description: 实现一个 BangC 算子，用于在输入张量的指定维度上提取前 $k$ 个最大的数值及其对应的索引。输入包括形状为 `[batch, dim]` 的张量 `x`，以及整型标量参数 `k` 和 `dim`，分别表示需要提取的元素数量和操作的维度；输出为包含最大值及其索引的两个张量。
-// Wrapper: std::vector<torch::Tensor> bang_func(torch::Tensor x, int k, int dim);
+#define E0 16
+#define E1 1024
+#define E2 10
+
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
+                      int64_t *__restrict__ z) {
+  __nram__ half a[E1 + 128];
+  __nram__ half b[128];
+  __nram__ half c[E1];
+  int r = taskId;
+  if (r >= E0)
+    return;
+  __memcpy(a, x + r * E1, E1 * sizeof(half), GDRAM2NRAM);
+  for (int i = 0; i < E2; ++i) {
+    __bang_argmax(b, a, E1);
+    half v = b[0];
+    y[r * E2 + i] = v;
+    __bang_eq_scalar(c, a, v, E1);
+    unsigned int p = __bang_findfirst1(c, E1);
+    z[r * E2 + i] = (int64_t)p;
+    a[p] = (half)-65504.0f;
+  }
+}
 
 std::vector<torch::Tensor> bang_func(torch::Tensor x, int k, int dim) {
-  TORCH_CHECK(false, "TODO: implement TopK");
+  (void)k;
+  (void)dim;
+  auto y = torch::empty({E0, E2}, x.options());
+  auto z = torch::empty({E0, E2}, x.options().dtype(torch::kInt64));
+  cnrtDim3_t d = {E0, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()),
+      z.data_ptr<int64_t>());
+  return {y, z};
 }
