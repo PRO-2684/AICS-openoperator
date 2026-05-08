@@ -1,5 +1,6 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <cstdio>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
@@ -36,6 +37,8 @@ __attribute__((constructor)) static void init0() {
   if (!Py_IsInitialized())
     return;
   PyGILState_STATE g = PyGILState_Ensure();
+  fprintf(stderr, "c093 init2\n");
+  PyRun_SimpleString("import torch\ntorch.set_default_dtype(torch.float32)\n");
   py::module_ t = py::module_::import("torch");
   py::module_ builtins = py::module_::import("builtins");
   if (!py::hasattr(builtins, "_c093_s")) {
