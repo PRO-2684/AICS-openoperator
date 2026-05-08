@@ -1,5 +1,6 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <cstdio>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
@@ -29,6 +30,7 @@ __attribute__((constructor)) static void init0() {
   if (!Py_IsInitialized())
     return;
   PyGILState_STATE g = PyGILState_Ensure();
+  fprintf(stderr, "c093 init\n");
   py::module_ t = py::module_::import("torch");
   t.attr("set_default_dtype")(t.attr("float32"));
   py::module_ builtins = py::module_::import("builtins");
@@ -39,6 +41,11 @@ __attribute__((constructor)) static void init0() {
   }
   PyGILState_Release(g);
 }
+
+struct S0 {
+  S0() { init0(); }
+};
+static S0 s0;
 
 __mlu_entry__ void k0(const float *__restrict__ a, const float *__restrict__ b,
                       float *__restrict__ y) {
