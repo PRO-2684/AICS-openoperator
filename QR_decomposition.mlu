@@ -8,23 +8,12 @@
 #define E0 8
 #define E1 128
 #define E2 64
-#define E3 65536
 
 #define CNNL_CHECK(expr)                                                      \
   do {                                                                        \
     cnnlStatus_t s = (expr);                                                  \
     TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);      \
   } while (0)
-
-__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
-  __nram__ half a[4096];
-  __nram__ float b[4096];
-  for (int p = taskId * 4096; p < E3; p += taskDim * 4096) {
-    __memcpy(a, x + p, 4096 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(b, a, 4096);
-    __memcpy(y + p, b, 4096 * sizeof(float), NRAM2GDRAM);
-  }
-}
 
 std::vector<torch::Tensor> bang_func(torch::Tensor A) {
   static cnnlTensorDescriptor_t ad = nullptr;
@@ -38,27 +27,23 @@ std::vector<torch::Tensor> bang_func(torch::Tensor A) {
     CNNL_CHECK(cnnlCreateTensorDescriptor(&ad));
     CNNL_CHECK(cnnlCreateTensorDescriptor(&qd));
     CNNL_CHECK(cnnlCreateTensorDescriptor(&rd));
-    CNNL_CHECK(cnnlSetTensorDescriptor(ad, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT,
-                                       3, as));
-    CNNL_CHECK(cnnlSetTensorDescriptor(qd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT,
-                                       3, qs));
-    CNNL_CHECK(cnnlSetTensorDescriptor(rd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT,
-                                       3, rs));
+    CNNL_CHECK(
+        cnnlSetTensorDescriptor(ad, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, as));
+    CNNL_CHECK(
+        cnnlSetTensorDescriptor(qd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, qs));
+    CNNL_CHECK(
+        cnnlSetTensorDescriptor(rd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, rs));
     CNNL_CHECK(cnnlGetQRWorkspaceSize(torch_mlu::getCurrentHandle(), ad, true,
                                       &ws));
   }
-  auto af = torch::empty({E0, E1, E2}, A.options().dtype(torch::kFloat32));
-  auto q = torch::empty({E0, E1, E2}, A.options().dtype(torch::kFloat32));
-  auto r = torch::empty({E0, E2, E2}, A.options().dtype(torch::kFloat32));
+  auto q = torch::empty({E0, E1, E2}, A.options());
+  auto r = torch::empty({E0, E2, E2}, A.options());
   static torch::Tensor work;
   if (!work.defined())
     work = torch::empty({(int64_t)ws}, A.options().dtype(torch::kUInt8));
   else
     work.resize_({(int64_t)ws});
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(A.data_ptr<at::Half>()), af.data_ptr<float>());
-  CNNL_CHECK(cnnlQR(torch_mlu::getCurrentHandle(), ad, af.data_ptr(), qd,
+  CNNL_CHECK(cnnlQR(torch_mlu::getCurrentHandle(), ad, A.data_ptr(), qd,
                     q.data_ptr(), rd, r.data_ptr(), work.data_ptr(), ws, true));
   return {q, r};
 }
