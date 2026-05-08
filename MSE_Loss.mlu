@@ -3,18 +3,14 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 32
-#define E1 16384
+#define E0 16
+#define E1 32768
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
                       float *__restrict__ z) {
-  if (taskId == 0)
-    z[0] = 0.0f;
-  __sync_all_ipu();
   __nram__ half a[E1];
   __nram__ half b[E1];
   __nram__ float c[E1];
-  __nram__ float d[1];
   int p = taskId * E1;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __memcpy(b, y + p, E1 * sizeof(half), GDRAM2NRAM);
@@ -23,22 +19,34 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
   __bang_mul(c, c, c, E1);
   __bang_reduce_sum(c, c, E1);
   float s = 0.0f;
-#pragma unroll 512
-  for (int i = 0; i < 512; ++i)
+#pragma unroll 1024
+  for (int i = 0; i < 1024; ++i)
     s += c[i * 32];
-  d[0] = s * 0.0000019073486328125f;
-  __bang_atomic_reduce_add(z, d, 1);
+  z[taskId] = s;
+}
+
+__mlu_entry__ void k1(const float *__restrict__ x, float *__restrict__ y) {
+  float s = 0.0f;
+#pragma unroll 16
+  for (int i = 0; i < E0; ++i)
+    s += x[i];
+  y[0] = s * 0.0000019073486328125f;
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   static torch::Tensor out;
+  static torch::Tensor tmp;
   if (!out.defined())
     out = torch::empty({}, predictions.options().dtype(torch::kFloat32));
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g0 = {4, 8, 1};
-  k0<<<g0, cnrtFuncTypeUnion1, queue>>>(
+  if (!tmp.defined())
+    tmp = torch::empty({E0}, predictions.options().dtype(torch::kFloat32));
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  cnrtDim3_t d0 = {4, 4, 1};
+  k0<<<d0, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(targets.data_ptr<at::Half>()),
-      out.data_ptr<float>());
+      tmp.data_ptr<float>());
+  cnrtDim3_t d1 = {1, 1, 1};
+  k1<<<d1, cnrtFuncTypeBlock, q>>>(tmp.data_ptr<float>(), out.data_ptr<float>());
   return out;
 }
