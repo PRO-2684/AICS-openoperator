@@ -18,7 +18,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
   __bang_half2float(c, a, E1);
   __bang_half2float(d, b, E1);
   __bang_sub(c, c, d, E1);
-  __bang_mul(c, c, c, E1);
+  __bang_square(c, c, E1);
   __bang_reduce_sum(c, c, E1);
   float s = 0.0f;
   for (int i = 0; i < 512; ++i) {
