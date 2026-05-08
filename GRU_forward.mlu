@@ -57,6 +57,7 @@ torch::Tensor bang_func(torch::Tensor x, int input_size, int hidden_size,
   static torch::Tensor work;
   static torch::Tensor fptr;
   static torch::Tensor bptr;
+  static torch::Tensor out;
   static bool ready = false;
   static torch::Tensor wv[8];
   if (!ready) {
@@ -115,7 +116,8 @@ torch::Tensor bang_func(torch::Tensor x, int input_size, int hidden_size,
     bptr = torch::empty({12}, x.options().dtype(torch::kInt64));
     ready = true;
   }
-  auto y = torch::empty({32, 128, 512}, x.options());
+  if (!out.defined())
+    out = torch::empty({32, 128, 512}, x.options());
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtMemsetAsync(hx.data_ptr(), 0, 2 * 1 * 32 * 512 * sizeof(half), q);
   uint64_t fp[12] = {
@@ -154,7 +156,7 @@ torch::Tensor bang_func(torch::Tensor x, int input_size, int hidden_size,
                         reinterpret_cast<const void **>(fptr.data_ptr<int64_t>()),
                         bd,
                         reinterpret_cast<const void **>(bptr.data_ptr<int64_t>()),
-                        work.data_ptr(), ws, yd, y.data_ptr(), sd,
+                        work.data_ptr(), ws, yd, out.data_ptr(), sd,
                         hy.data_ptr()));
-  return y;
+  return out;
 }
