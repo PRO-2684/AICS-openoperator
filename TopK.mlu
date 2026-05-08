@@ -6,8 +6,8 @@
 #define E0 16
 #define E1 1024
 #define E2 10
-#define E3 512
-#define E4 20
+#define E3 256
+#define E4 40
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
                       int64_t *__restrict__ z, half *__restrict__ w,
@@ -15,8 +15,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
   __nram__ half a[E3 + 64];
   __nram__ half b[128];
   __nram__ half c[E3];
-  int r = taskId >> 1;
-  int s = taskId & 1;
+  int r = taskId >> 2;
+  int s = taskId & 3;
   if (r >= E0)
     return;
   __memcpy(a, x + r * E1 + s * E3, E3 * sizeof(half), GDRAM2NRAM);
@@ -76,7 +76,7 @@ std::vector<torch::Tensor> bang_func(torch::Tensor x, int k, int dim) {
   auto y = torch::empty({E0, E2}, x.options());
   auto z = torch::empty({E0, E2}, x.options().dtype(torch::kInt64));
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {E0 * 2, 1, 1};
+  cnrtDim3_t d = {E0 * 4, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()),
