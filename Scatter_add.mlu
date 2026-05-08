@@ -22,8 +22,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ w,
     __memcpy(b, x + r * E1, E1 * sizeof(half), GDRAM2NRAM);
     __bang_half2float(c, b, E1);
     int64_t q = w[r];
-    __bang_atomic_reduce_add(y + q * E1, c, E1);
+    __bang_atomic_reduce_add_async(y + q * E1, c, E1);
   }
+  __asm__ volatile("sync;");
 }
 
 torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
