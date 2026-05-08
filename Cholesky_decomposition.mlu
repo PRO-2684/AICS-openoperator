@@ -76,69 +76,62 @@ struct S0 {
 static S0 s0;
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __mlu_shared__ float s[E1 + 1];
+  __mlu_shared__ float s[E2];
   __nram__ half a[E3];
   __nram__ float b[E3];
-  __nram__ float r[E1];
   int n = taskIdY;
   int c = coreId;
-  int r0 = c * 16;
   if (c < 4) {
     int o = c * E3;
     __memcpy(a, x + n * E2 + o, E3 * sizeof(half), GDRAM2NRAM);
     __bang_half2float(b, a, E3);
+    __memcpy(s + o, b, E3 * sizeof(float), NRAM2SRAM);
   }
   __sync_cluster();
   for (int j = 0; j < E1; ++j) {
-    int oc = j >> 4;
-    int li = j & 15;
-    if (c == oc) {
-      float v = b[li * E1 + j];
+    if (c == 0) {
+      float v = s[j * E1 + j];
       int k = 0;
       int m = j;
       for (; k + 3 < m; k += 4) {
-        float v0 = b[li * E1 + k];
-        float v1 = b[li * E1 + k + 1];
-        float v2 = b[li * E1 + k + 2];
-        float v3 = b[li * E1 + k + 3];
+        float v0 = s[j * E1 + k];
+        float v1 = s[j * E1 + k + 1];
+        float v2 = s[j * E1 + k + 2];
+        float v3 = s[j * E1 + k + 3];
         v -= v0 * v0 + v1 * v1 + v2 * v2 + v3 * v3;
       }
       for (; k < m; ++k)
-        v -= b[li * E1 + k] * b[li * E1 + k];
-      b[li * E1 + j] = sqrtf(v);
-      __memcpy(s, b + li * E1, E1 * sizeof(float), NRAM2SRAM);
-      s[E1] = b[li * E1 + j];
+        v -= s[j * E1 + k] * s[j * E1 + k];
+      s[j * E1 + j] = sqrtf(v);
     }
     __sync_cluster();
     if (c < 4) {
-      __memcpy(r, s, E1 * sizeof(float), SRAM2NRAM);
-      float d = s[E1];
-      for (int ii = 0; ii < 16; ++ii) {
-        int i = r0 + ii;
-        if (i <= j)
-          continue;
-        float v = b[ii * E1 + j];
+      float d = s[j * E1 + j];
+      for (int i = j + 1 + c; i < E1; i += 4) {
+        float v = s[i * E1 + j];
         int k = 0;
         int m = j;
         for (; k + 3 < m; k += 4) {
-          v -= b[ii * E1 + k] * r[k] +
-               b[ii * E1 + k + 1] * r[k + 1] +
-               b[ii * E1 + k + 2] * r[k + 2] +
-               b[ii * E1 + k + 3] * r[k + 3];
+          v -= s[i * E1 + k] * s[j * E1 + k] +
+               s[i * E1 + k + 1] * s[j * E1 + k + 1] +
+               s[i * E1 + k + 2] * s[j * E1 + k + 2] +
+               s[i * E1 + k + 3] * s[j * E1 + k + 3];
         }
         for (; k < m; ++k)
-          v -= b[ii * E1 + k] * r[k];
-        b[ii * E1 + j] = v / d;
+          v -= s[i * E1 + k] * s[j * E1 + k];
+        s[i * E1 + j] = v / d;
       }
     }
     __sync_cluster();
   }
   if (c < 4) {
     int o = c * E3;
+    __memcpy(b, s + o, E3 * sizeof(float), SRAM2NRAM);
+    int r0 = c * 16;
     for (int i = 0; i < 16; ++i) {
       int g = r0 + i;
-      for (int j = g + 1; j < E1; ++j)
-        b[i * E1 + j] = 0.0f;
+      if (g + 1 < E1)
+        __bang_write_value(b + i * E1 + g + 1, E1 - g - 1, 0.0f);
     }
     __bang_float2half_rn(a, b, E3);
     __memcpy(y + n * E2 + o, a, E3 * sizeof(half), NRAM2GDRAM);
