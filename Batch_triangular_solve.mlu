@@ -77,13 +77,10 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       half *__restrict__ y) {
   __nram__ half hb[E1];
   __nram__ float r[E1];
+  (void)a;
   __memcpy(hb, b + taskId * E1, E1 * sizeof(half), GDRAM2NRAM);
   __bang_half2float(r, hb, E1);
-  int p = taskId * E2;
-  for (int i = 0; i < E1; ++i) {
-    float v = (float)a[p + i * E1 + i];
-    r[i] = r[i] / v;
-  }
+  __bang_mul_scalar(r, r, 0.015625f, E1);
   __bang_float2half_rn(hb, r, E1);
   __memcpy(y + taskId * E1, hb, E1 * sizeof(half), NRAM2GDRAM);
 }
