@@ -6,7 +6,7 @@
 #include <torch/extension.h>
 
 #define TASK_COUNT 128
-#define CHUNK_SIZE 16384
+#define CHUNK_SIZE 4096
 
 __mlu_entry__ void LogSoftmaxKernel(half *output, const half *input,
                                     int32_t batch, int32_t dim) {
