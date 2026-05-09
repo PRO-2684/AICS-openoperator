@@ -6,7 +6,7 @@
 #include <torch/extension.h>
 
 #define TASK_COUNT 128
-#define CHUNK_SIZE 8192
+#define CHUNK_SIZE 16384
 
 __mlu_entry__ void LogSoftmaxKernel(half *output, const half *input,
                                     int32_t batch, int32_t dim) {
@@ -21,62 +21,41 @@ __mlu_entry__ void LogSoftmaxKernel(half *output, const half *input,
       task_id * per_task + (task_id < remainder ? task_id : remainder);
   uint32_t count = per_task + (task_id < remainder ? 1 : 0);
 
-  __nram__ float buf[CHUNK_SIZE];
-  __nram__ half half_buf[CHUNK_SIZE];
+  __nram__ half buf[CHUNK_SIZE];
+  __nram__ half mx_val[1];
 
   for (uint32_t b = start; b < start + count; ++b) {
     uint32_t off = b * dim;
 
-    // --- 1. 计算 Max ---
-    float mx = -FLT_MAX;
-
+    half mx = (half)(-65000.0f);
     for (uint32_t i = 0; i < dim; i += CHUNK_SIZE) {
       uint32_t cur = (dim - i > CHUNK_SIZE) ? CHUNK_SIZE : (dim - i);
-      // 修正：使用 __memcpy 并指定方向 GDRAM2NRAM
-      __memcpy(buf, reinterpret_cast<const float *>(input + off + i), cur,
-               GDRAM2NRAM);
-
-      for (uint32_t j = 0; j < cur; ++j) {
-        if (buf[j] > mx)
-          mx = buf[j];
-      }
+      __memcpy(buf, input + off + i, cur * sizeof(half), GDRAM2NRAM);
+      __bang_argmax((float *)mx_val, (float *)buf, cur);
+      if ((float)mx_val[0] > (float)mx)
+        mx = mx_val[0];
     }
 
-    // --- 2. 计算 Sum(Exp(x - mx)) ---
-    float sum_exp = 0.0f;
+    half sum_exp = (half)0.0f;
     for (uint32_t i = 0; i < dim; i += CHUNK_SIZE) {
       uint32_t cur = (dim - i > CHUNK_SIZE) ? CHUNK_SIZE : (dim - i);
-      // 修正：使用 __memcpy 并指定方向 GDRAM2NRAM
-      __memcpy(buf, reinterpret_cast<const float *>(input + off + i), cur,
-               GDRAM2NRAM);
-
-      __bang_sub_scalar(buf, buf, mx, cur);
-      __bang_active_exp(buf, buf, cur);
-
-      for (uint32_t j = 0; j < cur; ++j) {
-        sum_exp += buf[j];
-      }
+      uint32_t alen = (cur + 63) & ~63;
+      __memcpy(buf, input + off + i, cur * sizeof(half), GDRAM2NRAM);
+      if (alen > cur)
+        __bang_write_value(buf + cur, alen - cur, (half)0.0f);
+      __bang_sub_scalar(buf, buf, mx, alen);
+      __bang_active_exp(buf, buf, alen);
+      for (uint32_t j = 0; j < alen; ++j)
+        sum_exp = sum_exp + buf[j];
     }
 
-    float lse = logf(sum_exp) + mx;
+    float lse = logf((float)sum_exp) + (float)mx;
 
-    // --- 3. 计算输出 x - lse ---
     for (uint32_t i = 0; i < dim; i += CHUNK_SIZE) {
       uint32_t cur = (dim - i > CHUNK_SIZE) ? CHUNK_SIZE : (dim - i);
-      // 修正：使用 __memcpy 并指定方向 GDRAM2NRAM
-      __memcpy(buf, reinterpret_cast<const float *>(input + off + i), cur,
-               GDRAM2NRAM);
-
-      __bang_sub_scalar(buf, buf, lse, cur);
-
-      // 类型转换 float -> half
-      for (uint32_t j = 0; j < cur; ++j) {
-        half_buf[j] = (half)buf[j];
-      }
-
-      // 修正：使用 __memcpy 并指定方向 NRAM2GDRAM
-      __memcpy(reinterpret_cast<float *>(output + off + i), half_buf, cur,
-               NRAM2GDRAM);
+      __memcpy(buf, input + off + i, cur * sizeof(half), GDRAM2NRAM);
+      __bang_sub_scalar(buf, buf, (half)lse, cur);
+      __memcpy(output + off + i, buf, cur * sizeof(half), NRAM2GDRAM);
     }
   }
 }
