@@ -23,6 +23,30 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     s = s * x[p + 13]; y[p + 13] = s;
     s = s * x[p + 14]; y[p + 14] = s;
     s = s * x[p + 15]; y[p + 15] = s;
+    s = s * x[p + 16]; y[p + 16] = s;
+    s = s * x[p + 17]; y[p + 17] = s;
+    s = s * x[p + 18]; y[p + 18] = s;
+    s = s * x[p + 19]; y[p + 19] = s;
+    s = s * x[p + 20]; y[p + 20] = s;
+    s = s * x[p + 21]; y[p + 21] = s;
+    s = s * x[p + 22]; y[p + 22] = s;
+    s = s * x[p + 23]; y[p + 23] = s;
+    s = s * x[p + 24]; y[p + 24] = s;
+    s = s * x[p + 25]; y[p + 25] = s;
+    s = s * x[p + 26]; y[p + 26] = s;
+    s = s * x[p + 27]; y[p + 27] = s;
+    s = s * x[p + 28]; y[p + 28] = s;
+    s = s * x[p + 29]; y[p + 29] = s;
+    s = s * x[p + 30]; y[p + 30] = s;
+    s = s * x[p + 31]; y[p + 31] = s;
+    s = s * x[p + 32]; y[p + 32] = s;
+    s = s * x[p + 33]; y[p + 33] = s;
+    s = s * x[p + 34]; y[p + 34] = s;
+    s = s * x[p + 35]; y[p + 35] = s;
+    s = s * x[p + 36]; y[p + 36] = s;
+    s = s * x[p + 37]; y[p + 37] = s;
+    s = s * x[p + 38]; y[p + 38] = s;
+    s = s * x[p + 39]; y[p + 39] = s;
   }
 }
 
