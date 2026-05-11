@@ -33,7 +33,7 @@ torch::Tensor bang_func(torch::Tensor x) {
     out = torch::empty({E0}, x.options().dtype(torch::kFloat));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {E0, 1, 1};
-  k0<<<d, cnrtFuncTypeUnion4, queue>>>(
+  k0<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       out.data_ptr<float>());
   return out;
