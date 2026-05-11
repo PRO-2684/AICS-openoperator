@@ -52,17 +52,25 @@ __mlu_func__ void f0(half *a) {
   s = s * a[45]; a[45] = s;
   s = s * a[46]; a[46] = s;
   s = s * a[47]; a[47] = s;
+  s = s * a[48]; a[48] = s;
+  s = s * a[49]; a[49] = s;
+  s = s * a[50]; a[50] = s;
+  s = s * a[51]; a[51] = s;
+  s = s * a[52]; a[52] = s;
+  s = s * a[53]; a[53] = s;
+  s = s * a[54]; a[54] = s;
+  s = s * a[55]; a[55] = s;
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[192];
+  __nram__ half a[224];
   int p = taskId * 16000;
-  __memcpy(a, x + p, 96, GDRAM2NRAM, 96, 8000, 3);
+  __memcpy(a, x + p, 112, GDRAM2NRAM, 112, 8000, 3);
   f0(a);
-  f0(a + 48);
-  f0(a + 96);
-  f0(a + 144);
-  __memcpy(y + p, a, 96, NRAM2GDRAM, 8000, 96, 3);
+  f0(a + 56);
+  f0(a + 112);
+  f0(a + 168);
+  __memcpy(y + p, a, 112, NRAM2GDRAM, 8000, 112, 3);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
