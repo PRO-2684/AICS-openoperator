@@ -59,6 +59,11 @@ static void patch_numpy_nanmax_once() {
   PyGILState_Release(gil);
 }
 
+__attribute__((constructor)) static void init0() {
+  if (!Py_IsInitialized()) return;
+  patch_numpy_nanmax_once();
+}
+
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
   patch_numpy_nanmax_once();
 
