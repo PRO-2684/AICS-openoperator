@@ -18,7 +18,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   static torch::Tensor w;
   static torch::Tensor y;
   if (!y.defined())
-    y = torch::empty({16, 256}, x.options().dtype(torch::kInt64));
+    y = torch::empty({16, 256}, x.options().dtype(torch::kInt32));
   else
     y.resize_({16, 256});
   cnnlHandle_t h = torch_mlu::getCurrentHandle();
@@ -31,11 +31,11 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
     CNNL_CHECK(cnnlCreateReduceDescriptor(&c));
     CNNL_CHECK(cnnlSetTensorDescriptor(a, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3,
                                        d0));
-    CNNL_CHECK(cnnlSetTensorDescriptor(b, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_INT64, 3,
+    CNNL_CHECK(cnnlSetTensorDescriptor(b, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_INT32, 3,
                                        d1));
     CNNL_CHECK(cnnlSetReduceDescriptor_v2(
         c, &ax, 1, CNNL_REDUCE_MAX, CNNL_DTYPE_HALF, CNNL_NOT_PROPAGATE_NAN,
-        CNNL_REDUCE_ONLY_INDICES, CNNL_64BIT_INDICES, 0.0f));
+        CNNL_REDUCE_ONLY_INDICES, CNNL_32BIT_INDICES, 0.0f));
     CNNL_CHECK(cnnlGetReduceOpWorkspaceSize_v2(h, a, nullptr, b, c, &s));
   }
   if (!w.defined())
