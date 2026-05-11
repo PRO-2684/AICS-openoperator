@@ -5,7 +5,7 @@
 
 #define E0 256
 #define E1 512
-#define E2 16
+#define E2 32
 
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ s,
                       float *__restrict__ q) {
@@ -65,10 +65,10 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bia
   auto q = torch::empty({E1}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t g = {E2, 1, 1};
-  k0<<<g, cnrtFuncTypeUnion1, queue>>>(
+  k0<<<g, cnrtFuncTypeUnion8, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()), s.data_ptr<float>(),
       q.data_ptr<float>());
-  k1<<<g, cnrtFuncTypeUnion1, queue>>>(
+  k1<<<g, cnrtFuncTypeUnion8, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()), s.data_ptr<float>(),
       q.data_ptr<float>(), reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
