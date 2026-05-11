@@ -16,7 +16,11 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   static cnnlReduceDescriptor_t c = nullptr;
   static size_t s = 0;
   static torch::Tensor w;
-  auto y = torch::empty({16, 256}, x.options().dtype(torch::kInt64));
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty({16, 256}, x.options().dtype(torch::kInt64));
+  else
+    y.resize_({16, 256});
   cnnlHandle_t h = torch_mlu::getCurrentHandle();
   if (a == nullptr) {
     int d0[3] = {16, 256, 256};
