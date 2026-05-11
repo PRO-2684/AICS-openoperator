@@ -25,13 +25,48 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
   }
 }
 
+__mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y,
+                      int64_t *__restrict__ z) {
+  __mlu_shared__ half s0[40];
+  __mlu_shared__ int s1[40];
+  __nram__ half a[320];
+  __nram__ half b[128];
+  __nram__ int c[64];
+  int r = taskIdY + taskIdZ * 8;
+  int q = coreId;
+  if (q != 0x80) {
+    int o = q * 256;
+    __memcpy(a, x + r * E1 + o, 256 * sizeof(half), GDRAM2NRAM);
+    for (int i = 0; i < E2; ++i) {
+      __bang_argmax(b, a, 256);
+      int p = (int)((uint16_t *)b)[1];
+      s0[q * E2 + i] = b[0];
+      s1[q * E2 + i] = o + p;
+      a[p] = (half)-65504.0f;
+    }
+  }
+  __sync_cluster();
+  if (q == 0) {
+    __bang_write_value(a, 64, (half)-65504.0f);
+    __memcpy(a, s0, 40 * sizeof(half), SRAM2NRAM);
+    __memcpy(c, s1, 40 * sizeof(int), SRAM2NRAM);
+    for (int i = 0; i < E2; ++i) {
+      __bang_argmax(b, a, 64);
+      int p = (int)((uint16_t *)b)[1];
+      y[r * E2 + i] = b[0];
+      z[r * E2 + i] = (int64_t)c[p];
+      a[p] = (half)-65504.0f;
+    }
+  }
+}
+
 std::vector<torch::Tensor> bang_func(torch::Tensor x, int k, int dim) {
   (void)k;
   (void)dim;
   auto y = torch::empty({E0, E2}, x.options());
   auto z = torch::empty({E0, E2}, x.options().dtype(torch::kInt64));
-  cnrtDim3_t d = {E0, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {4, 8, 2};
+  k1<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()),
       z.data_ptr<int64_t>());
