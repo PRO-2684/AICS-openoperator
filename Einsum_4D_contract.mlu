@@ -28,7 +28,7 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   static torch::Tensor out;
   if (!out.defined())
     out = torch::empty({4, 8, 128, 128}, A.options().dtype(torch::kFloat));
-  cnrtDim3_t d = {4, 8, 1};
+  cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
