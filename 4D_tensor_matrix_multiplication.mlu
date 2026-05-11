@@ -12,7 +12,7 @@ static cnnlTensorDescriptor_t f(int n) {
   int d[1] = {n};
   cnnlTensorDescriptor_t r;
   X(cnnlCreateTensorDescriptor(&r));
-  X(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 1, d));
+  X(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT, 1, d));
   return r;
 }
 

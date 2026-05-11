@@ -62,8 +62,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   for (int i = 0; i < 18; ++i) {
     s += t[i * 32];
   }
-  half mh = (half)(s * 0.001736111111111111f);
-  float m = (float)mh;
+  float m = s * 0.001736111111111111f;
 
   __bang_sub_scalar(a, a, m, E1);
   __bang_mul(b, a, a, E1);
@@ -73,11 +72,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   for (int i = 0; i < 18; ++i) {
     q += t[i * 32];
   }
-  half sh = (half)sqrtf(q * 0.0017391304347826088f);
-  half dh = (half)((float)sh + 1.0e-5f);
-  float r = 1.0f / (float)dh;
-  __bang_float2half_rn(h, a, E1);
-  __bang_half2float(a, h, E1);
+  float r = 1.0f / (sqrtf(q * 0.0017391304347826088f) + 1.0e-5f);
   __bang_mul_scalar(a, a, r, E1);
   __bang_float2half_rn(h, a, E1);
 
