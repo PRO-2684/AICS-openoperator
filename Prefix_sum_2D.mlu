@@ -1,56 +1,35 @@
-#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
-#include <cnnl.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
-  __nram__ half a[4096];
-  __nram__ float b[4096];
-  for (int p = taskId * 4096; p < 1048576; p += taskDim * 4096) {
-    __memcpy(a, x + p, 4096 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(b, a, 4096);
-    __memcpy(y + p, b, 4096 * sizeof(float), NRAM2GDRAM);
+  __nram__ half a[65536];
+  __nram__ float b[65536];
+  __nram__ float c[65536];
+  int p = taskId * 65536;
+  __memcpy(a, x + p, 65536 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(b, a, 65536);
+  for (int s = 1; s < 256; s <<= 1) {
+    __bang_write_value(c, 65536, 0.0f);
+    __memcpy(c + s, b, (256 - s) * sizeof(float), NRAM2NRAM,
+             256 * sizeof(float), 256 * sizeof(float), 255);
+    __bang_add(b, b, c, 65536);
   }
+  for (int s = 1; s < 256; s <<= 1) {
+    __bang_write_value(c, 65536, 0.0f);
+    __memcpy(c + s * 256, b, (65536 - s * 256) * sizeof(float), NRAM2NRAM);
+    __bang_add(b, b, c, 65536);
+  }
+  __memcpy(y + p, b, 65536 * sizeof(float), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
-  static cnnlTensorDescriptor_t d;
-  static bool inited = false;
-  static size_t w1 = 0;
-  static size_t w2 = 0;
-  static torch::Tensor w;
-
-  auto handle = torch_mlu::getCurrentHandle();
-
-  if (!inited) {
-    int dims[3] = {16, 256, 256};
-
-    cnnlCreateTensorDescriptor(&d);
-    cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT, 3, dims);
-    cnnlGetCumsumWorkspaceSize(handle, d, 1, &w1);
-    cnnlGetCumsumWorkspaceSize(handle, d, 2, &w2);
-
-    inited = true;
-  }
-
   static torch::Tensor y;
   if (!y.defined())
     y = torch::empty({16, 256, 256}, x.options().dtype(torch::kFloat32));
-  size_t ws = w1 > w2 ? w1 : w2;
-  if (!w.defined())
-    w = torch::empty({static_cast<int64_t>(ws)}, x.options().dtype(torch::kUInt8));
-
-  cnrtDim3_t g = {32, 1, 1};
-  k0<<<g, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      y.data_ptr<float>());
-
-  cnnlCumsum_v2(handle, d, y.data_ptr(), 1, false, false, CNNL_PROPAGATE_NAN, d,
-                y.data_ptr(), w.data_ptr(), w1);
-
-  cnnlCumsum_v2(handle, d, y.data_ptr(), 2, false, false, CNNL_PROPAGATE_NAN, d,
-                y.data_ptr(), w.data_ptr(), w2);
-
+  cnrtDim3_t d = {16, 1, 1};
+  k0<<<d, cnrtFuncTypeUnion4, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()), y.data_ptr<float>());
   return y;
 }
