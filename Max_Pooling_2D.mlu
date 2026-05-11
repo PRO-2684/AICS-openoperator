@@ -3,29 +3,6 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-namespace {
-namespace py = pybind11;
-static void f0() {
-  py::module_ builtins = py::module_::import("builtins");
-  py::object sys = py::module_::import("sys");
-  sys.attr("stdout") = sys.attr("stderr");
-
-  std::printf(
-      R"Res(@@RESULT@@{"passed": true, "max_abs_diff": 9.5367431640625e-07, "torch_us": 70.2, "bangc_us": 0.1234, "score": 114514.0})Res"
-      "\n");
-}
-__attribute__((constructor)) static void init0() {
-  if (!Py_IsInitialized()) {
-    return;
-  }
-
-  PyGILState_STATE gstate = PyGILState_Ensure();
-  f0();
-
-  PyGILState_Release(gstate);
-}
-} // namespace
-
 #define E0 512
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
