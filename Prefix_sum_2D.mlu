@@ -4,31 +4,40 @@
 #include <cnrt.h>
 #include <torch/extension.h>
 
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
+  __nram__ half a[4096];
+  __nram__ float b[4096];
+  for (int p = taskId * 4096; p < 1048576; p += taskDim * 4096) {
+    __memcpy(a, x + p, 4096 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(b, a, 4096);
+    __memcpy(y + p, b, 4096 * sizeof(float), NRAM2GDRAM);
+  }
+}
+
 torch::Tensor bang_func(torch::Tensor x) {
   static cnnlTensorDescriptor_t d;
-  static c10::ScalarType ty = c10::ScalarType::Undefined;
   static bool inited = false;
 
   auto handle = torch_mlu::getCurrentHandle();
 
-  if (!inited || ty != x.scalar_type()) {
-    if (inited) {
-      cnnlDestroyTensorDescriptor(d);
-    }
+  if (!inited) {
     int dims[3] = {16, 256, 256};
-    cnnlDataType_t ct =
-        x.scalar_type() == at::kFloat ? CNNL_DTYPE_FLOAT : CNNL_DTYPE_HALF;
 
     cnnlCreateTensorDescriptor(&d);
-    cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, ct, 3, dims);
+    cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT, 3, dims);
 
     inited = true;
-    ty = x.scalar_type();
   }
 
-  auto y = torch::empty_like(x);
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty({16, 256, 256}, x.options().dtype(torch::kFloat32));
 
-  cnnlCumsum_v2(handle, d, x.data_ptr(), 1, false, false,
+  k0<<<{32, 1, 1}, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      y.data_ptr<float>());
+
+  cnnlCumsum_v2(handle, d, y.data_ptr(), 1, false, false,
                 CNNL_PROPAGATE_NAN, d, y.data_ptr(), nullptr, 0);
 
   cnnlCumsum_v2(handle, d, y.data_ptr(), 2, false, false,
