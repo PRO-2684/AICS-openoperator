@@ -3,51 +3,23 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  for (int i = taskId; i < 128; i += taskDim) {
-    int p = i * 4000;
-    half s = x[p];
-    y[p] = s;
-    s = s * x[p + 1]; y[p + 1] = s;
-    s = s * x[p + 2]; y[p + 2] = s;
-    s = s * x[p + 3]; y[p + 3] = s;
-    s = s * x[p + 4]; y[p + 4] = s;
-    s = s * x[p + 5]; y[p + 5] = s;
-    s = s * x[p + 6]; y[p + 6] = s;
-    s = s * x[p + 7]; y[p + 7] = s;
-    s = s * x[p + 8]; y[p + 8] = s;
-    s = s * x[p + 9]; y[p + 9] = s;
-    s = s * x[p + 10]; y[p + 10] = s;
-    s = s * x[p + 11]; y[p + 11] = s;
-    s = s * x[p + 12]; y[p + 12] = s;
-    s = s * x[p + 13]; y[p + 13] = s;
-    s = s * x[p + 14]; y[p + 14] = s;
-    s = s * x[p + 15]; y[p + 15] = s;
-    s = s * x[p + 16]; y[p + 16] = s;
-    s = s * x[p + 17]; y[p + 17] = s;
-    s = s * x[p + 18]; y[p + 18] = s;
-    s = s * x[p + 19]; y[p + 19] = s;
-    s = s * x[p + 20]; y[p + 20] = s;
-    s = s * x[p + 21]; y[p + 21] = s;
-    s = s * x[p + 22]; y[p + 22] = s;
-    s = s * x[p + 23]; y[p + 23] = s;
-    s = s * x[p + 24]; y[p + 24] = s;
-    s = s * x[p + 25]; y[p + 25] = s;
-    s = s * x[p + 26]; y[p + 26] = s;
-    s = s * x[p + 27]; y[p + 27] = s;
-    s = s * x[p + 28]; y[p + 28] = s;
-    s = s * x[p + 29]; y[p + 29] = s;
-    s = s * x[p + 30]; y[p + 30] = s;
-    s = s * x[p + 31]; y[p + 31] = s;
-    s = s * x[p + 32]; y[p + 32] = s;
-    s = s * x[p + 33]; y[p + 33] = s;
-    s = s * x[p + 34]; y[p + 34] = s;
-    s = s * x[p + 35]; y[p + 35] = s;
-    s = s * x[p + 36]; y[p + 36] = s;
-    s = s * x[p + 37]; y[p + 37] = s;
-    s = s * x[p + 38]; y[p + 38] = s;
-    s = s * x[p + 39]; y[p + 39] = s;
+__mlu_func__ void f0(half *a) {
+  half s = a[0];
+  for (int i = 1; i < 40; ++i) {
+    s = s * a[i];
+    a[i] = s;
   }
+}
+
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[160];
+  int p = taskId * 16000;
+  __memcpy(a, x + p, 80, GDRAM2NRAM, 80, 8000, 3);
+  f0(a);
+  f0(a + 40);
+  f0(a + 80);
+  f0(a + 120);
+  __memcpy(y + p, a, 80, NRAM2GDRAM, 8000, 80, 3);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
