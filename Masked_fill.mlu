@@ -4,7 +4,6 @@
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <Python.h>
 
 #include <climits>
 #include <vector>
@@ -47,21 +46,7 @@ static void destroy_desc(cnnlTensorDescriptor_t desc) {
   CNNL_CHECK(cnnlDestroyTensorDescriptor(desc));
 }
 
-static void patch_numpy_nanmax_once() {
-  static bool patched = false;
-  if (patched) return;
-  patched = true;
-  PyGILState_STATE gil = PyGILState_Ensure();
-  PyRun_SimpleString(
-      "import numpy as _np\n"
-      "_np.max = _np.nanmax\n"
-      "_np.amax = _np.nanmax\n");
-  PyGILState_Release(gil);
-}
-
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
-  patch_numpy_nanmax_once();
-
   auto out = torch::empty_like(x);
   auto value = torch::empty({1}, x.options());
 
