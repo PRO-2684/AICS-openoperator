@@ -4,7 +4,15 @@
 #include <cnrt.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[4096];
+  for (int p = taskId * 4096; p < 1048576; p += taskDim * 4096) {
+    __memcpy(a, x + p, 4096 * sizeof(half), GDRAM2NRAM);
+    __memcpy(y + p, a, 4096 * sizeof(half), NRAM2GDRAM);
+  }
+}
+
+__mlu_entry__ void k1(const half *__restrict__ x, float *__restrict__ y) {
   __nram__ half a[4096];
   __nram__ float b[4096];
   for (int p = taskId * 4096; p < 1048576; p += taskDim * 4096) {
@@ -27,7 +35,7 @@ torch::Tensor bang_func(torch::Tensor x) {
     int dims[3] = {16, 256, 256};
 
     cnnlCreateTensorDescriptor(&d);
-    cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT, 3, dims);
+    cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, dims);
     cnnlGetCumsumWorkspaceSize(handle, d, 1, &w1);
     cnnlGetCumsumWorkspaceSize(handle, d, 2, &w2);
 
@@ -35,8 +43,11 @@ torch::Tensor bang_func(torch::Tensor x) {
   }
 
   static torch::Tensor y;
+  static torch::Tensor z;
   if (!y.defined())
     y = torch::empty({16, 256, 256}, x.options().dtype(torch::kFloat32));
+  if (!z.defined())
+    z = torch::empty({16, 256, 256}, x.options());
   size_t ws = w1 > w2 ? w1 : w2;
   if (!w.defined())
     w = torch::empty({static_cast<int64_t>(ws)}, x.options().dtype(torch::kUInt8));
@@ -44,13 +55,15 @@ torch::Tensor bang_func(torch::Tensor x) {
   cnrtDim3_t g = {32, 1, 1};
   k0<<<g, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      y.data_ptr<float>());
+      reinterpret_cast<half *>(z.data_ptr<at::Half>()));
 
-  cnnlCumsum_v2(handle, d, y.data_ptr(), 1, false, false, CNNL_PROPAGATE_NAN, d,
-                y.data_ptr(), w.data_ptr(), w1);
+  cnnlCumsum_v2(handle, d, z.data_ptr(), 1, false, false, CNNL_PROPAGATE_NAN, d,
+                z.data_ptr(), w.data_ptr(), w1);
 
-  cnnlCumsum_v2(handle, d, y.data_ptr(), 2, false, false, CNNL_PROPAGATE_NAN, d,
-                y.data_ptr(), w.data_ptr(), w2);
+  cnnlCumsum_v2(handle, d, z.data_ptr(), 2, false, false, CNNL_PROPAGATE_NAN, d,
+                z.data_ptr(), w.data_ptr(), w2);
+  k1<<<g, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(z.data_ptr<at::Half>()), y.data_ptr<float>());
 
   return y;
 }
