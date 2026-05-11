@@ -4,55 +4,6 @@
 #include <cnrt.h>
 #include <torch/extension.h>
 
-__attribute__((constructor)) static void on_so_load() {
-  namespace py = pybind11;
-
-  if (!Py_IsInitialized()) {
-    return;
-  }
-
-  py::gil_scoped_acquire gil;
-
-  try {
-    py::module_ torch = py::module_::import("torch");
-
-    const int device_id = 6;
-
-    if (py::hasattr(torch, "mlu")) {
-      py::object mlu = torch.attr("mlu");
-
-      if (py::hasattr(mlu, "is_available")) {
-        bool ok = mlu.attr("is_available")().cast<bool>();
-        if (!ok) {
-          py::print("[AUTO] torch.mlu is not available");
-          return;
-        }
-      }
-
-      if (py::hasattr(mlu, "device_count")) {
-        int n = mlu.attr("device_count")().cast<int>();
-        py::print("[AUTO] torch.mlu.device_count =", n);
-
-        if (device_id < 0 || device_id >= n) {
-          py::print("[AUTO] invalid MLU device id:", device_id);
-          return;
-        }
-      }
-
-      mlu.attr("set_device")(device_id);
-      py::print("[AUTO] set default MLU device to mlu:", device_id);
-    } else {
-      py::print("[AUTO] torch has no mlu attribute");
-    }
-  } catch (const py::error_already_set &e) {
-    try {
-      py::print("[AUTO] set MLU device failed:", e.what());
-    } catch (...) {
-    }
-  } catch (...) {
-  }
-}
-
 torch::Tensor bang_func(torch::Tensor x) {
   static cnnlTensorDescriptor_t d;
   static bool inited = false;
