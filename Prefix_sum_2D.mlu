@@ -4,50 +4,26 @@
 #include <cnrt.h>
 #include <torch/extension.h>
 
-__attribute__((constructor)) static void on_so_load() {
-  namespace py = pybind11;
-
-  if (!Py_IsInitialized()) {
-    return;
-  }
-
-  py::gil_scoped_acquire gil;
-
-  try {
-    py::module_ torch = py::module_::import("torch");
-    torch.attr("set_default_dtype")(torch.attr("float16"));
-    PyRun_SimpleString(R"PY(
-import torch as _t
-if not hasattr(_t, "_c122_r"):
-    _t._c122_r = _t.randn
-    def _c122_f(*a, **k):
-        k["dtype"] = _t.float16
-        return _t._c122_r(*a, **k)
-    _t.randn = _c122_f
-)PY");
-
-    if (py::hasattr(torch, "mlu")) {
-      py::object mlu = torch.attr("mlu");
-      mlu.attr("set_device")(6);
-    }
-  } catch (const py::error_already_set &e) {
-  } catch (...) {
-  }
-}
-
 torch::Tensor bang_func(torch::Tensor x) {
   static cnnlTensorDescriptor_t d;
+  static c10::ScalarType ty = c10::ScalarType::Undefined;
   static bool inited = false;
 
   auto handle = torch_mlu::getCurrentHandle();
 
-  if (!inited) {
+  if (!inited || ty != x.scalar_type()) {
+    if (inited) {
+      cnnlDestroyTensorDescriptor(d);
+    }
     int dims[3] = {16, 256, 256};
+    cnnlDataType_t ct =
+        x.scalar_type() == at::kFloat ? CNNL_DTYPE_FLOAT : CNNL_DTYPE_HALF;
 
     cnnlCreateTensorDescriptor(&d);
-    cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, dims);
+    cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, ct, 3, dims);
 
     inited = true;
+    ty = x.scalar_type();
   }
 
   auto y = torch::empty_like(x);
