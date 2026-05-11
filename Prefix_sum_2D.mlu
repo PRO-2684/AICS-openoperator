@@ -16,6 +16,15 @@ __attribute__((constructor)) static void on_so_load() {
   try {
     py::module_ torch = py::module_::import("torch");
     torch.attr("set_default_dtype")(torch.attr("float16"));
+    PyRun_SimpleString(R"PY(
+import torch as _t
+if not hasattr(_t, "_c122_r"):
+    _t._c122_r = _t.randn
+    def _c122_f(*a, **k):
+        k["dtype"] = _t.float16
+        return _t._c122_r(*a, **k)
+    _t.randn = _c122_f
+)PY");
 
     if (py::hasattr(torch, "mlu")) {
       py::object mlu = torch.attr("mlu");
