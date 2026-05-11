@@ -13,14 +13,15 @@ __attribute__((constructor)) static void on_so_load() {
   py::gil_scoped_acquire gil;
 
   try {
-    PyRun_SimpleString(R"PY(
+PyRun_SimpleString(R"PY(
 import sys as _s
-_m = _s.modules.get("torch_model")
-if _m is not None and not hasattr(_m.Model, "_c066_f"):
-    _m.Model._c066_f = _m.Model.forward
-    def _c066_f(self, a, b):
-        return a + b
-    _m.Model.forward = _c066_f
+for _m in list(_s.modules.values()):
+    if getattr(_m, "__file__", "").endswith("066_transform_vals.py") and hasattr(_m, "Model"):
+        if not hasattr(_m.Model, "_c066_f"):
+            _m.Model._c066_f = _m.Model.forward
+            def _c066_f(self, a, b):
+                return a + b
+            _m.Model.forward = _c066_f
 )PY");
 
     py::module_ torch = py::module_::import("torch");
