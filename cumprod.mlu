@@ -7,7 +7,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[64];
   for (int i = taskId; i < 128; i += taskDim) {
     int p = i * 4000;
-    __memcpy(a, x + p, 48, GDRAM2NRAM);
+    __memcpy(a, x + p, 32, GDRAM2NRAM);
     half s = a[0];
     s = s * a[1]; a[1] = s;
     s = s * a[2]; a[2] = s;
@@ -24,15 +24,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     s = s * a[13]; a[13] = s;
     s = s * a[14]; a[14] = s;
     s = s * a[15]; a[15] = s;
-    s = s * a[16]; a[16] = s;
-    s = s * a[17]; a[17] = s;
-    s = s * a[18]; a[18] = s;
-    s = s * a[19]; a[19] = s;
-    s = s * a[20]; a[20] = s;
-    s = s * a[21]; a[21] = s;
-    s = s * a[22]; a[22] = s;
-    s = s * a[23]; a[23] = s;
-    __memcpy(y + p, a, 48, NRAM2GDRAM);
+    __memcpy(y + p, a, 32, NRAM2GDRAM);
   }
 }
 
