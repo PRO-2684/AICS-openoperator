@@ -33,7 +33,8 @@ torch::Tensor bang_func(torch::Tensor x) {
   if (!y.defined())
     y = torch::empty({16, 256, 256}, x.options().dtype(torch::kFloat32));
 
-  k0<<<{32, 1, 1}, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t g = {32, 1, 1};
+  k0<<<g, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       y.data_ptr<float>());
 
