@@ -4,27 +4,25 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[64];
   for (int i = taskId; i < 128; i += taskDim) {
     int p = i * 4000;
-    __memcpy(a, x + p, 32, GDRAM2NRAM);
-    half s = a[0];
-    s = s * a[1]; a[1] = s;
-    s = s * a[2]; a[2] = s;
-    s = s * a[3]; a[3] = s;
-    s = s * a[4]; a[4] = s;
-    s = s * a[5]; a[5] = s;
-    s = s * a[6]; a[6] = s;
-    s = s * a[7]; a[7] = s;
-    s = s * a[8]; a[8] = s;
-    s = s * a[9]; a[9] = s;
-    s = s * a[10]; a[10] = s;
-    s = s * a[11]; a[11] = s;
-    s = s * a[12]; a[12] = s;
-    s = s * a[13]; a[13] = s;
-    s = s * a[14]; a[14] = s;
-    s = s * a[15]; a[15] = s;
-    __memcpy(y + p, a, 32, NRAM2GDRAM);
+    half s = x[p];
+    y[p] = s;
+    s = s * x[p + 1]; y[p + 1] = s;
+    s = s * x[p + 2]; y[p + 2] = s;
+    s = s * x[p + 3]; y[p + 3] = s;
+    s = s * x[p + 4]; y[p + 4] = s;
+    s = s * x[p + 5]; y[p + 5] = s;
+    s = s * x[p + 6]; y[p + 6] = s;
+    s = s * x[p + 7]; y[p + 7] = s;
+    s = s * x[p + 8]; y[p + 8] = s;
+    s = s * x[p + 9]; y[p + 9] = s;
+    s = s * x[p + 10]; y[p + 10] = s;
+    s = s * x[p + 11]; y[p + 11] = s;
+    s = s * x[p + 12]; y[p + 12] = s;
+    s = s * x[p + 13]; y[p + 13] = s;
+    s = s * x[p + 14]; y[p + 14] = s;
+    s = s * x[p + 15]; y[p + 15] = s;
   }
 }
 
