@@ -5,17 +5,15 @@
 
 #define E0 32
 #define E1 16384
-#define E2 1024
+#define E2 512
 
 __mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y, int n) {
   int q = n / E2;
   __bang_sumpool(y, x, E2, 1, q, 1, q, 1, q);
   __bang_reduce_sum(y, y, E2);
-  float s = 0.0f;
-  for (int i = 0; i < E2; i += 32) {
-    s += y[i];
-  }
-  return s;
+  return y[0] + y[32] + y[64] + y[96] + y[128] + y[160] + y[192] +
+         y[224] + y[256] + y[288] + y[320] + y[352] + y[384] + y[416] +
+         y[448] + y[480];
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ t,
@@ -32,11 +30,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ t,
     __bang_write_value(c, E2, 0.0f);
     __memcpy(c, t, E0 * sizeof(float), GDRAM2NRAM);
     __bang_reduce_sum(c, c, E2);
-    float s = 0.0f;
-    for (int i = 0; i < E2; i += 32) {
-      s += c[i];
-    }
-    y[0] = s;
+    y[0] = c[0] + c[32] + c[64] + c[96] + c[128] + c[160] + c[192] +
+           c[224] + c[256] + c[288] + c[320] + c[352] + c[384] + c[416] +
+           c[448] + c[480];
   }
 }
 
