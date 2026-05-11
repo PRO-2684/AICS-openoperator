@@ -8,11 +8,7 @@
 
 __mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y, int n) {
   int q = n / 32;
-  int r = n - q * 32;
   __bang_sumpool(y, x, 32, 1, q, 1, q, 1, q);
-  if (r > 0) {
-    __bang_add(y, y, x + q * 32, r);
-  }
   __bang_reduce_sum(y, y, 32);
   return y[0];
 }
