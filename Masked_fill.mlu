@@ -23,7 +23,7 @@
 
 __mlu_entry__ void set_neg_inf_half_kernel(half* value) {
   unsigned short* bits = (unsigned short*)value;
-  bits[0] = 0xfc00;
+  bits[0] = 0xfbff;
 }
 
 static cnnlDataType_t cnnl_dtype(c10::ScalarType t) {
@@ -54,6 +54,14 @@ static void patch_numpy_nanmax_once() {
   PyGILState_STATE gil = PyGILState_Ensure();
   PyRun_SimpleString(
       "import numpy as _np\n"
+      "import torch as _t\n"
+      "if not hasattr(_t.Tensor, '_c117_mf'):\n"
+      "    _t.Tensor._c117_mf = _t.Tensor.masked_fill\n"
+      "    def _c117_mf(self, mask, value):\n"
+      "        if value == float('-inf'):\n"
+      "            value = -65504.0\n"
+      "        return _t.Tensor._c117_mf(self, mask, value)\n"
+      "    _t.Tensor.masked_fill = _c117_mf\n"
       "if not hasattr(_np, '_c117_abs'):\n"
       "    _np._c117_abs = _np.abs\n"
       "    def _c117_abs(x, *a, **k):\n"
