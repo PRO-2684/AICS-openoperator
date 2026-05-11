@@ -11,7 +11,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       float *__restrict__ y) {
   __nram__ half x[E1];
   __nram__ half r[E1];
-  __nram__ half z[E2];
+  __nram__ half z[E1];
   __nram__ float f[E2];
   __wram__ half w[E1];
 
