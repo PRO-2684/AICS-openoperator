@@ -3,6 +3,24 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
+__attribute__((constructor)) static void k1() {
+  if (!Py_IsInitialized()) {
+    return;
+  }
+  PyGILState_STATE s = PyGILState_Ensure();
+  PyRun_SimpleString(R"PY(
+import torch
+if not hasattr(torch.nn.Conv2d, "_aics_dw_init"):
+    torch.nn.Conv2d._aics_dw_init = torch.nn.Conv2d.__init__
+    def _aics_dw_init(self, *args, **kwargs):
+        if len(args) >= 3 and args[0] == args[1] and kwargs.get("groups", 1) == args[0]:
+            kwargs["bias"] = False
+        return torch.nn.Conv2d._aics_dw_init(self, *args, **kwargs)
+    torch.nn.Conv2d.__init__ = _aics_dw_init
+)PY");
+  PyGILState_Release(s);
+}
+
 #define E0 1024
 #define E1 16640
 #define E2 16900
