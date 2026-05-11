@@ -45,7 +45,7 @@ __mlu_func__ void f0(half *a) {
   s = s * a[38]; a[38] = s;
   s = s * a[39]; a[39] = s;
   float v = (float)s;
-  if (v > 0.0001f || v < -0.0001f) {
+  if (v > 0.001f || v < -0.001f) {
     s = s * a[40]; a[40] = s;
     s = s * a[41]; a[41] = s;
     s = s * a[42]; a[42] = s;
