@@ -31,37 +31,18 @@ __mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
 
 __mlu_entry__ void k2(const half *__restrict__ x, const int64_t *__restrict__ w,
                       float *__restrict__ y) {
-  __mlu_shared__ float s[16384];
   __nram__ half b[E1];
   __nram__ float c[E1];
   __nram__ float d[E4];
-  __nram__ float e[E3];
-  __nram__ float f[E3];
-  int g = taskIdY;
-  int h = coreId;
-  int tid = g * 4 + h;
+  float *p0 = y + taskId * E4;
   __bang_write_value(d, E4, 0.0f);
-  if (h != 0x80) {
-    for (int r = tid; r < E0; r += 32) {
-      __memcpy(b, x + r * E1, E1 * sizeof(half), GDRAM2NRAM);
-      __bang_half2float(c, b, E1);
-      int64_t q = w[r];
-      __bang_add(d + q * E1, d + q * E1, c, E1);
-    }
-    for (int p = 0; p < E4; p += E3) {
-      __memcpy(s + h * E3, d + p, E3 * sizeof(float), NRAM2SRAM);
-      __sync_cluster();
-      if (h == 0) {
-        __bang_write_value(e, E3, 0.0f);
-        for (int i = 0; i < 4; ++i) {
-          __memcpy(f, s + i * E3, E3 * sizeof(float), SRAM2NRAM);
-          __bang_add(e, e, f, E3);
-        }
-        __memcpy(y + g * E4 + p, e, E3 * sizeof(float), NRAM2GDRAM);
-      }
-      __sync_cluster();
-    }
+  for (int r = taskId; r < E0; r += taskDim) {
+    __memcpy(b, x + r * E1, E1 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(c, b, E1);
+    int64_t q = w[r];
+    __bang_add(d + q * E1, d + q * E1, c, E1);
   }
+  __memcpy(p0, d, E4 * sizeof(float), NRAM2GDRAM);
 }
 
 __mlu_entry__ void k3(const float *__restrict__ t, float *__restrict__ y) {
@@ -69,7 +50,7 @@ __mlu_entry__ void k3(const float *__restrict__ t, float *__restrict__ y) {
   __nram__ float b[E3];
   for (int p = taskId * E3; p < E4; p += taskDim * E3) {
     __bang_write_value(a, E3, 0.0f);
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < 32; ++i) {
       __memcpy(b, t + i * E4 + p, E3 * sizeof(float), GDRAM2NRAM);
       __bang_add(a, a, b, E3);
     }
