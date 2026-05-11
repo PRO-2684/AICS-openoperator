@@ -13,15 +13,13 @@ __mlu_func__ void f0(half *a) {
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[160];
-  for (int n = 0; n < 32; ++n) {
-    int p = n * 16000;
-    __memcpy(a, x + p, 80, GDRAM2NRAM, 80, 8000, 3);
-    f0(a);
-    f0(a + 40);
-    f0(a + 80);
-    f0(a + 120);
-    __memcpy(y + p, a, 80, NRAM2GDRAM, 8000, 80, 3);
-  }
+  int p = taskId * 16000;
+  __memcpy(a, x + p, 80, GDRAM2NRAM, 80, 8000, 3);
+  f0(a);
+  f0(a + 40);
+  f0(a + 80);
+  f0(a + 120);
+  __memcpy(y + p, a, 80, NRAM2GDRAM, 8000, 80, 3);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
@@ -35,7 +33,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   if (u)
     cnrtMemsetAsync(y.data_ptr(), 0, 1024000, q);
-  cnrtDim3_t g = {1, 1, 1};
+  cnrtDim3_t g = {32, 1, 1};
   k0<<<g, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
