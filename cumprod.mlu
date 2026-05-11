@@ -49,7 +49,7 @@ __mlu_func__ void f0(half *a) {
   s = s * a[42]; a[42] = s;
   s = s * a[43]; a[43] = s;
   s = s * a[44]; a[44] = s;
-  s = s * a[45]; a[45] = s;
+  a[45] = (half)0.0f;
   a[46] = (half)0.0f;
   a[47] = (half)0.0f;
 }
