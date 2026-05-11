@@ -1,73 +1,29 @@
 #include <bang.h>
-#include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#include <vector>
-
-#define ROWS 128
-#define COLS 4000
-
-#define CNNL_CHECK(expr)                                                     \
-  do {                                                                       \
-    cnnlStatus_t status = (expr);                                            \
-    TORCH_CHECK(status == CNNL_STATUS_SUCCESS, "CNNL call failed: ", status); \
-  } while (0)
-
-__mlu_entry__ void shift_kernel(const half *__restrict__ x,
-                                half *__restrict__ y) {
-  int row = taskId;
-  if (row >= ROWS) {
-    return;
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
+  __nram__ half a[4000];
+  __nram__ float b[4000];
+  for (int r = taskId; r < 128; r += taskDim) {
+    __memcpy(a, x + r * 4000, 4000 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(b, a, 4000);
+    float s = 0.0f;
+    for (int i = 0; i < 4000; ++i) {
+      float t = b[i];
+      b[i] = s;
+      s += t;
+    }
+    __memcpy(y + r * 4000, b, 4000 * sizeof(float), NRAM2GDRAM);
   }
-
-  int base = row * COLS;
-  y[base] = (half)0.0f;
-  __memcpy(y + base + 1, x + base, (COLS - 1) * sizeof(half), GDRAM2GDRAM);
-}
-
-static void cumsum_dim1(torch::Tensor in, torch::Tensor out) {
-  int dims[2] = {ROWS, COLS};
-
-  cnnlTensorDescriptor_t in_desc;
-  cnnlTensorDescriptor_t out_desc;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&in_desc));
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&out_desc));
-  CNNL_CHECK(cnnlSetTensorDescriptor(in_desc, CNNL_LAYOUT_ARRAY,
-                                     CNNL_DTYPE_HALF, 2, dims));
-  CNNL_CHECK(cnnlSetTensorDescriptor(out_desc, CNNL_LAYOUT_ARRAY,
-                                     CNNL_DTYPE_HALF, 2, dims));
-
-  cnnlHandle_t handle;
-  CNNL_CHECK(cnnlCreate(&handle));
-  CNNL_CHECK(cnnlSetQueue(handle, torch_mlu::getCurMLUStream()));
-
-  size_t workspace_size = 0;
-  CNNL_CHECK(cnnlGetCumsumWorkspaceSize(handle, in_desc, 1, &workspace_size));
-  auto workspace =
-      torch::empty({(int64_t)workspace_size}, in.options().dtype(torch::kUInt8));
-
-  CNNL_CHECK(cnnlCumsum_v2(handle, in_desc, in.data_ptr(), 1, false, false,
-                           CNNL_NOT_PROPAGATE_NAN, out_desc, out.data_ptr(),
-                           workspace.data_ptr(), workspace_size));
-
-  CNNL_CHECK(cnnlDestroy(handle));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(out_desc));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(in_desc));
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
-  auto shifted = torch::empty_like(x);
-  auto out = torch::empty_like(x);
-
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t grid = {ROWS, 1, 1};
-  shift_kernel<<<grid, cnrtFuncTypeBlock, queue>>>(
+  auto y = torch::empty({128, 4000}, x.options().dtype(torch::kFloat32));
+  k0<<<{32, 1, 1}, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(shifted.data_ptr<at::Half>()));
-
-  cumsum_dim1(shifted, out);
-  return out;
+      y.data_ptr<float>());
+  return y;
 }

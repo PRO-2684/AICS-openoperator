@@ -1,73 +1,28 @@
 #include <bang.h>
-#include <cnnl.h>
 #include <cnrt.h>
-#include <aten/cnnl/cnnlHandle.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define ROWS 128
-#define COLS 4000
-
-#define CNNL_CHECK(expr)                                                     \
-  do {                                                                       \
-    cnnlStatus_t status = (expr);                                            \
-    TORCH_CHECK(status == CNNL_STATUS_SUCCESS, "CNNL call failed: ", status); \
-  } while (0)
-
-__mlu_entry__ void flip_kernel(const half *__restrict__ x,
-                               half *__restrict__ y) {
-  __nram__ half u[4096];
-  __nram__ half v[4096];
-  for (int row = taskId; row < ROWS; row += taskDim) {
-    int base = row * COLS;
-    __bang_write_value(u, 96, (half)0.0f);
-    __memcpy(u + 96, x + base, COLS * sizeof(half), GDRAM2NRAM);
-    __bang_rotate180(v, u, 64, 64);
-    __memcpy(y + base, v, COLS * sizeof(half), NRAM2GDRAM);
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
+  __nram__ half a[4000];
+  __nram__ float b[4000];
+  for (int r = taskId; r < 128; r += taskDim) {
+    __memcpy(a, x + r * 4000, 4000 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(b, a, 4000);
+    float s = 0.0f;
+    for (int i = 3999; i >= 0; --i) {
+      s += b[i];
+      b[i] = s;
+    }
+    __memcpy(y + r * 4000, b, 4000 * sizeof(float), NRAM2GDRAM);
   }
-}
-
-
-static void cumsum_dim1(torch::Tensor in, torch::Tensor out) {
-  static cnnlTensorDescriptor_t d;
-  static torch::Tensor w;
-  static size_t z = 0;
-  static bool ok = false;
-  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
-  if (!ok) {
-    int dims[2] = {ROWS, COLS};
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-    CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF,
-                                       2, dims));
-    CNNL_CHECK(cnnlGetCumsumWorkspaceSize(handle, d, 1, &z));
-    w = torch::empty({(int64_t)z}, in.options().dtype(torch::kUInt8));
-    ok = true;
-  }
-  CNNL_CHECK(cnnlCumsum_v2(handle, d, in.data_ptr(), 1, false, false,
-                           CNNL_NOT_PROPAGATE_NAN, d, out.data_ptr(),
-                           w.data_ptr(), z));
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
-  static torch::Tensor flipped;
-  static torch::Tensor scanned;
-  static torch::Tensor out;
-  if (!out.defined()) {
-    flipped = torch::empty_like(x);
-    scanned = torch::empty_like(x);
-    out = torch::empty_like(x);
-  }
-
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t grid = {4, 8, 1};
-  flip_kernel<<<grid, cnrtFuncTypeBlock, queue>>>(
+  auto y = torch::empty({128, 4000}, x.options().dtype(torch::kFloat32));
+  k0<<<{32, 1, 1}, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(flipped.data_ptr<at::Half>()));
-  cumsum_dim1(flipped, scanned);
-  flip_kernel<<<grid, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(scanned.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
-
-  return out;
+      y.data_ptr<float>());
+  return y;
 }
