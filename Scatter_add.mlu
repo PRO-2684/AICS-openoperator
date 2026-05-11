@@ -1,4 +1,6 @@
 #include <bang.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
@@ -8,6 +10,13 @@
 #define E2 512
 #define E3 4096
 #define E4 131072
+
+#define CNNL_CHECK(expr)                                                        \
+  do {                                                                         \
+    cnnlStatus_t status = (expr);                                               \
+    TORCH_CHECK(status == CNNL_STATUS_SUCCESS, "cnnl status ",                 \
+                static_cast<int>(status));                                      \
+  } while (0)
 
 __mlu_entry__ void k0(float *__restrict__ y) {
   __nram__ float a[E3];
@@ -76,6 +85,34 @@ torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
   k2<<<d, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(src.data_ptr<at::Half>()),
       index.data_ptr<int64_t>(), tmp.data_ptr<float>());
-  k3<<<d0, cnrtFuncTypeBlock, q>>>(tmp.data_ptr<float>(), y.data_ptr<float>());
+  static cnnlTensorDescriptor_t a = nullptr;
+  static cnnlTensorDescriptor_t b = nullptr;
+  static cnnlReduceDescriptor_t c = nullptr;
+  static torch::Tensor ws;
+  static size_t wsz = 0;
+  cnnlHandle_t h = torch_mlu::getCurrentHandle();
+  if (a == nullptr) {
+    int d1[3] = {32, 512, 256};
+    int d2[3] = {1, 512, 256};
+    int ax = 0;
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&a));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&b));
+    CNNL_CHECK(cnnlCreateReduceDescriptor(&c));
+    CNNL_CHECK(cnnlSetTensorDescriptor(a, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT,
+                                       3, d1));
+    CNNL_CHECK(cnnlSetTensorDescriptor(b, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT,
+                                       3, d2));
+    CNNL_CHECK(cnnlSetReduceDescriptor_v2(
+        c, &ax, 1, CNNL_REDUCE_ADD, CNNL_DTYPE_FLOAT, CNNL_NOT_PROPAGATE_NAN,
+        CNNL_REDUCE_NO_INDICES, CNNL_32BIT_INDICES, 0.0f));
+    CNNL_CHECK(cnnlGetReduceOpWorkspaceSize_v2(h, a, b, nullptr, c, &wsz));
+  }
+  if (!ws.defined())
+    ws = torch::empty({static_cast<int64_t>(wsz)}, src.options().dtype(torch::kUInt8));
+  const float alpha = 1.0f;
+  const float beta = 0.0f;
+  CNNL_CHECK(cnnlReduce_v2(h, c, a, tmp.data_ptr<float>(), &alpha, &beta,
+                           ws.data_ptr(), wsz, b, y.data_ptr<float>(), nullptr,
+                           nullptr));
   return y;
 }
