@@ -5,10 +5,45 @@
 
 __mlu_func__ void f0(half *a) {
   half s = a[0];
-  for (int i = 1; i < 40; ++i) {
-    s = s * a[i];
-    a[i] = s;
-  }
+  s = s * a[1]; a[1] = s;
+  s = s * a[2]; a[2] = s;
+  s = s * a[3]; a[3] = s;
+  s = s * a[4]; a[4] = s;
+  s = s * a[5]; a[5] = s;
+  s = s * a[6]; a[6] = s;
+  s = s * a[7]; a[7] = s;
+  s = s * a[8]; a[8] = s;
+  s = s * a[9]; a[9] = s;
+  s = s * a[10]; a[10] = s;
+  s = s * a[11]; a[11] = s;
+  s = s * a[12]; a[12] = s;
+  s = s * a[13]; a[13] = s;
+  s = s * a[14]; a[14] = s;
+  s = s * a[15]; a[15] = s;
+  s = s * a[16]; a[16] = s;
+  s = s * a[17]; a[17] = s;
+  s = s * a[18]; a[18] = s;
+  s = s * a[19]; a[19] = s;
+  s = s * a[20]; a[20] = s;
+  s = s * a[21]; a[21] = s;
+  s = s * a[22]; a[22] = s;
+  s = s * a[23]; a[23] = s;
+  s = s * a[24]; a[24] = s;
+  s = s * a[25]; a[25] = s;
+  s = s * a[26]; a[26] = s;
+  s = s * a[27]; a[27] = s;
+  s = s * a[28]; a[28] = s;
+  s = s * a[29]; a[29] = s;
+  s = s * a[30]; a[30] = s;
+  s = s * a[31]; a[31] = s;
+  s = s * a[32]; a[32] = s;
+  s = s * a[33]; a[33] = s;
+  s = s * a[34]; a[34] = s;
+  s = s * a[35]; a[35] = s;
+  s = s * a[36]; a[36] = s;
+  s = s * a[37]; a[37] = s;
+  s = s * a[38]; a[38] = s;
+  s = s * a[39]; a[39] = s;
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
