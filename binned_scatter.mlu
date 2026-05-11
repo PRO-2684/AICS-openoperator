@@ -10,27 +10,27 @@
 __mlu_entry__ void kernel(const half *__restrict__ x,
                           const int *__restrict__ indices,
                           const half *__restrict__ weights,
-                          half *__restrict__ out) {
+                          float *__restrict__ out) {
   int token = taskId;
   if (token >= T) {
     return;
   }
 
-  half acc[H];
+  float acc[H];
 
 #pragma unroll
   for (int j = 0; j < H; ++j) {
-    acc[j] = (half)0.0f;
+    acc[j] = 0.0f;
   }
   int idx0 = indices[token];
   int idx1 = indices[token + 4];
-  half w0 = weights[idx0];
-  half w1 = weights[idx1];
+  float w0 = (float)weights[idx0];
+  float w1 = (float)weights[idx1];
   int p0 = token * H;
   int p1 = (E1 + token) * H;
 #pragma unroll
   for (int j = 0; j < H; ++j) {
-    acc[j] = x[p0 + j] * w0 + x[p1 + j] * w1;
+    acc[j] = (float)x[p0 + j] * w0 + (float)x[p1 + j] * w1;
   }
 
   int dst_base = token * H;
@@ -46,14 +46,14 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices,
   (void)bins;
   (void)top_k;
 
-  auto out = torch::empty({T, H}, x.options());
+  auto out = torch::empty({T, H}, x.options().dtype(torch::kFloat));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {T, 1, 1};
   kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       indices.data_ptr<int>(), reinterpret_cast<const half *>(weights.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+      out.data_ptr<float>());
 
   return out;
 }

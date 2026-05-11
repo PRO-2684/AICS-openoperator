@@ -9,7 +9,7 @@
 #define TRACE_N 512
 
 __mlu_entry__ void trace_half_float_reduce_kernel(const half *__restrict__ a,
-                                                  half *__restrict__ out,
+                                                  float *__restrict__ out,
                                                   int batch, int n) {
   const int b = taskId;
   if (b >= batch)
@@ -19,7 +19,6 @@ __mlu_entry__ void trace_half_float_reduce_kernel(const half *__restrict__ a,
 
   __nram__ half hbuf[TRACE_N];
   __nram__ float fbuf[TRACE_N];
-  __nram__ half obuf[64];
 
   __memcpy_async(hbuf, a + base, sizeof(half), GDRAM2NRAM, sizeof(half),
                  (n + 1) * sizeof(half), n - 1);
@@ -35,21 +34,14 @@ __mlu_entry__ void trace_half_float_reduce_kernel(const half *__restrict__ a,
     s += fbuf[i];
   }
 
-  fbuf[0] = s;
-#pragma unroll
-  for (int i = 1; i < 64; ++i) {
-    fbuf[i] = 0.0f;
-  }
-
-  __bang_float2half_rn(obuf, fbuf, 64);
-  __memcpy(out + b, obuf, sizeof(half), NRAM2GDRAM);
+  out[b] = s;
 }
 
 torch::Tensor bang_func(torch::Tensor A) {
   const int batch = (int)A.size(0);
   const int n = (int)A.size(1);
 
-  auto out = torch::empty({batch}, A.options());
+  auto out = torch::empty({batch}, A.options().dtype(torch::kFloat));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
@@ -58,7 +50,7 @@ torch::Tensor bang_func(torch::Tensor A) {
 
   trace_half_float_reduce_kernel<<<dim, ktype, queue>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()), batch, n);
+      out.data_ptr<float>(), batch, n);
 
   return out;
 }
