@@ -16,9 +16,11 @@ __mlu_entry__ void k0(const half *__restrict__ x, int64_t *__restrict__ y) {
   for (int i = 1; i < 256; ++i) {
     half *p = a + i * 256;
     __bang_gt(c, p, b, 256);
-    __bang_fusion(FUSION_FSM, b, c, p, b, 256, 256);
     __bang_write_value(a + 65280, 256, (half)i);
-    __bang_fusion(FUSION_FSM, d, c, a + 65280, d, 256, 256);
+    __bang_sub(a + 65280, a + 65280, d, 256);
+    __bang_mul(a + 65280, a + 65280, c, 256);
+    __bang_add(d, d, a + 65280, 256);
+    __bang_maxequal(b, b, p, 256);
   }
   __bang_half2int32(e, d, 256, 0);
   for (int i = 0; i < 256; ++i) {
