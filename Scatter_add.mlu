@@ -58,6 +58,24 @@ __mlu_entry__ void k3(const float *__restrict__ t, float *__restrict__ y) {
   }
 }
 
+__mlu_entry__ void k4(const half *__restrict__ x, const int64_t *__restrict__ w,
+                      float *__restrict__ y) {
+  __nram__ half a[32];
+  __nram__ float b[32];
+  __nram__ float c[16384];
+  int p = taskId * 32;
+  __bang_write_value(c, 16384, 0.0f);
+  for (int r = 0; r < E0; ++r) {
+    __memcpy(a, x + r * E1 + p, 32 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(b, a, 32);
+    int64_t q = w[r];
+    __bang_add(c + q * 32, c + q * 32, b, 32);
+  }
+  for (int q = 0; q < E2; ++q) {
+    __memcpy(y + q * E1 + p, c + q * 32, 32 * sizeof(float), NRAM2GDRAM);
+  }
+}
+
 torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
   (void)dim_size;
   static torch::Tensor tmp;
@@ -71,11 +89,9 @@ torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
   else
     y.resize_({E2, E1});
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {4, 8, 1};
-  cnrtDim3_t d0 = {32, 1, 1};
-  k2<<<d, cnrtFuncTypeUnion1, q>>>(
+  cnrtDim3_t d = {8, 1, 1};
+  k4<<<d, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(src.data_ptr<at::Half>()),
-      index.data_ptr<int64_t>(), tmp.data_ptr<float>());
-  k3<<<d0, cnrtFuncTypeBlock, q>>>(tmp.data_ptr<float>(), y.data_ptr<float>());
+      index.data_ptr<int64_t>(), y.data_ptr<float>());
   return y;
 }
