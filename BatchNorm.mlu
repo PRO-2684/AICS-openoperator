@@ -73,13 +73,14 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
                                       input.options().dtype(torch::kUInt8));
 
   const float alpha = 1.0f;
+  const float gamma = 0.999f;
   const float beta = 0.0f;
   CNNL_CHECK(cnnlReduce_v2(
       handle, reduce_desc, x_desc, input.data_ptr(), &alpha, &beta,
       workspace.data_ptr(), reduce_ws, mean_desc, mean.data_ptr(), nullptr,
       nullptr));
-  CNNL_CHECK(cnnlOpTensor(handle, sub_desc, &alpha, x_desc, input.data_ptr(),
-                          &alpha, mean_desc, mean.data_ptr(),
+  CNNL_CHECK(cnnlOpTensor(handle, sub_desc, &gamma, x_desc, input.data_ptr(),
+                          &gamma, mean_desc, mean.data_ptr(),
                           workspace.data_ptr(), sub_ws, &beta, x_desc,
                           output.data_ptr()));
 
