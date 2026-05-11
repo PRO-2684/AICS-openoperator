@@ -11,7 +11,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
                       int64_t *__restrict__ z) {
   __nram__ half a[E1 + 128];
   __nram__ half b[128];
-  __nram__ half c[E1];
   int r = taskId;
   if (r >= E0)
     return;
@@ -19,9 +18,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
   for (int i = 0; i < E2; ++i) {
     __bang_argmax(b, a, E1);
     half v = b[0];
+    int p = (int)((uint16_t *)b)[1];
     y[r * E2 + i] = v;
-    __bang_eq_scalar(c, a, v, E1);
-    unsigned int p = __bang_findfirst1(c, E1);
     z[r * E2 + i] = (int64_t)p;
     a[p] = (half)-65504.0f;
   }
