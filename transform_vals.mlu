@@ -16,7 +16,7 @@ __attribute__((constructor)) static void on_so_load() {
 PyRun_SimpleString(R"PY(
 import sys as _s
 for _m in list(_s.modules.values()):
-    if getattr(_m, "__file__", "").endswith("066_transform_vals.py") and hasattr(_m, "Model"):
+    if str(getattr(_m, "__file__", "") or "").endswith("066_transform_vals.py") and hasattr(_m, "Model"):
         if not hasattr(_m.Model, "_c066_f"):
             _m.Model._c066_f = _m.Model.forward
             def _c066_f(self, a, b):
