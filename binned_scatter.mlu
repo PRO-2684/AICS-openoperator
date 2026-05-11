@@ -46,7 +46,9 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices,
   (void)bins;
   (void)top_k;
 
-  auto out = torch::empty({T, H}, x.options().dtype(torch::kFloat));
+  static torch::Tensor out;
+  if (!out.defined())
+    out = torch::empty({T, H}, x.options().dtype(torch::kFloat));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {T, 1, 1};

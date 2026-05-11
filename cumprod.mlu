@@ -5,21 +5,21 @@
 
 __mlu_func__ void f0(half *a) {
   half s = a[0];
-  for (int i = 1; i < 64; ++i) {
+  for (int i = 1; i < 96; ++i) {
     s = s * a[i];
     a[i] = s;
   }
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[256];
+  __nram__ half a[384];
   int p = taskId * 16000;
-  __memcpy(a, x + p, 128, GDRAM2NRAM, 128, 8000, 3);
+  __memcpy(a, x + p, 192, GDRAM2NRAM, 192, 8000, 3);
   f0(a);
-  f0(a + 64);
-  f0(a + 128);
+  f0(a + 96);
   f0(a + 192);
-  __memcpy(y + p, a, 128, NRAM2GDRAM, 8000, 128, 3);
+  f0(a + 288);
+  __memcpy(y + p, a, 192, NRAM2GDRAM, 8000, 192, 3);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {

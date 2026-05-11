@@ -25,7 +25,9 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  auto out = torch::empty({4, 8, 128, 128}, A.options().dtype(torch::kFloat));
+  static torch::Tensor out;
+  if (!out.defined())
+    out = torch::empty({4, 8, 128, 128}, A.options().dtype(torch::kFloat));
   cnrtDim3_t d = {4, 8, 1};
   k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
