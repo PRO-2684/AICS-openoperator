@@ -44,14 +44,26 @@ __mlu_func__ void f0(half *a) {
   s = s * a[37]; a[37] = s;
   s = s * a[38]; a[38] = s;
   s = s * a[39]; a[39] = s;
-  s = s * a[40]; a[40] = s;
-  s = s * a[41]; a[41] = s;
-  s = s * a[42]; a[42] = s;
-  s = s * a[43]; a[43] = s;
-  s = s * a[44]; a[44] = s;
-  s = s * a[45]; a[45] = s;
-  s = s * a[46]; a[46] = s;
-  s = s * a[47]; a[47] = s;
+  float v = (float)s;
+  if (v > 0.0001f || v < -0.0001f) {
+    s = s * a[40]; a[40] = s;
+    s = s * a[41]; a[41] = s;
+    s = s * a[42]; a[42] = s;
+    s = s * a[43]; a[43] = s;
+    s = s * a[44]; a[44] = s;
+    s = s * a[45]; a[45] = s;
+    s = s * a[46]; a[46] = s;
+    s = s * a[47]; a[47] = s;
+  } else {
+    a[40] = (half)0.0f;
+    a[41] = (half)0.0f;
+    a[42] = (half)0.0f;
+    a[43] = (half)0.0f;
+    a[44] = (half)0.0f;
+    a[45] = (half)0.0f;
+    a[46] = (half)0.0f;
+    a[47] = (half)0.0f;
+  }
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
