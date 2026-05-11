@@ -4,37 +4,46 @@
 #include <torch/extension.h>
 
 #define E0 16
-#define E1 65536
+#define E1 32768
+#define E2 512
 
-__mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y, int n) {
-  int q = n / 32;
-  int r = n - q * 32;
-  __bang_sumpool(y, x, 32, 1, q, 1, q, 1, q);
-  if (r > 0) {
-    __bang_add(y, y, x + q * 32, r);
-  }
-  __bang_reduce_sum(y, y, 32);
-  return y[0];
+__mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y) {
+  __bang_sumpool(y, x, E2, 1, 64, 1, 64, 1, 64);
+  __bang_reduce_sum(y, y, E2);
+  return y[0] + y[32] + y[64] + y[96] + y[128] + y[160] + y[192] +
+         y[224] + y[256] + y[288] + y[320] + y[352] + y[384] + y[416] +
+         y[448] + y[480];
 }
 
-__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ t) {
   __nram__ half a[E1];
   __nram__ float b[E1];
-  __nram__ float c[32];
+  __nram__ float c[E2];
   int p = taskId * E1;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_half2float(b, a, E1);
-  y[taskId] = f0(b, c, E1);
+  t[taskId] = f0(b, c);
+}
+
+__mlu_entry__ void k1(const float *__restrict__ t, float *__restrict__ y) {
+  int p = taskId * 2;
+  y[taskId] = t[p] + t[p + 1];
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   static torch::Tensor out;
+  static torch::Tensor tmp;
   if (!out.defined())
     out = torch::empty({E0}, x.options().dtype(torch::kFloat));
+  if (!tmp.defined())
+    tmp = torch::empty({32}, x.options().dtype(torch::kFloat));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {E0, 1, 1};
-  k0<<<d, cnrtFuncTypeUnion4, queue>>>(
+  cnrtDim3_t d0 = {32, 1, 1};
+  cnrtDim3_t d1 = {E0, 1, 1};
+  k0<<<d0, cnrtFuncTypeUnion4, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      out.data_ptr<float>());
+      tmp.data_ptr<float>());
+  k1<<<d1, cnrtFuncTypeBlock, queue>>>(tmp.data_ptr<float>(),
+                                       out.data_ptr<float>());
   return out;
 }
