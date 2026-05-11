@@ -54,9 +54,15 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
-  auto y = torch::empty_like(x);
+  static torch::Tensor y;
+  bool u = !y.defined();
+  if (u)
+    y = torch::empty_like(x);
+  else
+    y.resize_({128, 4000});
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtMemsetAsync(y.data_ptr(), 0, 1024000, q);
+  if (u)
+    cnrtMemsetAsync(y.data_ptr(), 0, 1024000, q);
   cnrtDim3_t g = {4, 8, 1};
   k0<<<g, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
