@@ -44,26 +44,14 @@ __mlu_func__ void f0(half *a) {
   s = s * a[37]; a[37] = s;
   s = s * a[38]; a[38] = s;
   s = s * a[39]; a[39] = s;
-  float v = (float)s;
-  if (v > 0.001f || v < -0.001f) {
-    s = s * a[40]; a[40] = s;
-    s = s * a[41]; a[41] = s;
-    s = s * a[42]; a[42] = s;
-    s = s * a[43]; a[43] = s;
-    s = s * a[44]; a[44] = s;
-    s = s * a[45]; a[45] = s;
-    s = s * a[46]; a[46] = s;
-    s = s * a[47]; a[47] = s;
-  } else {
-    a[40] = (half)0.0f;
-    a[41] = (half)0.0f;
-    a[42] = (half)0.0f;
-    a[43] = (half)0.0f;
-    a[44] = (half)0.0f;
-    a[45] = (half)0.0f;
-    a[46] = (half)0.0f;
-    a[47] = (half)0.0f;
-  }
+  s = s * a[40]; a[40] = s;
+  s = s * a[41]; a[41] = s;
+  s = s * a[42]; a[42] = s;
+  s = s * a[43]; a[43] = s;
+  s = s * a[44]; a[44] = s;
+  s = s * a[45]; a[45] = s;
+  s = s * a[46]; a[46] = s;
+  s = s * a[47]; a[47] = s;
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
@@ -86,8 +74,8 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   if (u)
     cnrtMemsetAsync(y.data_ptr(), 0, 1024000, q);
-  cnrtDim3_t g = {32, 1, 1};
-  k0<<<g, cnrtFuncTypeBlock, q>>>(
+  cnrtDim3_t g = {4, 8, 1};
+  k0<<<g, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
