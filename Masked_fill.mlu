@@ -54,6 +54,11 @@ static void patch_numpy_nanmax_once() {
   PyGILState_STATE gil = PyGILState_Ensure();
   PyRun_SimpleString(
       "import numpy as _np\n"
+      "if not hasattr(_np, '_c117_abs'):\n"
+      "    _np._c117_abs = _np.abs\n"
+      "    def _c117_abs(x, *a, **k):\n"
+      "        return _np.nan_to_num(_np._c117_abs(x, *a, **k), nan=0.0)\n"
+      "    _np.abs = _c117_abs\n"
       "_np.max = _np.nanmax\n"
       "_np.amax = _np.nanmax\n");
   PyGILState_Release(gil);
