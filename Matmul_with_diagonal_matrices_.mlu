@@ -10,15 +10,13 @@
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       half *__restrict__ c) {
   __nram__ half x[E1];
-  __nram__ half y[E1];
   int row_base = taskId * E2;
   int p = row_base * E0;
 
   __memcpy(x, b + p, E1 * sizeof(half), GDRAM2NRAM);
   for (int r = 0; r < E2; ++r) {
-    __bang_write_value(y + r * E0, E0, a[row_base + r]);
+    __bang_mul_scalar(x + r * E0, x + r * E0, a[row_base + r], E0);
   }
-  __bang_mul(x, x, y, E1);
 
   __memcpy(c + p, x, E1 * sizeof(half), NRAM2GDRAM);
 }
