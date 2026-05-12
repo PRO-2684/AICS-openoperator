@@ -3,25 +3,21 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void k0(int *__restrict__ a) {
-  __nram__ int c[4096];
-  __bang_write_value(c, 4096, 0);
-  for (int i = taskId * 4096; i < 16384; i += taskDim * 4096) {
-    __memcpy(a + i, c, 4096 * sizeof(int), NRAM2GDRAM);
-  }
-}
-
 __mlu_entry__ void k1(const int64_t *__restrict__ x, int *__restrict__ a,
                       int *__restrict__ b) {
+  __nram__ int c[512];
+  __nram__ int d[4096];
+  __bang_write_value(c, 512, 0);
   for (int i = taskId; i < 4096; i += taskDim) {
     int p = (int)x[i];
-    int *u = a + taskId * 512 + p;
-    int q = *u;
-    *u = q + 1;
+    int q = c[p];
+    c[p] = q + 1;
     if (q < 8) {
-      b[(taskId * 512 + p) * 8 + q] = i;
+      d[p * 8 + q] = i;
     }
   }
+  __memcpy(a + taskId * 512, c, 512 * sizeof(int), NRAM2GDRAM);
+  __memcpy(b + taskId * 4096, d, 4096 * sizeof(int), NRAM2GDRAM);
 }
 
 __mlu_entry__ void k2(const half *__restrict__ x, const int *__restrict__ a,
@@ -63,9 +59,7 @@ torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
   }
   auto y = torch::empty({512, 256}, src.options().dtype(torch::kFloat32));
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d0 = {1, 1, 1};
   cnrtDim3_t d = {4, 8, 1};
-  k0<<<d0, cnrtFuncTypeBlock, q>>>(a.data_ptr<int>());
   k1<<<d, cnrtFuncTypeUnion1, q>>>(index.data_ptr<int64_t>(), a.data_ptr<int>(),
                                    b.data_ptr<int>());
   k2<<<d, cnrtFuncTypeUnion1, q>>>(
