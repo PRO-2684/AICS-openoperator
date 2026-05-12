@@ -8,10 +8,12 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ y,
   __nram__ half a[256];
   __nram__ float b[256];
   __nram__ float c[4096];
+  __nram__ int64_t d[4096];
   __bang_write_value(c, 4096, 0.0f);
+  __memcpy(d, y, 4096 * sizeof(int64_t), GDRAM2NRAM);
   int q = taskId << 4;
   for (int i = 0; i < 4096; ++i) {
-    int p = (int)y[i];
+    int p = (int)d[i];
     if ((p >> 4) == taskId) {
       __memcpy(a, x + i * 256, 256 * sizeof(half), GDRAM2NRAM);
       __bang_half2float(b, a, 256);
