@@ -8,11 +8,22 @@
 #define E0 4096
 #define E1 256
 #define E2 512
+#define E3 1048576
+#define E4 32768
 #define C(x)                                                                  \
   do {                                                                        \
     cnnlStatus_t s = (x);                                                     \
     TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "cnnl ", (int)s);                  \
   } while (0)
+
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
+  __nram__ half a[E4];
+  __nram__ float b[E4];
+  int p = taskId * E4;
+  __memcpy(a, x + p, E4 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(b, a, E4);
+  __memcpy(y + p, b, E4 * sizeof(float), NRAM2GDRAM);
+}
 
 torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
   (void)dim_size;
@@ -21,6 +32,7 @@ torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
   static cnnlTensorDescriptor_t c = nullptr;
   static size_t ws = 0;
   static torch::Tensor work;
+  static torch::Tensor tmp;
   if (a == nullptr) {
     int s0[2] = {E0, E1};
     int s1[1] = {E0};
@@ -29,16 +41,21 @@ torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
     C(cnnlCreateTensorDescriptor(&a));
     C(cnnlCreateTensorDescriptor(&b));
     C(cnnlCreateTensorDescriptor(&c));
-    C(cnnlSetTensorDescriptor(a, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, s0));
+    C(cnnlSetTensorDescriptor(a, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT, 2, s0));
     C(cnnlSetTensorDescriptorEx(b, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_INT32, 1, s1,
                                 t1));
     C(cnnlSetTensorDescriptor(c, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT, 2, s2));
     C(cnnlGetUnsortedSegmentSumWorkspaceSize(torch_mlu::getCurrentHandle(), a,
                                              c, &ws));
     work = torch::empty({(int64_t)ws}, src.options().dtype(torch::kUInt8));
+    tmp = torch::empty({E0, E1}, src.options().dtype(torch::kFloat32));
   }
   auto y = torch::empty({E2, E1}, src.options().dtype(torch::kFloat32));
-  C(cnnlUnsortedSegmentSum(torch_mlu::getCurrentHandle(), a, src.data_ptr(), b,
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(src.data_ptr<at::Half>()),
+      tmp.data_ptr<float>());
+  C(cnnlUnsortedSegmentSum(torch_mlu::getCurrentHandle(), a, tmp.data_ptr(), b,
                            index.data_ptr<int64_t>(), work.data_ptr(), ws, c,
                            y.data_ptr<float>()));
   return y;
