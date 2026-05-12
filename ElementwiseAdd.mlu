@@ -5,13 +5,14 @@
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       half *__restrict__ y) {
-  __nram__ half x0[131072];
-  __nram__ half x1[131072];
-  int p = taskId * 131072;
-  __memcpy(x0, a + p, 131072 * sizeof(half), GDRAM2NRAM);
-  __memcpy(x1, b + p, 131072 * sizeof(half), GDRAM2NRAM);
-  __bang_add(x0, x0, x1, 131072);
-  __memcpy(y + p, x0, 131072 * sizeof(half), NRAM2GDRAM);
+  __nram__ half x0[65536];
+  __nram__ half x1[65536];
+  for (int p = taskId * 65536; p < 4194304; p += taskDim * 65536) {
+    __memcpy(x0, a + p, 65536 * sizeof(half), GDRAM2NRAM);
+    __memcpy(x1, b + p, 65536 * sizeof(half), GDRAM2NRAM);
+    __bang_add(x0, x0, x1, 65536);
+    __memcpy(y + p, x0, 65536 * sizeof(half), NRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
