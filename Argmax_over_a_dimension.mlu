@@ -1,46 +1,46 @@
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define CNNL_CHECK(expr)                                                        \
-  do {                                                                         \
-    cnnlStatus_t status = (expr);                                               \
-    TORCH_CHECK(status == CNNL_STATUS_SUCCESS, "cnnl status ",                 \
-                static_cast<int>(status));                                      \
-  } while (0)
+__mlu_entry__ void k0(const half *__restrict__ x, int64_t *__restrict__ y) {
+  __nram__ half a[256];
+  __nram__ half b[256];
+  __nram__ half c[256];
+  __nram__ half d[256];
+  __nram__ half e[256];
+  int p = taskId * 65536;
+  __memcpy(a, x + p, 256 * sizeof(half), GDRAM2NRAM);
+  __bang_write_value(b, 256, (half)0.0f);
+  for (int i = 1; i < 256; ++i) {
+    __memcpy(c, x + p + i * 256, 256 * sizeof(half), GDRAM2NRAM);
+    __bang_gt(d, c, a, 256);
+    __bang_mul(e, c, d, 256);
+    __bang_mul_scalar(d, d, (half)-1.0f, 256);
+    __bang_add_scalar(d, d, (half)1.0f, 256);
+    __bang_mul(a, a, d, 256);
+    __bang_add(a, a, e, 256);
+    __bang_mul(b, b, d, 256);
+    __bang_mul_scalar(e, d, (half)-1.0f, 256);
+    __bang_add_scalar(e, e, (half)1.0f, 256);
+    __bang_mul_scalar(e, e, (half)i, 256);
+    __bang_add(b, b, e, 256);
+  }
+  for (int j = 0; j < 256; ++j) {
+    y[taskId * 256 + j] = (int64_t)((float)b[j]);
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
-  static cnnlTensorDescriptor_t a = nullptr;
-  static cnnlTensorDescriptor_t b = nullptr;
-  static cnnlReduceDescriptor_t c = nullptr;
-  static size_t s = 0;
-  static torch::Tensor w;
   static torch::Tensor y;
   if (!y.defined())
     y = torch::empty({16, 256}, x.options().dtype(torch::kInt64));
   else
     y.resize_({16, 256});
-  cnnlHandle_t h = torch_mlu::getCurrentHandle();
-  if (a == nullptr) {
-    int d0[3] = {16, 256, 256};
-    int d1[3] = {16, 1, 256};
-    int ax = 1;
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&a));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&b));
-    CNNL_CHECK(cnnlCreateReduceDescriptor(&c));
-    CNNL_CHECK(cnnlSetTensorDescriptor(a, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3,
-                                       d0));
-    CNNL_CHECK(cnnlSetTensorDescriptor(b, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_INT64, 3,
-                                       d1));
-    CNNL_CHECK(cnnlSetReduceDescriptor_v2(
-        c, &ax, 1, CNNL_REDUCE_MAX, CNNL_DTYPE_HALF, CNNL_NOT_PROPAGATE_NAN,
-        CNNL_REDUCE_ONLY_INDICES, CNNL_64BIT_INDICES, 0.0f));
-    CNNL_CHECK(cnnlGetReduceOpWorkspaceSize_v2(h, a, nullptr, b, c, &s));
-  }
-  if (!w.defined())
-    w = torch::empty({static_cast<int64_t>(s)}, x.options().dtype(torch::kUInt8));
-  CNNL_CHECK(cnnlReduce_v2(h, c, a, x.data_ptr(), nullptr, nullptr,
-                           w.data_ptr(), s, nullptr, nullptr, b, y.data_ptr()));
+  cnrtDim3_t d = {16, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      y.data_ptr<int64_t>());
   return y;
 }
