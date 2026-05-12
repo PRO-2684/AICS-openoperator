@@ -16,7 +16,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
     __memcpy(a, x + m * 4096, 4096 * sizeof(half), GDRAM2NRAM);
     __memcpy(b, y + n * 128, 128 * sizeof(half), GDRAM2NRAM,
              128 * sizeof(half), 16384 * sizeof(half), 31);
-    __bang_transpose(t, b, 32, 128);
+    __bang_transpose(t, b, 128, 32);
     __memcpy(w, t, 4096 * sizeof(half), NRAM2WRAM);
     __bang_matmul(c, a, w, 128, 32, 128);
     __memcpy(z + m * 2097152 + n * 128, c, 128 * sizeof(float),
