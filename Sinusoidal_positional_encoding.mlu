@@ -195,31 +195,16 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
 
   const uint32_t base = taskId * PLANE_ELEMS;
 
-  __nram__ half x0[SEG_ELEMS];
-  __nram__ half p0[SEG_ELEMS];
-  __nram__ half x1[SEG_ELEMS];
-  __nram__ half p1[SEG_ELEMS];
+  __nram__ half x0[PLANE_ELEMS];
+  __nram__ half p0[PLANE_ELEMS];
 
   half *x_gdram = (half *)__builtin_assume_aligned(x + base, 512);
   const half *p_gdram = (const half *)__builtin_assume_aligned(cache, 512);
 
-  __memcpy(x0, x_gdram, SEG_ELEMS * sizeof(half), GDRAM2NRAM);
-  __memcpy(p0, p_gdram, SEG_ELEMS * sizeof(half), GDRAM2NRAM);
-  __sync_io();
-
-  __memcpy(x1, x_gdram + SEG_ELEMS, SEG_ELEMS * sizeof(half), GDRAM2NRAM);
-  __memcpy(p1, p_gdram + SEG_ELEMS, SEG_ELEMS * sizeof(half), GDRAM2NRAM);
-
-  __bang_add(x0, x0, p0, SEG_ELEMS);
-  __sync_io_move_compute();
-
-  __memcpy(x_gdram, x0, SEG_ELEMS * sizeof(half), NRAM2GDRAM);
-
-  __bang_add(x1, x1, p1, SEG_ELEMS);
-  __sync_io_move_compute();
-
-  __memcpy(x_gdram + SEG_ELEMS, x1, SEG_ELEMS * sizeof(half), NRAM2GDRAM);
-  __sync_io();
+  __memcpy(x0, x_gdram, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
+  __memcpy(p0, p_gdram, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
+  __bang_add(x0, x0, p0, PLANE_ELEMS);
+  __memcpy(x_gdram, x0, PLANE_ELEMS * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len) {
