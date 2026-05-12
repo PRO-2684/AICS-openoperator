@@ -5,8 +5,8 @@
 #include <torch/extension.h>
 
 #define E0 1048576
-#define E1 32768
-#define E2 32
+#define E1 16384
+#define E2 64
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
                       int *__restrict__ y) {
@@ -35,7 +35,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
       y[i] = q;
       q += t;
     }
-    y[32] = q;
+    y[E2] = q;
   }
 }
 
@@ -48,7 +48,7 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   else
     out.resize_({E0});
   if (!work2.defined())
-    work2 = torch::empty({33}, input.options().dtype(torch::kInt32));
+    work2 = torch::empty({65}, input.options().dtype(torch::kInt32));
 
   torch_mlu::MLUStream stream2 =
       torch_mlu::getStreamFromPool(false, input.get_device());
@@ -64,7 +64,7 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
       work2.data_ptr<int>());
 
   int n = 0;
-  cnrtMemcpyAsync(&n, work2.data_ptr<int>() + 32, sizeof(int), queue2,
+  cnrtMemcpyAsync(&n, work2.data_ptr<int>() + E2, sizeof(int), queue2,
                   cnrtMemcpyDevToHost);
   cnrtQueueSync(queue2);
   k0<<<dim, cnrtFuncTypeUnion4, queue>>>(
