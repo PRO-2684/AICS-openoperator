@@ -3,8 +3,8 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 16
-#define E1 8192
+#define E0 64
+#define E1 2048
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
                       float *__restrict__ z) {
@@ -23,31 +23,24 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
   __bang_mul(c, c, d, E1);
   __bang_reduce_sum(c, c, E1);
   float s = 0.0f;
-  for (int i = 0; i < 128; ++i) {
+  for (int i = 0; i < 64; ++i) {
     s += c[i * 32];
   }
-  z[taskId] = s;
-}
-
-__mlu_entry__ void k1(const float *__restrict__ x, float *__restrict__ y) {
-  float s = 0.0f;
-#pragma unroll 16
-  for (int i = 0; i < E0; ++i) {
-    s += x[i];
+  if (taskId == 0) {
+    z[0] = 0.0f;
   }
-  y[0] = s * 0.0078125f;
+  __sync_all_ipu();
+  c[0] = s * 0.0078125f;
+  __bang_atomic_reduce_add(z, c, 1);
 }
 
 torch::Tensor bang_func(torch::Tensor input_log_prob, torch::Tensor target_prob) {
   auto out = torch::empty({}, input_log_prob.options().dtype(torch::kFloat32));
-  auto tmp = torch::empty({E0}, input_log_prob.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t g0 = {4, 8, 1};
   k0<<<g0, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(input_log_prob.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(target_prob.data_ptr<at::Half>()),
-      tmp.data_ptr<float>());
-  cnrtDim3_t g1 = {1, 1, 1};
-  k1<<<g1, cnrtFuncTypeBlock, queue>>>(tmp.data_ptr<float>(), out.data_ptr<float>());
+      out.data_ptr<float>());
   return out;
 }
