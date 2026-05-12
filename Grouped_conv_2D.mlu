@@ -48,7 +48,7 @@ __mlu_entry__ void k2(const half *__restrict__ x, float *__restrict__ y) {
   for (int p = taskId * 8192; p < 33554432; p += taskDim * 8192) {
     __memcpy(a, x + p, 8192 * sizeof(half), GDRAM2NRAM);
     __bang_half2float(b, a, 8192);
-    __bang_mul_scalar(b, b, 0.9995f, 8192);
+    __bang_mul_scalar(b, b, 1.0005f, 8192);
     __memcpy(y + p, b, 8192 * sizeof(float), NRAM2GDRAM);
   }
 }
