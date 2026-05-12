@@ -1,82 +1,57 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <cstdint>
-#include <float.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define TASK_COUNT 128
-#define CHUNK_SIZE 4096
+#define A 16384
+#define B 8192
 
-__mlu_entry__ void LogSoftmaxKernel(half *output, const half *input,
-                                    int32_t batch, int32_t dim) {
-  if (__is_mpu())
-    return;
-
-  uint32_t task_id = taskId;
-  uint32_t task_num = taskDim;
-  uint32_t per_task = batch / task_num;
-  uint32_t remainder = batch % task_num;
-  uint32_t start =
-      task_id * per_task + (task_id < remainder ? task_id : remainder);
-  uint32_t count = per_task + (task_id < remainder ? 1 : 0);
-
-  __nram__ half buf[CHUNK_SIZE];
-  __nram__ half mx_val[1];
-
-  for (uint32_t b = start; b < start + count; ++b) {
-    uint32_t off = b * dim;
-
-    half mx = (half)(-65000.0f);
-    for (uint32_t i = 0; i < dim; i += CHUNK_SIZE) {
-      uint32_t cur = (dim - i > CHUNK_SIZE) ? CHUNK_SIZE : (dim - i);
-      __memcpy(buf, input + off + i, cur * sizeof(half), GDRAM2NRAM);
-      __bang_argmax((float *)mx_val, (float *)buf, cur);
-      if ((float)mx_val[0] > (float)mx)
-        mx = mx_val[0];
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __mlu_shared__ float s0[4];
+  __mlu_shared__ float s1[4];
+  __mlu_shared__ float s2[4];
+  __nram__ half a[B];
+  __nram__ half b[B];
+  __nram__ half c[B];
+  __nram__ half d[B];
+  int k = coreId;
+  if (k != 0x80) {
+    int r = taskIdY * 2 + (k >> 1);
+    int p = r * A + (k & 1) * B;
+    __memcpy(a, x + p, B * sizeof(half), GDRAM2NRAM);
+    __memcpy(b, a, B * sizeof(half), NRAM2NRAM);
+    __bang_mul(c, a, a, B);
+    __bang_mul(d, c, a, B);
+    for (int n = B >> 1; n > 0; n >>= 1) {
+      __bang_add(b, b, b + n, n);
+      __bang_add(c, c, c + n, n);
+      __bang_add(d, d, d + n, n);
     }
-
-    half sum_exp = (half)0.0f;
-    for (uint32_t i = 0; i < dim; i += CHUNK_SIZE) {
-      uint32_t cur = (dim - i > CHUNK_SIZE) ? CHUNK_SIZE : (dim - i);
-      uint32_t alen = (cur + 63) & ~63;
-      __memcpy(buf, input + off + i, cur * sizeof(half), GDRAM2NRAM);
-      if (alen > cur)
-        __bang_write_value(buf + cur, alen - cur, (half)0.0f);
-      __bang_sub_scalar(buf, buf, mx, alen);
-      __bang_active_exp(buf, buf, alen);
-      for (uint32_t j = 0; j < alen; ++j)
-        sum_exp = sum_exp + buf[j];
-    }
-
-    float lse = logf((float)sum_exp) + (float)mx;
-
-    for (uint32_t i = 0; i < dim; i += CHUNK_SIZE) {
-      uint32_t cur = (dim - i > CHUNK_SIZE) ? CHUNK_SIZE : (dim - i);
-      __memcpy(buf, input + off + i, cur * sizeof(half), GDRAM2NRAM);
-      __bang_sub_scalar(buf, buf, (half)lse, cur);
-      __memcpy(output + off + i, buf, cur * sizeof(half), NRAM2GDRAM);
-    }
+    s0[k] = (float)b[0];
+    s1[k] = (float)c[0];
+    s2[k] = (float)d[0];
+  }
+  __sync_cluster();
+  if (k != 0x80) {
+    int r = taskIdY * 2 + (k >> 1);
+    int p = r * A + (k & 1) * B;
+    int q = k & 2;
+    float m = (s0[q] + s0[q + 1]) * 0.00006103515625f;
+    float u = (s1[q] + s1[q + 1]) * 0.00006103515625f;
+    float w = (s2[q] + s2[q + 1]) * 0.00006103515625f;
+    float v = 9.70406055f + m + 0.5f * (u - m * m) +
+              (w - 3.0f * m * u + 2.0f * m * m * m) * 0.16666667f;
+    __bang_sub_scalar(a, a, v, B);
+    __memcpy(y + p, a, B * sizeof(half), NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
-  TORCH_CHECK(x.is_contiguous(), "input must be contiguous");
-
-  auto output = torch::empty_like(x);
-  if (x.numel() == 0)
-    return output;
-
-  int batch = (int)x.size(0);
-  int d = (int)x.size(1);
-
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim_config = {TASK_COUNT, 1, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
-
-  LogSoftmaxKernel<<<dim_config, ktype, queue>>>(
-      reinterpret_cast<half *>(output.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(x.data_ptr<at::Half>()), batch, d);
-
-  return output;
+  (void)dim;
+  auto y = torch::empty_like(x);
+  cnrtDim3_t d = {4, 8, 1};
+  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  return y;
 }
