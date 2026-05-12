@@ -9,7 +9,7 @@ __mlu_entry__ void k0(bool *__restrict__ y) {
   __memcpy(y, a, 4096, NRAM2GDRAM);
 }
 
-__mlu_entry__ void k1(bool *__restrict__ y) { y[0] = false; }
+__mlu_entry__ void k1(bool *__restrict__ y) { (void)y; }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)x;
