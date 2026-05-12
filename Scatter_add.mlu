@@ -4,20 +4,22 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(int *__restrict__ a) {
-  __nram__ int c[512];
-  __bang_write_value(c, 512, 0);
-  __memcpy(a, c, 512 * sizeof(int), NRAM2GDRAM);
+  __nram__ int c[4096];
+  __bang_write_value(c, 4096, 0);
+  for (int i = taskId * 4096; i < 16384; i += taskDim * 4096) {
+    __memcpy(a + i, c, 4096 * sizeof(int), NRAM2GDRAM);
+  }
 }
 
 __mlu_entry__ void k1(const int64_t *__restrict__ x, int *__restrict__ a,
                       int *__restrict__ b) {
-  __nram__ int c[1];
   for (int i = taskId; i < 4096; i += taskDim) {
     int p = (int)x[i];
-    __bang_atomic_add(c, a + p, 1, 1);
-    int q = c[0];
-    if (q < 64) {
-      b[p * 64 + q] = i;
+    int *u = a + taskId * 512 + p;
+    int q = *u;
+    *u = q + 1;
+    if (q < 8) {
+      b[(taskId * 512 + p) * 8 + q] = i;
     }
   }
 }
@@ -29,15 +31,17 @@ __mlu_entry__ void k2(const half *__restrict__ x, const int *__restrict__ a,
   __nram__ float e[256];
   for (int p = taskId; p < 512; p += taskDim) {
     __bang_write_value(d, 256, 0.0f);
-    int n = a[p];
-    if (n > 64) {
-      n = 64;
-    }
-    for (int i = 0; i < n; ++i) {
-      int q = b[p * 64 + i];
-      __memcpy(c, x + q * 256, 256 * sizeof(half), GDRAM2NRAM);
-      __bang_half2float(e, c, 256);
-      __bang_add(d, d, e, 256);
+    for (int r = 0; r < 32; ++r) {
+      int n = a[r * 512 + p];
+      if (n > 8) {
+        n = 8;
+      }
+      for (int i = 0; i < n; ++i) {
+        int q = b[(r * 512 + p) * 8 + i];
+        __memcpy(c, x + q * 256, 256 * sizeof(half), GDRAM2NRAM);
+        __bang_half2float(e, c, 256);
+        __bang_add(d, d, e, 256);
+      }
     }
     __memcpy(y + p * 256, d, 256 * sizeof(float), NRAM2GDRAM);
   }
@@ -48,14 +52,14 @@ torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
   static torch::Tensor a;
   static torch::Tensor b;
   if (!a.defined()) {
-    a = torch::empty({512}, index.options().dtype(torch::kInt32));
+    a = torch::empty({16384}, index.options().dtype(torch::kInt32));
   } else {
-    a.resize_({512});
+    a.resize_({16384});
   }
   if (!b.defined()) {
-    b = torch::empty({32768}, index.options().dtype(torch::kInt32));
+    b = torch::empty({131072}, index.options().dtype(torch::kInt32));
   } else {
-    b.resize_({32768});
+    b.resize_({131072});
   }
   auto y = torch::empty({512, 256}, src.options().dtype(torch::kFloat32));
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
