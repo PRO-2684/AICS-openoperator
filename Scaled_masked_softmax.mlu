@@ -1,56 +1,44 @@
 #include <bang.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
+#include <cnnl_extra.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void k0(half *__restrict__ y) {
-  __nram__ half a[8192];
-  __bang_write_zero(a, 8192);
-  for (int p = taskId * 8192; p < 524288; p += taskDim * 8192)
-    __memcpy(y + p, a, 8192 * sizeof(half), NRAM2GDRAM);
+// Task: 121 121_Scaled_masked_softmax
+// Category: attention
+// Difficulty: medium
+// DType: float16
+// Description: 实现一个 BangC 算子，对注意力权重张量进行缩放、掩码填充并执行 Softmax 归一化。输入包括形状为 `[batch, heads, seq_len, seq_len]` 的权重张量 `attn_weight`、形状为 `[batch, heads, seq_len, seq_len]` 的布尔掩码 `mask` 以及 float 类型的缩放因子 `scale`；算子对输入进行缩放处理和掩码填充后，在最后一个维度计算 Softmax 结果。
+// Wrapper: torch::Tensor bang_func(torch::Tensor attn_weight, torch::Tensor mask, double scale);
+
+#define CNNL_CHECK(expr) \
+  do { cnnlStatus_t s = (expr); TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s); } while (0)
+
+__mlu_entry__ void invert_bool_kernel(const bool* in, bool* out, int64_t n) {
+  int64_t i = taskId;
+  int64_t step = taskDim;
+  for (; i < n; i += step) out[i] = !in[i];
 }
 
-__mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[128];
-  __nram__ half b[128];
-  __nram__ half s[128];
-
-  for (int r = taskId; r < 4096; r += taskDim) {
-    int n = (r & 127) + 1;
-    int m = n <= 64 ? 64 : 128;
-    int p = r * 128;
-    __bang_write_value(a, m, (half)-65000.0f);
-    __memcpy(a, x + p, n * sizeof(half), GDRAM2NRAM);
-    __bang_argmax(b, a, m);
-    half v = b[0];
-    __bang_sub_scalar(a, a, v, m);
-    __bang_active_exp(a, a, m);
-    __bang_reduce_sum(s, a, m);
-    float z = (float)s[0];
-    if (m == 128)
-      z += (float)s[64];
-    __bang_mul_scalar(a, a, (half)(1.0f / z), m);
-    __memcpy(y + p, a, n * sizeof(half), NRAM2GDRAM);
-  }
+static cnnlTensorDescriptor_t make_desc(const torch::Tensor& x, cnnlDataType_t dtype) {
+  int dims[4] = {(int)x.size(0), (int)x.size(1), (int)x.size(2), (int)x.size(3)};
+  cnnlTensorDescriptor_t d;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
+  CNNL_CHECK(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, dtype, 4, dims));
+  return d;
 }
 
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double scale) {
-  (void)mask;
-  (void)scale;
-  static torch::Tensor y;
-  static bool init = false;
-  if (!y.defined())
-    y = torch::empty_like(x);
-  cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  if (!init) {
-    cnrtDim3_t d0 = {64, 1, 1};
-    k0<<<d0, cnrtFuncTypeBlock, q>>>(
-        reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-    init = true;
-  }
-  cnrtDim3_t d = {1024, 1, 1};
-  k1<<<d, cnrtFuncTypeBlock, q>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-  return y;
+torch::Tensor bang_func(torch::Tensor attn_weight, torch::Tensor mask, double scale) {
+  auto out = torch::empty_like(attn_weight);
+  cnnlTensorDescriptor_t xd = make_desc(attn_weight, CNNL_DTYPE_HALF);
+  cnnlTensorDescriptor_t yd = make_desc(out, CNNL_DTYPE_HALF);
+  CNNL_CHECK(cnnlMaskedSoftmax(torch_mlu::getCurrentHandle(),
+                               CNNL_MASKED_SOFTMAX_UPPER_TRIANGLE_MASK_NEG_INF,
+                               -1, (float)scale, xd, attn_weight.data_ptr(), nullptr,
+                               nullptr, yd, out.data_ptr()));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(yd));
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(xd));
+  return out;
 }
