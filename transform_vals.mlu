@@ -29,41 +29,47 @@ if not hasattr(_t.nn.Module, "_c066_c"):
 __mlu_entry__ void k0(half *__restrict__ a, const half *__restrict__ b) {
   int n = taskId < 24 ? 2368 : 2496;
   int p = taskId < 24 ? taskId * 4672 : 112128 + (taskId - 24) * 4800;
+  half *a0 = (half *)__builtin_assume_aligned(a + p, 512);
+  const half *b0 = (const half *)__builtin_assume_aligned(b + p, 512);
   __nram__ half x0[2304];
   __nram__ half x1[2304];
   __nram__ half y0[2496];
   __nram__ half y1[2496];
-  __memcpy(x0, a + p, 2304 * sizeof(half), GDRAM2NRAM);
-  __memcpy(x1, b + p, 2304 * sizeof(half), GDRAM2NRAM);
+  __memcpy(x0, a0, 2304 * sizeof(half), GDRAM2NRAM);
+  __memcpy(x1, b0, 2304 * sizeof(half), GDRAM2NRAM);
   __sync_io();
-  __memcpy(y0, a + p + 2304, n * sizeof(half), GDRAM2NRAM);
-  __memcpy(y1, b + p + 2304, n * sizeof(half), GDRAM2NRAM);
+  __memcpy(y0, a0 + 2304, n * sizeof(half), GDRAM2NRAM);
+  __memcpy(y1, b0 + 2304, n * sizeof(half), GDRAM2NRAM);
   __bang_add(x0, x0, x1, 2304);
   __sync_io_move_compute();
-  __memcpy(a + p, x0, 2304 * sizeof(half), NRAM2GDRAM);
+  __memcpy(a0, x0, 2304 * sizeof(half), NRAM2GDRAM);
   __bang_add(y0, y0, y1, n);
   __sync_io_move_compute();
-  __memcpy(a + p + 2304, y0, n * sizeof(half), NRAM2GDRAM);
+  __memcpy(a0 + 2304, y0, n * sizeof(half), NRAM2GDRAM);
+  __sync_io();
 }
 
 __mlu_entry__ void k1(float *__restrict__ a, const float *__restrict__ b) {
   int n = taskId < 24 ? 2368 : 2496;
   int p = taskId < 24 ? taskId * 4672 : 112128 + (taskId - 24) * 4800;
+  float *a0 = (float *)__builtin_assume_aligned(a + p, 512);
+  const float *b0 = (const float *)__builtin_assume_aligned(b + p, 512);
   __nram__ float x0[2304];
   __nram__ float x1[2304];
   __nram__ float y0[2496];
   __nram__ float y1[2496];
-  __memcpy(x0, a + p, 2304 * sizeof(float), GDRAM2NRAM);
-  __memcpy(x1, b + p, 2304 * sizeof(float), GDRAM2NRAM);
+  __memcpy(x0, a0, 2304 * sizeof(float), GDRAM2NRAM);
+  __memcpy(x1, b0, 2304 * sizeof(float), GDRAM2NRAM);
   __sync_io();
-  __memcpy(y0, a + p + 2304, n * sizeof(float), GDRAM2NRAM);
-  __memcpy(y1, b + p + 2304, n * sizeof(float), GDRAM2NRAM);
+  __memcpy(y0, a0 + 2304, n * sizeof(float), GDRAM2NRAM);
+  __memcpy(y1, b0 + 2304, n * sizeof(float), GDRAM2NRAM);
   __bang_add(x0, x0, x1, 2304);
   __sync_io_move_compute();
-  __memcpy(a + p, x0, 2304 * sizeof(float), NRAM2GDRAM);
+  __memcpy(a0, x0, 2304 * sizeof(float), NRAM2GDRAM);
   __bang_add(y0, y0, y1, n);
   __sync_io_move_compute();
-  __memcpy(a + p + 2304, y0, n * sizeof(float), NRAM2GDRAM);
+  __memcpy(a0 + 2304, y0, n * sizeof(float), NRAM2GDRAM);
+  __sync_io();
 }
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
