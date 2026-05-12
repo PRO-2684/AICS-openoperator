@@ -12,7 +12,7 @@
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E2 * E3];
   __nram__ half b[E1 * E3];
-  __nram__ half s[E2];
+  __nram__ half s[E3];
   __bang_write_zero(b, E1 * E3);
 
   for (int row = taskId * E3; row < E0; row += taskDim * E3) {
