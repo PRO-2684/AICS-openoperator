@@ -46,12 +46,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ dw,
     DO_ONE(d0, 0);
     DO_ONE(d1, 1);
     DO_ONE(d2, 2);
-    __bang_float2half_rn(h, d0, m);
-    __bang_half2float(d0, h, m);
-    __bang_float2half_rn(h, d1, m);
-    __bang_half2float(d1, h, m);
-    __bang_float2half_rn(h, d2, m);
-    __bang_half2float(d2, h, m);
     for (int c = 0; c < 64; ++c) {
       int o = c * 3;
       __bang_mul_scalar(t, d1, (float)kp[o + 1], m);
