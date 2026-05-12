@@ -47,7 +47,7 @@ torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
                                        s2));
     CNNL_CHECK(cnnlGetIndexAddWorkspaceSize(h, a, &ws_size));
   }
-  CNNL_CHECK(cnnlSetQuantizeRoundMode(h, CNNL_ROUND_HALF_UP));
+  CNNL_CHECK(cnnlSetQuantizeRoundMode(h, CNNL_ROUND_HALF_OFF_ZERO));
   if (ws_size && !ws.defined())
     ws = torch::empty({(int64_t)ws_size}, src.options().dtype(torch::kUInt8));
   auto y = torch::empty({E2, E1}, src.options());
