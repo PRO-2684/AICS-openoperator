@@ -4,26 +4,28 @@
 #include <torch/extension.h>
 
 #define E0 4096
-#define E1 262144
-#define E2 64
+#define E1 131072
+#define E2 32
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       half *__restrict__ c) {
   __nram__ half x[E1];
+  __nram__ half y[E1];
   int row_base = taskId * E2;
   int p = row_base * E0;
 
   __memcpy(x, b + p, E1 * sizeof(half), GDRAM2NRAM);
   for (int r = 0; r < E2; ++r) {
-    __bang_mul_scalar(x + r * E0, x + r * E0, a[row_base + r], E0);
+    __bang_write_value(y + r * E0, E0, a[row_base + r]);
   }
+  __bang_mul(x, x, y, E1);
 
   __memcpy(c + p, x, E1 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto C = torch::empty({E0, E0}, B.options());
-  cnrtDim3_t d = {64, 1, 1};
+  cnrtDim3_t d = {128, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
