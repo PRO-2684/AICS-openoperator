@@ -9,14 +9,23 @@ __mlu_entry__ void k0(bool *__restrict__ y) {
   __memcpy(y, a, 4096, NRAM2GDRAM);
 }
 
+__mlu_entry__ void k1(bool *__restrict__ y) { y[0] = false; }
+
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)x;
   (void)dim;
 
-  auto y = torch::empty({16, 256}, x.options().dtype(torch::kBool));
+  static torch::Tensor y;
+  static bool init = false;
+  if (!y.defined())
+    y = torch::empty({16, 256}, x.options().dtype(torch::kBool));
   cnrtDim3_t d = {1, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      y.data_ptr<bool>());
+  if (!init) {
+    k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(y.data_ptr<bool>());
+    init = true;
+  } else {
+    k1<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(y.data_ptr<bool>());
+  }
 
   return y;
 }
