@@ -9,7 +9,7 @@
 #define E1 256
 #define E2 512
 #define E3 4096
-#define E4 65536
+#define E4 16384
 
 #define CNNL_CHECK(expr)                                                        \
   do {                                                                         \
