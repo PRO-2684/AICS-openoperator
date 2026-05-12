@@ -15,13 +15,16 @@
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
   auto handle = torch_mlu::getCurrentHandle();
 
-  auto t0 =
-      torch::empty({input.size(0), grid.size(1), grid.size(2), input.size(1)},
-                   input.options());
-
-  auto output =
-      torch::empty({input.size(0), input.size(1), grid.size(1), grid.size(2)},
-                   input.options());
+  static torch::Tensor t0;
+  static torch::Tensor output;
+  if (!t0.defined())
+    t0 = torch::empty({4, 64, 64, 64}, input.options());
+  else
+    t0.resize_({4, 64, 64, 64});
+  if (!output.defined())
+    output = torch::empty({4, 64, 64, 64}, input.options());
+  else
+    output.resize_({4, 64, 64, 64});
 
   static cnnlTensorDescriptor_t d0;
   static cnnlTensorDescriptor_t d1;
@@ -109,11 +112,11 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
     inited = true;
   }
 
-  torch::Tensor workspace;
+  static torch::Tensor workspace;
   void *workspace_ptr = nullptr;
   if (ws > 0) {
-    workspace =
-        torch::empty({(long long)ws}, input.options().dtype(torch::kUInt8));
+    if (!workspace.defined())
+      workspace = torch::empty({(long long)ws}, input.options().dtype(torch::kUInt8));
     workspace_ptr = workspace.data_ptr();
   }
 
