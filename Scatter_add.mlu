@@ -18,6 +18,8 @@ __mlu_entry__ void k0(float *__restrict__ y) {
 
 __mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
                       float *__restrict__ y) {
+  __mlu_shared__ float g[4 * 128 * E1];
+  __mlu_shared__ int h[4 * 129];
   __nram__ half a[E0 * E1 / 32];
   __nram__ float b[E1];
   __nram__ int c[E2];
@@ -41,7 +43,31 @@ __mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
   }
   for (int i = 0; i < n; ++i) {
     int p = f[i];
-    __bang_atomic_reduce_add(y + p * E1, d + p * E1, E1);
+    h[coreId * 129 + i] = p;
+    __memcpy(g + (coreId * 128 + i) * E1, d + p * E1,
+             E1 * sizeof(float), NRAM2SRAM);
+  }
+  h[coreId * 129 + 128] = n;
+  __sync_cluster();
+  if (coreId == 0) {
+    for (int r = 1; r < 4; ++r) {
+      int m = h[r * 129 + 128];
+      for (int i = 0; i < m; ++i) {
+        int p = h[r * 129 + i];
+        __memcpy(b, g + (r * 128 + i) * E1, E1 * sizeof(float), SRAM2NRAM);
+        if (!c[p]) {
+          c[p] = 1;
+          f[n++] = p;
+          __memcpy(d + p * E1, b, E1 * sizeof(float), NRAM2NRAM);
+        } else {
+          __bang_add(d + p * E1, d + p * E1, b, E1);
+        }
+      }
+    }
+    for (int i = 0; i < n; ++i) {
+      int p = f[i];
+      __bang_atomic_reduce_add(y + p * E1, d + p * E1, E1);
+    }
   }
 }
 
