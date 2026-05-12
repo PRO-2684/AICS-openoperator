@@ -1,70 +1,75 @@
+#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
+#include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void k1(const int64_t *__restrict__ x, int *__restrict__ a,
-                      int *__restrict__ b) {
-  __nram__ int c[512];
-  __nram__ int d[4096];
-  __bang_write_value(c, 512, 0);
-  for (int i = taskId; i < 4096; i += taskDim) {
-    int p = (int)x[i];
-    int q = c[p];
-    c[p] = q + 1;
-    if (q < 8) {
-      d[p * 8 + q] = i;
-    }
-  }
-  __memcpy(a + taskId * 512, c, 512 * sizeof(int), NRAM2GDRAM);
-  __memcpy(b + taskId * 4096, d, 4096 * sizeof(int), NRAM2GDRAM);
-}
+#define E0 4096
+#define E1 256
+#define E2 512
+#define E3 4096
+#define E4 32768
 
-__mlu_entry__ void k2(const half *__restrict__ x, const int *__restrict__ a,
-                      const int *__restrict__ b, float *__restrict__ y) {
-  __nram__ half c[256];
-  __nram__ float d[256];
-  __nram__ float e[256];
-  for (int p = taskId; p < 512; p += taskDim) {
-    __bang_write_value(d, 256, 0.0f);
-    for (int r = 0; r < 32; ++r) {
-      int n = a[r * 512 + p];
-      if (n > 8) {
-        n = 8;
-      }
-      for (int i = 0; i < n; ++i) {
-        int q = b[(r * 512 + p) * 8 + i];
-        __memcpy(c, x + q * 256, 256 * sizeof(half), GDRAM2NRAM);
-        __bang_half2float(e, c, 256);
-        __bang_add(d, d, e, 256);
-      }
-    }
-    __memcpy(y + p * 256, d, 256 * sizeof(float), NRAM2GDRAM);
+#define CNNL_CHECK(expr)                                                        \
+  do {                                                                         \
+    cnnlStatus_t s = (expr);                                                   \
+    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
+  } while (0)
+
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y,
+                      float *__restrict__ z) {
+  __nram__ half a[E4];
+  __nram__ float b[E4];
+  __nram__ float c[E3];
+  for (int p = taskId * E4; p < E0 * E1; p += taskDim * E4) {
+    __memcpy(a, x + p, E4 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(b, a, E4);
+    __memcpy(y + p, b, E4 * sizeof(float), NRAM2GDRAM);
+  }
+  __bang_write_value(c, E3, 0.0f);
+  for (int p = taskId * E3; p < E2 * E1; p += taskDim * E3) {
+    __memcpy(z + p, c, E3 * sizeof(float), NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
   (void)dim_size;
-  static torch::Tensor a;
-  static torch::Tensor b;
-  if (!a.defined()) {
-    a = torch::empty({16384}, index.options().dtype(torch::kInt32));
-  } else {
-    a.resize_({16384});
+  static cnnlTensorDescriptor_t a = nullptr;
+  static cnnlTensorDescriptor_t b = nullptr;
+  static cnnlTensorDescriptor_t c = nullptr;
+  static size_t ws_size = 0;
+  static torch::Tensor t;
+  static torch::Tensor ws;
+  cnnlHandle_t h = torch_mlu::getCurrentHandle();
+  if (a == nullptr) {
+    int s0[2] = {E2, E1};
+    int s1[1] = {E0};
+    int s2[2] = {E0, E1};
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&a));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&b));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&c));
+    CNNL_CHECK(cnnlSetTensorDescriptor(a, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT, 2,
+                                       s0));
+    CNNL_CHECK(cnnlSetTensorDescriptor(b, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_INT64, 1,
+                                       s1));
+    CNNL_CHECK(cnnlSetTensorDescriptor(c, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT, 2,
+                                       s2));
+    CNNL_CHECK(cnnlGetIndexAddWorkspaceSize(h, a, &ws_size));
   }
-  if (!b.defined()) {
-    b = torch::empty({131072}, index.options().dtype(torch::kInt32));
-  } else {
-    b.resize_({131072});
-  }
-  auto y = torch::empty({512, 256}, src.options().dtype(torch::kFloat32));
+  if (!t.defined())
+    t = torch::empty({E0, E1}, src.options().dtype(torch::kFloat32));
+  if (ws_size && !ws.defined())
+    ws = torch::empty({(int64_t)ws_size}, src.options().dtype(torch::kUInt8));
+  auto y = torch::empty({E2, E1}, src.options().dtype(torch::kFloat32));
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {4, 8, 1};
-  k1<<<d, cnrtFuncTypeUnion1, q>>>(index.data_ptr<int64_t>(), a.data_ptr<int>(),
-                                   b.data_ptr<int>());
-  k2<<<d, cnrtFuncTypeUnion1, q>>>(
+  k0<<<d, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(src.data_ptr<at::Half>()),
-      a.data_ptr<int>(), b.data_ptr<int>(),
-      reinterpret_cast<float *>(y.data_ptr()));
+      t.data_ptr<float>(), y.data_ptr<float>());
+  CNNL_CHECK(cnnlIndexAdd_v2(h, 0, a, y.data_ptr<float>(), b,
+                             index.data_ptr<int64_t>(), c, t.data_ptr<float>(),
+                             ws_size ? ws.data_ptr() : nullptr, ws_size, a,
+                             y.data_ptr<float>()));
   return y;
 }
