@@ -5,7 +5,7 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define TASK_COUNT 16
+#define TASK_COUNT 128
 #define CHUNK_SIZE 4096
 
 __mlu_entry__ void LogSoftmaxKernel(half *output, const half *input,
@@ -13,12 +13,18 @@ __mlu_entry__ void LogSoftmaxKernel(half *output, const half *input,
   if (__is_mpu())
     return;
 
+  uint32_t task_id = taskId;
+  uint32_t task_num = taskDim;
+  uint32_t per_task = batch / task_num;
+  uint32_t remainder = batch % task_num;
+  uint32_t start =
+      task_id * per_task + (task_id < remainder ? task_id : remainder);
+  uint32_t count = per_task + (task_id < remainder ? 1 : 0);
+
   __nram__ half buf[CHUNK_SIZE];
-  __nram__ half tmp[CHUNK_SIZE];
-  __nram__ half acc[64];
   __nram__ half mx_val[1];
 
-  for (uint32_t b = taskId; b < (uint32_t)batch; b += taskDim) {
+  for (uint32_t b = start; b < start + count; ++b) {
     uint32_t off = b * dim;
 
     half mx = (half)(-65000.0f);
@@ -36,14 +42,11 @@ __mlu_entry__ void LogSoftmaxKernel(half *output, const half *input,
       uint32_t alen = (cur + 63) & ~63;
       __memcpy(buf, input + off + i, cur * sizeof(half), GDRAM2NRAM);
       if (alen > cur)
-        __bang_write_value(buf + cur, alen - cur, (half)0.0f);
+      __bang_write_value(buf + cur, alen - cur, (half)0.0f);
       __bang_sub_scalar(buf, buf, mx, alen);
       __bang_active_exp(buf, buf, alen);
-      __bang_reduce_sum(tmp, buf, alen);
-      __memcpy(acc, tmp, sizeof(half), NRAM2NRAM, sizeof(half),
-               64 * sizeof(half), 63);
-      __bang_reduce_sum(acc, acc, 64);
-      sum_exp = sum_exp + acc[0];
+      for (uint32_t j = 0; j < alen; ++j)
+        sum_exp = sum_exp + buf[j];
     }
 
     float lse = logf((float)sum_exp) + (float)mx;
