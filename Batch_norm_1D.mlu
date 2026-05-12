@@ -27,8 +27,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ s,
     __bang_mul(c, c, c, E1);
     __bang_add(b, b, c, E1);
   }
-  __bang_atomic_reduce_add_async(s, a, E1);
-  __bang_atomic_reduce_add_async(q, b, E1);
+  __bang_atomic_reduce_add(s, a, E1);
+  __bang_atomic_reduce_add(q, b, E1);
 }
 
 __mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ s,
@@ -78,8 +78,8 @@ __mlu_entry__ void k2(const half *__restrict__ x, float *__restrict__ s,
     __bang_mul(c, c, c, E1);
     __bang_add(b, b, c, E1);
   }
-  __bang_atomic_reduce_add_async(s, a, E1);
-  __bang_atomic_reduce_add_async(q, b, E1);
+  __bang_atomic_reduce_add(s, a, E1);
+  __bang_atomic_reduce_add(q, b, E1);
   __sync_all_ipu();
   __memcpy(a, s, E1 * sizeof(float), GDRAM2NRAM);
   __memcpy(b, q, E1 * sizeof(float), GDRAM2NRAM);
