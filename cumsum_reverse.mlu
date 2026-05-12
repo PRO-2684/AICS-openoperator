@@ -5,58 +5,55 @@
 
 __mlu_func__ void k1(float *__restrict__ a, float *__restrict__ b) {
   __bang_write_value(a + 4000, 96, 0.0f);
-  __bang_write_value(b, 1, 0.0f);
-  __memcpy(b + 1, a, 4095 * sizeof(float), NRAM2NRAM);
+  __bang_write_value(b + 4095, 1, 0.0f);
+  __memcpy(b, a + 1, 4095 * sizeof(float), NRAM2NRAM);
   __bang_add(a, a, b, 4096);
-  __bang_write_value(b, 2, 0.0f);
-  __memcpy(b + 2, a, 4094 * sizeof(float), NRAM2NRAM);
+  __bang_write_value(b + 4094, 2, 0.0f);
+  __memcpy(b, a + 2, 4094 * sizeof(float), NRAM2NRAM);
   __bang_add(a, a, b, 4096);
-  __bang_write_value(b, 4, 0.0f);
-  __memcpy(b + 4, a, 4092 * sizeof(float), NRAM2NRAM);
+  __bang_write_value(b + 4092, 4, 0.0f);
+  __memcpy(b, a + 4, 4092 * sizeof(float), NRAM2NRAM);
   __bang_add(a, a, b, 4096);
-  __bang_write_value(b, 8, 0.0f);
-  __memcpy(b + 8, a, 4088 * sizeof(float), NRAM2NRAM);
+  __bang_write_value(b + 4088, 8, 0.0f);
+  __memcpy(b, a + 8, 4088 * sizeof(float), NRAM2NRAM);
   __bang_add(a, a, b, 4096);
-  __bang_write_value(b, 16, 0.0f);
-  __memcpy(b + 16, a, 4080 * sizeof(float), NRAM2NRAM);
+  __bang_write_value(b + 4080, 16, 0.0f);
+  __memcpy(b, a + 16, 4080 * sizeof(float), NRAM2NRAM);
   __bang_add(a, a, b, 4096);
-  __bang_write_value(b, 32, 0.0f);
-  __memcpy(b + 32, a, 4064 * sizeof(float), NRAM2NRAM);
+  __bang_write_value(b + 4064, 32, 0.0f);
+  __memcpy(b, a + 32, 4064 * sizeof(float), NRAM2NRAM);
   __bang_add(a, a, b, 4096);
-  __bang_write_value(b, 64, 0.0f);
-  __memcpy(b + 64, a, 4032 * sizeof(float), NRAM2NRAM);
+  __bang_write_value(b + 4032, 64, 0.0f);
+  __memcpy(b, a + 64, 4032 * sizeof(float), NRAM2NRAM);
   __bang_add(a, a, b, 4096);
-  __bang_write_value(b, 128, 0.0f);
-  __memcpy(b + 128, a, 3968 * sizeof(float), NRAM2NRAM);
+  __bang_write_value(b + 3968, 128, 0.0f);
+  __memcpy(b, a + 128, 3968 * sizeof(float), NRAM2NRAM);
   __bang_add(a, a, b, 4096);
-  __bang_write_value(b, 256, 0.0f);
-  __memcpy(b + 256, a, 3840 * sizeof(float), NRAM2NRAM);
+  __bang_write_value(b + 3840, 256, 0.0f);
+  __memcpy(b, a + 256, 3840 * sizeof(float), NRAM2NRAM);
   __bang_add(a, a, b, 4096);
-  __bang_write_value(b, 512, 0.0f);
-  __memcpy(b + 512, a, 3584 * sizeof(float), NRAM2NRAM);
+  __bang_write_value(b + 3584, 512, 0.0f);
+  __memcpy(b, a + 512, 3584 * sizeof(float), NRAM2NRAM);
   __bang_add(a, a, b, 4096);
-  __bang_write_value(b, 1024, 0.0f);
-  __memcpy(b + 1024, a, 3072 * sizeof(float), NRAM2NRAM);
+  __bang_write_value(b + 3072, 1024, 0.0f);
+  __memcpy(b, a + 1024, 3072 * sizeof(float), NRAM2NRAM);
   __bang_add(a, a, b, 4096);
-  __bang_write_value(b, 2048, 0.0f);
-  __memcpy(b + 2048, a, 2048 * sizeof(float), NRAM2NRAM);
+  __bang_write_value(b + 2048, 2048, 0.0f);
+  __memcpy(b, a + 2048, 2048 * sizeof(float), NRAM2NRAM);
   __bang_add(a, a, b, 4096);
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
   __nram__ half h[4096];
-  __nram__ half r[4096];
   __nram__ float a[4096];
   __nram__ float b[4096];
   for (int row = taskId; row < 128; row += taskDim) {
     int p = row * 4000;
-    __bang_write_value(h, 96, (half)0.0f);
-    __memcpy(h + 96, x + p, 4000 * sizeof(half), GDRAM2NRAM);
-    __bang_rotate180(r, h, 64, 64);
-    __bang_half2float(a, r, 4096);
+    __memcpy(h, x + p, 4000 * sizeof(half), GDRAM2NRAM);
+    __bang_write_value(h + 4000, 96, (half)0.0f);
+    __bang_half2float(a, h, 4096);
     k1(a, b);
-    __bang_rotate180(b, a, 64, 64);
-    __memcpy(y + p, b + 96, 4000 * sizeof(float), NRAM2GDRAM);
+    __memcpy(y + p, a, 4000 * sizeof(float), NRAM2GDRAM);
   }
 }
 
