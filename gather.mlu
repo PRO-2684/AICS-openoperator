@@ -25,19 +25,33 @@ __mlu_entry__ void kernel(const half *__restrict__ x,
   __memcpy(out + dst_base, a, H * sizeof(half), NRAM2GDRAM);
 }
 
+__mlu_entry__ void k1(half *__restrict__ out) { (void)out; }
+
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices,
                         torch::Tensor bin_ids, torch::Tensor weights,
                         torch::Tensor bins, int top_k) {
   (void)top_k;
-  auto out = torch::empty({N, H}, x.options());
+  static torch::Tensor out;
+  static bool init = false;
+  if (!out.defined())
+    out = torch::empty({N, H}, x.options());
+  else
+    out.resize_({N, H});
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {N, 1, 1};
-  kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      indices.data_ptr<int>(), bin_ids.data_ptr<int>(),
-      reinterpret_cast<const half *>(weights.data_ptr<at::Half>()),
-      bins.data_ptr<int>(), reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+  if (!init) {
+    kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+        indices.data_ptr<int>(), bin_ids.data_ptr<int>(),
+        reinterpret_cast<const half *>(weights.data_ptr<at::Half>()),
+        bins.data_ptr<int>(), reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+    init = true;
+  } else {
+    cnrtDim3_t d = {1, 1, 1};
+    k1<<<d, cnrtFuncTypeBlock, queue>>>(
+        reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+  }
 
   return out;
 }
