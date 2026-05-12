@@ -6,22 +6,22 @@
 __mlu_entry__ void k0(const float *__restrict__ x, const float *__restrict__ y,
                       float *__restrict__ z) {
   __nram__ float a[4096];
-  __nram__ float b[4096];
-  __nram__ float t[4096];
-  __nram__ float c[16384];
-  __wram__ float w[4096];
+  __nram__ float b[8192];
+  __nram__ float t[8192];
+  __nram__ float c[32768];
+  __wram__ float w[8192];
 
-  for (int g = taskId; g < 16384; g += taskDim) {
-    int m = g >> 7;
-    int n = g & 127;
+  for (int g = taskId; g < 8192; g += taskDim) {
+    int m = g >> 6;
+    int n = g & 63;
     __memcpy(a, x + m * 4096, 4096 * sizeof(float), GDRAM2NRAM);
-    __memcpy(b, y + n * 128, 128 * sizeof(float), GDRAM2NRAM,
-             128 * sizeof(float), 16384 * sizeof(float), 31);
-    __bang_transpose(t, b, 32, 128);
-    __memcpy(w, t, 4096 * sizeof(float), NRAM2WRAM);
-    __bang_matmul(c, a, w, 128, 32, 128);
-    __memcpy(z + m * 2097152 + n * 128, c, 128 * sizeof(float),
-             NRAM2GDRAM, 16384 * sizeof(float), 128 * sizeof(float), 127);
+    __memcpy(b, y + n * 256, 256 * sizeof(float), GDRAM2NRAM,
+             256 * sizeof(float), 16384 * sizeof(float), 31);
+    __bang_transpose(t, b, 32, 256);
+    __memcpy(w, t, 8192 * sizeof(float), NRAM2WRAM);
+    __bang_matmul(c, a, w, 128, 32, 256);
+    __memcpy(z + m * 2097152 + n * 256, c, 256 * sizeof(float),
+             NRAM2GDRAM, 16384 * sizeof(float), 256 * sizeof(float), 127);
   }
 }
 
