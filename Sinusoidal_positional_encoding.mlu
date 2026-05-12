@@ -214,11 +214,11 @@ torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
   cnrtDim3_t dim;
-  dim.x = 4;
-  dim.y = 8;
+  dim.x = 32;
+  dim.y = 1;
   dim.z = 1;
 
-  add_cache_kernel_pipe<<<dim, cnrtFuncTypeUnion1, queue>>>(
+  add_cache_kernel_pipe<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(g_state.cache.data_ptr<at::Half>()));
 
