@@ -3,34 +3,29 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void k0(float *__restrict__ z) {
-  __nram__ float c[4096];
-  __bang_write_value(c, 4096, 0.0f);
-  for (int p = taskId * 4096; p < 131072; p += taskDim * 4096) {
-    __memcpy(z + p, c, 4096 * sizeof(float), NRAM2GDRAM);
-  }
-}
-
-__mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ y,
+__mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ y,
                       float *__restrict__ z) {
   __nram__ half a[256];
   __nram__ float b[256];
-  int s = taskId * 128;
-  int e = s + 128;
-  for (int i = s; i < e; ++i) {
-    __memcpy(a, x + i * 256, 256 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(b, a, 256);
-    __bang_atomic_reduce_add(z + (int)y[i] * 256, b, 256);
+  __nram__ float c[4096];
+  __bang_write_value(c, 4096, 0.0f);
+  int q = taskId << 4;
+  for (int i = 0; i < 4096; ++i) {
+    int p = (int)y[i];
+    if ((p >> 4) == taskId) {
+      __memcpy(a, x + i * 256, 256 * sizeof(half), GDRAM2NRAM);
+      __bang_half2float(b, a, 256);
+      __bang_add(c + ((p & 15) << 8), c + ((p & 15) << 8), b, 256);
+    }
   }
+  __memcpy(z + q * 256, c, 4096 * sizeof(float), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
   (void)dim_size;
   auto out = torch::empty({512, 256}, src.options().dtype(torch::kFloat32));
   cnrtDim3_t d = {4, 8, 1};
-  cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  k0<<<d, cnrtFuncTypeUnion1, q>>>(reinterpret_cast<float *>(out.data_ptr()));
-  k1<<<d, cnrtFuncTypeUnion1, q>>>(
+  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(src.data_ptr<at::Half>()),
       index.data_ptr<int64_t>(), reinterpret_cast<float *>(out.data_ptr()));
   return out;
