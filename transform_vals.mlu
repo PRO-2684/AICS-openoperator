@@ -3,85 +3,22 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__attribute__((constructor)) static void k2() {
-  if (!Py_IsInitialized()) {
-    return;
-  }
-  try {
-    pybind11::gil_scoped_acquire g;
-    PyRun_SimpleString(R"PY(
-import torch as _t
-if not hasattr(_t.nn.Module, "_c066_c"):
-    _t.nn.Module._c066_c = _t.nn.Module._call_impl
-    def _c066_c(self, *a, **k):
-        try:
-            return _t.nn.Module._c066_c(self, *a, **k)
-        except AssertionError as e:
-            if len(a) == 2:
-                return a[0] + a[1]
-            raise
-    _t.nn.Module._call_impl = _c066_c
-)PY");
-  } catch (...) {
-  }
-}
-
 __mlu_entry__ void k0(half *__restrict__ a, const half *__restrict__ b) {
-  int n = taskId < 24 ? 2368 : 2496;
-  int p = taskId < 24 ? taskId * 4672 : 112128 + (taskId - 24) * 4800;
+  int p = taskId * 4704;
   half *a0 = (half *)__builtin_assume_aligned(a + p, 512);
   const half *b0 = (const half *)__builtin_assume_aligned(b + p, 512);
-  __nram__ half x0[2304];
-  __nram__ half x1[2304];
-  __nram__ half y0[2496];
-  __nram__ half y1[2496];
-  __memcpy(x0, a0, 2304 * sizeof(half), GDRAM2NRAM);
-  __memcpy(x1, b0, 2304 * sizeof(half), GDRAM2NRAM);
-  __sync_io();
-  __memcpy(y0, a0 + 2304, n * sizeof(half), GDRAM2NRAM);
-  __memcpy(y1, b0 + 2304, n * sizeof(half), GDRAM2NRAM);
-  __bang_add(x0, x0, x1, 2304);
-  __sync_io_move_compute();
-  __memcpy(a0, x0, 2304 * sizeof(half), NRAM2GDRAM);
-  __bang_add(y0, y0, y1, n);
-  __sync_io_move_compute();
-  __memcpy(a0 + 2304, y0, n * sizeof(half), NRAM2GDRAM);
-  __sync_io();
-}
-
-__mlu_entry__ void k1(float *__restrict__ a, const float *__restrict__ b) {
-  int n = taskId < 24 ? 2368 : 2496;
-  int p = taskId < 24 ? taskId * 4672 : 112128 + (taskId - 24) * 4800;
-  float *a0 = (float *)__builtin_assume_aligned(a + p, 512);
-  const float *b0 = (const float *)__builtin_assume_aligned(b + p, 512);
-  __nram__ float x0[2304];
-  __nram__ float x1[2304];
-  __nram__ float y0[2496];
-  __nram__ float y1[2496];
-  __memcpy(x0, a0, 2304 * sizeof(float), GDRAM2NRAM);
-  __memcpy(x1, b0, 2304 * sizeof(float), GDRAM2NRAM);
-  __sync_io();
-  __memcpy(y0, a0 + 2304, n * sizeof(float), GDRAM2NRAM);
-  __memcpy(y1, b0 + 2304, n * sizeof(float), GDRAM2NRAM);
-  __bang_add(x0, x0, x1, 2304);
-  __sync_io_move_compute();
-  __memcpy(a0, x0, 2304 * sizeof(float), NRAM2GDRAM);
-  __bang_add(y0, y0, y1, n);
-  __sync_io_move_compute();
-  __memcpy(a0 + 2304, y0, n * sizeof(float), NRAM2GDRAM);
-  __sync_io();
+  __nram__ half x[4704];
+  __nram__ half y[4704];
+  __memcpy(x, a0, 4704 * sizeof(half), GDRAM2NRAM);
+  __memcpy(y, b0, 4704 * sizeof(half), GDRAM2NRAM);
+  __bang_add(x, x, y, 4704);
+  __memcpy(a0, x, 4704 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
   cnrtDim3_t d = {16, 2, 1};
-  cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  if (a.scalar_type() == at::kFloat) {
-    k1<<<d, cnrtFuncTypeUnion4, q>>>(a.data_ptr<float>(),
-                                     b.data_ptr<float>());
-  } else {
-    k0<<<d, cnrtFuncTypeUnion4, q>>>(
-        reinterpret_cast<half *>(a.data_ptr<at::Half>()),
-        reinterpret_cast<const half *>(b.data_ptr<at::Half>()));
-  }
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<half *>(a.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(b.data_ptr<at::Half>()));
   return a;
 }
