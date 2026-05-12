@@ -31,9 +31,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, float *__restrict__ y,
     __bang_add(a, a, b, 32768);
   }
   for (int o = 1; o < 128; o <<= 1) {
-    __bang_write_value(b, o * 256, 0.0f);
-    __memcpy(b + o * 256, a, (32768 - o * 256) * sizeof(float), NRAM2NRAM);
-    __bang_add(a, a, b, 32768);
+    __bang_add(a + o * 256, a + o * 256, a, 32768 - o * 256);
   }
   __memcpy(y + p, a, 32768 * sizeof(float), NRAM2GDRAM);
   if (u == 0) {
