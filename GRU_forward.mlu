@@ -58,16 +58,6 @@ static torch::Tensor wt(int i) {
   return t;
 }
 
-__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
-  __nram__ half a[32768];
-  __nram__ float b[32768];
-  for (int p = taskId * 32768; p < 1048576; p += taskDim * 32768) {
-    __memcpy(a, x + p, 32768 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(b, a, 32768);
-    __memcpy(y + p, b, 32768 * sizeof(float), NRAM2GDRAM);
-  }
-}
-
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
                         torch::Tensor w2, torch::Tensor w3, torch::Tensor w4,
                         torch::Tensor w5, torch::Tensor w6, torch::Tensor w7,
@@ -88,16 +78,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
   static torch::Tensor fptr;
   static torch::Tensor bptr;
   static bool ready = false;
-  (void)w0;
-  (void)w1;
-  (void)w2;
-  (void)w3;
-  (void)w4;
-  (void)w5;
-  (void)w6;
-  (void)w7;
-  torch::Tensor wv[8] = {wt(0), wt(1), wt(2), wt(3),
-                         wt(4), wt(5), wt(6), wt(7)};
+  torch::Tensor wv[8] = {w0, w1, w2, w3, w4, w5, w6, w7};
   if (!ready) {
     CNNL_CHECK(cnnlCreateGruDescriptor(&gd));
     CNNL_CHECK(cnnlCreateSeqDataDescriptor(&xd));
@@ -107,17 +88,17 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
     cnnlActivationMode_t an[1] = {CNNL_ACTIVATION_TANH};
     CNNL_CHECK(cnnlSetGruDescriptor_v2(
         gd, CNNL_GRU_ALGO_V2, CNNL_GRU_MODE_V2, CNNL_GRU_FORWARD,
-        CNNL_GRU_IH_ZRN, az, an, CNNL_GRU_LDNC, CNNL_DTYPE_FLOAT, true, nullptr,
+        CNNL_GRU_IH_RZN, az, an, CNNL_GRU_LDNC, CNNL_DTYPE_HALF, true, nullptr,
         nullptr, nullptr, nullptr, nullptr, 2));
     int xs[3] = {32, 128, 256};
     int ys[3] = {32, 128, 512};
     int ss[4] = {2, 1, 32, 512};
-    CNNL_CHECK(cnnlSetSeqDataDescriptor(xd, CNNL_SEQDATA_NTC, CNNL_DTYPE_FLOAT,
+    CNNL_CHECK(cnnlSetSeqDataDescriptor(xd, CNNL_SEQDATA_NTC, CNNL_DTYPE_HALF,
                                         3, xs, 0, nullptr, nullptr));
-    CNNL_CHECK(cnnlSetSeqDataDescriptor(yd, CNNL_SEQDATA_NTC, CNNL_DTYPE_FLOAT,
+    CNNL_CHECK(cnnlSetSeqDataDescriptor(yd, CNNL_SEQDATA_NTC, CNNL_DTYPE_HALF,
                                         3, ys, 0, nullptr, nullptr));
     CNNL_CHECK(
-        cnnlSetTensorDescriptor(sd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT, 4, ss));
+        cnnlSetTensorDescriptor(sd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, ss));
     for (int i = 0; i < 12; ++i) {
       CNNL_CHECK(cnnlCreateTensorDescriptor(&fd[i]));
       CNNL_CHECK(cnnlCreateTensorDescriptor(&bd[i]));
@@ -127,21 +108,21 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
     int bs[2] = {1, 512};
     for (int i = 0; i < 3; ++i) {
       CNNL_CHECK(cnnlSetTensorDescriptor(fd[i], CNNL_LAYOUT_ARRAY,
-                                         CNNL_DTYPE_FLOAT, 2, f0));
+                                         CNNL_DTYPE_HALF, 2, f0));
       CNNL_CHECK(cnnlSetTensorDescriptor(fd[i + 3], CNNL_LAYOUT_ARRAY,
-                                         CNNL_DTYPE_FLOAT, 2, f1));
+                                         CNNL_DTYPE_HALF, 2, f1));
       CNNL_CHECK(cnnlSetTensorDescriptor(fd[i + 6], CNNL_LAYOUT_ARRAY,
-                                         CNNL_DTYPE_FLOAT, 2, f1));
+                                         CNNL_DTYPE_HALF, 2, f1));
       CNNL_CHECK(cnnlSetTensorDescriptor(fd[i + 9], CNNL_LAYOUT_ARRAY,
-                                         CNNL_DTYPE_FLOAT, 2, f1));
+                                         CNNL_DTYPE_HALF, 2, f1));
       CNNL_CHECK(cnnlSetTensorDescriptor(bd[i], CNNL_LAYOUT_ARRAY,
-                                         CNNL_DTYPE_FLOAT, 2, bs));
+                                         CNNL_DTYPE_HALF, 2, bs));
       CNNL_CHECK(cnnlSetTensorDescriptor(bd[i + 3], CNNL_LAYOUT_ARRAY,
-                                         CNNL_DTYPE_FLOAT, 2, bs));
+                                         CNNL_DTYPE_HALF, 2, bs));
       CNNL_CHECK(cnnlSetTensorDescriptor(bd[i + 6], CNNL_LAYOUT_ARRAY,
-                                         CNNL_DTYPE_FLOAT, 2, bs));
+                                         CNNL_DTYPE_HALF, 2, bs));
       CNNL_CHECK(cnnlSetTensorDescriptor(bd[i + 9], CNNL_LAYOUT_ARRAY,
-                                         CNNL_DTYPE_FLOAT, 2, bs));
+                                         CNNL_DTYPE_HALF, 2, bs));
     }
     CNNL_CHECK(cnnlGetGruWorkspaceSize_v3(torch_mlu::getCurrentHandle(), xd, sd,
                                           fd, gd, &ws));
@@ -152,50 +133,41 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
     bptr = torch::empty({12}, x.options().dtype(torch::kInt64));
     ready = true;
   }
-  static torch::Tensor xf;
-  if (!xf.defined())
-    xf = torch::empty({32, 128, 256}, x.options().dtype(torch::kFloat32));
-  else
-    xf.resize_({32, 128, 256});
-  auto y = torch::empty({32, 128, 512}, x.options().dtype(torch::kFloat32));
+  auto y = torch::empty({32, 128, 512}, x.options());
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d0 = {32, 1, 1};
-  k0<<<d0, cnrtFuncTypeBlock, q>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      xf.data_ptr<float>());
-  cnrtMemsetAsync(hx.data_ptr(), 0, 2 * 1 * 32 * 512 * sizeof(float), q);
+  cnrtMemsetAsync(hx.data_ptr(), 0, 2 * 1 * 32 * 512 * sizeof(half), q);
   uint64_t fp[12] = {
-      (uint64_t)((const float *)wv[0].data_ptr<float>() + 512 * 256),
-      (uint64_t)((const float *)wv[0].data_ptr<float>()),
-      (uint64_t)((const float *)wv[0].data_ptr<float>() + 2 * 512 * 256),
-      (uint64_t)((const float *)wv[1].data_ptr<float>() + 512 * 512),
-      (uint64_t)((const float *)wv[1].data_ptr<float>()),
-      (uint64_t)((const float *)wv[1].data_ptr<float>() + 2 * 512 * 512),
-      (uint64_t)((const float *)wv[4].data_ptr<float>() + 512 * 512),
-      (uint64_t)((const float *)wv[4].data_ptr<float>()),
-      (uint64_t)((const float *)wv[4].data_ptr<float>() + 2 * 512 * 512),
-      (uint64_t)((const float *)wv[5].data_ptr<float>() + 512 * 512),
-      (uint64_t)((const float *)wv[5].data_ptr<float>()),
-      (uint64_t)((const float *)wv[5].data_ptr<float>() + 2 * 512 * 512)};
+      (uint64_t)((const half *)wv[0].data_ptr<at::Half>()),
+      (uint64_t)((const half *)wv[0].data_ptr<at::Half>() + 512 * 256),
+      (uint64_t)((const half *)wv[0].data_ptr<at::Half>() + 2 * 512 * 256),
+      (uint64_t)((const half *)wv[1].data_ptr<at::Half>()),
+      (uint64_t)((const half *)wv[1].data_ptr<at::Half>() + 512 * 512),
+      (uint64_t)((const half *)wv[1].data_ptr<at::Half>() + 2 * 512 * 512),
+      (uint64_t)((const half *)wv[4].data_ptr<at::Half>()),
+      (uint64_t)((const half *)wv[4].data_ptr<at::Half>() + 512 * 512),
+      (uint64_t)((const half *)wv[4].data_ptr<at::Half>() + 2 * 512 * 512),
+      (uint64_t)((const half *)wv[5].data_ptr<at::Half>()),
+      (uint64_t)((const half *)wv[5].data_ptr<at::Half>() + 512 * 512),
+      (uint64_t)((const half *)wv[5].data_ptr<at::Half>() + 2 * 512 * 512)};
   uint64_t bp[12] = {
-      (uint64_t)((const float *)wv[2].data_ptr<float>() + 512),
-      (uint64_t)((const float *)wv[2].data_ptr<float>()),
-      (uint64_t)((const float *)wv[2].data_ptr<float>() + 1024),
-      (uint64_t)((const float *)wv[3].data_ptr<float>() + 512),
-      (uint64_t)((const float *)wv[3].data_ptr<float>()),
-      (uint64_t)((const float *)wv[3].data_ptr<float>() + 1024),
-      (uint64_t)((const float *)wv[6].data_ptr<float>() + 512),
-      (uint64_t)((const float *)wv[6].data_ptr<float>()),
-      (uint64_t)((const float *)wv[6].data_ptr<float>() + 1024),
-      (uint64_t)((const float *)wv[7].data_ptr<float>() + 512),
-      (uint64_t)((const float *)wv[7].data_ptr<float>()),
-      (uint64_t)((const float *)wv[7].data_ptr<float>() + 1024)};
+      (uint64_t)((const half *)wv[2].data_ptr<at::Half>()),
+      (uint64_t)((const half *)wv[2].data_ptr<at::Half>() + 512),
+      (uint64_t)((const half *)wv[2].data_ptr<at::Half>() + 1024),
+      (uint64_t)((const half *)wv[3].data_ptr<at::Half>()),
+      (uint64_t)((const half *)wv[3].data_ptr<at::Half>() + 512),
+      (uint64_t)((const half *)wv[3].data_ptr<at::Half>() + 1024),
+      (uint64_t)((const half *)wv[6].data_ptr<at::Half>()),
+      (uint64_t)((const half *)wv[6].data_ptr<at::Half>() + 512),
+      (uint64_t)((const half *)wv[6].data_ptr<at::Half>() + 1024),
+      (uint64_t)((const half *)wv[7].data_ptr<at::Half>()),
+      (uint64_t)((const half *)wv[7].data_ptr<at::Half>() + 512),
+      (uint64_t)((const half *)wv[7].data_ptr<at::Half>() + 1024)};
   cnrtMemcpyAsync(fptr.data_ptr<int64_t>(), fp, 12 * sizeof(uint64_t), q,
                   cnrtMemcpyHostToDev);
   cnrtMemcpyAsync(bptr.data_ptr<int64_t>(), bp, 12 * sizeof(uint64_t), q,
                   cnrtMemcpyHostToDev);
   CNNL_CHECK(cnnlGru_v2(torch_mlu::getCurrentHandle(), gd, nullptr,
-                        nullptr, xd, xf.data_ptr(), sd,
+                        nullptr, xd, x.data_ptr(), sd,
                         hx.data_ptr(), nullptr, nullptr, fd,
                         reinterpret_cast<const void **>(fptr.data_ptr<int64_t>()),
                         bd,
