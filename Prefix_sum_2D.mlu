@@ -34,15 +34,10 @@ __mlu_entry__ void k1(const half *__restrict__ x, float *__restrict__ y,
     __memcpy(b, a, n * sizeof(float), NRAM2NRAM);
     __bang_add(a + o * 256, a + o * 256, b, n);
   }
+  __memcpy(y + p, a, 32768 * sizeof(float), NRAM2GDRAM);
   if (u == 0) {
     __memcpy(t + g * 256, a + 32512, 256 * sizeof(float), NRAM2GDRAM);
   }
-  __sync_all_ipu();
-  if (u != 0) {
-    __memcpy(b, t + g * 256, 256 * sizeof(float), GDRAM2NRAM);
-    __bang_cycle_add(a, a, b, 32768, 256);
-  }
-  __memcpy(y + p, a, 32768 * sizeof(float), NRAM2GDRAM);
 }
 
 __mlu_entry__ void k2(float *__restrict__ y, const float *__restrict__ t) {
@@ -65,8 +60,10 @@ torch::Tensor bang_func(torch::Tensor x) {
     t = torch::empty({4096}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t g0 = {32, 1, 1};
-  k1<<<g0, cnrtFuncTypeBlock, q>>>(
+  k1<<<g0, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       y.data_ptr<float>(), t.data_ptr<float>());
+  cnrtDim3_t g1 = {16, 1, 1};
+  k2<<<g1, cnrtFuncTypeUnion1, q>>>(y.data_ptr<float>(), t.data_ptr<float>());
   return y;
 }
