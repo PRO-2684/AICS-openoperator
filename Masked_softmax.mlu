@@ -22,11 +22,11 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     __memcpy(a, in, E2 * sizeof(half), GDRAM2NRAM, E2 * sizeof(half),
              E1 * sizeof(half), E3 - 1);
     __bang_active_exp(a, a, E2 * E3);
+    __bang_reduce_sum(s, a, E2 * E3);
 
 #pragma unroll
     for (int i = 0; i < E3; ++i) {
-      __bang_reduce_sum(s, a + i * E2, E2);
-      half v = (half)(1.0f / (float)s[0]);
+      half v = (half)(1.0f / (float)s[i]);
       __bang_mul_scalar(a + i * E2, a + i * E2, v, E2);
     }
 
