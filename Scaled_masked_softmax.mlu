@@ -31,14 +31,18 @@ static cnnlTensorDescriptor_t make_desc(const torch::Tensor& x, cnnlDataType_t d
 }
 
 torch::Tensor bang_func(torch::Tensor attn_weight, torch::Tensor mask, double scale) {
-  auto out = torch::empty_like(attn_weight);
-  cnnlTensorDescriptor_t xd = make_desc(attn_weight, CNNL_DTYPE_HALF);
-  cnnlTensorDescriptor_t yd = make_desc(out, CNNL_DTYPE_HALF);
+  static torch::Tensor out;
+  static cnnlTensorDescriptor_t xd = nullptr;
+  static cnnlTensorDescriptor_t yd = nullptr;
+  if (!out.defined())
+    out = torch::empty_like(attn_weight);
+  if (xd == nullptr) {
+    xd = make_desc(attn_weight, CNNL_DTYPE_HALF);
+    yd = make_desc(out, CNNL_DTYPE_HALF);
+  }
   CNNL_CHECK(cnnlMaskedSoftmax(torch_mlu::getCurrentHandle(),
                                CNNL_MASKED_SOFTMAX_UPPER_TRIANGLE_MASK_NEG_INF,
                                -1, (float)scale, xd, attn_weight.data_ptr(), nullptr,
                                nullptr, yd, out.data_ptr()));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(yd));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(xd));
   return out;
 }
