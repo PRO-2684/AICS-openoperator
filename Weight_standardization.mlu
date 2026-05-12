@@ -72,7 +72,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   for (int i = 0; i < 18; ++i) {
     q += t[i * 32];
   }
-  float r = 1.0f / (sqrtf(q * 0.001736111111111111f) + 1.0e-5f);
+  float r = 1.0f / (sqrtf(q * 0.0017391304347826088f) + 1.0e-5f);
   __bang_mul_scalar(a, a, r, E1);
   __bang_float2half_rn(h, a, E1);
 
