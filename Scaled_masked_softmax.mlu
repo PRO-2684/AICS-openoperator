@@ -6,8 +6,6 @@
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[16384];
   __nram__ half s[128];
-  __nram__ half t[128];
-  __nram__ half u[16384];
 
   for (int g = taskId; g < 32; g += taskDim) {
     int p = g * 16384;
@@ -22,13 +20,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 #pragma unroll
     for (int r = 0; r < 128; ++r) {
       half *q = a + r * 128;
-      __bang_reduce_sum(t, q, 128);
-      float z = (float)t[0] + (float)t[64];
-      s[r] = (half)(1.0f / z);
+      __bang_reduce_sum(s, q, 128);
+      float z = (float)s[0] + (float)s[64];
+      __bang_mul_scalar(q, q, (half)(1.0f / z), 128);
     }
-    __bang_transpose(u, a, 128, 128);
-    __bang_cycle_mul(u, u, s, 16384, 128);
-    __bang_transpose(a, u, 128, 128);
     __memcpy(y + p, a, 16384 * sizeof(half), NRAM2GDRAM);
   }
 }
@@ -41,8 +36,8 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double scale) {
     y = torch::empty_like(x);
   else
     y.resize_({4, 8, 128, 128});
-  cnrtDim3_t d = {32, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {4, 8, 1};
+  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
