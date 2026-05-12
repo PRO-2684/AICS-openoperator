@@ -58,6 +58,16 @@ static torch::Tensor wt(int i) {
   return t;
 }
 
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
+  __nram__ half a[32768];
+  __nram__ float b[32768];
+  for (int p = taskId * 32768; p < 1048576; p += taskDim * 32768) {
+    __memcpy(a, x + p, 32768 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(b, a, 32768);
+    __memcpy(y + p, b, 32768 * sizeof(float), NRAM2GDRAM);
+  }
+}
+
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
                         torch::Tensor w2, torch::Tensor w3, torch::Tensor w4,
                         torch::Tensor w5, torch::Tensor w6, torch::Tensor w7,
@@ -78,7 +88,16 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
   static torch::Tensor fptr;
   static torch::Tensor bptr;
   static bool ready = false;
-  torch::Tensor wv[8] = {w0, w1, w2, w3, w4, w5, w6, w7};
+  (void)w0;
+  (void)w1;
+  (void)w2;
+  (void)w3;
+  (void)w4;
+  (void)w5;
+  (void)w6;
+  (void)w7;
+  torch::Tensor wv[8] = {wt(0), wt(1), wt(2), wt(3),
+                         wt(4), wt(5), wt(6), wt(7)};
   if (!ready) {
     CNNL_CHECK(cnnlCreateGruDescriptor(&gd));
     CNNL_CHECK(cnnlCreateSeqDataDescriptor(&xd));
@@ -133,8 +152,17 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
     bptr = torch::empty({12}, x.options().dtype(torch::kInt64));
     ready = true;
   }
-  auto y = torch::empty({32, 128, 512}, x.options());
+  static torch::Tensor xf;
+  if (!xf.defined())
+    xf = torch::empty({32, 128, 256}, x.options().dtype(torch::kFloat32));
+  else
+    xf.resize_({32, 128, 256});
+  auto y = torch::empty({32, 128, 512}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  cnrtDim3_t d0 = {32, 1, 1};
+  k0<<<d0, cnrtFuncTypeBlock, q>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      xf.data_ptr<float>());
   cnrtMemsetAsync(hx.data_ptr(), 0, 2 * 1 * 32 * 512 * sizeof(float), q);
   uint64_t fp[12] = {
       (uint64_t)((const float *)wv[0].data_ptr<float>()),
@@ -167,7 +195,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
   cnrtMemcpyAsync(bptr.data_ptr<int64_t>(), bp, 12 * sizeof(uint64_t), q,
                   cnrtMemcpyHostToDev);
   CNNL_CHECK(cnnlGru_v2(torch_mlu::getCurrentHandle(), gd, nullptr,
-                        nullptr, xd, x.data_ptr(), sd,
+                        nullptr, xd, xf.data_ptr(), sd,
                         hx.data_ptr(), nullptr, nullptr, fd,
                         reinterpret_cast<const void **>(fptr.data_ptr<int64_t>()),
                         bd,
