@@ -13,8 +13,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   int row_base = taskId * E2;
   int p = row_base * E0;
 
+  __memcpy(x, b + p, E1 * sizeof(half), GDRAM2NRAM);
   for (int r = 0; r < E2; ++r) {
-    __memcpy(x + r * E0, b + p + r * E0, E0 * sizeof(half), GDRAM2NRAM);
     __bang_mul_scalar(x + r * E0, x + r * E0, a[row_base + r], E0);
   }
 
