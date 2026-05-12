@@ -24,6 +24,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ w,
     int64_t q = w[r];
     __bang_atomic_reduce_add_async(y + q * E1, c, E1);
   }
+  __sync_all_ipu();
 }
 
 torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
