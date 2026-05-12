@@ -8,6 +8,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
   __nram__ half a[128];
   __nram__ half b[128];
   __nram__ half s[128];
+  __nram__ half m[64];
   for (int r = taskId; r < 4096; r += taskDim) {
     int q = r & 127;
     int n = q + 1;
@@ -16,9 +17,11 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
       __bang_write_value(a + n, 128 - n, (half)-20.0f);
     if (v != 1.0f)
       __bang_mul_scalar(a, a, (half)v, 128);
+    __bang_argmax(m, a, 128);
+    __bang_sub_scalar(a, a, m[0], 128);
     __bang_active_exp(a, a, 128);
     __bang_reduce_sum(s, a, 128);
-    half u = (half)(1.0f / (float)s[0]);
+    half u = (half)(1.0f / ((float)s[0] + (float)s[64]));
     __bang_mul_scalar(b, a, u, 128);
     if (n < 128)
       __bang_write_zero(b + n, 128 - n);
