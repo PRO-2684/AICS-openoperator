@@ -38,8 +38,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 
 __mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E2 * E3];
-  __nram__ half b[E2 * E3];
-  __nram__ half s[E2 * E3];
+  __nram__ half s[E2];
 
   for (int row = taskId * E3; row < E0; row += taskDim * E3) {
     const half *in = x + row * E1;
@@ -49,13 +48,12 @@ __mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y) {
              E1 * sizeof(half), E3 - 1);
     __bang_active_exp(a, a, E2 * E3);
 
-    __bang_reduce_sum(s, a, E2 * E3);
 #pragma unroll
     for (int i = 0; i < E3; ++i) {
-      half v = (half)(1.0f / (float)s[i * E2]);
-      __bang_write_value(b + i * E2, E2, v);
+      __bang_reduce_sum(s, a + i * E2, E2);
+      half v = (half)(1.0f / (float)s[0]);
+      __bang_mul_scalar(a + i * E2, a + i * E2, v, E2);
     }
-    __bang_mul(a, a, b, E2 * E3);
 
     __memcpy(out, a, E2 * sizeof(half), NRAM2GDRAM, E1 * sizeof(half),
              E2 * sizeof(half), E3 - 1);
