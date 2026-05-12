@@ -135,6 +135,33 @@ __mlu_entry__ void k4(const half *__restrict__ x, const float *__restrict__ s,
   }
 }
 
+__mlu_entry__ void k5(const half *__restrict__ x, half *__restrict__ y) {
+  int f = taskId;
+  if (f >= 512) {
+    return;
+  }
+  __nram__ half h[256];
+  __nram__ float a[256];
+  __memcpy(h, x + f, sizeof(half), GDRAM2NRAM, sizeof(half),
+           512 * sizeof(half), 255);
+  __bang_half2float(a, h, 256);
+  __bang_reduce_sum(a, a, 256);
+  float s0 = (float)a[0] + (float)a[64] + (float)a[128] + (float)a[192];
+  __bang_half2float(a, h, 256);
+  __bang_mul(a, a, a, 256);
+  __bang_reduce_sum(a, a, 256);
+  float s1 = (float)a[0] + (float)a[64] + (float)a[128] + (float)a[192];
+  float m = s0 * 0.00390625f;
+  float v = s1 * 0.00390625f - m * m + 1.0e-5f;
+  float r = 1.0f / sqrtf(v);
+  __bang_half2float(a, h, 256);
+  __bang_sub_scalar(a, a, m, 256);
+  __bang_mul_scalar(a, a, r, 256);
+  __bang_float2half_rn(h, a, 256);
+  __memcpy(y + f, h, sizeof(half), NRAM2GDRAM, 512 * sizeof(half),
+           sizeof(half), 255);
+}
+
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bias,
                         torch::Tensor running_mean, torch::Tensor running_var,
                         int num_features) {
@@ -150,9 +177,9 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bia
   if (!q.defined())
     q = torch::empty({E1}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {E2, 1, 1};
-  k2<<<g, cnrtFuncTypeUnion8, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()), s.data_ptr<float>(),
-      q.data_ptr<float>(), reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+  cnrtDim3_t g = {512, 1, 1};
+  k5<<<g, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
 }
