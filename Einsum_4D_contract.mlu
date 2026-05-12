@@ -16,9 +16,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   __wram__ half w[E1];
 
   int p = taskId;
-  __memcpy_async(x, a + p * E1, E1 * sizeof(half), GDRAM2NRAM);
-  __memcpy_async(z, b + p * E1, E1 * sizeof(half), GDRAM2NRAM);
-  __sync_io();
+  __memcpy(x, a + p * E1, E1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(z, b + p * E1, E1 * sizeof(half), GDRAM2NRAM);
   __bang_reshape_filter(r, z, 128, 1, 1, 64);
   __memcpy(w, r, E1 * sizeof(half), NRAM2WRAM);
   __bang_matmul(f, x, w, 128, 64, 128);
