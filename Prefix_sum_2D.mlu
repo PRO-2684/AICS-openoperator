@@ -18,20 +18,21 @@ __mlu_entry__ void k1(const half *__restrict__ x, float *__restrict__ y,
                       float *__restrict__ t) {
   __nram__ half h[32768];
   __nram__ float a[32768];
-  __nram__ float b[32768];
   int g = taskId >> 1;
   int u = taskId & 1;
   int p = g * 65536 + u * 32768;
   __memcpy(h, x + p, 32768 * sizeof(half), GDRAM2NRAM);
   __bang_half2float(a, h, 32768);
   for (int o = 1; o < 256; o <<= 1) {
-    __bang_write_value(b, 32768, 0.0f);
-    __memcpy(b + o, a, (256 - o) * sizeof(float), NRAM2NRAM,
-             256 * sizeof(float), 256 * sizeof(float), 127);
-    __bang_add(a, a, b, 32768);
+    for (int r = 0; r < 128; ++r) {
+      __bang_add(a + r * 256 + o, a + r * 256 + o, a + r * 256, 256 - o);
+    }
   }
+  __nram__ float b[32768];
   for (int o = 1; o < 128; o <<= 1) {
-    __bang_add(a + o * 256, a + o * 256, a, 32768 - o * 256);
+    __bang_write_value(b, o * 256, 0.0f);
+    __memcpy(b + o * 256, a, (32768 - o * 256) * sizeof(float), NRAM2NRAM);
+    __bang_add(a, a, b, 32768);
   }
   __memcpy(y + p, a, 32768 * sizeof(float), NRAM2GDRAM);
   if (u == 0) {
