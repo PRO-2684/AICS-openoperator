@@ -22,7 +22,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   __bang_reshape_filter(r, z, 128, 1, 1, 64);
   __memcpy(w, r, E1 * sizeof(half), NRAM2WRAM);
   __bang_matmul(f, x, w, 128, 64, 128);
-  __bang_float2half_up(h, f, E2);
+  __bang_float2half_rd(h, f, E2);
   __memcpy(y + p * E2, h, E2 * sizeof(half), NRAM2GDRAM);
 }
 
