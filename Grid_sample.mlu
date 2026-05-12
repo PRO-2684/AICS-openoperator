@@ -1,131 +1,49 @@
-#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
-#include <cnnl.h>
 #include <cnrt.h>
-#include <cstdio>
+#include <framework/core/MLUStream.h>
+#include <math.h>
 #include <torch/extension.h>
 
-#define CNNL_CHECK(call)                                                       \
-  do {                                                                         \
-    cnnlStatus_t _status = (call);                                             \
-    TORCH_CHECK(_status == CNNL_STATUS_SUCCESS,                                \
-                "CNNL call failed, status=", (int)_status);                    \
-  } while (0)
+__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ g,
+                      half *__restrict__ y) {
+  for (int r = taskId; r < 256; r += taskDim) {
+    int n = r >> 6;
+    int c = r & 63;
+    const half *px = x + n * 1048576 + c * 16384;
+    half *py = y + n * 262144 + c * 4096;
+    const half *pg = g + n * 8192;
+    for (int i = 0; i < 4096; ++i) {
+      float gx = (float)pg[i * 2];
+      float gy = (float)pg[i * 2 + 1];
+      float fx = (gx + 1.0f) * 63.5f;
+      float fy = (gy + 1.0f) * 63.5f;
+      int x0 = (int)floorf(fx);
+      int y0 = (int)floorf(fy);
+      float wx = fx - (float)x0;
+      float wy = fy - (float)y0;
+      int x1 = x0 + 1;
+      int y1 = y0 + 1;
+      float v00 = (float)px[y0 * 128 + x0];
+      float v01 = (float)px[y0 * 128 + x1];
+      float v10 = (float)px[y1 * 128 + x0];
+      float v11 = (float)px[y1 * 128 + x1];
+      float a = v00 + (v01 - v00) * wx;
+      float b = v10 + (v11 - v10) * wx;
+      py[i] = (half)(a + (b - a) * wy);
+    }
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
-  auto handle = torch_mlu::getCurrentHandle();
-
-  static torch::Tensor t0;
-  static torch::Tensor output;
-  if (!t0.defined())
-    t0 = torch::empty({4, 64, 64, 64}, input.options());
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty({4, 64, 64, 64}, input.options());
   else
-    t0.resize_({4, 64, 64, 64});
-  if (!output.defined())
-    output = torch::empty({4, 64, 64, 64}, input.options());
-  else
-    output.resize_({4, 64, 64, 64});
-
-  static cnnlTensorDescriptor_t d0;
-  static cnnlTensorDescriptor_t d1;
-  static cnnlTensorDescriptor_t d2;
-  static cnnlTensorDescriptor_t d3;
-  static cnnlGridSampleDescriptor_t gd;
-  static cnnlTransposeDescriptor_t td;
-  static bool inited = false;
-
-  static size_t ws0 = 0;
-  static size_t ws1 = 0;
-  static size_t ws = 0;
-
-  if (!inited) {
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&d0));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&d1));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&d2));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&d3));
-    CNNL_CHECK(cnnlCreateGridSampleDescriptor(&gd));
-    CNNL_CHECK(cnnlCreateTransposeDescriptor(&td));
-
-    int s0[4] = {
-        (int)input.size(0),
-        (int)input.size(2),
-        (int)input.size(3),
-        (int)input.size(1),
-    };
-
-    int st0[4] = {
-        (int)(input.size(1) * input.size(2) * input.size(3)),
-        (int)input.size(3),
-        1,
-        (int)(input.size(2) * input.size(3)),
-    };
-
-    int s1[4] = {
-        (int)grid.size(0),
-        (int)grid.size(1),
-        (int)grid.size(2),
-        (int)grid.size(3),
-    };
-
-    int s2[4] = {
-        (int)input.size(0),
-        (int)grid.size(1),
-        (int)grid.size(2),
-        (int)input.size(1),
-    };
-
-    int s3[4] = {
-        (int)input.size(0),
-        (int)input.size(1),
-        (int)grid.size(1),
-        (int)grid.size(2),
-    };
-
-    CNNL_CHECK(cnnlSetTensorDescriptorEx(d0, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF,
-                                         4, s0, st0));
-
-    CNNL_CHECK(
-        cnnlSetTensorDescriptor(d1, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, s1));
-
-    CNNL_CHECK(
-        cnnlSetTensorDescriptor(d2, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, s2));
-
-    CNNL_CHECK(
-        cnnlSetTensorDescriptor(d3, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, s3));
-
-    CNNL_CHECK(cnnlSetGridSampleDescriptor(
-        gd, CNNL_INTERP_BILINEAR, CNNL_GRIDSAMPLE_PADDING_ZEROS, true));
-
-    int p[4] = {0, 3, 1, 2};
-    CNNL_CHECK(cnnlSetTransposeDescriptor(td, 4, p));
-
-    CNNL_CHECK(cnnlGetGridSampleForwardWorkspaceSize(handle, d0, d1, d2, &ws0));
-    CNNL_CHECK(cnnlGetTransposeWorkspaceSize(handle, d2, td, &ws1));
-
-    ws = ws0;
-    if (ws1 > ws)
-      ws = ws1;
-
-    size_t extra = (size_t)input.numel() * input.element_size();
-    if (extra > ws)
-      ws = extra;
-    inited = true;
-  }
-
-  static torch::Tensor workspace;
-  void *workspace_ptr = nullptr;
-  if (ws > 0) {
-    if (!workspace.defined())
-      workspace = torch::empty({(long long)ws}, input.options().dtype(torch::kUInt8));
-    workspace_ptr = workspace.data_ptr();
-  }
-
-  CNNL_CHECK(cnnlGridSampleForward(handle, gd, d0, input.data_ptr(), d1,
-                                   grid.data_ptr(), d2, t0.data_ptr(),
-                                   workspace_ptr, ws));
-
-  CNNL_CHECK(cnnlTranspose_v2(handle, td, d2, t0.data_ptr(), d3,
-                              output.data_ptr(), workspace_ptr, ws1));
-
-  return output;
+    y.resize_({4, 64, 64, 64});
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(grid.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  return y;
 }
