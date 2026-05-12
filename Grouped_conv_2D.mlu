@@ -48,35 +48,15 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)out_channels;
   (void)kernel_size;
   (void)groups;
-  static torch::Tensor xh;
-  static torch::Tensor yh;
-  static torch::Tensor y;
-  static torch::Tensor w;
-  static void *last = nullptr;
-  if (!xh.defined())
-    xh = torch::empty({16, 128, 128, 64}, x.options());
-  else
-    xh.resize_({16, 128, 128, 64});
-  if (!yh.defined())
-    yh = torch::empty({16, 128, 128, 128}, x.options());
-  else
-    yh.resize_({16, 128, 128, 128});
-  if (!y.defined())
-    y = torch::empty({16, 128, 128, 128}, x.options());
-  else
-    y.resize_({16, 128, 128, 128});
-  if (!w.defined())
-    w = torch::empty({128, 3, 3, 8}, kernel.options());
-  else
-    w.resize_({128, 3, 3, 8});
+  auto xh = torch::empty({16, 128, 128, 64}, x.options());
+  auto yh = torch::empty({16, 128, 128, 128}, x.options());
+  auto y = torch::empty({16, 128, 128, 128}, x.options());
+  auto w = torch::empty({128, 3, 3, 8}, kernel.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  if (last != kernel.data_ptr()) {
-    cnrtDim3_t dim = {32, 1, 1};
-    k1<<<dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(w.data_ptr<at::Half>()));
-    last = kernel.data_ptr();
-  }
+  cnrtDim3_t dim = {32, 1, 1};
+  k1<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(w.data_ptr<at::Half>()));
   static cnnlTensorDescriptor_t xd = nullptr;
   static cnnlTensorDescriptor_t xhd = nullptr;
   static cnnlTensorDescriptor_t wd = nullptr;
@@ -131,12 +111,8 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
     if (c > ws_size)
       ws_size = c;
   }
-  static torch::Tensor work;
-  if (!work.defined())
-    work = torch::empty({(int64_t)ws_size}, x.options().dtype(torch::kUInt8));
-  else
-    work.resize_({(int64_t)ws_size});
-  void *wp = ws_size ? work.data_ptr() : nullptr;
+  auto ws = torch::empty({(int64_t)ws_size}, x.options().dtype(torch::kUInt8));
+  void *wp = ws_size ? ws.data_ptr() : nullptr;
   CNNL_CHECK(cnnlTranspose_v2(torch_mlu::getCurrentHandle(), td0, xd,
                               x.data_ptr(), xhd, xh.data_ptr(), wp, ws_size));
   CNNL_CHECK(cnnlConvolutionForward(
