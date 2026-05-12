@@ -42,7 +42,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
   }
   for (int i = 0; i < n; ++i) {
     int p = f[i];
-    __bang_atomic_reduce_add(y + p * E1, d + p * E1, E1);
+    __bang_atomic_reduce_add_async(y + p * E1, d + p * E1, E1);
   }
 }
 
