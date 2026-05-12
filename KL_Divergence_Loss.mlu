@@ -3,8 +3,8 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 64
-#define E1 2048
+#define E0 16
+#define E1 8192
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
                       float *__restrict__ z) {
@@ -23,7 +23,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
   __bang_mul(c, c, d, E1);
   __bang_reduce_sum(c, c, E1);
   float s = 0.0f;
-  for (int i = 0; i < 64; ++i) {
+  for (int i = 0; i < 256; ++i) {
     s += c[i * 32];
   }
   if (taskId == 0) {
@@ -37,7 +37,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
 torch::Tensor bang_func(torch::Tensor input_log_prob, torch::Tensor target_prob) {
   auto out = torch::empty({}, input_log_prob.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g0 = {8, 8, 1};
+  cnrtDim3_t g0 = {16, 1, 1};
   k0<<<g0, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(input_log_prob.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(target_prob.data_ptr<at::Half>()),
