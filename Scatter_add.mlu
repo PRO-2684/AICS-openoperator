@@ -35,15 +35,6 @@ __mlu_entry__ void k1(const half *__restrict__ x, float *__restrict__ y) {
   }
 }
 
-__mlu_entry__ void k2(const int64_t *__restrict__ x, int *__restrict__ y) {
-  __nram__ int a[E1];
-  for (int r = taskId; r < E0; r += taskDim) {
-    int v = (int)x[r];
-    __bang_write_value(a, E1, v);
-    __memcpy(y + r * E1, a, E1 * sizeof(int), NRAM2GDRAM);
-  }
-}
-
 torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
   (void)dim_size;
   static cnnlTensorDescriptor_t a = nullptr;
@@ -51,28 +42,25 @@ torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
   static cnnlTensorDescriptor_t c = nullptr;
   static size_t ws_size = 0;
   static torch::Tensor t;
-  static torch::Tensor u;
   static torch::Tensor ws;
   cnnlHandle_t h = torch_mlu::getCurrentHandle();
   if (a == nullptr) {
     int s0[2] = {E2, E1};
-    int s1[2] = {E0, E1};
+    int s1[1] = {E0};
     int s2[2] = {E0, E1};
     CNNL_CHECK(cnnlCreateTensorDescriptor(&a));
     CNNL_CHECK(cnnlCreateTensorDescriptor(&b));
     CNNL_CHECK(cnnlCreateTensorDescriptor(&c));
     CNNL_CHECK(cnnlSetTensorDescriptor(a, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT, 2,
                                        s0));
-    CNNL_CHECK(cnnlSetTensorDescriptor(b, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_INT32, 2,
+    CNNL_CHECK(cnnlSetTensorDescriptor(b, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_INT64, 1,
                                        s1));
     CNNL_CHECK(cnnlSetTensorDescriptor(c, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT, 2,
                                        s2));
-    CNNL_CHECK(cnnlGetScatterWorkspaceSize(h, b, &ws_size));
+    CNNL_CHECK(cnnlGetIndexAddWorkspaceSize(h, a, &ws_size));
   }
   if (!t.defined())
     t = torch::empty({E0, E1}, src.options().dtype(torch::kFloat32));
-  if (!u.defined())
-    u = torch::empty({E0, E1}, src.options().dtype(torch::kInt32));
   if (ws_size && !ws.defined())
     ws = torch::empty({(int64_t)ws_size}, src.options().dtype(torch::kUInt8));
   auto y = torch::empty({E2, E1}, src.options().dtype(torch::kFloat32));
@@ -80,11 +68,10 @@ torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
   cnrtDim3_t d = {4, 8, 1};
   k1<<<d, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(src.data_ptr<at::Half>()), t.data_ptr<float>());
-  k2<<<d, cnrtFuncTypeUnion1, q>>>(index.data_ptr<int64_t>(), u.data_ptr<int>());
   k0<<<d, cnrtFuncTypeUnion1, q>>>(y.data_ptr<float>());
-  CNNL_CHECK(cnnlScatter_v2(h, 0, a, y.data_ptr<float>(), b, u.data_ptr<int>(),
-                            c, t.data_ptr<float>(),
-                            ws_size ? ws.data_ptr() : nullptr, ws_size, a,
-                            y.data_ptr<float>(), CNNL_SCATTER_ADD));
+  CNNL_CHECK(cnnlIndexAdd_v2(h, 0, a, y.data_ptr<float>(), b,
+                             index.data_ptr<int64_t>(), c, t.data_ptr<float>(),
+                             ws_size ? ws.data_ptr() : nullptr, ws_size, a,
+                             y.data_ptr<float>()));
   return y;
 }
