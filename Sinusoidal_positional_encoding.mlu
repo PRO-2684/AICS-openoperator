@@ -15,7 +15,7 @@
 #define INNER_SPLIT 2
 #define INNER_TILE_ELEMS 32768
 
-#define TASKS_PER_LAUNCH 64
+#define TASKS_PER_LAUNCH 32
 #define PLANE_ELEMS 65536
 #define SEG_ELEMS 32768
 
@@ -193,19 +193,18 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
     return;
   }
 
-  const uint32_t base = (taskId >> 1) * PLANE_ELEMS + (taskId & 1) * SEG_ELEMS;
-  const uint32_t pbase = (taskId & 1) * SEG_ELEMS;
+  const uint32_t base = taskId * PLANE_ELEMS;
 
-  __nram__ half x0[SEG_ELEMS];
-  __nram__ half p0[SEG_ELEMS];
+  __nram__ half x0[PLANE_ELEMS];
+  __nram__ half p0[PLANE_ELEMS];
 
   half *x_gdram = (half *)__builtin_assume_aligned(x + base, 512);
-  const half *p_gdram = (const half *)__builtin_assume_aligned(cache + pbase, 512);
+  const half *p_gdram = (const half *)__builtin_assume_aligned(cache, 512);
 
-  __memcpy(x0, x_gdram, SEG_ELEMS * sizeof(half), GDRAM2NRAM);
-  __memcpy(p0, p_gdram, SEG_ELEMS * sizeof(half), GDRAM2NRAM);
-  __bang_add(x0, x0, p0, SEG_ELEMS);
-  __memcpy(x_gdram, x0, SEG_ELEMS * sizeof(half), NRAM2GDRAM);
+  __memcpy(x0, x_gdram, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
+  __memcpy(p0, p_gdram, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
+  __bang_add(x0, x0, p0, PLANE_ELEMS);
+  __memcpy(x_gdram, x0, PLANE_ELEMS * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len) {
@@ -215,7 +214,7 @@ torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
   cnrtDim3_t dim;
-  dim.x = 64;
+  dim.x = 32;
   dim.y = 1;
   dim.z = 1;
 
