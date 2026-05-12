@@ -1,63 +1,34 @@
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define X(e)                                                                   \
-  do {                                                                         \
-    cnnlStatus_t s = (e);                                                      \
-    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
-  } while (0)
+__mlu_entry__ void k0(const float *__restrict__ x, const float *__restrict__ y,
+                      float *__restrict__ z) {
+  __nram__ float a[4096];
+  __nram__ float b[4096];
+  __nram__ float t[4096];
+  __nram__ float c[16384];
+  __wram__ float w[4096];
 
-static cnnlTensorDescriptor_t f2(int a, int b, cnnlDataType_t t = CNNL_DTYPE_HALF) {
-  int64_t d[2] = {a, b};
-  int64_t st[2] = {b, 1};
-  cnnlTensorDescriptor_t r;
-  X(cnnlCreateTensorDescriptor(&r));
-  X(cnnlSetTensorDescriptorEx_v2(r, CNNL_LAYOUT_ARRAY, t, 2, d, st));
-  return r;
+  for (int g = taskId; g < 16384; g += taskDim) {
+    int m = g >> 7;
+    int n = g & 127;
+    __memcpy(a, x + m * 4096, 4096 * sizeof(float), GDRAM2NRAM);
+    __memcpy(b, y + n * 128, 128 * sizeof(float), GDRAM2NRAM,
+             128 * sizeof(float), 16384 * sizeof(float), 31);
+    __bang_transpose(t, b, 32, 128);
+    __memcpy(w, t, 4096 * sizeof(float), NRAM2WRAM);
+    __bang_matmul(c, a, w, 128, 32, 128);
+    __memcpy(z + m * 2097152 + n * 128, c, 128 * sizeof(float),
+             NRAM2GDRAM, 16384 * sizeof(float), 128 * sizeof(float), 127);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  auto C = torch::empty({16384, 16384}, A.options().dtype(torch::kFloat32));
-
-  static cnnlTensorDescriptor_t a = nullptr;
-  static cnnlTensorDescriptor_t b = nullptr;
-  static cnnlTensorDescriptor_t c = nullptr;
-  static cnnlMatMulDescriptor_t d = nullptr;
-  static cnnlMatMulAlgo_t e = nullptr;
-  static size_t z = 0;
-
-  cnnlHandle_t h = torch_mlu::getCurrentHandle();
-  float al = 1.0f;
-  float be = 0.0f;
-
-  if (d == nullptr) {
-    a = f2(16384, 32);
-    b = f2(32, 16384);
-    c = f2(16384, 16384, CNNL_DTYPE_FLOAT);
-    X(cnnlMatMulDescCreate(&d));
-    X(cnnlCreateMatMulAlgo(&e));
-    cnnlMatMulHeuristicResult_t r;
-    X(cnnlCreateMatMulHeuristicResult(&r));
-    int v = 0;
-    int lda = 32;
-    int ldb = 16384;
-    int ldc = 16384;
-    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_ALLOW_TF32, &v, sizeof(v)));
-    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDA, &lda, sizeof(lda)));
-    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDB, &ldb, sizeof(ldb)));
-    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDC, &ldc, sizeof(ldc)));
-    int q = 0;
-    X(cnnlGetMatMulAlgoHeuristic(h, d, a, b, c, c, nullptr, 1, &r, &q));
-    X(cnnlGetMatMulHeuristicResult(r, e, &z));
-    X(cnnlDestroyMatMulHeuristicResult(r));
-  }
-
-  auto w = torch::empty({(int64_t)z}, A.options().dtype(torch::kUInt8));
-  X(cnnlMatMul_v2(h, d, e, &al, a, A.data_ptr(), b, B.data_ptr(), &be, c,
-                  C.data_ptr(), z ? w.data_ptr() : nullptr, z, c,
-                  C.data_ptr()));
+  auto C = torch::empty({16384, 16384}, A.options());
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      A.data_ptr<float>(), B.data_ptr<float>(), C.data_ptr<float>());
   return C;
 }
-
-#undef X
