@@ -33,8 +33,8 @@ __mlu_entry__ void leakyrelu_half_kernel(const half *input, half *output,
     }
 
     __bang_ge_scalar(nram_scale, nram_input, (half)0.0f, aligned_len);
-    __bang_fusion(FUSION_FMA, nram_scale, nram_scale, positive_scale_delta,
-                  slope, aligned_len);
+    __bang_mul_scalar(nram_scale, nram_scale, positive_scale_delta, aligned_len);
+    __bang_add_scalar(nram_scale, nram_scale, slope, aligned_len);
     __bang_mul(nram_input, nram_input, nram_scale, len);
 
     __memcpy(output + start + offset, nram_input, len * sizeof(half), NRAM2GDRAM);
@@ -42,7 +42,15 @@ __mlu_entry__ void leakyrelu_half_kernel(const half *input, half *output,
 }
 
 torch::Tensor bang_func(torch::Tensor input, double negative_slope) {
+  TORCH_CHECK(input.is_contiguous(), "input must be contiguous");
+  TORCH_CHECK(input.scalar_type() == at::kHalf,
+              "input must be float32 or float16");
+
   auto output = torch::empty_like(input);
+  uint32_t total = static_cast<uint32_t>(input.numel());
+  if (total == 0) {
+    return output;
+  }
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {TASK_COUNT, 1, 1};
@@ -51,7 +59,7 @@ torch::Tensor bang_func(torch::Tensor input, double negative_slope) {
 
   leakyrelu_half_kernel<<<dim, ktype, queue>>>(
     reinterpret_cast<half *>(input.data_ptr<at::Half>()),
-    reinterpret_cast<half *>(output.data_ptr<at::Half>()), 262144, slope);
+    reinterpret_cast<half *>(output.data_ptr<at::Half>()), total, slope);
 
   return output;
 }
