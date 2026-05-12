@@ -22,10 +22,9 @@ __mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
   __nram__ float b[E1 * 8];
   __nram__ int c[E2];
   __nram__ int f[128];
-  __nram__ int e[256];
+  __nram__ int64_t e[128];
   __nram__ float d[E2 * E1];
   __bang_write_value(c, E2, 0);
-  __bang_write_value(d, E2 * E1, 0.0f);
   int s = taskId * 128;
   __memcpy(e, w + s, 128 * sizeof(int64_t), GDRAM2NRAM);
   __memcpy(a, x + s * E1, 128 * E1 * sizeof(half), GDRAM2NRAM);
@@ -33,11 +32,13 @@ __mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
   for (int j = 0; j < 128; j += 8) {
     __bang_half2float(b, a + j * E1, E1 * 8);
     for (int k = 0; k < 8; ++k) {
-      int p = e[(j + k) * 2];
-      __bang_add(d + p * E1, d + p * E1, b + k * E1, E1);
+      int p = (int)e[j + k];
       if (!c[p]) {
         c[p] = 1;
         f[n++] = p;
+        __memcpy(d + p * E1, b + k * E1, E1 * sizeof(float), NRAM2NRAM);
+      } else {
+        __bang_add(d + p * E1, d + p * E1, b + k * E1, E1);
       }
     }
   }
