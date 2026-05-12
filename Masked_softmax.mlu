@@ -12,7 +12,8 @@
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E2 * E3];
   __nram__ half b[E1 * E3];
-  __nram__ half s[E2];
+  __nram__ half s[E2 * E3];
+  __nram__ half c[E3];
   __bang_write_zero(b, E1 * E3);
 
   for (int row = taskId * E3; row < E0; row += taskDim * E3) {
@@ -25,10 +26,15 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 
 #pragma unroll
     for (int i = 0; i < E3; ++i) {
-      __bang_reduce_sum(s, a + i * E2, E2);
-      half v = (half)(1.0f / (float)s[0]);
-      __bang_mul_scalar(a + i * E2, a + i * E2, v, E2);
+      c[i] = (half)1.0f;
     }
+    __bang_reduce_sum(s, a, E2 * E3);
+#pragma unroll
+    for (int i = 0; i < E3; ++i)
+      c[i] = (half)(1.0f / (float)s[i * E2]);
+    __bang_transpose(b, a, E3, E2);
+    __bang_cycle_mul(b, b, c, E2 * E3, E3);
+    __bang_transpose(a, b, E2, E3);
 
     __memcpy(b, a, E2 * sizeof(half), NRAM2NRAM, E1 * sizeof(half),
              E2 * sizeof(half), E3 - 1);
