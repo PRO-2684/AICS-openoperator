@@ -3,8 +3,6 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#pragma bang walign(64)
-
 #define E0 32
 #define E1 8192
 #define E2 16384
