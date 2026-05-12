@@ -10,19 +10,19 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ w,
                       float *__restrict__ y) {
+  __nram__ float a[E3];
+  __bang_write_value(a, E3, 0.0f);
+  for (int p = taskId * E3; p < E2 * E1; p += taskDim * E3) {
+    __memcpy(y + p, a, E3 * sizeof(float), NRAM2GDRAM);
+  }
+  __sync_all_ipu();
   __nram__ half b[E1];
   __nram__ float c[E1];
-  __nram__ float a[E1];
-  for (int q = taskId; q < E2; q += taskDim) {
-    __bang_write_value(a, E1, 0.0f);
-    for (int r = 0; r < E0; ++r) {
-      if ((int)w[r] == q) {
-        __memcpy(b, x + r * E1, E1 * sizeof(half), GDRAM2NRAM);
-        __bang_half2float(c, b, E1);
-        __bang_add(a, a, c, E1);
-      }
-    }
-    __memcpy(y + q * E1, a, E1 * sizeof(float), NRAM2GDRAM);
+  for (int r = taskId; r < E0; r += taskDim) {
+    __memcpy(b, x + r * E1, E1 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(c, b, E1);
+    int64_t q = w[r];
+    __bang_atomic_reduce_add_async(y + q * E1, c, E1);
   }
 }
 
