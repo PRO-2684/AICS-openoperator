@@ -21,7 +21,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   for (int i = 0; i < E1; i += 64) {
     s += (float)a[i];
   }
-  y[taskId] = (half)(logf(s) + m);
+  c[0] = (half)s;
+  __bang_active_log(c, c, 64);
+  y[taskId] = (half)((float)c[0] + m);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
