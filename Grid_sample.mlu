@@ -6,31 +6,45 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ g,
                       half *__restrict__ y) {
-  for (int r = taskId; r < 256; r += taskDim) {
-    int n = r >> 6;
-    int c = r & 63;
-    const half *px = x + n * 1048576 + c * 16384;
-    half *py = y + n * 262144 + c * 4096;
-    const half *pg = g + n * 8192;
-    for (int i = 0; i < 4096; ++i) {
-      float gx = (float)pg[i * 2];
-      float gy = (float)pg[i * 2 + 1];
-      float fx = (gx + 1.0f) * 63.5f;
-      float fy = (gy + 1.0f) * 63.5f;
-      int x0 = (int)floorf(fx);
-      int y0 = (int)floorf(fy);
-      float wx = fx - (float)x0;
-      float wy = fy - (float)y0;
-      int x1 = x0 + 1;
-      int y1 = y0 + 1;
-      float v00 = (float)px[y0 * 128 + x0];
-      float v01 = (float)px[y0 * 128 + x1];
-      float v10 = (float)px[y1 * 128 + x0];
-      float v11 = (float)px[y1 * 128 + x1];
-      float a = v00 + (v01 - v00) * wx;
-      float b = v10 + (v11 - v10) * wx;
-      py[i] = (half)(a + (b - a) * wy);
-    }
+  __nram__ half h0[64];
+  __nram__ half h1[64];
+  __nram__ half h2[64];
+  __nram__ half h3[64];
+  __nram__ half ho[64];
+  __nram__ float f0[64];
+  __nram__ float f1[64];
+  __nram__ float f2[64];
+  __nram__ float f3[64];
+  for (int r = taskId; r < 16384; r += taskDim) {
+    int n = r >> 12;
+    int t = r & 4095;
+    float gx = (float)g[n * 8192 + t * 2];
+    float gy = (float)g[n * 8192 + t * 2 + 1];
+    float fx = (gx + 1.0f) * 63.5f;
+    float fy = (gy + 1.0f) * 63.5f;
+    int x0 = (int)floorf(fx);
+    int y0 = (int)floorf(fy);
+    float wx = fx - (float)x0;
+    float wy = fy - (float)y0;
+    int x1 = x0 + 1;
+    int y1 = y0 + 1;
+    const half *p = x + n * 1048576;
+    __memcpy(h0, p + y0 * 128 + x0, 2, GDRAM2NRAM, 2, 32768, 63);
+    __memcpy(h1, p + y0 * 128 + x1, 2, GDRAM2NRAM, 2, 32768, 63);
+    __memcpy(h2, p + y1 * 128 + x0, 2, GDRAM2NRAM, 2, 32768, 63);
+    __memcpy(h3, p + y1 * 128 + x1, 2, GDRAM2NRAM, 2, 32768, 63);
+    __bang_half2float(f0, h0, 64);
+    __bang_half2float(f1, h1, 64);
+    __bang_half2float(f2, h2, 64);
+    __bang_half2float(f3, h3, 64);
+    __bang_sub(f1, f1, f0, 64);
+    __bang_fusion(FUSION_FMA, f0, f1, wx, f0, 64, 64);
+    __bang_sub(f3, f3, f2, 64);
+    __bang_fusion(FUSION_FMA, f2, f3, wx, f2, 64, 64);
+    __bang_sub(f2, f2, f0, 64);
+    __bang_fusion(FUSION_FMA, f0, f2, wy, f0, 64, 64);
+    __bang_float2half_rn(ho, f0, 64);
+    __memcpy(y + n * 262144 + t, ho, 2, NRAM2GDRAM, 8192, 2, 63);
   }
 }
 
