@@ -4,24 +4,27 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void k0(const int64_t *__restrict__ x, half *__restrict__ y) {
-  for (int r = taskId; r < 1024; r += taskDim) {
-    int c = (int)x[r];
-    y[r * 512 + c] = (half)1.0f;
+__mlu_entry__ void k0(const int64_t *__restrict__ x, bool *__restrict__ y) {
+  __nram__ bool a[16384];
+  int p = taskId * 32;
+  __bang_write_value((char *)a, 16384, (char)0);
+#pragma unroll
+  for (int r = 0; r < 32; ++r) {
+    int c = (int)x[p + r];
+    a[r * 512 + c] = true;
   }
+  __memcpy(y + p * 512, a, 16384 * sizeof(bool), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int n) {
   (void)n;
   static torch::Tensor y;
   if (!y.defined())
-    y = torch::empty({1024, 512}, x.options().dtype(torch::kHalf));
+    y = torch::empty({1024, 512}, x.options().dtype(torch::kBool));
   else
     y.resize_({1024, 512});
-  cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtMemsetAsync(y.data_ptr(), 0, 1024 * 512 * sizeof(half), q);
   cnrtDim3_t d = {32, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, q>>>(x.data_ptr<int64_t>(),
-                                  reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      x.data_ptr<int64_t>(), y.data_ptr<bool>());
   return y;
 }
