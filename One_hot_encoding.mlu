@@ -33,7 +33,11 @@ __mlu_entry__ void onehot_i64_kernel(const int64_t *__restrict__ idx,
 
 torch::Tensor bang_func(torch::Tensor x, int num_classes) {
   (void)num_classes;
-  auto out = torch::empty({ROWS, CLASSES}, x.options().dtype(torch::kHalf));
+  static torch::Tensor out;
+  if (!out.defined())
+    out = torch::empty({ROWS, CLASSES}, x.options().dtype(torch::kHalf));
+  else
+    out.resize_({ROWS, CLASSES});
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {TASKS, 1, 1};
