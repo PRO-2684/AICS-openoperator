@@ -14,43 +14,57 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
   }
 }
 
-torch::Tensor bang_func(torch::Tensor x) {
-  static cnnlTensorDescriptor_t d;
-  static bool inited = false;
-  static size_t w1 = 0;
-  static size_t w2 = 0;
-  static torch::Tensor w;
-
-  auto handle = torch_mlu::getCurrentHandle();
-
-  if (!inited) {
-    int dims[3] = {16, 256, 256};
-
-    cnnlCreateTensorDescriptor(&d);
-    cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT, 3, dims);
-    cnnlGetCumsumWorkspaceSize(handle, d, 1, &w1);
-    cnnlGetCumsumWorkspaceSize(handle, d, 2, &w2);
-
-    inited = true;
+__mlu_entry__ void k1(const half *__restrict__ x, float *__restrict__ y,
+                      float *__restrict__ t) {
+  __nram__ half h[32768];
+  __nram__ float a[32768];
+  __nram__ float b[32768];
+  int g = taskId >> 1;
+  int u = taskId & 1;
+  int p = g * 65536 + u * 32768;
+  __memcpy(h, x + p, 32768 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(a, h, 32768);
+  for (int o = 1; o < 256; o <<= 1) {
+    __bang_write_value(b, 32768, 0.0f);
+    __memcpy(b + o, a, (256 - o) * sizeof(float), NRAM2NRAM,
+             256 * sizeof(float), 256 * sizeof(float), 127);
+    __bang_add(a, a, b, 32768);
   }
+  for (int o = 1; o < 128; o <<= 1) {
+    __bang_write_value(b, o * 256, 0.0f);
+    __memcpy(b + o * 256, a, (32768 - o * 256) * sizeof(float), NRAM2NRAM);
+    __bang_add(a, a, b, 32768);
+  }
+  __memcpy(y + p, a, 32768 * sizeof(float), NRAM2GDRAM);
+  if (u == 0) {
+    __memcpy(t + g * 256, a + 32512, 256 * sizeof(float), NRAM2GDRAM);
+  }
+}
 
+__mlu_entry__ void k2(float *__restrict__ y, const float *__restrict__ t) {
+  __nram__ float a[32768];
+  __nram__ float b[256];
+  int g = taskId;
+  int p = g * 65536 + 32768;
+  __memcpy(a, y + p, 32768 * sizeof(float), GDRAM2NRAM);
+  __memcpy(b, t + g * 256, 256 * sizeof(float), GDRAM2NRAM);
+  __bang_cycle_add(a, a, b, 32768, 256);
+  __memcpy(y + p, a, 32768 * sizeof(float), NRAM2GDRAM);
+}
+
+torch::Tensor bang_func(torch::Tensor x) {
   static torch::Tensor y;
+  static torch::Tensor t;
   if (!y.defined())
     y = torch::empty({16, 256, 256}, x.options().dtype(torch::kFloat32));
-  size_t ws = w1 > w2 ? w1 : w2;
-  if (!w.defined())
-    w = torch::empty({static_cast<int64_t>(ws)}, x.options().dtype(torch::kUInt8));
-
-  cnrtDim3_t g = {32, 1, 1};
-  k0<<<g, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  if (!t.defined())
+    t = torch::empty({4096}, x.options().dtype(torch::kFloat32));
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  cnrtDim3_t g0 = {32, 1, 1};
+  k1<<<g0, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      y.data_ptr<float>());
-
-  cnnlCumsum_v2(handle, d, y.data_ptr(), 2, false, false, CNNL_PROPAGATE_NAN, d,
-                y.data_ptr(), w.data_ptr(), w2);
-
-  cnnlCumsum_v2(handle, d, y.data_ptr(), 1, false, false, CNNL_PROPAGATE_NAN, d,
-                y.data_ptr(), w.data_ptr(), w1);
-
+      y.data_ptr<float>(), t.data_ptr<float>());
+  cnrtDim3_t g1 = {16, 1, 1};
+  k2<<<g1, cnrtFuncTypeBlock, q>>>(y.data_ptr<float>(), t.data_ptr<float>());
   return y;
 }
