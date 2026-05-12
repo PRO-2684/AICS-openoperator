@@ -11,26 +11,26 @@ __mlu_entry__ void kernel(const half *__restrict__ x,
                           const int *__restrict__ indices,
                           const half *__restrict__ weights,
                           half *__restrict__ out) {
-  (void)indices;
-#pragma unroll
-  for (int slot = 0; slot < 4; ++slot) {
-    int src_base = slot * H;
-    int d0 = slot * H;
-    int d1 = (E1 + slot) * H;
-    half w0 = weights[slot << 1];
-    half w1 = weights[(slot << 1) + 1];
+  int slot = taskId;
+  if (slot == 0) {
+    int z = 4 * H;
 #pragma unroll
     for (int j = 0; j < H; ++j) {
-      half v = x[src_base + j];
-      out[d0 + j] = v * w0;
-      out[d1 + j] = v * w1;
+      out[z + j] = (half)0.0f;
+      out[z + E1 * H + j] = (half)0.0f;
     }
   }
-  int z = 4 * H;
+  (void)indices;
+  int src_base = slot * H;
+  int d0 = slot * H;
+  int d1 = (E1 + slot) * H;
+  half w0 = weights[slot << 1];
+  half w1 = weights[(slot << 1) + 1];
 #pragma unroll
   for (int j = 0; j < H; ++j) {
-    out[z + j] = (half)0.0f;
-    out[z + E1 * H + j] = (half)0.0f;
+    half v = x[src_base + j];
+    out[d0 + j] = v * w0;
+    out[d1 + j] = v * w1;
   }
 }
 
@@ -44,8 +44,8 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices,
   auto out = torch::empty({E0, E1, H}, x.options());
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {1, 1, 1};
-  kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+  cnrtDim3_t dim = {4, 1, 1};
+  kernel<<<dim, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       indices.data_ptr<int>(),
       reinterpret_cast<const half *>(weights.data_ptr<at::Half>()),
