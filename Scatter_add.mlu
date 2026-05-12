@@ -3,17 +3,10 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void k0(int *__restrict__ a, float *__restrict__ b) {
+__mlu_entry__ void k0(int *__restrict__ a) {
   __nram__ int c[512];
-  __nram__ float d[4096];
   __bang_write_value(c, 512, 0);
-  __bang_write_value(d, 4096, 0.0f);
-  if (taskId == 0) {
-    __memcpy(a, c, 512 * sizeof(int), NRAM2GDRAM);
-  }
-  for (int i = taskId * 4096; i < 131072; i += taskDim * 4096) {
-    __memcpy(b + i, d, 4096 * sizeof(float), NRAM2GDRAM);
-  }
+  __memcpy(a, c, 512 * sizeof(int), NRAM2GDRAM);
 }
 
 __mlu_entry__ void k1(const int64_t *__restrict__ x, int *__restrict__ a,
@@ -67,8 +60,7 @@ torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
   auto y = torch::empty({512, 256}, src.options().dtype(torch::kFloat32));
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, q>>>(a.data_ptr<int>(),
-                                   reinterpret_cast<float *>(y.data_ptr()));
+  k0<<<{1, 1, 1}, cnrtFuncTypeBlock, q>>>(a.data_ptr<int>());
   k1<<<d, cnrtFuncTypeUnion1, q>>>(index.data_ptr<int64_t>(), a.data_ptr<int>(),
                                    b.data_ptr<int>());
   k2<<<d, cnrtFuncTypeUnion1, q>>>(
