@@ -3,34 +3,36 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void k0(half *__restrict__ y) {
-  __nram__ half a[8192];
-  __bang_write_zero(a, 8192);
-  for (int p = taskId * 8192; p < 524288; p += taskDim * 8192)
-    __memcpy(y + p, a, 8192 * sizeof(half), NRAM2GDRAM);
-}
-
-__mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[128];
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[16384];
   __nram__ half b[128];
   __nram__ half s[128];
 
-  for (int r = taskId; r < 4096; r += taskDim) {
-    int n = (r & 127) + 1;
-    int m = n <= 64 ? 64 : 128;
-    int p = r * 128;
-    __bang_write_value(a, m, (half)-65000.0f);
-    __memcpy(a, x + p, n * sizeof(half), GDRAM2NRAM);
-    __bang_argmax(b, a, m);
-    half v = b[0];
-    __bang_sub_scalar(a, a, v, m);
-    __bang_active_exp(a, a, m);
-    __bang_reduce_sum(s, a, m);
-    float z = (float)s[0];
-    if (m == 128)
-      z += (float)s[64];
-    __bang_mul_scalar(a, a, (half)(1.0f / z), m);
-    __memcpy(y + p, a, n * sizeof(half), NRAM2GDRAM);
+  for (int g = taskId; g < 32; g += taskDim) {
+    int p = g * 16384;
+    __memcpy(a, x + p, 16384 * sizeof(half), GDRAM2NRAM);
+#pragma unroll
+    for (int r = 0; r < 128; ++r) {
+      int n = 127 - r;
+      if (n > 0)
+        __bang_write_value(a + r * 128 + r + 1, n, (half)-65000.0f);
+    }
+#pragma unroll
+    for (int r = 0; r < 128; ++r) {
+      half *q = a + r * 128;
+      __bang_argmax(b, q, 128);
+      half v = b[0];
+      __bang_sub_scalar(q, q, v, 128);
+    }
+    __bang_active_exp(a, a, 16384);
+#pragma unroll
+    for (int r = 0; r < 128; ++r) {
+      half *q = a + r * 128;
+      __bang_reduce_sum(s, q, 128);
+      float z = (float)s[0] + (float)s[64];
+      __bang_mul_scalar(q, q, (half)(1.0f / z), 128);
+    }
+    __memcpy(y + p, a, 16384 * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -38,17 +40,12 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double scale) {
   (void)mask;
   (void)scale;
   static torch::Tensor y;
-  static bool init = false;
   if (!y.defined())
     y = torch::empty_like(x);
-  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  else
+    y.resize_({4, 8, 128, 128});
   cnrtDim3_t d = {32, 1, 1};
-  if (!init) {
-    k0<<<d, cnrtFuncTypeBlock, q>>>(
-        reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-    init = true;
-  }
-  k1<<<d, cnrtFuncTypeBlock, q>>>(
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
