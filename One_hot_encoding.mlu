@@ -5,15 +5,15 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(const int64_t *__restrict__ x, unsigned char *__restrict__ y) {
-  __nram__ unsigned char a[4096];
-  int p = taskId * 8;
-  __bang_write_value((char *)a, 4096, (char)0);
+  __nram__ unsigned char a[16384];
+  int p = taskId * 32;
+  __bang_write_value((char *)a, 16384, (char)0);
 #pragma unroll
-  for (int r = 0; r < 8; ++r) {
+  for (int r = 0; r < 32; ++r) {
     int c = (int)x[p + r];
     a[r * 512 + c] = 1;
   }
-  __memcpy(y + p * 512, a, 4096 * sizeof(unsigned char), NRAM2GDRAM);
+  __memcpy(y + p * 512, a, 16384 * sizeof(bool), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int n) {
@@ -23,7 +23,7 @@ torch::Tensor bang_func(torch::Tensor x, int n) {
     y = torch::empty({1024, 512}, x.options().dtype(torch::kUInt8));
   else
     y.resize_({1024, 512});
-  cnrtDim3_t d = {128, 1, 1};
+  cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       x.data_ptr<int64_t>(), y.data_ptr<unsigned char>());
   return y;
