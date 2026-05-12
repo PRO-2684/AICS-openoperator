@@ -78,7 +78,16 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
   static torch::Tensor fptr;
   static torch::Tensor bptr;
   static bool ready = false;
-  torch::Tensor wv[8] = {w0, w1, w2, w3, w4, w5, w6, w7};
+  (void)w0;
+  (void)w1;
+  (void)w2;
+  (void)w3;
+  (void)w4;
+  (void)w5;
+  (void)w6;
+  (void)w7;
+  torch::Tensor wv[8] = {wt(0), wt(1), wt(2), wt(3),
+                         wt(4), wt(5), wt(6), wt(7)};
   if (!ready) {
     CNNL_CHECK(cnnlCreateGruDescriptor(&gd));
     CNNL_CHECK(cnnlCreateSeqDataDescriptor(&xd));
