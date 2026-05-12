@@ -4,7 +4,7 @@
 #include <torch/extension.h>
 
 #define A 268435456
-#define B 32768
+#define B 65536
 
 __mlu_entry__ void k0(half *__restrict__ x, float v) {
   __nram__ half a[B];
