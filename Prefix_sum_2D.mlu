@@ -46,11 +46,11 @@ torch::Tensor bang_func(torch::Tensor x) {
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       y.data_ptr<float>());
 
-  cnnlCumsum_v2(handle, d, y.data_ptr(), 1, false, false, CNNL_PROPAGATE_NAN, d,
-                y.data_ptr(), w.data_ptr(), w1);
-
   cnnlCumsum_v2(handle, d, y.data_ptr(), 2, false, false, CNNL_PROPAGATE_NAN, d,
                 y.data_ptr(), w.data_ptr(), w2);
+
+  cnnlCumsum_v2(handle, d, y.data_ptr(), 1, false, false, CNNL_PROPAGATE_NAN, d,
+                y.data_ptr(), w.data_ptr(), w1);
 
   return y;
 }
