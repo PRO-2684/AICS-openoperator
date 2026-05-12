@@ -11,11 +11,11 @@
   } while (0)
 
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
-  static torch::Tensor t0;
-  if (!t0.defined())
-    t0 = torch::empty({4, 64, 64, 64}, input.options());
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty({4, 64, 64, 64}, input.options());
   else
-    t0.resize_({4, 64, 64, 64});
+    y.resize_({4, 64, 64, 64});
 
   static cnnlTensorDescriptor_t d0;
   static cnnlTensorDescriptor_t d1;
@@ -34,12 +34,13 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
     int st0[4] = {1048576, 128, 1, 16384};
     int s1[4] = {4, 64, 64, 2};
     int s2[4] = {4, 64, 64, 64};
+    int st2[4] = {262144, 64, 1, 4096};
     CNNL_CHECK(cnnlSetTensorDescriptorEx(d0, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF,
                                          4, s0, st0));
     CNNL_CHECK(
         cnnlSetTensorDescriptor(d1, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, s1));
-    CNNL_CHECK(
-        cnnlSetTensorDescriptor(d2, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, s2));
+    CNNL_CHECK(cnnlSetTensorDescriptorEx(d2, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF,
+                                         4, s2, st2));
     CNNL_CHECK(cnnlSetGridSampleDescriptor(
         gd, CNNL_INTERP_BILINEAR, CNNL_GRIDSAMPLE_PADDING_ZEROS, true));
     CNNL_CHECK(cnnlGetGridSampleForwardWorkspaceSize(h, d0, d1, d2, &ws));
@@ -54,6 +55,6 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
     p = w.data_ptr();
   }
   CNNL_CHECK(cnnlGridSampleForward(h, gd, d0, input.data_ptr(), d1,
-                                   grid.data_ptr(), d2, t0.data_ptr(), p, ws));
-  return t0.as_strided({4, 64, 64, 64}, {262144, 1, 4096, 64});
+                                   grid.data_ptr(), d2, y.data_ptr(), p, ws));
+  return y;
 }
