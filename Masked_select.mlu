@@ -55,7 +55,7 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   torch_mlu::MLUEvent ev;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtQueue_t queue2 = stream2.stream();
-  cnrtDim3_t dim = {E2, 1, 1};
+  cnrtDim3_t dim = {4, 8, 1};
 
   ev.place(torch_mlu::getCurrentMLUStream());
   ev.wait(stream2);
