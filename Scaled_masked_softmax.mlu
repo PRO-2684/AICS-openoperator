@@ -11,14 +11,17 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
   for (int r = taskId; r < 4096; r += taskDim) {
     int q = r & 127;
     int n = q + 1;
-    __bang_write_zero(b, 128);
-    __memcpy(a, x + r * 128, n * sizeof(half), GDRAM2NRAM);
+    __memcpy(a, x + r * 128, 128 * sizeof(half), GDRAM2NRAM);
+    if (n < 128)
+      __bang_write_value(a + n, 128 - n, (half)-20.0f);
     if (v != 1.0f)
-      __bang_mul_scalar(a, a, (half)v, n);
-    __bang_active_exp(a, a, n);
-    __bang_reduce_sum(s, a, n);
+      __bang_mul_scalar(a, a, (half)v, 128);
+    __bang_active_exp(a, a, 128);
+    __bang_reduce_sum(s, a, 128);
     half u = (half)(1.0f / (float)s[0]);
-    __bang_mul_scalar(b, a, u, n);
+    __bang_mul_scalar(b, a, u, 128);
+    if (n < 128)
+      __bang_write_zero(b + n, 128 - n);
     __memcpy(y + r * 128, b, 128 * sizeof(half), NRAM2GDRAM);
   }
 }
