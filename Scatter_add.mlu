@@ -21,10 +21,12 @@ __mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
   __nram__ half a[E1];
   __nram__ float b[E1];
   __nram__ int c[E2];
+  __nram__ int f[128];
   __nram__ int64_t e[E0];
   __nram__ float d[E2 * E1];
   __bang_write_value(c, E2, 0);
   __memcpy(e, w, E0 * sizeof(int64_t), GDRAM2NRAM);
+  int n = 0;
   for (int r = taskId; r < E0; r += taskDim) {
     int p = (int)e[r];
     __memcpy(a, x + r * E1, E1 * sizeof(half), GDRAM2NRAM);
@@ -34,12 +36,12 @@ __mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
     } else {
       __memcpy(d + p * E1, b, E1 * sizeof(float), NRAM2NRAM);
       c[p] = 1;
+      f[n++] = p;
     }
   }
-  for (int p = 0; p < E2; ++p) {
-    if (c[p]) {
-      __bang_atomic_reduce_add(y + p * E1, d + p * E1, E1);
-    }
+  for (int i = 0; i < n; ++i) {
+    int p = f[i];
+    __bang_atomic_reduce_add(y + p * E1, d + p * E1, E1);
   }
 }
 
