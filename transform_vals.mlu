@@ -73,13 +73,13 @@ __mlu_entry__ void k1(float *__restrict__ a, const float *__restrict__ b) {
 }
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
-  cnrtDim3_t d = {16, 2, 1};
+  cnrtDim3_t d = {4, 8, 1};
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   if (a.scalar_type() == at::kFloat) {
-    k1<<<d, cnrtFuncTypeUnion4, q>>>(a.data_ptr<float>(),
+    k1<<<d, cnrtFuncTypeUnion1, q>>>(a.data_ptr<float>(),
                                      b.data_ptr<float>());
   } else {
-    k0<<<d, cnrtFuncTypeUnion4, q>>>(
+    k0<<<d, cnrtFuncTypeUnion1, q>>>(
         reinterpret_cast<half *>(a.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(b.data_ptr<at::Half>()));
   }
