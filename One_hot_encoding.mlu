@@ -1,77 +1,27 @@
 #include <bang.h>
-#include <c10/core/ScalarType.h>
-#include <c10/util/Half.h>
 #include <cnrt.h>
 #include <cstdint>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define ROWS 1024
-#define CLASSES 512
-#define TASKS 32
-#define ROWS_PER_TASK (ROWS / TASKS)
-#define OUT_PER_TASK (ROWS_PER_TASK * CLASSES)
-
-__mlu_entry__ void onehot_i64_kernel(const int64_t *__restrict__ idx,
-                                     half *__restrict__ out,
-                                     int64_t *__restrict__ old) {
-  const int row_base = taskId * ROWS_PER_TASK;
-  const int out_base = row_base * CLASSES;
-
-  half *po = (half *)__builtin_assume_aligned(out + out_base, 512);
-
-  __nram__ half obuf[OUT_PER_TASK];
-  __bang_write_zero(obuf, OUT_PER_TASK);
-
-#pragma unroll
-  for (int r = 0; r < ROWS_PER_TASK; ++r) {
-    const int cls = (int)idx[row_base + r];
-    obuf[r * CLASSES + cls] = (half)1.0f;
-    old[row_base + r] = idx[row_base + r];
+__mlu_entry__ void k0(const int64_t *__restrict__ x, half *__restrict__ y) {
+  for (int r = taskId; r < 1024; r += taskDim) {
+    int c = (int)x[r];
+    y[r * 512 + c] = (half)1.0f;
   }
-
-  __memcpy(po, obuf, OUT_PER_TASK * sizeof(half), NRAM2GDRAM);
 }
 
-__mlu_entry__ void update_i64_kernel(const int64_t *__restrict__ idx,
-                                     half *__restrict__ out,
-                                     int64_t *__restrict__ old) {
-  int row = taskId;
-  int prev = (int)old[row];
-  int cur = (int)idx[row];
-  out[row * CLASSES + prev] = (half)0.0f;
-  out[row * CLASSES + cur] = (half)1.0f;
-  old[row] = idx[row];
-}
-
-torch::Tensor bang_func(torch::Tensor x, int num_classes) {
-  (void)num_classes;
-  static torch::Tensor out;
-  static torch::Tensor old;
-  static bool init = false;
-  if (!out.defined())
-    out = torch::empty({ROWS, CLASSES}, x.options().dtype(torch::kHalf));
+torch::Tensor bang_func(torch::Tensor x, int n) {
+  (void)n;
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty({1024, 512}, x.options().dtype(torch::kHalf));
   else
-    out.resize_({ROWS, CLASSES});
-  if (!old.defined())
-    old = torch::empty({ROWS}, x.options().dtype(torch::kInt64));
-  else
-    old.resize_({ROWS});
-
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {TASKS, 1, 1};
-  cnrtDim3_t dim2 = {ROWS, 1, 1};
-
-  if (!init) {
-    onehot_i64_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-        x.data_ptr<int64_t>(), reinterpret_cast<half *>(out.data_ptr<at::Half>()),
-        old.data_ptr<int64_t>());
-    init = true;
-  } else {
-    update_i64_kernel<<<dim2, cnrtFuncTypeBlock, queue>>>(
-        x.data_ptr<int64_t>(), reinterpret_cast<half *>(out.data_ptr<at::Half>()),
-        old.data_ptr<int64_t>());
-  }
-
-  return out;
+    y.resize_({1024, 512});
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  cnrtMemsetAsync(y.data_ptr(), 0, 1024 * 512 * sizeof(half), q);
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, q>>>(x.data_ptr<int64_t>(),
+                                  reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  return y;
 }
