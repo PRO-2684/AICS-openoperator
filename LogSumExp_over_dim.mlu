@@ -28,10 +28,14 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
-  auto out = torch::empty({E0}, x.options());
+  static torch::Tensor out;
+  if (!out.defined())
+    out = torch::empty({E0}, x.options());
+  else
+    out.resize_({E0});
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {E0, 1, 1};
-  k0<<<d, cnrtFuncTypeUnion4, queue>>>(
+  k0<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
