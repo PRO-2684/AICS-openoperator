@@ -4,18 +4,18 @@
 #include <torch/extension.h>
 
 __mlu_func__ void k1(float *__restrict__ a) {
-  __bang_add(a, a, a + 1, 4095);
-  __bang_add(a, a, a + 2, 4094);
-  __bang_add(a, a, a + 4, 4092);
-  __bang_add(a, a, a + 8, 4088);
-  __bang_add(a, a, a + 16, 4080);
-  __bang_add(a, a, a + 32, 4064);
-  __bang_add(a, a, a + 64, 4032);
-  __bang_add(a, a, a + 128, 3968);
-  __bang_add(a, a, a + 256, 3840);
-  __bang_add(a, a, a + 512, 3584);
-  __bang_add(a, a, a + 1024, 3072);
-  __bang_add(a, a, a + 2048, 2048);
+  __bang_add(a, a, a + 1, 3999);
+  __bang_add(a, a, a + 2, 3998);
+  __bang_add(a, a, a + 4, 3996);
+  __bang_add(a, a, a + 8, 3992);
+  __bang_add(a, a, a + 16, 3984);
+  __bang_add(a, a, a + 32, 3968);
+  __bang_add(a, a, a + 64, 3936);
+  __bang_add(a, a, a + 128, 3872);
+  __bang_add(a, a, a + 256, 3744);
+  __bang_add(a, a, a + 512, 3488);
+  __bang_add(a, a, a + 1024, 2976);
+  __bang_add(a, a, a + 2048, 1952);
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
@@ -24,8 +24,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
   for (int row = taskId; row < 128; row += taskDim) {
     int p = row * 4000;
     __memcpy(h, x + p, 4000 * sizeof(half), GDRAM2NRAM);
-    __bang_write_value(h + 4000, 96, (half)0.0f);
-    __bang_half2float(a, h, 4096);
+    __bang_half2float(a, h, 4000);
     k1(a);
     __memcpy(y + p, a, 4000 * sizeof(float), NRAM2GDRAM);
   }
