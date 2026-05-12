@@ -16,48 +16,40 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
 
 __mlu_entry__ void k1(const half *__restrict__ x, float *__restrict__ y,
                       float *__restrict__ t) {
-  __nram__ half h[16384];
-  __nram__ float a[16384];
-  __nram__ float b[16384];
-  int g = taskId >> 2;
-  int u = taskId & 3;
-  int p = g * 65536 + u * 16384;
-  __memcpy(h, x + p, 16384 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(a, h, 16384);
+  __nram__ half h[32768];
+  __nram__ float a[32768];
+  __nram__ float b[32768];
+  int g = taskId >> 1;
+  int u = taskId & 1;
+  int p = g * 65536 + u * 32768;
+  __memcpy(h, x + p, 32768 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(a, h, 32768);
   for (int o = 1; o < 256; o <<= 1) {
-    __bang_write_value(b, 16384, 0.0f);
+    __bang_write_value(b, 32768, 0.0f);
     __memcpy(b + o, a, (256 - o) * sizeof(float), NRAM2NRAM,
-             256 * sizeof(float), 256 * sizeof(float), 63);
-    __bang_add(a, a, b, 16384);
+             256 * sizeof(float), 256 * sizeof(float), 127);
+    __bang_add(a, a, b, 32768);
   }
-  for (int o = 1; o < 64; o <<= 1) {
+  for (int o = 1; o < 128; o <<= 1) {
     __bang_write_value(b, o * 256, 0.0f);
-    __memcpy(b + o * 256, a, (16384 - o * 256) * sizeof(float), NRAM2NRAM);
-    __bang_add(a, a, b, 16384);
+    __memcpy(b + o * 256, a, (32768 - o * 256) * sizeof(float), NRAM2NRAM);
+    __bang_add(a, a, b, 32768);
   }
-  __memcpy(y + p, a, 16384 * sizeof(float), NRAM2GDRAM);
-  __memcpy(t + taskId * 256, a + 16128, 256 * sizeof(float), NRAM2GDRAM);
+  __memcpy(y + p, a, 32768 * sizeof(float), NRAM2GDRAM);
+  if (u == 0) {
+    __memcpy(t + g * 256, a + 32512, 256 * sizeof(float), NRAM2GDRAM);
+  }
 }
 
 __mlu_entry__ void k2(float *__restrict__ y, const float *__restrict__ t) {
-  __nram__ float a[16384];
+  __nram__ float a[32768];
   __nram__ float b[256];
-  __nram__ float c[256];
-  int g = taskId / 3;
-  int u = taskId - g * 3 + 1;
-  int p = g * 65536 + u * 16384;
-  __memcpy(a, y + p, 16384 * sizeof(float), GDRAM2NRAM);
-  __memcpy(b, t + g * 1024, 256 * sizeof(float), GDRAM2NRAM);
-  if (u > 1) {
-    __memcpy(c, t + g * 1024 + 256, 256 * sizeof(float), GDRAM2NRAM);
-    __bang_add(b, b, c, 256);
-  }
-  if (u > 2) {
-    __memcpy(c, t + g * 1024 + 512, 256 * sizeof(float), GDRAM2NRAM);
-    __bang_add(b, b, c, 256);
-  }
-  __bang_cycle_add(a, a, b, 16384, 256);
-  __memcpy(y + p, a, 16384 * sizeof(float), NRAM2GDRAM);
+  int g = taskId;
+  int p = g * 65536 + 32768;
+  __memcpy(a, y + p, 32768 * sizeof(float), GDRAM2NRAM);
+  __memcpy(b, t + g * 256, 256 * sizeof(float), GDRAM2NRAM);
+  __bang_cycle_add(a, a, b, 32768, 256);
+  __memcpy(y + p, a, 32768 * sizeof(float), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
@@ -68,11 +60,11 @@ torch::Tensor bang_func(torch::Tensor x) {
   if (!t.defined())
     t = torch::empty({4096}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g0 = {64, 1, 1};
+  cnrtDim3_t g0 = {32, 1, 1};
   k1<<<g0, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       y.data_ptr<float>(), t.data_ptr<float>());
-  cnrtDim3_t g1 = {48, 1, 1};
+  cnrtDim3_t g1 = {16, 1, 1};
   k2<<<g1, cnrtFuncTypeBlock, q>>>(y.data_ptr<float>(), t.data_ptr<float>());
   return y;
 }
