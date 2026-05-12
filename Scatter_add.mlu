@@ -26,9 +26,10 @@ __mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
   __nram__ float d[E2 * E1];
   __bang_write_value(c, E2, 0);
   __bang_write_value(d, E2 * E1, 0.0f);
-  int s = taskId * 128;
-  __memcpy(e, w + s, 128 * sizeof(int64_t), GDRAM2NRAM);
-  __memcpy(a, x + s * E1, 128 * E1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(e, w + taskId, sizeof(int64_t), GDRAM2NRAM, sizeof(int64_t),
+           taskDim * sizeof(int64_t), 127);
+  __memcpy(a, x + taskId * E1, E1 * sizeof(half), GDRAM2NRAM,
+           E1 * sizeof(half), taskDim * E1 * sizeof(half), 127);
   int n = 0;
   for (int j = 0; j < 128; ++j) {
     int p = (int)e[j];
