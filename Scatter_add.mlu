@@ -7,17 +7,18 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ y,
                       float *__restrict__ z) {
   __nram__ half a[256];
   __nram__ float b[256];
-  __nram__ float c[256];
-  for (int p = taskId; p < 512; p += taskDim) {
-    __bang_write_value(b, 256, 0.0f);
-    for (int i = 0; i < 4096; ++i) {
-      if ((int)y[i] == p) {
-        __memcpy(a, x + i * 256, 256 * sizeof(half), GDRAM2NRAM);
-        __bang_half2float(c, a, 256);
-        __bang_add(b, b, c, 256);
-      }
-    }
-    __memcpy(z + p * 256, b, 256 * sizeof(float), NRAM2GDRAM);
+  __nram__ float c[4096];
+  __bang_write_value(c, 4096, 0.0f);
+  for (int p = taskId * 4096; p < 131072; p += taskDim * 4096) {
+    __memcpy(z + p, c, 4096 * sizeof(float), NRAM2GDRAM);
+  }
+  __sync_all_ipu();
+  int s = taskId * 128;
+  int e = s + 128;
+  for (int i = s; i < e; ++i) {
+    __memcpy(a, x + i * 256, 256 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(b, a, 256);
+    __bang_atomic_reduce_add(z + (int)y[i] * 256, b, 256);
   }
 }
 
