@@ -5,25 +5,25 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
                       float *__restrict__ z) {
-  __nram__ half a[4096];
+  __nram__ half a[8192];
   __nram__ half b[8192];
   __nram__ half t[8192];
   __nram__ half r[8192];
-  __nram__ float c[32768];
+  __nram__ float c[65536];
   __wram__ half w[8192];
 
-  for (int g = taskId; g < 8192; g += taskDim) {
+  for (int g = taskId; g < 4096; g += taskDim) {
     int m = g >> 6;
     int n = g & 63;
-    __memcpy(a, x + m * 4096, 4096 * sizeof(half), GDRAM2NRAM);
+    __memcpy(a, x + m * 8192, 8192 * sizeof(half), GDRAM2NRAM);
     __memcpy(b, y + n * 256, 256 * sizeof(half), GDRAM2NRAM,
              256 * sizeof(half), 16384 * sizeof(half), 31);
     __bang_transpose(t, b, 32, 256);
     __bang_reshape_filter(r, t, 256, 1, 1, 32);
     __memcpy(w, r, 8192 * sizeof(half), NRAM2WRAM);
-    __bang_matmul(c, a, w, 128, 32, 256);
-    __memcpy(z + m * 2097152 + n * 256, c, 256 * sizeof(float),
-             NRAM2GDRAM, 16384 * sizeof(float), 256 * sizeof(float), 127);
+    __bang_matmul(c, a, w, 256, 32, 256);
+    __memcpy(z + m * 4194304 + n * 256, c, 256 * sizeof(float),
+             NRAM2GDRAM, 16384 * sizeof(float), 256 * sizeof(float), 255);
   }
 }
 
