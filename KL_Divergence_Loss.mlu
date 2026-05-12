@@ -3,8 +3,8 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 64
-#define E1 2048
+#define E0 16
+#define E1 8192
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
                       float *__restrict__ z) {
@@ -23,7 +23,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
   __bang_mul(c, c, d, E1);
   __bang_reduce_sum(c, c, E1);
   float s = 0.0f;
-  for (int i = 0; i < 64; ++i) {
+  for (int i = 0; i < 256; ++i) {
     s += c[i * 32];
   }
   if (taskId == 0) {
