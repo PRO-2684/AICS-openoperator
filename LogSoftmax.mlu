@@ -45,7 +45,8 @@ __mlu_entry__ void LogSoftmaxKernel(half *output, const half *input,
         __bang_write_value(buf + cur, alen - cur, (half)0.0f);
       __bang_sub_scalar(buf, buf, mx, alen);
       __bang_active_exp(buf, buf, alen);
-      for (uint32_t j = 0; j < alen; ++j)
+      __bang_reduce_sum(buf, buf, alen);
+      for (uint32_t j = 0; j < alen; j += 64)
         sum_exp = sum_exp + buf[j];
     }
 
