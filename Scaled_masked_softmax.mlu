@@ -5,7 +5,6 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[16384];
-  __nram__ half b[128];
   __nram__ half s[128];
 
   for (int g = taskId; g < 32; g += taskDim) {
@@ -16,13 +15,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
       int n = 127 - r;
       if (n > 0)
         __bang_write_value(a + r * 128 + r + 1, n, (half)-65000.0f);
-    }
-#pragma unroll
-    for (int r = 0; r < 128; ++r) {
-      half *q = a + r * 128;
-      __bang_argmax(b, q, 128);
-      half v = b[0];
-      __bang_sub_scalar(q, q, v, 128);
     }
     __bang_active_exp(a, a, 16384);
 #pragma unroll
