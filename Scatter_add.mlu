@@ -23,9 +23,9 @@ __mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
   __nram__ int c[E2];
   __nram__ int f[128];
   __nram__ int64_t e[E0];
-  __nram__ float d[E2 * E1];
+  __nram__ half d[E2 * E1];
   __bang_write_value(c, E2, 0);
-  __bang_write_value(d, E2 * E1, 0.0f);
+  __bang_write_value(d, E2 * E1, (half)0.0f);
   __memcpy(e, w, E0 * sizeof(int64_t), GDRAM2NRAM);
   __memcpy(a, x + taskId * E1, E1 * sizeof(half), GDRAM2NRAM,
            E1 * sizeof(half), taskDim * E1 * sizeof(half), 127);
@@ -33,8 +33,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
   int j = 0;
   for (int r = taskId; r < E0; r += taskDim) {
     int p = (int)e[r];
-    __bang_half2float(b, a + j * E1, E1);
-    __bang_add(d + p * E1, d + p * E1, b, E1);
+    __bang_add(d + p * E1, d + p * E1, a + j * E1, E1);
     if (!c[p]) {
       c[p] = 1;
       f[n++] = p;
@@ -43,7 +42,8 @@ __mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
   }
   for (int i = 0; i < n; ++i) {
     int p = f[i];
-    __bang_atomic_reduce_add(y + p * E1, d + p * E1, E1);
+    __bang_half2float(b, d + p * E1, E1);
+    __bang_atomic_reduce_add(y + p * E1, b, E1);
   }
 }
 
