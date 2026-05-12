@@ -33,8 +33,8 @@ __mlu_entry__ void leakyrelu_half_kernel(const half *input, half *output,
     }
 
     __bang_ge_scalar(nram_scale, nram_input, (half)0.0f, aligned_len);
-    __bang_mul_scalar(nram_scale, nram_scale, positive_scale_delta, aligned_len);
-    __bang_add_scalar(nram_scale, nram_scale, slope, aligned_len);
+    __bang_fusion(FUSION_FMA, nram_scale, nram_scale, positive_scale_delta,
+                  slope, aligned_len);
     __bang_mul(nram_input, nram_input, nram_scale, len);
 
     __memcpy(output + start + offset, nram_input, len * sizeof(half), NRAM2GDRAM);
