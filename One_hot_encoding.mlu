@@ -4,15 +4,14 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(const int64_t *__restrict__ x, unsigned char *__restrict__ y) {
-  __nram__ unsigned char a[16384];
   int p = taskId * 32;
-  __bang_write_zero(a, 16384);
+  __gdramset(y + p * 512, 16384, (unsigned char)0);
+  __sync_all_ipu();
 #pragma unroll
   for (int r = 0; r < 32; ++r) {
     int c = (int)x[p + r];
-    a[r * 512 + c] = 1;
+    y[(p + r) * 512 + c] = 1;
   }
-  __memcpy(y + p * 512, a, 16384 * sizeof(unsigned char), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int n) {
