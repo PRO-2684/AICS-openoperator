@@ -18,11 +18,7 @@ static cnnlTensorDescriptor_t f2(int a, int b, cnnlDataType_t t = CNNL_DTYPE_HAL
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  static torch::Tensor C;
-  if (!C.defined())
-    C = torch::empty({4096, 4096}, A.options().dtype(torch::kFloat32));
-  else
-    C.resize_({4096, 4096});
+  auto C = torch::empty({4096, 4096}, A.options().dtype(torch::kFloat32));
 
   static cnnlTensorDescriptor_t a = nullptr;
   static cnnlTensorDescriptor_t b = nullptr;
