@@ -70,7 +70,7 @@ python scripts/update_problems.py
 | 019 | [Matmul_with_irregular_shapes_](Matmul_with_irregular_shapes_.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/6351f12) |
 | 020 | [Matmul_with_large_K_dimension_](Matmul_with_large_K_dimension_.mlu) | N/A | 🔴 |
 | 021 | [Matmul_with_small_K_dimension_](Matmul_with_small_K_dimension_.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/bd18e4d) |
-| 022 | [Matmul_with_transposed_both](Matmul_with_transposed_both.mlu) | N/A | 🔴 |
+| 022 | [Matmul_with_transposed_both](Matmul_with_transposed_both.mlu) | N/A | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/06470bc) |
 | 023 | [Matrix_vector_multiplication_](Matrix_vector_multiplication_.mlu) | N/A | 🔴 |
 | 024 | [Square_matrix_multiplication_](Square_matrix_multiplication_.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/bd18e4d) |
 | 025 | [fused_matmul_fwd](fused_matmul_fwd.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/97ee76824ec7d02384639b6a069728dc4a18101e) |
@@ -147,7 +147,7 @@ python scripts/update_problems.py
 | 096 | [LocalResponseNorm](LocalResponseNorm.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/dfd6660) |
 | 097 | [PixelShuffle](PixelShuffle.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/674ecd9) |
 | 098 | [Attention_with_temperature](Attention_with_temperature.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/a105aa2c69c8fb104689ec98f98f377f59da8374) |
-| 099 | [DropPath](DropPath.mlu) | N/A | 🔴 |
+| 099 | [DropPath](DropPath.mlu) | N/A | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/a244575) |
 | 100 | [Adaptive_Max_Pool_2D](Adaptive_Max_Pool_2D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/0fb6230) |
 | 101 | [Max_Pool_2D_with_indices](Max_Pool_2D_with_indices.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/6e64eb8) |
 | 102 | [Adaptive_Average_Pool_3D](Adaptive_Average_Pool_3D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/7e26c82) |
