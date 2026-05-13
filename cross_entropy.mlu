@@ -15,6 +15,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
                       half *__restrict__ c, float ls, int red, int ign) {
   __nram__ half a[B2];
   __nram__ half b[B2];
+  __nram__ half c[B2];
   __nram__ half m[64];
 
   if (red) {
@@ -43,20 +44,20 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
     half mx = m[0];
     half tv = b[(int)id];
 
-    __bang_reduce_sum(b, b, B2);
+    __bang_reduce_sum(c, b, B2);
     float sum_x = 0.0f;
 #pragma unroll 1
     for (int i = 0; i < B2 / 32; ++i) {
-      sum_x += (float)b[i * 32];
+      sum_x += (float)c[i * 32];
     }
 
     __bang_sub_scalar(a, a, mx, B2);
     __bang_active_exp(a, a, B2);
-    __bang_reduce_sum(b, a, B2);
+    __bang_reduce_sum(c, a, B2);
     float sum_e = 0.0f;
 #pragma unroll 1
     for (int i = 0; i < B2 / 32; ++i) {
-      sum_e += (float)b[i * 32];
+      sum_e += (float)c[i * 32];
     }
 
     float lse = (float)mx + logf(sum_e);
