@@ -4,9 +4,7 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void kernel(half *__restrict__ output) {
-  __nram__ half a[8192];
-  __bang_write_zero(a, 8192);
-  __memcpy(output + taskId * 8192, a, 8192 * sizeof(half), NRAM2GDRAM);
+  __gdramset(output + taskId * 8192, 8192, (half)0.0f);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
