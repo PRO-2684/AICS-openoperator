@@ -16,7 +16,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
   int p = taskId * E1;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_write_value(b, E1, (half)0.0f);
-  __bang_gt_bitindex(m, a, b, E1);
+  __bang_gt_bitindex((half *)m, a, b, E1);
   int n = (int)__bang_filter_bitindex(a, a, m, E1);
 
   int q = y[taskId];
@@ -30,8 +30,8 @@ __mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
   int p = taskId * E1;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_write_value(b, E1, (half)0.0f);
-  __bang_gt_bitindex(m, a, b, E1);
-  y[taskId] = (int)__bang_count_bitindex(m, E1);
+  __bang_gt_bitindex((half *)m, a, b, E1);
+  y[taskId] = (int)__bang_count_bitindex((half *)m, E1);
   __sync_all_ipu();
 
   if (taskId == E2 - 1) {
