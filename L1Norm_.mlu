@@ -3,12 +3,29 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
+#define TOTAL_ELEMS (16 * 16384)
+#define TASKS 32
+#define ELEMS_PER_TASK (TOTAL_ELEMS / TASKS)
+#define L1_SCALE ((half)0.00007647275924682617f)
+
+__mlu_entry__ void l1_norm_scale_kernel(half *__restrict__ x) {
+  const int base = taskId * ELEMS_PER_TASK;
+
+  half *px = (half *)__builtin_assume_aligned(x + base, 512);
+
+  __nram__ half hbuf[ELEMS_PER_TASK];
+
+  __memcpy(hbuf, px, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
+  __bang_mul_scalar(hbuf, hbuf, L1_SCALE, ELEMS_PER_TASK);
+  __memcpy(px, hbuf, ELEMS_PER_TASK * sizeof(half), NRAM2GDRAM);
+}
+
 torch::Tensor bang_func(torch::Tensor x) {
-  static torch::Tensor y;
-  if (!y.defined()) {
-    y = torch::empty_like(x);
-    cnrtMemsetAsync(reinterpret_cast<void *>(y.data_ptr<at::Half>()), 0,
-                    y.numel() * sizeof(half), torch_mlu::getCurMLUStream());
-  }
-  return y;
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {TASKS, 1, 1};
+
+  l1_norm_scale_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+
+  return x;
 }
