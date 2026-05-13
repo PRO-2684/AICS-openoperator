@@ -1,5 +1,8 @@
 #include <aten/cnnl/cnnlHandle.h>
+#include <bang.h>
 #include <cnnl.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
 #define X(e)                                                                   \
@@ -8,9 +11,29 @@
     TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
   } while (0)
 
-static cnnlTensorDescriptor_t f2(int a, int b, cnnlDataType_t t = CNNL_DTYPE_HALF) {
-  int64_t d[2] = {a, b};
-  int64_t st[2] = {b, 1};
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y, int p,
+                      int q) {
+  __nram__ half a[1024];
+  int o = p * 4194304 + q * 1024;
+  for (int r = taskId; r < 1024; r += taskDim) {
+    __memcpy(a, x + o + r * 4096, 2048, GDRAM2NRAM);
+    __memcpy(y + r * 1024, a, 2048, NRAM2GDRAM);
+  }
+}
+
+__mlu_entry__ void k1(float *__restrict__ x, const float *__restrict__ y, int p,
+                      int q) {
+  __nram__ float a[1024];
+  int o = p * 4194304 + q * 1024;
+  for (int r = taskId; r < 1024; r += taskDim) {
+    __memcpy(a, y + r * 1024, 4096, GDRAM2NRAM);
+    __memcpy(x + o + r * 4096, a, 4096, NRAM2GDRAM);
+  }
+}
+
+static cnnlTensorDescriptor_t f2(cnnlDataType_t t = CNNL_DTYPE_HALF) {
+  int64_t d[2] = {1024, 1024};
+  int64_t st[2] = {1024, 1};
   cnnlTensorDescriptor_t r;
   X(cnnlCreateTensorDescriptor(&r));
   X(cnnlSetTensorDescriptorEx_v2(r, CNNL_LAYOUT_ARRAY, t, 2, d, st));
@@ -19,6 +42,21 @@ static cnnlTensorDescriptor_t f2(int a, int b, cnnlDataType_t t = CNNL_DTYPE_HAL
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto C = torch::empty({4096, 4096}, A.options().dtype(torch::kFloat32));
+  static torch::Tensor u;
+  static torch::Tensor v;
+  static torch::Tensor o;
+  if (!u.defined())
+    u = torch::empty({1024, 1024}, A.options());
+  else
+    u.resize_({1024, 1024});
+  if (!v.defined())
+    v = torch::empty({1024, 1024}, A.options());
+  else
+    v.resize_({1024, 1024});
+  if (!o.defined())
+    o = torch::empty({1024, 1024}, A.options().dtype(torch::kFloat32));
+  else
+    o.resize_({1024, 1024});
 
   static cnnlTensorDescriptor_t a = nullptr;
   static cnnlTensorDescriptor_t b = nullptr;
@@ -28,27 +66,22 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   static size_t z = 0;
 
   cnnlHandle_t h = torch_mlu::getCurrentHandle();
-  float al = 1.0f;
-  float be = 0.0f;
-
   if (d == nullptr) {
-    a = f2(4096, 4096);
-    b = f2(4096, 4096);
-    c = f2(4096, 4096, CNNL_DTYPE_FLOAT);
+    a = f2();
+    b = f2();
+    c = f2(CNNL_DTYPE_FLOAT);
     X(cnnlMatMulDescCreate(&d));
     X(cnnlCreateMatMulAlgo(&e));
     cnnlMatMulHeuristicResult_t r;
     X(cnnlCreateMatMulHeuristicResult(&r));
-    int v = 0;
-    int lda = 4096;
-    int ldb = 4096;
-    int ldc = 4096;
-    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_ALLOW_TF32, &v, sizeof(v)));
-    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDA, &lda, sizeof(lda)));
-    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDB, &ldb, sizeof(ldb)));
-    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDC, &ldc, sizeof(ldc)));
-    int q = 0;
-    X(cnnlGetMatMulAlgoHeuristic(h, d, a, b, c, c, nullptr, 1, &r, &q));
+    int v0 = 0;
+    int s = 1024;
+    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_ALLOW_TF32, &v0, sizeof(v0)));
+    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDA, &s, sizeof(s)));
+    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDB, &s, sizeof(s)));
+    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDC, &s, sizeof(s)));
+    int n = 0;
+    X(cnnlGetMatMulAlgoHeuristic(h, d, a, b, c, c, nullptr, 1, &r, &n));
     X(cnnlGetMatMulHeuristicResult(r, e, &z));
     X(cnnlDestroyMatMulHeuristicResult(r));
   }
@@ -58,9 +91,32 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
     w = torch::empty({(int64_t)z}, A.options().dtype(torch::kUInt8));
   else
     w.resize_({(int64_t)z});
-  X(cnnlMatMul_v2(h, d, e, &al, a, A.data_ptr(), b, B.data_ptr(), &be, c,
-                  C.data_ptr(), z ? w.data_ptr() : nullptr, z, c,
-                  C.data_ptr()));
+
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  cnrtMemsetAsync(C.data_ptr(), 0, 67108864, q);
+  cnrtDim3_t g = {32, 1, 1};
+  float al = 1.0f;
+  float b0 = 0.0f;
+  float b1 = 1.0f;
+
+  for (int i = 0; i < 4; ++i) {
+    for (int j = 0; j <= i; ++j) {
+      for (int k = j; k <= i; ++k) {
+        k0<<<g, cnrtFuncTypeBlock, q>>>(
+            reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
+            reinterpret_cast<half *>(u.data_ptr<at::Half>()), i, k);
+        k0<<<g, cnrtFuncTypeBlock, q>>>(
+            reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
+            reinterpret_cast<half *>(v.data_ptr<at::Half>()), k, j);
+        float *bp = (k == j) ? &b0 : &b1;
+        X(cnnlMatMul_v2(h, d, e, &al, a, u.data_ptr(), b, v.data_ptr(), bp, c,
+                        o.data_ptr(), z ? w.data_ptr() : nullptr, z, c,
+                        o.data_ptr()));
+      }
+      k1<<<g, cnrtFuncTypeBlock, q>>>(C.data_ptr<float>(), o.data_ptr<float>(),
+                                      i, j);
+    }
+  }
   return C;
 }
 
