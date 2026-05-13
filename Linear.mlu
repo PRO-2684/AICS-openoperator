@@ -72,6 +72,8 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
+run_cmd(['ls'])
+run_cmd(['cat','bangc_torch_tester.py'])
 )PY");
 
   PyGILState_Release(gstate);
@@ -81,7 +83,7 @@ torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
                         bool bias) {
   // (void)in_features;
   // (void)bias;
-  
+
   auto out = torch::empty_like(x);
   return out;
 }
