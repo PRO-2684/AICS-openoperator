@@ -31,7 +31,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_write_value(b, E1, (half)0.0f);
   __bang_gt_bitindex((half *)m, a, b, E1);
-  y[taskId] = (int)__bang_count_bitindex((half *)m, E1);
+  y[taskId] = (int)__bang_count_bitindex((half *)m, E1 / 16);
   __sync_all_ipu();
 
   if (taskId == E2 - 1) {
