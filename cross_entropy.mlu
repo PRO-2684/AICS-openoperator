@@ -1,90 +1,54 @@
+#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
+#include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
-#include <math.h>
-#include <stdint.h>
 #include <torch/extension.h>
 
-#define B0 4
-#define B1 128
-#define B2 32768
-#define T0 32
+#define X(e)                                                                  \
+  do {                                                                        \
+    cnnlStatus_t s_ = (e);                                                    \
+    TORCH_CHECK(s_ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s_);    \
+  } while (0)
 
-__mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
-                      half *__restrict__ y, half *__restrict__ s,
-                      half *__restrict__ cnt_ptr, float ls, int red, int ign) {
-  __nram__ half a[B2];
-  __nram__ half b[B2];
-  __nram__ half rbuf[B2];
-  __nram__ half m[64];
+static cnnlTensorDescriptor_t make_desc(int n, int c, cnnlDataType_t dt) {
+  int dims[2] = {n, c};
+  cnnlTensorDescriptor_t d;
+  X(cnnlCreateTensorDescriptor(&d));
+  X(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, dt, 2, dims));
+  return d;
+}
 
-  if (red) {
-    if (taskId == 0) {
-      s[0] = (half)0.0f;
-      cnt_ptr[0] = (half)0.0f;
-    }
-    __sync_all_ipu();
+static cnnlTensorDescriptor_t make_desc(int n, cnnlDataType_t dt) {
+  int dims[1] = {n};
+  cnnlTensorDescriptor_t d;
+  X(cnnlCreateTensorDescriptor(&d));
+  X(cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, dt, 1, dims));
+  return d;
+}
+
+__mlu_entry__ void cast_i64_to_i32_kernel(const int64_t *__restrict__ src,
+                                          int *__restrict__ dst, int n) {
+  for (int i = taskId; i < n; i += taskDim) {
+    dst[i] = (int)src[i];
   }
+}
 
-  float acc = 0.0f;
-  float cnt = 0.0f;
-
-  for (int r = taskId; r < B0 * B1; r += taskDim) {
-    int64_t id = t[r];
-    if ((int)id == ign) {
-      if (!red) y[r] = (half)0.0f;
-      continue;
+__mlu_entry__ void mean_f32_to_half_kernel(const float *__restrict__ src,
+                                           half *__restrict__ dst, int n) {
+  if (taskId == 0) {
+    float s = 0.0f;
+    for (int i = 0; i < n; ++i) {
+      s += src[i];
     }
-
-    int base = r * B2;
-    __memcpy(a, x + base, B2 * sizeof(half), GDRAM2NRAM);
-    __memcpy(b, a, B2 * sizeof(half), NRAM2NRAM);
-
-    __bang_argmax(m, a, B2);
-    half mx = m[0];
-    half tv = b[(int)id];
-
-    __bang_reduce_sum(rbuf, b, B2);
-    float sum_x = 0.0f;
-#pragma unroll 1
-    for (int i = 0; i < B2 / 32; ++i) {
-      sum_x += (float)rbuf[i * 32];
-    }
-
-    __bang_sub_scalar(a, a, mx, B2);
-    __bang_active_exp(a, a, B2);
-    __bang_reduce_sum(rbuf, a, B2);
-    float sum_e = 0.0f;
-#pragma unroll 1
-    for (int i = 0; i < B2 / 32; ++i) {
-      sum_e += (float)rbuf[i * 32];
-    }
-
-    float lse = (float)mx + logf(sum_e);
-    float nll = lse - (float)tv;
-    float sml = lse - sum_x * (1.0f / (float)B2);
-    float loss = (1.0f - ls) * nll + ls * sml;
-
-    if (red) {
-      acc += loss;
-      cnt += 1.0f;
-    } else {
-      y[r] = (half)loss;
-    }
+    dst[0] = (half)(s / (float)n);
   }
+}
 
-  if (red) {
-    __nram__ half hv[1];
-    __nram__ half hc[1];
-    hv[0] = (half)acc;
-    hc[0] = (half)cnt;
-    __bang_atomic_reduce_add(s, hv, 1);
-    __bang_atomic_reduce_add(cnt_ptr, hc, 1);
-    __sync_all_ipu();
-    if (taskId == 0) {
-      float z = (float)cnt_ptr[0];
-      y[0] = (half)((float)s[0] / (z < 1.0f ? 1.0f : z));
-    }
+__mlu_entry__ void cast_f32_to_half_kernel(const float *__restrict__ src,
+                                           half *__restrict__ dst, int n) {
+  for (int i = taskId; i < n; i += taskDim) {
+    dst[i] = (half)src[i];
   }
 }
 
@@ -95,45 +59,80 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
                         torch::Tensor ignore_idx) {
   (void)dist_process_group;
 
-  float ls = label_smoothing.item<float>();
-  int red = reduce_loss.item<int>() != 0;
-  int ign = (int)ignore_idx.item<int64_t>();
+  auto in = _input.contiguous();
+  auto tgt = target.contiguous();
+  float smoothing = label_smoothing.item<float>();
+  bool red = reduce_loss.item<int>() != 0;
+  int64_t ign = ignore_idx.item<int64_t>();
 
+  int64_t rows = in.size(0) * in.size(1);
+  int64_t cols = in.size(2);
+
+  static torch::Tensor labels32;
+  static torch::Tensor losses32;
+  static torch::Tensor lse32;
   static torch::Tensor out;
-  static torch::Tensor sum;
-  static torch::Tensor cnt;
-  if (red) {
-    if (!out.defined())
-      out = torch::empty({1}, _input.options());
-    if (!sum.defined())
-      sum = torch::empty({}, _input.options());
-    if (!cnt.defined())
-      cnt = torch::empty({}, _input.options());
-    out.resize_({1});
-    sum.resize_({});
-    cnt.resize_({});
-  } else {
-    if (!out.defined())
-      out = torch::empty({_input.size(0), _input.size(1)}, _input.options());
+  static torch::Tensor workspace;
+  static cnnlTensorDescriptor_t logits_desc = nullptr;
+  static cnnlTensorDescriptor_t labels_desc = nullptr;
+  static cnnlTensorDescriptor_t losses_desc = nullptr;
+  static cnnlTensorDescriptor_t lse_desc = nullptr;
+  static size_t ws_size = 0;
+
+  if (!labels32.defined() || labels32.numel() != rows)
+    labels32 = torch::empty({rows}, in.options().dtype(torch::kInt32));
+  if (!losses32.defined() || losses32.numel() != rows)
+    losses32 = torch::empty({rows}, in.options().dtype(torch::kFloat32));
+  if (!lse32.defined() || lse32.numel() != rows)
+    lse32 = torch::empty({rows}, in.options().dtype(torch::kFloat32));
+
+  if (!out.defined() || (red && out.numel() != 1) ||
+      (!red && out.numel() != rows)) {
+    if (red)
+      out = torch::empty({1}, in.options());
     else
-      out.resize_({_input.size(0), _input.size(1)});
+      out = torch::empty({in.size(0), in.size(1)}, in.options());
+  } else if (red) {
+    out.resize_({1});
+  } else {
+    out.resize_({in.size(0), in.size(1)});
   }
 
-  cnrtDim3_t d = {T0, 1, 1};
+  if (logits_desc == nullptr) {
+    logits_desc = make_desc((int)rows, (int)cols, CNNL_DTYPE_HALF);
+    labels_desc = make_desc((int)rows, CNNL_DTYPE_INT32);
+    losses_desc = make_desc((int)rows, CNNL_DTYPE_FLOAT);
+    lse_desc = make_desc((int)rows, CNNL_DTYPE_FLOAT);
+    X(cnnlGetCrossEntropyForwardWorkspaceSize(
+        torch_mlu::getCurrentHandle(), false, smoothing, ign, logits_desc,
+        labels_desc, &ws_size));
+  }
+
+  if (!workspace.defined() || workspace.numel() != (int64_t)ws_size) {
+    workspace =
+        torch::empty({(int64_t)ws_size}, in.options().dtype(torch::kUInt8));
+  }
+
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t d0 = {32, 1, 1};
+  cast_i64_to_i32_kernel<<<d0, cnrtFuncTypeBlock, queue>>>(
+      tgt.data_ptr<int64_t>(), labels32.data_ptr<int32_t>(), (int)rows);
+
+  float z = 0.0f;
+  X(cnnlCrossEntropyForward(
+      torch_mlu::getCurrentHandle(), false, smoothing, z, logits_desc,
+      in.data_ptr(), ign, 0, cols, ws_size ? workspace.data_ptr() : nullptr,
+      ws_size, labels_desc, labels32.data_ptr(), losses_desc,
+      losses32.data_ptr(), lse_desc, lse32.data_ptr()));
+
   if (red) {
-    k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-        reinterpret_cast<const half *>(_input.data_ptr<at::Half>()),
-        reinterpret_cast<const int64_t *>(target.data_ptr<int64_t>()),
-        reinterpret_cast<half *>(out.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(sum.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(cnt.data_ptr<at::Half>()), ls, red, ign);
-    return out;
+    cnrtDim3_t d1 = {1, 1, 1};
+    mean_f32_to_half_kernel<<<d1, cnrtFuncTypeBlock, queue>>>(
+        losses32.data_ptr<float>(), out.data_ptr<at::Half>(), (int)rows);
+  } else {
+    cast_f32_to_half_kernel<<<d0, cnrtFuncTypeBlock, queue>>>(
+        losses32.data_ptr<float>(), out.data_ptr<at::Half>(), (int)rows);
   }
 
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(_input.data_ptr<at::Half>()),
-      reinterpret_cast<const int64_t *>(target.data_ptr<int64_t>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()),
-      nullptr, nullptr, ls, red, ign);
   return out;
 }
