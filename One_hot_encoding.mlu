@@ -12,8 +12,7 @@ __mlu_entry__ void k0(const int64_t *__restrict__ x, unsigned char *__restrict__
     int c = (int)x[p + r];
     a[r * 512 + c] = 1;
   }
-  __memcpy_async(y + p * 512, a, 8192 * sizeof(unsigned char), NRAM2GDRAM);
-  __sync_io();
+  __memcpy(y + p * 512, a, 8192 * sizeof(unsigned char), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int n) {
