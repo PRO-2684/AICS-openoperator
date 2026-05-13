@@ -9,3 +9,4 @@ AGENTS.md
 .cache/
 .vscode/
 CLAUDE.md
+bench_smallfiles/
