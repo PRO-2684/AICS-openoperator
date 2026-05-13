@@ -128,10 +128,12 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
   if (red) {
     cnrtDim3_t d1 = {1, 1, 1};
     mean_f32_to_half_kernel<<<d1, cnrtFuncTypeBlock, queue>>>(
-        losses32.data_ptr<float>(), out.data_ptr<at::Half>(), (int)rows);
+        losses32.data_ptr<float>(),
+        reinterpret_cast<half *>(out.data_ptr<at::Half>()), (int)rows);
   } else {
     cast_f32_to_half_kernel<<<d0, cnrtFuncTypeBlock, queue>>>(
-        losses32.data_ptr<float>(), out.data_ptr<at::Half>(), (int)rows);
+        losses32.data_ptr<float>(),
+        reinterpret_cast<half *>(out.data_ptr<at::Half>()), (int)rows);
   }
 
   return out;
