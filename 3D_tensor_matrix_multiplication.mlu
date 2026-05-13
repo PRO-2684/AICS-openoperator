@@ -18,7 +18,11 @@ static cnnlTensorDescriptor_t f2(int a, int b, cnnlDataType_t t = CNNL_DTYPE_HAL
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  auto C = torch::empty({16, 1024, 768}, A.options().dtype(torch::kFloat32));
+  static torch::Tensor C;
+  if (!C.defined())
+    C = torch::empty({16, 1024, 768}, A.options().dtype(torch::kFloat32));
+  else
+    C.resize_({16, 1024, 768});
 
   static cnnlTensorDescriptor_t a = nullptr;
   static cnnlTensorDescriptor_t b = nullptr;
@@ -53,7 +57,11 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
     X(cnnlDestroyMatMulHeuristicResult(r));
   }
 
-  auto w = torch::empty({(int64_t)z}, A.options().dtype(torch::kUInt8));
+  static torch::Tensor w;
+  if (!w.defined())
+    w = torch::empty({(int64_t)z}, A.options().dtype(torch::kUInt8));
+  else
+    w.resize_({(int64_t)z});
   X(cnnlMatMul_v2(h, d, e, &al, a, A.data_ptr(), b, B.data_ptr(), &be, c,
                   C.data_ptr(), z ? w.data_ptr() : nullptr, z, c,
                   C.data_ptr()));
