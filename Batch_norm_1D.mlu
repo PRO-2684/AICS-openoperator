@@ -76,9 +76,8 @@ __mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ s,
   __sync_all_ipu();
   for (int r = taskId; r < E0; r += taskDim) {
     __memcpy(h, x + r * E1, E1 * sizeof(half), GDRAM2NRAM);
-    __memcpy(c, h, E1 * sizeof(half), NRAM2NRAM);
-    __bang_add(a, a, c, E1);
-    __bang_mul(c, c, c, E1);
+    __bang_add(a, a, h, E1);
+    __bang_mul(c, h, h, E1);
     __bang_add(b, b, c, E1);
   }
   __bang_atomic_reduce_add(s, a, E1);
