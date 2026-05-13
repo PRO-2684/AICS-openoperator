@@ -19,52 +19,75 @@ static cnnlTensorDescriptor_t make_desc(int m, int n, cnnlDataType_t dtype) {
   return desc;
 }
 
+struct MatmulState {
+  cnnlTensorDescriptor_t a = nullptr;
+  cnnlTensorDescriptor_t b = nullptr;
+  cnnlTensorDescriptor_t c = nullptr;
+  cnnlMatMulExDescriptor_t d = nullptr;
+  cnnlMatMulExAlgo_t e = nullptr;
+  size_t ws = 0;
+};
+
+static void init_state(MatmulState &s, cnnlHandle_t h, cnnlDataType_t dtype) {
+  if (s.d != nullptr) {
+    return;
+  }
+  s.a = make_desc(4096, 1024, dtype);
+  s.b = make_desc(2048, 4096, dtype);
+  s.c = make_desc(1024, 2048, dtype);
+  CNNL_CHECK(cnnlCreateMatMulExDescriptor(&s.d));
+  CNNL_CHECK(cnnlCreateMatMulExAlgo(&s.e));
+  CNNL_CHECK(cnnlSetMatMulExDescAttrBase(
+      s.d, CNNL_MATMUL_OP_T, CNNL_MATMUL_OP_T, false, CNNL_MATMUL_EPI_NONE));
+  int lda = 1024;
+  int ldb = 4096;
+  int ldc = 2048;
+  int tf32 = 0;
+  cnnlDataType_t compute_type = CNNL_DTYPE_FLOAT;
+  CNNL_CHECK(cnnlSetMatMulExDescAttr(
+      s.d, CNNL_MATMUL_EX_DESC_COMPUTE_TYPE, &compute_type,
+      sizeof(compute_type)));
+  CNNL_CHECK(cnnlSetMatMulExDescAttr(
+      s.d, CNNL_MATMUL_EX_DESC_LDA, &lda, sizeof(lda)));
+  CNNL_CHECK(cnnlSetMatMulExDescAttr(
+      s.d, CNNL_MATMUL_EX_DESC_LDB, &ldb, sizeof(ldb)));
+  CNNL_CHECK(cnnlSetMatMulExDescAttr(
+      s.d, CNNL_MATMUL_EX_DESC_LDC, &ldc, sizeof(ldc)));
+  CNNL_CHECK(cnnlSetMatMulExDescAttr(
+      s.d, CNNL_MATMUL_EX_ALLOW_TF32, &tf32, sizeof(tf32)));
+  cnnlMatMulExHeuristicResult_t r;
+  CNNL_CHECK(cnnlCreateMatMulExHeuristicResult(&r));
+  int q = 0;
+  CNNL_CHECK(cnnlGetMatMulExAlgoHeuristic(
+      h, s.d, s.a, s.b, s.c, s.c, nullptr, 1, &r, &q));
+  CNNL_CHECK(cnnlGetMatMulExHeuristicResult(r, s.e, &s.ws));
+  CNNL_CHECK(cnnlDestroyMatMulExHeuristicResult(r));
+}
+
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto C = torch::empty({1024, 2048}, A.options());
 
-  static cnnlTensorDescriptor_t a = nullptr;
-  static cnnlTensorDescriptor_t b = nullptr;
-  static cnnlTensorDescriptor_t c = nullptr;
-  static cnnlMatMulExDescriptor_t d = nullptr;
-  static cnnlMatMulExAlgo_t e = nullptr;
-  static size_t ws = 0;
+  static MatmulState half_state;
+  static MatmulState float_state;
 
   cnnlHandle_t h = torch_mlu::getCurrentHandle();
   float alpha = 1.0f;
   float beta = 0.0f;
 
-  if (d == nullptr) {
-    a = make_desc(4096, 1024, CNNL_DTYPE_HALF);
-    b = make_desc(2048, 4096, CNNL_DTYPE_HALF);
-    c = make_desc(1024, 2048, CNNL_DTYPE_HALF);
-    CNNL_CHECK(cnnlCreateMatMulExDescriptor(&d));
-    CNNL_CHECK(cnnlCreateMatMulExAlgo(&e));
-    CNNL_CHECK(cnnlSetMatMulExDescAttrBase(
-        d, CNNL_MATMUL_OP_T, CNNL_MATMUL_OP_T, false, CNNL_MATMUL_EPI_NONE));
-    int lda = 1024;
-    int ldb = 4096;
-    int ldc = 2048;
-    int tf32 = 0;
-    CNNL_CHECK(cnnlSetMatMulExDescAttr(
-        d, CNNL_MATMUL_EX_DESC_LDA, &lda, sizeof(lda)));
-    CNNL_CHECK(cnnlSetMatMulExDescAttr(
-        d, CNNL_MATMUL_EX_DESC_LDB, &ldb, sizeof(ldb)));
-    CNNL_CHECK(cnnlSetMatMulExDescAttr(
-        d, CNNL_MATMUL_EX_DESC_LDC, &ldc, sizeof(ldc)));
-    CNNL_CHECK(cnnlSetMatMulExDescAttr(
-        d, CNNL_MATMUL_EX_ALLOW_TF32, &tf32, sizeof(tf32)));
-    cnnlMatMulExHeuristicResult_t r;
-    CNNL_CHECK(cnnlCreateMatMulExHeuristicResult(&r));
-    int q = 0;
-    CNNL_CHECK(cnnlGetMatMulExAlgoHeuristic(
-        h, d, a, b, c, c, nullptr, 1, &r, &q));
-    CNNL_CHECK(cnnlGetMatMulExHeuristicResult(r, e, &ws));
-    CNNL_CHECK(cnnlDestroyMatMulExHeuristicResult(r));
+  MatmulState *s = nullptr;
+  if (A.scalar_type() == at::kHalf) {
+    s = &half_state;
+    init_state(*s, h, CNNL_DTYPE_HALF);
+  } else {
+    TORCH_CHECK(A.scalar_type() == at::kFloat, "unsupported dtype");
+    s = &float_state;
+    init_state(*s, h, CNNL_DTYPE_FLOAT);
   }
 
-  auto workspace = torch::empty({(int64_t)ws}, A.options().dtype(torch::kUInt8));
+  auto workspace = torch::empty({(int64_t)s->ws}, A.options().dtype(torch::kUInt8));
   CNNL_CHECK(cnnlMatMulEx_v2(
-      h, d, e, &alpha, a, A.data_ptr(), b, B.data_ptr(), &beta, c, C.data_ptr(),
-      ws ? workspace.data_ptr() : nullptr, ws, c, C.data_ptr()));
+      h, s->d, s->e, &alpha, s->a, A.data_ptr(), s->b, B.data_ptr(), &beta,
+      s->c, C.data_ptr(), s->ws ? workspace.data_ptr() : nullptr, s->ws, s->c,
+      C.data_ptr()));
   return C;
 }
