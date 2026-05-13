@@ -12,16 +12,16 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
                       half *__restrict__ y, half *__restrict__ s,
-                      half *__restrict__ c, float ls, int red, int ign) {
+                      half *__restrict__ cnt_ptr, float ls, int red, int ign) {
   __nram__ half a[B2];
   __nram__ half b[B2];
-  __nram__ half c[B2];
+  __nram__ half rbuf[B2];
   __nram__ half m[64];
 
   if (red) {
     if (taskId == 0) {
       s[0] = (half)0.0f;
-      c[0] = (half)0.0f;
+      cnt_ptr[0] = (half)0.0f;
     }
     __sync_all_ipu();
   }
@@ -44,20 +44,20 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
     half mx = m[0];
     half tv = b[(int)id];
 
-    __bang_reduce_sum(c, b, B2);
+    __bang_reduce_sum(rbuf, b, B2);
     float sum_x = 0.0f;
 #pragma unroll 1
     for (int i = 0; i < B2 / 32; ++i) {
-      sum_x += (float)c[i * 32];
+      sum_x += (float)rbuf[i * 32];
     }
 
     __bang_sub_scalar(a, a, mx, B2);
     __bang_active_exp(a, a, B2);
-    __bang_reduce_sum(c, a, B2);
+    __bang_reduce_sum(rbuf, a, B2);
     float sum_e = 0.0f;
 #pragma unroll 1
     for (int i = 0; i < B2 / 32; ++i) {
-      sum_e += (float)c[i * 32];
+      sum_e += (float)rbuf[i * 32];
     }
 
     float lse = (float)mx + logf(sum_e);
@@ -79,10 +79,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
     hv[0] = (half)acc;
     hc[0] = (half)cnt;
     __bang_atomic_reduce_add(s, hv, 1);
-    __bang_atomic_reduce_add(c, hc, 1);
+    __bang_atomic_reduce_add(cnt_ptr, hc, 1);
     __sync_all_ipu();
     if (taskId == 0) {
-      float z = (float)c[0];
+      float z = (float)cnt_ptr[0];
       y[0] = (half)((float)s[0] / (z < 1.0f ? 1.0f : z));
     }
   }
