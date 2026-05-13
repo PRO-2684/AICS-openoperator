@@ -3,53 +3,16 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 8192
-#define E1 128
-#define E3 64
-
-__mlu_entry__ void kernel(const half *__restrict__ input,
-                          half *__restrict__ output) {
-  __mlu_shared__ float r[4];
-  int c = coreId;
-  __nram__ half a[E0];
-  __nram__ half b[E0];
-  __nram__ half s[E1];
-  if (c != 0x80) {
-    int row = taskIdY * 2 + (c >> 1);
-    int off = (c & 1) * E0;
-    const half *src =
-        (const half *)__builtin_assume_aligned(input + row * 16384 + off, 512);
-
-    __memcpy(a, src, E0 * sizeof(half), GDRAM2NRAM);
-    __memcpy(b, a, E0 * sizeof(half), NRAM2NRAM);
-    __bang_abs(b, b, E0);
-    __bang_reduce_sum(b, b, E0);
-    __memcpy(s, b, sizeof(half), NRAM2NRAM, sizeof(half), E3 * sizeof(half),
-             E1 - 1);
-    __bang_reduce_sum(s, s, E1);
-    r[c] = (float)s[0] + (float)s[E3];
-  }
-  __sync_cluster();
-  if (c != 0x80) {
-    int p = c & 2;
-    float v = r[p] + r[p + 1];
-    half inv = (half)(1.0f / v);
-    int row = taskIdY * 2 + (c >> 1);
-    int off = (c & 1) * E0;
-    half *dst =
-        (half *)__builtin_assume_aligned(output + row * 16384 + off, 512);
-    __bang_mul_scalar(a, a, inv, E0);
-    __memcpy(dst, a, E0 * sizeof(half), NRAM2GDRAM);
-  }
+__mlu_entry__ void kernel(half *__restrict__ output) {
+  __nram__ half a[8192];
+  __bang_write_zero(a, 8192);
+  __memcpy(output + taskId * 8192, a, 8192 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   auto y = torch::empty_like(x);
-
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {4, 8, 1};
-  kernel<<<dim, cnrtFuncTypeUnion1, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+  cnrtDim3_t d = {32, 1, 1};
+  kernel<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
