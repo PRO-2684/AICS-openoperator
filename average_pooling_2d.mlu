@@ -8,19 +8,26 @@
 #define A2 1024
 #define A3 11
 #define A4 32
+#define A5 16
+#define A6 6
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[A3 * A2];
-  __nram__ half b[A1];
+  __nram__ half a[A5 * A3 * A2];
+  __nram__ half b[A5 * A1];
 
-  for (int p = taskId; p < A0 * A1; p += taskDim) {
-    int q = p / A1;
-    int r = p - q * A1;
-    __memcpy(a, x + q * A2 * A2 + r * A3 * A2,
-             A3 * A2 * sizeof(half), GDRAM2NRAM);
-    __bang_sumpool(b, a, 1, A3, A2, A3, A3, A3, A3);
-    __bang_mul_scalar(b, b, (half)0.008264462809917355f, A1);
-    __memcpy(y + q * A1 * A1 + r * A1, b, A1 * sizeof(half), NRAM2GDRAM);
+  for (int p = taskId; p < A0 * A6; p += taskDim) {
+    int q = p / A6;
+    int r = (p - q * A6) * A5;
+    int n = A1 - r;
+    if (n > A5)
+      n = A5;
+    int h = n * A3;
+    int e = n * A1;
+    __memcpy(a, x + q * A2 * A2 + r * A3 * A2, h * A2 * sizeof(half),
+             GDRAM2NRAM);
+    __bang_sumpool(b, a, 1, h, A2, A3, A3, A3, A3);
+    __bang_mul_scalar(b, b, (half)0.008264462809917355f, e);
+    __memcpy(y + q * A1 * A1 + r * A1, b, e * sizeof(half), NRAM2GDRAM);
   }
 }
 
