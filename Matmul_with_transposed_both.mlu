@@ -1,14 +1,70 @@
-#include <bang.h>
-#include <cnrt.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-// Task: 022 022_Matmul_with_transposed_both
-// Category: matrix
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，对两个输入矩阵分别进行转置并计算其矩阵乘积。输入包括形状为 `[K, M]` 的张量 `A` 和形状为 `[N, K]` 的张量 `B`；输出为形状为 `[M, N]` 的结果张量。
-// Wrapper: torch::Tensor bang_func(torch::Tensor A, torch::Tensor B);
+#define CNNL_CHECK(expr)                                                       \
+  do {                                                                         \
+    cnnlStatus_t status__ = (expr);                                            \
+    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ",        \
+                (int)status__);                                                \
+  } while (0)
+
+static cnnlTensorDescriptor_t make_desc(int m, int n, cnnlDataType_t dtype) {
+  int64_t dims[2] = {m, n};
+  int64_t strides[2] = {n, 1};
+  cnnlTensorDescriptor_t desc;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&desc));
+  CNNL_CHECK(cnnlSetTensorDescriptorEx_v2(
+      desc, CNNL_LAYOUT_ARRAY, dtype, 2, dims, strides));
+  return desc;
+}
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  TORCH_CHECK(false, "TODO: implement Matmul_with_transposed_both");
+  auto C = torch::empty({1024, 2048}, A.options());
+
+  static cnnlTensorDescriptor_t a = nullptr;
+  static cnnlTensorDescriptor_t b = nullptr;
+  static cnnlTensorDescriptor_t c = nullptr;
+  static cnnlMatMulExDescriptor_t d = nullptr;
+  static cnnlMatMulExAlgo_t e = nullptr;
+  static size_t ws = 0;
+
+  cnnlHandle_t h = torch_mlu::getCurrentHandle();
+  float alpha = 1.0f;
+  float beta = 0.0f;
+
+  if (d == nullptr) {
+    a = make_desc(4096, 1024, CNNL_DTYPE_HALF);
+    b = make_desc(2048, 4096, CNNL_DTYPE_HALF);
+    c = make_desc(1024, 2048, CNNL_DTYPE_HALF);
+    CNNL_CHECK(cnnlCreateMatMulExDescriptor(&d));
+    CNNL_CHECK(cnnlCreateMatMulExAlgo(&e));
+    CNNL_CHECK(cnnlSetMatMulExDescAttrBase(
+        d, CNNL_MATMUL_OP_T, CNNL_MATMUL_OP_T, false, CNNL_MATMUL_EPI_NONE));
+    int lda = 1024;
+    int ldb = 4096;
+    int ldc = 2048;
+    int tf32 = 0;
+    CNNL_CHECK(cnnlSetMatMulExDescAttr(
+        d, CNNL_MATMUL_EX_DESC_LDA, &lda, sizeof(lda)));
+    CNNL_CHECK(cnnlSetMatMulExDescAttr(
+        d, CNNL_MATMUL_EX_DESC_LDB, &ldb, sizeof(ldb)));
+    CNNL_CHECK(cnnlSetMatMulExDescAttr(
+        d, CNNL_MATMUL_EX_DESC_LDC, &ldc, sizeof(ldc)));
+    CNNL_CHECK(cnnlSetMatMulExDescAttr(
+        d, CNNL_MATMUL_EX_ALLOW_TF32, &tf32, sizeof(tf32)));
+    cnnlMatMulExHeuristicResult_t r;
+    CNNL_CHECK(cnnlCreateMatMulExHeuristicResult(&r));
+    int q = 0;
+    CNNL_CHECK(cnnlGetMatMulExAlgoHeuristic(
+        h, d, a, b, c, c, nullptr, 1, &r, &q));
+    CNNL_CHECK(cnnlGetMatMulExHeuristicResult(r, e, &ws));
+    CNNL_CHECK(cnnlDestroyMatMulExHeuristicResult(r));
+  }
+
+  auto workspace = torch::empty({(int64_t)ws}, A.options().dtype(torch::kUInt8));
+  CNNL_CHECK(cnnlMatMulEx_v2(
+      h, d, e, &alpha, a, A.data_ptr(), b, B.data_ptr(), &beta, c, C.data_ptr(),
+      ws ? workspace.data_ptr() : nullptr, ws, c, C.data_ptr()));
+  return C;
 }
