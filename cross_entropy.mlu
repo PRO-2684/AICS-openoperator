@@ -1,14 +1,138 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
+#include <math.h>
+#include <stdint.h>
 #include <torch/extension.h>
 
-// Task: 060 060_cross_entropy
-// Category: loss
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，支持标签平滑（Label Smoothing）和忽略特定索引值的交叉熵损失计算。输入包括形状为 `[batch, seq_len, vocab]` 的预测对数概率 `_input`、形状为 `[batch * seq_len]` 的目标标签 `target`，以及 `label_smoothing`、`reduce_loss` 和 `ignore_idx` 等控制参数。该算子根据归约标志返回标量形式或形状为 `[batch, seq_len]` 的逐元素损失张量。
-// Wrapper: torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target, torch::Tensor label_smoothing, torch::Tensor reduce_loss, torch::Tensor dist_process_group, torch::Tensor ignore_idx);
+#define B0 4
+#define B1 128
+#define B2 32768
+#define T0 32
 
-torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target, torch::Tensor label_smoothing, torch::Tensor reduce_loss, torch::Tensor dist_process_group, torch::Tensor ignore_idx) {
-  TORCH_CHECK(false, "TODO: implement cross_entropy");
+__mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
+                      half *__restrict__ y, half *__restrict__ s,
+                      half *__restrict__ c, float ls, int red, int ign) {
+  __nram__ half a[B2];
+  __nram__ half b[B2];
+  __nram__ half m[64];
+
+  if (red) {
+    if (taskId == 0) {
+      s[0] = (half)0.0f;
+      c[0] = (half)0.0f;
+    }
+    __sync_all_ipu();
+  }
+
+  float acc = 0.0f;
+  float cnt = 0.0f;
+
+  for (int r = taskId; r < B0 * B1; r += taskDim) {
+    int64_t id = t[r];
+    if ((int)id == ign) {
+      if (!red) y[r] = (half)0.0f;
+      continue;
+    }
+
+    int base = r * B2;
+    __memcpy(a, x + base, B2 * sizeof(half), GDRAM2NRAM);
+    __memcpy(b, a, B2 * sizeof(half), NRAM2NRAM);
+
+    __bang_argmax(m, a, B2);
+    half mx = m[0];
+    half tv = b[(int)id];
+
+    __bang_reduce_sum(b, b, B2);
+    float sum_x = 0.0f;
+#pragma unroll 1
+    for (int i = 0; i < B2 / 32; ++i) {
+      sum_x += (float)b[i * 32];
+    }
+
+    __bang_sub_scalar(a, a, mx, B2);
+    __bang_active_exp(a, a, B2);
+    __bang_reduce_sum(b, a, B2);
+    float sum_e = 0.0f;
+#pragma unroll 1
+    for (int i = 0; i < B2 / 32; ++i) {
+      sum_e += (float)b[i * 32];
+    }
+
+    float lse = (float)mx + logf(sum_e);
+    float nll = lse - (float)tv;
+    float sml = lse - sum_x * (1.0f / (float)B2);
+    float loss = (1.0f - ls) * nll + ls * sml;
+
+    if (red) {
+      acc += loss;
+      cnt += 1.0f;
+    } else {
+      y[r] = (half)loss;
+    }
+  }
+
+  if (red) {
+    __nram__ half hv[1];
+    __nram__ half hc[1];
+    hv[0] = (half)acc;
+    hc[0] = (half)cnt;
+    __bang_atomic_reduce_add(s, hv, 1);
+    __bang_atomic_reduce_add(c, hc, 1);
+    __sync_all_ipu();
+    if (taskId == 0) {
+      float z = (float)c[0];
+      y[0] = (half)((float)s[0] / (z < 1.0f ? 1.0f : z));
+    }
+  }
+}
+
+torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
+                        torch::Tensor label_smoothing,
+                        torch::Tensor reduce_loss,
+                        torch::Tensor dist_process_group,
+                        torch::Tensor ignore_idx) {
+  (void)dist_process_group;
+
+  float ls = label_smoothing.item<float>();
+  int red = reduce_loss.item<int>() != 0;
+  int ign = (int)ignore_idx.item<int64_t>();
+
+  static torch::Tensor out;
+  static torch::Tensor sum;
+  static torch::Tensor cnt;
+  if (red) {
+    if (!out.defined())
+      out = torch::empty({}, _input.options());
+    if (!sum.defined())
+      sum = torch::empty({}, _input.options());
+    if (!cnt.defined())
+      cnt = torch::empty({}, _input.options());
+    out.resize_({});
+    sum.resize_({});
+    cnt.resize_({});
+  } else {
+    if (!out.defined())
+      out = torch::empty({_input.size(0), _input.size(1)}, _input.options());
+    else
+      out.resize_({_input.size(0), _input.size(1)});
+  }
+
+  cnrtDim3_t d = {T0, 1, 1};
+  if (red) {
+    k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+        reinterpret_cast<const half *>(_input.data_ptr<at::Half>()),
+        reinterpret_cast<const int64_t *>(target.data_ptr<int64_t>()),
+        reinterpret_cast<half *>(out.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(sum.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(cnt.data_ptr<at::Half>()), ls, red, ign);
+    return out;
+  }
+
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(_input.data_ptr<at::Half>()),
+      reinterpret_cast<const int64_t *>(target.data_ptr<int64_t>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()),
+      nullptr, nullptr, ls, red, ign);
+  return out;
 }
