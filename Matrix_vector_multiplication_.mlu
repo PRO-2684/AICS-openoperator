@@ -20,8 +20,8 @@ static cnnlTensorDescriptor_t make_desc(int m, int n, cnnlDataType_t dtype) {
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  auto C = torch::empty({256, 1}, A.options().dtype(torch::kFloat32));
-
+  static torch::Tensor C;
+  static torch::Tensor workspace;
   static cnnlTensorDescriptor_t a = nullptr;
   static cnnlTensorDescriptor_t b = nullptr;
   static cnnlTensorDescriptor_t c = nullptr;
@@ -32,6 +32,11 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   cnnlHandle_t h = torch_mlu::getCurrentHandle();
   float alpha = 1.0f;
   float beta = 0.0f;
+
+  if (!C.defined())
+    C = torch::empty({256, 1}, A.options().dtype(torch::kFloat32));
+  else
+    C.resize_({256, 1});
 
   if (d == nullptr) {
     a = make_desc(256, 131072, CNNL_DTYPE_HALF);
@@ -55,7 +60,10 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
     CNNL_CHECK(cnnlDestroyMatMulHeuristicResult(r));
   }
 
-  auto workspace = torch::empty({(int64_t)ws}, A.options().dtype(torch::kUInt8));
+  if (!workspace.defined())
+    workspace = torch::empty({(int64_t)ws}, A.options().dtype(torch::kUInt8));
+  else
+    workspace.resize_({(int64_t)ws});
   CNNL_CHECK(cnnlMatMul_v2(
       h, d, e, &alpha, a, A.data_ptr(), b, B.data_ptr(), &beta, c, C.data_ptr(),
       ws ? workspace.data_ptr() : nullptr, ws, c, C.data_ptr()));
