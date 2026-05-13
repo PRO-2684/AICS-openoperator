@@ -10,29 +10,31 @@
 __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ w,
                       float *__restrict__ y) {
   __nram__ half a[E0 * E1 / 16];
-  __nram__ half b[E2 * E1];
-  __nram__ float g[E1];
+  __nram__ float b[E1 * 4];
   __nram__ int c[E2];
   __nram__ int f[256];
   __nram__ int64_t e[256];
+  __nram__ float d[E2 * E1];
   __bang_write_value(c, E2, 0);
-  __bang_write_value(b, E2 * E1, (half)0.0f);
+  __bang_write_value(d, E2 * E1, 0.0f);
   int s = taskId * 256;
   __memcpy(e, w + s, 256 * sizeof(int64_t), GDRAM2NRAM);
   __memcpy(a, x + s * E1, 256 * E1 * sizeof(half), GDRAM2NRAM);
   int n = 0;
-  for (int j = 0; j < 256; ++j) {
-    int p = (int)e[j];
-    __bang_add(b + p * E1, b + p * E1, a + j * E1, E1);
-    if (!c[p]) {
-      c[p] = 1;
-      f[n++] = p;
+  for (int j = 0; j < 256; j += 4) {
+    __bang_half2float(b, a + j * E1, E1 * 4);
+    for (int k = 0; k < 4; ++k) {
+      int p = (int)e[j + k];
+      __bang_add(d + p * E1, d + p * E1, b + k * E1, E1);
+      if (!c[p]) {
+        c[p] = 1;
+        f[n++] = p;
+      }
     }
   }
   for (int i = 0; i < n; ++i) {
     int p = f[i];
-    __bang_half2float(g, b + p * E1, E1);
-    __bang_atomic_reduce_add_async(y + p * E1, g, E1);
+    __bang_atomic_reduce_add_async(y + p * E1, d + p * E1, E1);
   }
 }
 
