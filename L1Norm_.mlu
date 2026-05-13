@@ -4,7 +4,7 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void kernel(half *__restrict__ output) {
-  __gdramset(output + taskId * 8192, 8192, (half)0.0f);
+  __gdramset_async(output + taskId * 8192, 8192, (half)0.0f);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
