@@ -22,10 +22,12 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
 
 __mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
   __nram__ half a[E1 + 2];
+  __nram__ unsigned int c[1];
   int p = taskId * E1;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-  __bang_fcmpfilter(CMP_GT, a, a, (half)0.0f, E1);
-  y[taskId] = *((int *)a);
+  __bang_gt_scalar(a, a, (half)0.0f, E1);
+  __bang_count(c, a, E1);
+  y[taskId] = (int)c[0];
   __sync_all_ipu();
 
   if (taskId == E2 - 1) {
