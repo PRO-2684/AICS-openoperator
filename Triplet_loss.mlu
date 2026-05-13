@@ -9,8 +9,13 @@
 #define E3 64
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
-                      const half *__restrict__ n, float *__restrict__ t,
+                      const half *__restrict__ n, float *__restrict__ y,
                       float m) {
+  if (taskId == 0) {
+    y[0] = 0.0f;
+  }
+  __sync_all_ipu();
+
   __nram__ half h0[E1];
   __nram__ half h1[E1];
   __nram__ half h2[E1];
@@ -42,31 +47,22 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
       s += e0;
     }
   }
-  t[taskId] = s;
-}
-
-__mlu_entry__ void k1(const float *__restrict__ t, float *__restrict__ y) {
-  float s = 0.0f;
-#pragma unroll
-  for (int i = 0; i < E2; ++i) {
-    s += t[i];
-  }
-  y[0] = s * 0.0078125f;
+  __nram__ float h[1];
+  h[0] = s * 0.0078125f;
+  __bang_atomic_reduce_add(y, h, 1);
 }
 
 torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive, torch::Tensor negative, double margin) {
-  auto out = torch::empty({}, anchor.options().dtype(torch::kFloat32));
-  auto tmp = torch::empty({E2}, anchor.options().dtype(torch::kFloat32));
+  static torch::Tensor out;
+  if (!out.defined())
+    out = torch::empty({}, anchor.options().dtype(torch::kFloat32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g0 = {E2, 1, 1};
-  k0<<<g0, cnrtFuncTypeBlock, queue>>>(
+  cnrtDim3_t g0 = {4, 8, 1};
+  k0<<<g0, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(anchor.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(positive.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(negative.data_ptr<at::Half>()),
-      tmp.data_ptr<float>(), static_cast<float>(margin));
-  cnrtDim3_t g1 = {1, 1, 1};
-  k1<<<g1, cnrtFuncTypeBlock, queue>>>(tmp.data_ptr<float>(),
-                                       out.data_ptr<float>());
+      out.data_ptr<float>(), static_cast<float>(margin));
   return out;
 }
