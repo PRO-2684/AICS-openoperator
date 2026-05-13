@@ -5,24 +5,26 @@
 
 #define E0 128
 #define E1 256
-#define E2 32
-#define E3 64
+#define E2 16
+#define E3 4
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
                       const half *__restrict__ n, float *__restrict__ y,
                       float m) {
-  if (taskId == 0) {
-    y[0] = 0.0f;
+  if (coreId == 128) {
+    return;
   }
-  __sync_all_ipu();
 
+  __mlu_shared__ float r0[4];
   __nram__ half h0[E1];
   __nram__ half h1[E1];
   __nram__ half h2[E1];
   float s = 0.0f;
 
-  for (int r = taskId; r < E0; r += taskDim) {
-    int q = r * E1;
+  int base = clusterId * E2 + coreId * E3;
+  #pragma unroll
+  for (int r = 0; r < E3; ++r) {
+    int q = (base + r) * E1;
     __memcpy(h0, a + q, E1 * sizeof(half), GDRAM2NRAM);
     __memcpy(h1, p + q, E1 * sizeof(half), GDRAM2NRAM);
     __memcpy(h2, n + q, E1 * sizeof(half), GDRAM2NRAM);
@@ -44,9 +46,15 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
       s += e0;
     }
   }
-  __nram__ float h[1];
-  h[0] = s * 0.0078125f;
-  __bang_atomic_reduce_add(y, h, 1);
+  r0[coreId] = s;
+  __sync_all_ipu_within_cluster();
+
+  if (coreId == 0) {
+    float t = r0[0] + r0[1] + r0[2] + r0[3];
+    __nram__ float h[1];
+    h[0] = t * 0.0078125f;
+    __bang_atomic_reduce_add(y, h, 1);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive, torch::Tensor negative, double margin) {
@@ -55,6 +63,7 @@ torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive, torch::Ten
     out = torch::empty({}, anchor.options().dtype(torch::kFloat32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtMemsetAsync(out.data_ptr<float>(), 0, sizeof(float), queue);
   cnrtDim3_t g0 = {4, 8, 1};
   k0<<<g0, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(anchor.data_ptr<at::Half>()),
