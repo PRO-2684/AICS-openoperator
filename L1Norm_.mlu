@@ -3,40 +3,52 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 16
-#define E1 16384
-#define E2 256
+#define E0 8192
+#define E1 128
 #define E3 64
 
 __mlu_entry__ void kernel(const half *__restrict__ input,
                           half *__restrict__ output) {
-  const int row = taskId;
-  const half *src = (const half *)__builtin_assume_aligned(input + row * E1, 512);
-  half *dst = (half *)__builtin_assume_aligned(output + row * E1, 512);
+  __mlu_shared__ float r[4];
+  int c = coreId;
+  __nram__ half a[E0];
+  __nram__ half b[E0];
+  __nram__ half s[E1];
+  if (c != 0x80) {
+    int row = taskIdY * 2 + (c >> 1);
+    int off = (c & 1) * E0;
+    const half *src =
+        (const half *)__builtin_assume_aligned(input + row * 16384 + off, 512);
 
-  __nram__ half a[E1];
-  __nram__ half b[E1];
-  __nram__ half c[E2];
-
-  __memcpy(a, src, E1 * sizeof(half), GDRAM2NRAM);
-  __memcpy(b, a, E1 * sizeof(half), NRAM2NRAM);
-  __bang_abs(b, b, E1);
-  __bang_reduce_sum(b, b, E1);
-  __memcpy(c, b, sizeof(half), NRAM2NRAM, sizeof(half), E3 * sizeof(half),
-           E2 - 1);
-  __bang_reduce_sum(c, c, E2);
-  float s = (float)c[0] + (float)c[E3] + (float)c[E3 * 2] + (float)c[E3 * 3];
-  half inv = (half)(1.0f / s);
-  __bang_mul_scalar(a, a, inv, E1);
-  __memcpy(dst, a, E1 * sizeof(half), NRAM2GDRAM);
+    __memcpy(a, src, E0 * sizeof(half), GDRAM2NRAM);
+    __memcpy(b, a, E0 * sizeof(half), NRAM2NRAM);
+    __bang_abs(b, b, E0);
+    __bang_reduce_sum(b, b, E0);
+    __memcpy(s, b, sizeof(half), NRAM2NRAM, sizeof(half), E3 * sizeof(half),
+             E1 - 1);
+    __bang_reduce_sum(s, s, E1);
+    r[c] = (float)s[0] + (float)s[E3];
+  }
+  __sync_cluster();
+  if (c != 0x80) {
+    int p = c & 2;
+    float v = r[p] + r[p + 1];
+    half inv = (half)(1.0f / v);
+    int row = taskIdY * 2 + (c >> 1);
+    int off = (c & 1) * E0;
+    half *dst =
+        (half *)__builtin_assume_aligned(output + row * 16384 + off, 512);
+    __bang_mul_scalar(a, a, inv, E0);
+    __memcpy(dst, a, E0 * sizeof(half), NRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   auto y = torch::empty_like(x);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {E0, 1, 1};
-  kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+  cnrtDim3_t dim = {4, 8, 1};
+  kernel<<<dim, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
