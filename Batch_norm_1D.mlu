@@ -92,7 +92,6 @@ __mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ s,
   __bang_mul_scalar(fb, fb, 0.00390625f, E1);
   __bang_mul(fc, fa, fa, E1);
   __bang_sub(fb, fb, fc, E1);
-  __bang_add_scalar(fb, fb, 1.0e-5f, E1);
   __bang_rsqrt(fd, fb, E1);
   __bang_mul(fc, fa, fd, E1);
   __bang_mul_scalar(fc, fc, -1.0f, E1);
