@@ -32,11 +32,10 @@ __mlu_entry__ void k1(float *__restrict__ x, const float *__restrict__ y, int p,
 }
 
 static cnnlTensorDescriptor_t f2(cnnlDataType_t t = CNNL_DTYPE_HALF) {
-  int64_t d[2] = {1024, 1024};
-  int64_t st[2] = {1024, 1};
+  int d[2] = {1024, 1024};
   cnnlTensorDescriptor_t r;
   X(cnnlCreateTensorDescriptor(&r));
-  X(cnnlSetTensorDescriptorEx_v2(r, CNNL_LAYOUT_ARRAY, t, 2, d, st));
+  X(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, t, 2, d));
   return r;
 }
 
@@ -75,7 +74,11 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
     cnnlMatMulHeuristicResult_t r;
     X(cnnlCreateMatMulHeuristicResult(&r));
     int v0 = 0;
+    int s = 1024;
     X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_ALLOW_TF32, &v0, sizeof(v0)));
+    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDA, &s, sizeof(s)));
+    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDB, &s, sizeof(s)));
+    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDC, &s, sizeof(s)));
     int n = 0;
     X(cnnlGetMatMulAlgoHeuristic(h, d, a, b, c, c, nullptr, 1, &r, &n));
     X(cnnlGetMatMulHeuristicResult(r, e, &z));
