@@ -3,28 +3,21 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 4096
+#define E0 8192
 
 __mlu_entry__ void kernel(const half *__restrict__ input,
                           half *__restrict__ output) {
   __nram__ half xbuf[E0];
-  __nram__ half ybuf[E0];
 
   if (coreId != 0x80) {
     int row = taskIdY * 2 + (coreId >> 1);
     int part = coreId & 1;
-    int base = row * 16384 + part * 8192;
+    int base = row * 16384 + part * E0;
     __memcpy(xbuf, input + base, E0 * sizeof(half), GDRAM2NRAM);
-    __sync_io();
-    __memcpy(ybuf, input + base + E0, E0 * sizeof(half), GDRAM2NRAM);
     __bang_active_exp(xbuf, xbuf, E0);
     __bang_mul_scalar(xbuf, xbuf, (half)3.702e-05f, E0);
     __sync_io_move_compute();
     __memcpy(output + base, xbuf, E0 * sizeof(half), NRAM2GDRAM);
-    __bang_active_exp(ybuf, ybuf, E0);
-    __bang_mul_scalar(ybuf, ybuf, (half)3.702e-05f, E0);
-    __sync_io_move_compute();
-    __memcpy(output + base + E0, ybuf, E0 * sizeof(half), NRAM2GDRAM);
     __sync_io();
   }
 }
