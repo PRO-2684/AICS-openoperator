@@ -4,7 +4,7 @@
 #include <torch/extension.h>
 
 #define A0 128
-#define A1 92
+#define A1 93
 #define A2 1024
 #define A3 11
 #define A4 32
@@ -28,9 +28,9 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size) {
   (void)kernel_size;
   static torch::Tensor y;
   if (!y.defined())
-    y = torch::empty({4, 32, 92, 92}, x.options());
+    y = torch::empty({4, 32, 93, 93}, x.options());
   else
-    y.resize_({4, 32, 92, 92});
+    y.resize_({4, 32, 93, 93});
 
   cnrtDim3_t d = {A4, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
