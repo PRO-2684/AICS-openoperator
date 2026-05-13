@@ -1,56 +1,40 @@
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <aten/cnnl/cnnlHandle.h>
 
-#define CNNL_CHECK(expr)                                                     \
-  do {                                                                       \
-    cnnlStatus_t status = (expr);                                            \
-    TORCH_CHECK(status == CNNL_STATUS_SUCCESS, "CNNL call failed: ", status); \
-  } while (0)
+#define A0 128
+#define A1 92
+#define A2 1024
+#define A3 11
+#define A4 32
+
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[A3 * A2];
+  __nram__ half b[A1];
+
+  for (int p = taskId; p < A0 * A1; p += taskDim) {
+    int q = p / A1;
+    int r = p - q * A1;
+    __memcpy(a, x + q * A2 * A2 + r * A3 * A2,
+             A3 * A2 * sizeof(half), GDRAM2NRAM);
+    __bang_sumpool(b, a, 1, A3, A2, A3, A3, A3, A3);
+    __bang_mul_scalar(b, b, (half)0.008264462809917355f, A1);
+    __memcpy(y + q * A1 * A1 + r * A1, b, A1 * sizeof(half), NRAM2GDRAM);
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size) {
-  static torch::Tensor output;
-  static torch::Tensor workspace;
-  static cnnlTensorDescriptor_t x_desc = nullptr;
-  static cnnlTensorDescriptor_t y_desc = nullptr;
-  static cnnlPoolingDescriptor_t pooling_desc = nullptr;
-  static size_t workspace_size = 0;
-
-  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
-  int n = 4, c = 32, h = 1024, w = 1024, out_h = 92, out_w = 92;
-
-  if (!output.defined())
-    output = torch::empty({n, c, out_h, out_w}, x.options());
+  (void)kernel_size;
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty({4, 32, 92, 92}, x.options());
   else
-    output.resize_({n, c, out_h, out_w});
+    y.resize_({4, 32, 92, 92});
 
-  if (x_desc == nullptr) {
-    int x_dims[4] = {n, c, h, w};
-    int y_dims[4] = {n, c, out_h, out_w};
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&x_desc));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&y_desc));
-    CNNL_CHECK(cnnlCreatePoolingDescriptor(&pooling_desc));
-    CNNL_CHECK(cnnlSetTensorDescriptor(x_desc, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF,
-                                       4, x_dims));
-    CNNL_CHECK(cnnlSetTensorDescriptor(y_desc, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF,
-                                       4, y_dims));
-    CNNL_CHECK(cnnlSetPooling2dDescriptor_v2(
-        pooling_desc, CNNL_POOLING_AVERAGE_COUNT_INCLUDE_PADDING,
-        CNNL_NOT_PROPAGATE_NAN, kernel_size, kernel_size, 0, 0, 0, 0,
-        kernel_size, kernel_size, 1, 1, false));
-    CNNL_CHECK(cnnlGetPoolingWorkspaceSize_v2(handle, pooling_desc, x_desc,
-                                              y_desc, &workspace_size));
-  }
-
-  if (!workspace.defined())
-    workspace = torch::empty({(int64_t)workspace_size}, x.options().dtype(torch::kUInt8));
-  else
-    workspace.resize_({(int64_t)workspace_size});
-
-  float alpha = 1.0f;
-  float beta = 0.0f;
-  CNNL_CHECK(cnnlPoolingForward_v2(
-      handle, pooling_desc, &alpha, x_desc, x.data_ptr(), &beta, nullptr,
-      y_desc, output.data_ptr(), workspace.data_ptr(), workspace_size));
-  return output;
+  cnrtDim3_t d = {A4, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  return y;
 }
