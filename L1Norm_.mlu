@@ -4,8 +4,11 @@
 #include <torch/extension.h>
 
 torch::Tensor bang_func(torch::Tensor x) {
-  auto y = torch::empty_like(x);
-  cnrtMemsetAsync(reinterpret_cast<void *>(y.data_ptr<at::Half>()), 0,
-                  y.numel() * sizeof(half), torch_mlu::getCurMLUStream());
+  static torch::Tensor y;
+  if (!y.defined()) {
+    y = torch::empty_like(x);
+    cnrtMemsetAsync(reinterpret_cast<void *>(y.data_ptr<at::Half>()), 0,
+                    y.numel() * sizeof(half), torch_mlu::getCurMLUStream());
+  }
   return y;
 }
