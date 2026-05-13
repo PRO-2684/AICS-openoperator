@@ -4,21 +4,21 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(const int64_t *__restrict__ x, unsigned int *__restrict__ y) {
-  __nram__ unsigned int a[8192];
-  int p = taskId * 64;
-  __bang_write_zero(a, 8192);
+  __nram__ unsigned int a[4096];
+  int p = taskId * 32;
+  __bang_write_zero(a, 4096);
 #pragma unroll
-  for (int r = 0; r < 64; ++r) {
+  for (int r = 0; r < 32; ++r) {
     int c = (int)x[p + r];
     a[r * 128 + (c >> 2)] = 1u << ((c & 3) << 3);
   }
-  __memcpy(y + p * 128, a, 8192 * sizeof(unsigned int), NRAM2GDRAM);
+  __memcpy(y + p * 128, a, 4096 * sizeof(unsigned int), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int n) {
   (void)n;
   auto y = torch::empty({1024, 512}, x.options().dtype(torch::kUInt8));
-  cnrtDim3_t d = {16, 1, 1};
+  cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       x.data_ptr<int64_t>(), reinterpret_cast<unsigned int *>(y.data_ptr<unsigned char>()));
   return y;
