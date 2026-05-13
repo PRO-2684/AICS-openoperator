@@ -32,11 +32,7 @@ __mlu_entry__ void kernel(const half *__restrict__ input,
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
-  static torch::Tensor y;
-  if (!y.defined())
-    y = torch::empty_like(x);
-  else
-    y.resize_(x.sizes());
+  auto y = torch::empty_like(x);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {E0, 1, 1};

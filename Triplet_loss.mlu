@@ -23,13 +23,15 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
     __memcpy(h1, p + q, E1 * sizeof(half), GDRAM2NRAM);
     __memcpy(h2, n + q, E1 * sizeof(half), GDRAM2NRAM);
 
-    __bang_fusion(FUSION_FSA, h1, h0, h1, e, E1);
+    __bang_sub(h1, h0, h1, E1);
+    __bang_add_scalar(h1, h1, e, E1);
     __bang_square(h1, h1, E1);
     __bang_reduce_sum(h1, h1, E1);
     float u = (float)h1[0] + (float)h1[E3] + (float)h1[E3 * 2] +
               (float)h1[E3 * 3];
 
-    __bang_fusion(FUSION_FSA, h2, h0, h2, e, E1);
+    __bang_sub(h2, h0, h2, E1);
+    __bang_add_scalar(h2, h2, e, E1);
     __bang_square(h2, h2, E1);
     __bang_reduce_sum(h2, h2, E1);
     float v = (float)h2[0] + (float)h2[E3] + (float)h2[E3 * 2] +
@@ -52,18 +54,9 @@ __mlu_entry__ void k1(const float *__restrict__ t, float *__restrict__ y) {
   y[0] = s * 0.0078125f;
 }
 
-torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive,
-                        torch::Tensor negative, double margin) {
-  static torch::Tensor out;
-  static torch::Tensor tmp;
-  if (!out.defined())
-    out = torch::empty({}, anchor.options().dtype(torch::kFloat32));
-  else
-    out.resize_({});
-  if (!tmp.defined())
-    tmp = torch::empty({E2}, anchor.options().dtype(torch::kFloat32));
-  else
-    tmp.resize_({E2});
+torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive, torch::Tensor negative, double margin) {
+  auto out = torch::empty({}, anchor.options().dtype(torch::kFloat32));
+  auto tmp = torch::empty({E2}, anchor.options().dtype(torch::kFloat32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t g0 = {E2, 1, 1};
