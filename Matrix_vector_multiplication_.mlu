@@ -20,7 +20,7 @@ static cnnlTensorDescriptor_t make_desc(int m, int n, cnnlDataType_t dtype) {
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  auto C = torch::empty({256, 1}, A.options().dtype(torch::kFloat32));
+  auto C = torch::empty({256, 1}, A.options());
 
   static cnnlTensorDescriptor_t a = nullptr;
   static cnnlTensorDescriptor_t b = nullptr;
@@ -36,7 +36,7 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   if (d == nullptr) {
     a = make_desc(256, 131072, CNNL_DTYPE_HALF);
     b = make_desc(131072, 1, CNNL_DTYPE_HALF);
-    c = make_desc(256, 1, CNNL_DTYPE_FLOAT);
+    c = make_desc(256, 1, CNNL_DTYPE_HALF);
     CNNL_CHECK(cnnlMatMulDescCreate(&d));
     CNNL_CHECK(cnnlCreateMatMulAlgo(&e));
     cnnlMatMulHeuristicResult_t r;
