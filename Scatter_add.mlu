@@ -10,7 +10,7 @@
 __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ w,
                       float *__restrict__ y) {
   __nram__ half a[E0 * E1 / 32];
-  __nram__ float b[E1 * 2];
+  __nram__ float b[E1 * 4];
   __nram__ int c[E2];
   __nram__ int f[128];
   __nram__ int64_t e[128];
@@ -21,9 +21,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ w,
   __memcpy(e, w + s, 128 * sizeof(int64_t), GDRAM2NRAM);
   __memcpy(a, x + s * E1, 128 * E1 * sizeof(half), GDRAM2NRAM);
   int n = 0;
-  for (int j = 0; j < 128; j += 2) {
-    __bang_half2float(b, a + j * E1, E1 * 2);
-    for (int k = 0; k < 2; ++k) {
+  for (int j = 0; j < 128; j += 4) {
+    __bang_half2float(b, a + j * E1, E1 * 4);
+    for (int k = 0; k < 4; ++k) {
       int p = (int)e[j + k];
       __bang_add(d + p * E1, d + p * E1, b + k * E1, E1);
       if (!c[p]) {
