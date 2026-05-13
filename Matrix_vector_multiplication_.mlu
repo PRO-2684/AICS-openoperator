@@ -19,91 +19,45 @@ static cnnlTensorDescriptor_t make_desc(int m, int n, cnnlDataType_t dtype) {
   return desc;
 }
 
-struct MatmulState {
-  cnnlTensorDescriptor_t a_half = nullptr;
-  cnnlTensorDescriptor_t b_half = nullptr;
-  cnnlTensorDescriptor_t a_float = nullptr;
-  cnnlTensorDescriptor_t b_float = nullptr;
-  cnnlTensorDescriptor_t c_float = nullptr;
-  cnnlMatMulDescriptor_t d = nullptr;
-  cnnlMatMulAlgo_t e = nullptr;
-  size_t ws = 0;
-};
-
-static void init_state(MatmulState &s, cnnlHandle_t h) {
-  if (s.d != nullptr) {
-    return;
-  }
-  s.a_half = make_desc(256, 131072, CNNL_DTYPE_HALF);
-  s.b_half = make_desc(131072, 1, CNNL_DTYPE_HALF);
-  s.a_float = make_desc(256, 131072, CNNL_DTYPE_FLOAT);
-  s.b_float = make_desc(131072, 1, CNNL_DTYPE_FLOAT);
-  s.c_float = make_desc(256, 1, CNNL_DTYPE_FLOAT);
-  CNNL_CHECK(cnnlMatMulDescCreate(&s.d));
-  CNNL_CHECK(cnnlCreateMatMulAlgo(&s.e));
-  cnnlMatMulHeuristicResult_t r;
-  CNNL_CHECK(cnnlCreateMatMulHeuristicResult(&r));
-  int v = 0;
-  int lda = 131072;
-  int ldb = 1;
-  int ldc = 1;
-  CNNL_CHECK(cnnlSetMatMulDescAttr(s.d, CNNL_MATMUL_ALLOW_TF32, &v, sizeof(v)));
-  CNNL_CHECK(cnnlSetMatMulDescAttr(s.d, CNNL_MATMUL_DESC_LDA, &lda, sizeof(lda)));
-  CNNL_CHECK(cnnlSetMatMulDescAttr(s.d, CNNL_MATMUL_DESC_LDB, &ldb, sizeof(ldb)));
-  CNNL_CHECK(cnnlSetMatMulDescAttr(s.d, CNNL_MATMUL_DESC_LDC, &ldc, sizeof(ldc)));
-  int q = 0;
-  CNNL_CHECK(cnnlGetMatMulAlgoHeuristic(
-      h, s.d, s.a_float, s.b_float, s.c_float, s.c_float, nullptr, 1, &r, &q));
-  CNNL_CHECK(cnnlGetMatMulHeuristicResult(r, s.e, &s.ws));
-  CNNL_CHECK(cnnlDestroyMatMulHeuristicResult(r));
-}
-
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto C = torch::empty({256, 1}, A.options().dtype(torch::kFloat32));
 
-  static MatmulState state;
-  static torch::Tensor a32;
-  static torch::Tensor b32;
+  static cnnlTensorDescriptor_t a = nullptr;
+  static cnnlTensorDescriptor_t b = nullptr;
+  static cnnlTensorDescriptor_t c = nullptr;
+  static cnnlMatMulDescriptor_t d = nullptr;
+  static cnnlMatMulAlgo_t e = nullptr;
+  static size_t ws = 0;
 
   cnnlHandle_t h = torch_mlu::getCurrentHandle();
   float alpha = 1.0f;
   float beta = 0.0f;
 
-  init_state(state, h);
-
-  const void *a_ptr = A.data_ptr();
-  const void *b_ptr = B.data_ptr();
-  const cnnlTensorDescriptor_t a_desc = state.a_float;
-  const cnnlTensorDescriptor_t b_desc = state.b_float;
-
-  if (A.scalar_type() == at::kHalf) {
-    if (!a32.defined()) {
-      a32 = torch::empty({256, 131072}, A.options().dtype(torch::kFloat32));
-    } else {
-      a32.resize_({256, 131072});
-    }
-    if (!b32.defined()) {
-      b32 = torch::empty({131072, 1}, A.options().dtype(torch::kFloat32));
-    } else {
-      b32.resize_({131072, 1});
-    }
-    CNNL_CHECK(cnnlCastDataType(h, state.a_half, A.data_ptr(),
-                                CNNL_CAST_HALF_TO_FLOAT, state.a_float,
-                                a32.data_ptr()));
-    CNNL_CHECK(cnnlCastDataType(h, state.b_half, B.data_ptr(),
-                                CNNL_CAST_HALF_TO_FLOAT, state.b_float,
-                                b32.data_ptr()));
-    a_ptr = a32.data_ptr();
-    b_ptr = b32.data_ptr();
-  } else {
-    TORCH_CHECK(A.scalar_type() == at::kFloat, "unsupported dtype");
+  if (d == nullptr) {
+    a = make_desc(256, 131072, CNNL_DTYPE_HALF);
+    b = make_desc(131072, 1, CNNL_DTYPE_HALF);
+    c = make_desc(256, 1, CNNL_DTYPE_FLOAT);
+    CNNL_CHECK(cnnlMatMulDescCreate(&d));
+    CNNL_CHECK(cnnlCreateMatMulAlgo(&e));
+    cnnlMatMulHeuristicResult_t r;
+    CNNL_CHECK(cnnlCreateMatMulHeuristicResult(&r));
+    int v = 0;
+    int lda = 131072;
+    int ldb = 1;
+    int ldc = 1;
+    CNNL_CHECK(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_ALLOW_TF32, &v, sizeof(v)));
+    CNNL_CHECK(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDA, &lda, sizeof(lda)));
+    CNNL_CHECK(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDB, &ldb, sizeof(ldb)));
+    CNNL_CHECK(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDC, &ldc, sizeof(ldc)));
+    int q = 0;
+    CNNL_CHECK(cnnlGetMatMulAlgoHeuristic(h, d, a, b, c, c, nullptr, 1, &r, &q));
+    CNNL_CHECK(cnnlGetMatMulHeuristicResult(r, e, &ws));
+    CNNL_CHECK(cnnlDestroyMatMulHeuristicResult(r));
   }
 
-  auto workspace =
-      torch::empty({(int64_t)state.ws}, A.options().dtype(torch::kUInt8));
+  auto workspace = torch::empty({(int64_t)ws}, A.options().dtype(torch::kUInt8));
   CNNL_CHECK(cnnlMatMul_v2(
-      h, state.d, state.e, &alpha, a_desc, a_ptr, b_desc, b_ptr, &beta,
-      state.c_float, C.data_ptr(), state.ws ? workspace.data_ptr() : nullptr,
-      state.ws, state.c_float, C.data_ptr()));
+      h, d, e, &alpha, a, A.data_ptr(), b, B.data_ptr(), &beta, c, C.data_ptr(),
+      ws ? workspace.data_ptr() : nullptr, ws, c, C.data_ptr()));
   return C;
 }
