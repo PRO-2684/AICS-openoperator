@@ -5,6 +5,8 @@
 
 #define E0 128
 #define E1 256
+#define E2 32
+#define E3 64
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
                       const half *__restrict__ n, float *__restrict__ t,
@@ -12,101 +14,30 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
   __nram__ half h0[E1];
   __nram__ half h1[E1];
   __nram__ half h2[E1];
-  __nram__ float x[E1];
-  __nram__ float y[E1];
-  __nram__ float z[E1];
   float s = 0.0f;
+  const half e = (half)1.0e-6f;
+
   for (int r = taskId; r < E0; r += taskDim) {
     int q = r * E1;
     __memcpy(h0, a + q, E1 * sizeof(half), GDRAM2NRAM);
     __memcpy(h1, p + q, E1 * sizeof(half), GDRAM2NRAM);
     __memcpy(h2, n + q, E1 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(x, h0, E1);
-    __bang_half2float(y, h1, E1);
-    __bang_half2float(z, h2, E1);
-    __bang_sub(y, x, y, E1);
-    __bang_sub(z, x, z, E1);
-    __bang_mul(y, y, y, E1);
-    __bang_mul(z, z, z, E1);
-    __memcpy(x + 1, y, (E1 - 1) * sizeof(float), NRAM2NRAM);
-    x[0] = 0.0f;
-    __bang_add(y, y, x, E1);
-    __memcpy(x + 2, y, (E1 - 2) * sizeof(float), NRAM2NRAM);
-    x[0] = 0.0f;
-    x[1] = 0.0f;
-    __bang_add(y, y, x, E1);
-    __memcpy(x + 4, y, (E1 - 4) * sizeof(float), NRAM2NRAM);
-    for (int i = 0; i < 4; ++i) {
-      x[i] = 0.0f;
-    }
-    __bang_add(y, y, x, E1);
-    __memcpy(x + 8, y, (E1 - 8) * sizeof(float), NRAM2NRAM);
-    for (int i = 0; i < 8; ++i) {
-      x[i] = 0.0f;
-    }
-    __bang_add(y, y, x, E1);
-    __memcpy(x + 16, y, (E1 - 16) * sizeof(float), NRAM2NRAM);
-    for (int i = 0; i < 16; ++i) {
-      x[i] = 0.0f;
-    }
-    __bang_add(y, y, x, E1);
-    __memcpy(x + 32, y, (E1 - 32) * sizeof(float), NRAM2NRAM);
-    for (int i = 0; i < 32; ++i) {
-      x[i] = 0.0f;
-    }
-    __bang_add(y, y, x, E1);
-    __memcpy(x + 64, y, (E1 - 64) * sizeof(float), NRAM2NRAM);
-    for (int i = 0; i < 64; ++i) {
-      x[i] = 0.0f;
-    }
-    __bang_add(y, y, x, E1);
-    __memcpy(x + 128, y, (E1 - 128) * sizeof(float), NRAM2NRAM);
-    for (int i = 0; i < 128; ++i) {
-      x[i] = 0.0f;
-    }
-    __bang_add(y, y, x, E1);
 
-    __memcpy(x + 1, z, (E1 - 1) * sizeof(float), NRAM2NRAM);
-    x[0] = 0.0f;
-    __bang_add(z, z, x, E1);
-    __memcpy(x + 2, z, (E1 - 2) * sizeof(float), NRAM2NRAM);
-    x[0] = 0.0f;
-    x[1] = 0.0f;
-    __bang_add(z, z, x, E1);
-    __memcpy(x + 4, z, (E1 - 4) * sizeof(float), NRAM2NRAM);
-    for (int i = 0; i < 4; ++i) {
-      x[i] = 0.0f;
-    }
-    __bang_add(z, z, x, E1);
-    __memcpy(x + 8, z, (E1 - 8) * sizeof(float), NRAM2NRAM);
-    for (int i = 0; i < 8; ++i) {
-      x[i] = 0.0f;
-    }
-    __bang_add(z, z, x, E1);
-    __memcpy(x + 16, z, (E1 - 16) * sizeof(float), NRAM2NRAM);
-    for (int i = 0; i < 16; ++i) {
-      x[i] = 0.0f;
-    }
-    __bang_add(z, z, x, E1);
-    __memcpy(x + 32, z, (E1 - 32) * sizeof(float), NRAM2NRAM);
-    for (int i = 0; i < 32; ++i) {
-      x[i] = 0.0f;
-    }
-    __bang_add(z, z, x, E1);
-    __memcpy(x + 64, z, (E1 - 64) * sizeof(float), NRAM2NRAM);
-    for (int i = 0; i < 64; ++i) {
-      x[i] = 0.0f;
-    }
-    __bang_add(z, z, x, E1);
-    __memcpy(x + 128, z, (E1 - 128) * sizeof(float), NRAM2NRAM);
-    for (int i = 0; i < 128; ++i) {
-      x[i] = 0.0f;
-    }
-    __bang_add(z, z, x, E1);
+    __bang_fusion(FUSION_FSA, h1, h0, h1, e, E1);
+    __bang_square(h1, h1, E1);
+    __bang_reduce_sum(h1, h1, E1);
+    float u = (float)h1[0] + (float)h1[E3] + (float)h1[E3 * 2] +
+              (float)h1[E3 * 3];
 
-    float e = sqrtf(y[E1 - 1]) - sqrtf(z[E1 - 1]) + m;
-    if (e > 0.0f) {
-      s += e;
+    __bang_fusion(FUSION_FSA, h2, h0, h2, e, E1);
+    __bang_square(h2, h2, E1);
+    __bang_reduce_sum(h2, h2, E1);
+    float v = (float)h2[0] + (float)h2[E3] + (float)h2[E3 * 2] +
+              (float)h2[E3 * 3];
+
+    float e0 = sqrtf(u) - sqrtf(v) + m;
+    if (e0 > 0.0f) {
+      s += e0;
     }
   }
   t[taskId] = s;
@@ -114,8 +45,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
 
 __mlu_entry__ void k1(const float *__restrict__ t, float *__restrict__ y) {
   float s = 0.0f;
-#pragma unroll 32
-  for (int i = 0; i < 32; ++i) {
+#pragma unroll
+  for (int i = 0; i < E2; ++i) {
     s += t[i];
   }
   y[0] = s * 0.0078125f;
@@ -123,16 +54,26 @@ __mlu_entry__ void k1(const float *__restrict__ t, float *__restrict__ y) {
 
 torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive,
                         torch::Tensor negative, double margin) {
-  auto out = torch::empty({}, anchor.options().dtype(torch::kFloat32));
-  auto tmp = torch::empty({32}, anchor.options().dtype(torch::kFloat32));
+  static torch::Tensor out;
+  static torch::Tensor tmp;
+  if (!out.defined())
+    out = torch::empty({}, anchor.options().dtype(torch::kFloat32));
+  else
+    out.resize_({});
+  if (!tmp.defined())
+    tmp = torch::empty({E2}, anchor.options().dtype(torch::kFloat32));
+  else
+    tmp.resize_({E2});
+
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g0 = {32, 1, 1};
+  cnrtDim3_t g0 = {E2, 1, 1};
   k0<<<g0, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(anchor.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(positive.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(negative.data_ptr<at::Half>()),
       tmp.data_ptr<float>(), static_cast<float>(margin));
   cnrtDim3_t g1 = {1, 1, 1};
-  k1<<<g1, cnrtFuncTypeBlock, queue>>>(tmp.data_ptr<float>(), out.data_ptr<float>());
+  k1<<<g1, cnrtFuncTypeBlock, queue>>>(tmp.data_ptr<float>(),
+                                       out.data_ptr<float>());
   return out;
 }

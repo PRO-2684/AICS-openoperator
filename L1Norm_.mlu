@@ -3,29 +3,45 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define TOTAL_ELEMS (16 * 16384)
-#define TASKS 32
-#define ELEMS_PER_TASK (TOTAL_ELEMS / TASKS)
-#define L1_SCALE ((half)0.00007647275924682617f)
+#define E0 16
+#define E1 16384
+#define E2 256
+#define E3 64
 
-__mlu_entry__ void l1_norm_scale_kernel(half *__restrict__ x) {
-  const int base = taskId * ELEMS_PER_TASK;
+__mlu_entry__ void kernel(const half *__restrict__ input,
+                          half *__restrict__ output) {
+  const int row = taskId;
+  const half *src = (const half *)__builtin_assume_aligned(input + row * E1, 512);
+  half *dst = (half *)__builtin_assume_aligned(output + row * E1, 512);
 
-  half *px = (half *)__builtin_assume_aligned(x + base, 512);
+  __nram__ half a[E1];
+  __nram__ half b[E1];
+  __nram__ half c[E2];
 
-  __nram__ half hbuf[ELEMS_PER_TASK];
-
-  __memcpy(hbuf, px, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
-  __bang_mul_scalar(hbuf, hbuf, L1_SCALE, ELEMS_PER_TASK);
-  __memcpy(px, hbuf, ELEMS_PER_TASK * sizeof(half), NRAM2GDRAM);
+  __memcpy(a, src, E1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(b, a, E1 * sizeof(half), NRAM2NRAM);
+  __bang_abs(b, b, E1);
+  __bang_reduce_sum(b, b, E1);
+  __memcpy(c, b, sizeof(half), NRAM2NRAM, sizeof(half), E3 * sizeof(half),
+           E2 - 1);
+  __bang_reduce_sum(c, c, E2);
+  float s = (float)c[0] + (float)c[E3] + (float)c[E3 * 2] + (float)c[E3 * 3];
+  half inv = (half)(1.0f / s);
+  __bang_mul_scalar(a, a, inv, E1);
+  __memcpy(dst, a, E1 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty_like(x);
+  else
+    y.resize_(x.sizes());
+
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {TASKS, 1, 1};
-
-  l1_norm_scale_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
-
-  return x;
+  cnrtDim3_t dim = {E0, 1, 1};
+  kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  return y;
 }
