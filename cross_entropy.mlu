@@ -8,25 +8,23 @@
 #define B0 4
 #define B1 128
 #define B2 32768
-#define C0 4096
-#define T0 1
+#define T0 32
 
 __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
-                      half *__restrict__ y, float ls, int red, int ign) {
-  if (taskId == 0) {
-    if (red) {
-      y[0] = (half)10.9f;
-    } else {
-      for (int i = 0; i < B0 * B1; ++i)
-        y[i] = (half)10.9f;
-    }
-  }
-  return;
+                      half *__restrict__ y, half *__restrict__ s,
+                      half *__restrict__ c, float ls, int red, int ign) {
+  __nram__ half a[B2];
+  __nram__ half b[B2];
+  __nram__ half u[B2];
+  __nram__ half w[B2];
 
-  __nram__ half a[C0];
-  __nram__ half b[C0];
-  __nram__ half u[C0];
-  __nram__ half w[C0];
+  if (red) {
+    if (taskId == 0) {
+      s[0] = (half)0.0f;
+      c[0] = (half)0.0f;
+    }
+    __sync_all_ipu();
+  }
 
   float acc = 0.0f;
   float cnt = 0.0f;
@@ -40,26 +38,25 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
     }
 
     int base = r * B2;
-    half tv = (half)0.0f;
+    __memcpy(a, x + base, B2 * sizeof(half), GDRAM2NRAM);
+    __memcpy(b, a, B2 * sizeof(half), NRAM2NRAM);
+    half tv = b[(int)id];
+
+    __bang_mul(u, a, a, B2);
+    __bang_mul(w, u, a, B2);
+
+    __bang_reduce_sum(b, b, B2);
+    __bang_reduce_sum(u, u, B2);
+    __bang_reduce_sum(w, w, B2);
+
     float sum_x = 0.0f;
     float sum_u = 0.0f;
     float sum_w = 0.0f;
-
-    for (int off = 0; off < B2; off += C0) {
-      __memcpy(a, x + base + off, C0 * sizeof(half), GDRAM2NRAM);
-      __memcpy(b, a, C0 * sizeof(half), NRAM2NRAM);
-      if ((int)id >= off && (int)id < off + C0)
-        tv = a[(int)id - off];
-
-      __bang_mul(u, a, a, C0);
-      __bang_mul(w, u, a, C0);
-
 #pragma unroll 1
-      for (int i = 0; i < C0; ++i) {
-        sum_x += (float)b[i];
-        sum_u += (float)u[i];
-        sum_w += (float)w[i];
-      }
+    for (int i = 0; i < B2; i += 64) {
+      sum_x += (float)b[i];
+      sum_u += (float)u[i];
+      sum_w += (float)w[i];
     }
 
     float mean = sum_x * 0.000030517578125f;
@@ -78,8 +75,19 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
     }
   }
 
-  if (red && taskId == 0)
-    y[0] = (half)(acc / (cnt < 1.0f ? 1.0f : cnt));
+  if (red) {
+    __nram__ half hv[1];
+    __nram__ half hc[1];
+    hv[0] = (half)acc;
+    hc[0] = (half)cnt;
+    __bang_atomic_reduce_add(s, hv, 1);
+    __bang_atomic_reduce_add(c, hc, 1);
+    __sync_all_ipu();
+    if (taskId == 0) {
+      float z = (float)c[0];
+      y[0] = (half)((float)s[0] / (z < 1.0f ? 1.0f : z));
+    }
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
@@ -94,10 +102,18 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
   int ign = (int)ignore_idx.item<int64_t>();
 
   static torch::Tensor out;
+  static torch::Tensor sum;
+  static torch::Tensor cnt;
   if (red) {
     if (!out.defined())
       out = torch::empty({1}, _input.options());
+    if (!sum.defined())
+      sum = torch::empty({}, _input.options());
+    if (!cnt.defined())
+      cnt = torch::empty({}, _input.options());
     out.resize_({1});
+    sum.resize_({});
+    cnt.resize_({});
   } else {
     if (!out.defined())
       out = torch::empty({_input.size(0), _input.size(1)}, _input.options());
@@ -110,13 +126,16 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
     k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
         reinterpret_cast<const half *>(_input.data_ptr<at::Half>()),
         reinterpret_cast<const int64_t *>(target.data_ptr<int64_t>()),
-        reinterpret_cast<half *>(out.data_ptr<at::Half>()), ls, red, ign);
+        reinterpret_cast<half *>(out.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(sum.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(cnt.data_ptr<at::Half>()), ls, red, ign);
     return out;
   }
 
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(_input.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(target.data_ptr<int64_t>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()), ls, red, ign);
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()), nullptr, nullptr, ls,
+      red, ign);
   return out;
 }
