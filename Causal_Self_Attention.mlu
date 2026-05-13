@@ -33,8 +33,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
       __bang_write_value(a3 + i * 128 + z, 128 - z, (half)0.0f);
     }
   }
-  __bang_half2float(f0, a3, 8192);
-  __bang_reduce_sum(f1, f0, 8192);
+  __bang_reduce_sum(a0, a3, 8192);
 
   __memcpy(a1, v + base, 8192 * sizeof(half), GDRAM2NRAM);
   __bang_transpose(a2, a1, 128, 64);
@@ -42,8 +41,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __bang_matmul(f2, a3, w0, 64, 128, 64);
 #pragma unroll
   for (int i = 0; i < 64; ++i) {
-    float s = f1[i * 128] + f1[i * 128 + 32] + f1[i * 128 + 64] +
-              f1[i * 128 + 96];
+    float s = (float)a0[i * 128] + (float)a0[i * 128 + 64];
     __bang_mul_scalar(f2 + i * 64, f2 + i * 64, 1.0f / s, 64);
   }
   __bang_float2half_rn(a0, f2, 4096);
