@@ -20,7 +20,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
   __nram__ half h1[E1];
   __nram__ half h2[E1];
   float s = 0.0f;
-  const half e = (half)1.0e-6f;
 
   for (int r = taskId; r < E0; r += taskDim) {
     int q = r * E1;
@@ -29,14 +28,12 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
     __memcpy(h2, n + q, E1 * sizeof(half), GDRAM2NRAM);
 
     __bang_sub(h1, h0, h1, E1);
-    __bang_add_scalar(h1, h1, e, E1);
     __bang_square(h1, h1, E1);
     __bang_reduce_sum(h1, h1, E1);
     float u = (float)h1[0] + (float)h1[E3] + (float)h1[E3 * 2] +
               (float)h1[E3 * 3];
 
     __bang_sub(h2, h0, h2, E1);
-    __bang_add_scalar(h2, h2, e, E1);
     __bang_square(h2, h2, E1);
     __bang_reduce_sum(h2, h2, E1);
     float v = (float)h2[0] + (float)h2[E3] + (float)h2[E3 * 2] +
