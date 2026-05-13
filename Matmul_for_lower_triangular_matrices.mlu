@@ -75,11 +75,7 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
     cnnlMatMulHeuristicResult_t r;
     X(cnnlCreateMatMulHeuristicResult(&r));
     int v0 = 0;
-    int s = 1024;
     X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_ALLOW_TF32, &v0, sizeof(v0)));
-    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDA, &s, sizeof(s)));
-    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDB, &s, sizeof(s)));
-    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDC, &s, sizeof(s)));
     int n = 0;
     X(cnnlGetMatMulAlgoHeuristic(h, d, a, b, c, c, nullptr, 1, &r, &n));
     X(cnnlGetMatMulHeuristicResult(r, e, &z));
