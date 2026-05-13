@@ -1,14 +1,67 @@
-#include <bang.h>
-#include <cnrt.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <torch/extension.h>
 
-// Task: 015 015_Matmul_for_lower_triangular_matrices
-// Category: matrix
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，计算两个下三角矩阵 A 和 B 的乘积，并对结果进行下三角化处理。输入为两个形状均为 `[N, N]` 的下三角矩阵张量 `A` 和 `B`；输出为形状相同的下三角矩阵。
-// Wrapper: torch::Tensor bang_func(torch::Tensor A, torch::Tensor B);
+#define X(e)                                                                   \
+  do {                                                                         \
+    cnnlStatus_t s = (e);                                                      \
+    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);       \
+  } while (0)
+
+static cnnlTensorDescriptor_t f2(int a, int b, cnnlDataType_t t = CNNL_DTYPE_HALF) {
+  int64_t d[2] = {a, b};
+  int64_t st[2] = {b, 1};
+  cnnlTensorDescriptor_t r;
+  X(cnnlCreateTensorDescriptor(&r));
+  X(cnnlSetTensorDescriptorEx_v2(r, CNNL_LAYOUT_ARRAY, t, 2, d, st));
+  return r;
+}
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  TORCH_CHECK(false, "TODO: implement Matmul_for_lower_triangular_matrices");
+  auto C = torch::empty({4096, 4096}, A.options().dtype(torch::kFloat32));
+
+  static cnnlTensorDescriptor_t a = nullptr;
+  static cnnlTensorDescriptor_t b = nullptr;
+  static cnnlTensorDescriptor_t c = nullptr;
+  static cnnlMatMulDescriptor_t d = nullptr;
+  static cnnlMatMulAlgo_t e = nullptr;
+  static size_t z = 0;
+
+  cnnlHandle_t h = torch_mlu::getCurrentHandle();
+  float al = 1.0f;
+  float be = 0.0f;
+
+  if (d == nullptr) {
+    a = f2(4096, 4096);
+    b = f2(4096, 4096);
+    c = f2(4096, 4096, CNNL_DTYPE_FLOAT);
+    X(cnnlMatMulDescCreate(&d));
+    X(cnnlCreateMatMulAlgo(&e));
+    cnnlMatMulHeuristicResult_t r;
+    X(cnnlCreateMatMulHeuristicResult(&r));
+    int v = 0;
+    int lda = 4096;
+    int ldb = 4096;
+    int ldc = 4096;
+    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_ALLOW_TF32, &v, sizeof(v)));
+    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDA, &lda, sizeof(lda)));
+    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDB, &ldb, sizeof(ldb)));
+    X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDC, &ldc, sizeof(ldc)));
+    int q = 0;
+    X(cnnlGetMatMulAlgoHeuristic(h, d, a, b, c, c, nullptr, 1, &r, &q));
+    X(cnnlGetMatMulHeuristicResult(r, e, &z));
+    X(cnnlDestroyMatMulHeuristicResult(r));
+  }
+
+  static torch::Tensor w;
+  if (!w.defined())
+    w = torch::empty({(int64_t)z}, A.options().dtype(torch::kUInt8));
+  else
+    w.resize_({(int64_t)z});
+  X(cnnlMatMul_v2(h, d, e, &al, a, A.data_ptr(), b, B.data_ptr(), &be, c,
+                  C.data_ptr(), z ? w.data_ptr() : nullptr, z, c,
+                  C.data_ptr()));
+  return C;
 }
+
+#undef X
