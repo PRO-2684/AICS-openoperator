@@ -103,12 +103,12 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
   static torch::Tensor cnt;
   if (red) {
     if (!out.defined())
-      out = torch::empty({}, _input.options());
+      out = torch::empty({1}, _input.options());
     if (!sum.defined())
       sum = torch::empty({}, _input.options());
     if (!cnt.defined())
       cnt = torch::empty({}, _input.options());
-    out.resize_({});
+    out.resize_({1});
     sum.resize_({});
     cnt.resize_({});
   } else {
