@@ -24,6 +24,11 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __bang_matmul(f0, a0, w0, 64, 64, 128);
   __bang_mul_scalar(f0, f0, 0.25f, 8192);
   __bang_float2half_rn(a3, f0, 8192);
+#pragma unroll
+  for (int i = 0; i < 64; ++i) {
+    __bang_argmax(a2 + i * 64, a3 + i * 128, 128);
+    __bang_sub_scalar(a3 + i * 128, a3 + i * 128, a2[i * 64], 128);
+  }
   __bang_active_exp(a3, a3, 8192);
   __bang_reduce_sum(a0, a3, 8192);
 
