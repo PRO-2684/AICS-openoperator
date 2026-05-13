@@ -11,15 +11,17 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ w,
                       float *__restrict__ y) {
   __nram__ half a[E1];
   __nram__ float b[E1];
-  __nram__ int64_t e[128];
-  int s = taskId * 128;
-  __memcpy(e, w + s, 128 * sizeof(int64_t), GDRAM2NRAM);
-  for (int j = 0; j < 128; ++j) {
-    int p = (int)e[j];
-    __memcpy(a, x + (s + j) * E1, E1 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(b, a, E1);
-    __bang_atomic_reduce_add_async(y + p * E1, b, E1);
+  __nram__ float t[E1];
+  __bang_write_value(b, E1, 0.0f);
+  int p = taskId;
+  for (int j = 0; j < E0; ++j) {
+    if ((int)w[j] == p) {
+      __memcpy(a, x + j * E1, E1 * sizeof(half), GDRAM2NRAM);
+      __bang_half2float(t, a, E1);
+      __bang_add(b, b, t, E1);
+    }
   }
+  __memcpy(y + p * E1, b, E1 * sizeof(float), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
@@ -31,9 +33,8 @@ torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
     y.resize_({E2, E1});
 
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtMemsetAsync(y.data_ptr<float>(), 0, y.numel() * sizeof(float), q);
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, q>>>(
+  cnrtDim3_t d = {512, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(src.data_ptr<at::Half>()),
       index.data_ptr<int64_t>(),
       y.data_ptr<float>());
