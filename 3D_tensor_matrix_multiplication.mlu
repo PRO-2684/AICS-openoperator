@@ -37,8 +37,6 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
     c = f2(16384, 768, CNNL_DTYPE_FLOAT);
     X(cnnlMatMulDescCreate(&d));
     X(cnnlCreateMatMulAlgo(&e));
-    cnnlMatMulHeuristicResult_t r;
-    X(cnnlCreateMatMulHeuristicResult(&r));
     int v = 0;
     int lda = 2048;
     int ldb = 768;
@@ -47,10 +45,13 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
     X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDA, &lda, sizeof(lda)));
     X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDB, &ldb, sizeof(ldb)));
     X(cnnlSetMatMulDescAttr(d, CNNL_MATMUL_DESC_LDC, &ldc, sizeof(ldc)));
+    int ids[16];
     int q = 0;
-    X(cnnlGetMatMulAlgoHeuristic(h, d, a, b, c, c, nullptr, 1, &r, &q));
-    X(cnnlGetMatMulHeuristicResult(r, e, &z));
-    X(cnnlDestroyMatMulHeuristicResult(r));
+    X(cnnlGetMatMulAlgoIds(h, d, a, b, c, c, 12, ids, &q));
+    int id = q > 1 ? ids[1] : ids[0];
+    X(cnnlInitialMatMulAlgo(h, d, a, b, c, c,
+                            CNNL_MATMUL_ALGO_INIT_LIMITED_BY_ALGO_ID, id, e,
+                            &z));
   }
 
   auto w = torch::empty({(int64_t)z}, A.options().dtype(torch::kUInt8));
