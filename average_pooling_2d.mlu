@@ -8,8 +8,8 @@
 #define A2 1024
 #define A3 11
 #define A4 32
-#define A5 16
-#define A6 6
+#define A5 31
+#define A6 3
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[A5 * A3 * A2];
