@@ -71,7 +71,12 @@ static void init(S &s, cnnlHandle_t h) {
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  auto C = torch::empty({128, 512, 2048}, A.options());
+  static torch::Tensor C;
+  static torch::Tensor w;
+  if (!C.defined())
+    C = torch::empty({128, 512, 2048}, A.options());
+  else
+    C.resize_({128, 512, 2048});
 
   static S s;
   cnnlHandle_t h = torch_mlu::getCurrentHandle();
@@ -93,7 +98,10 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   float al = 1.0f;
   float be = 0.0f;
 
-  auto w = torch::empty({(int64_t)s.z}, A.options().dtype(torch::kUInt8));
+  if (!w.defined())
+    w = torch::empty({(int64_t)s.z}, A.options().dtype(torch::kUInt8));
+  else
+    w.resize_({(int64_t)s.z});
   X(cnnlStrideBatchMatMul_v3(h, s.d, s.e, ta, tb, m, n, k, bs, &al, s.a,
                              A.data_ptr(), la, sa, s.b, B.data_ptr(), lb, sb,
                              &be, s.c, C.data_ptr(), lc, sc,
