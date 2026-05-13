@@ -22,7 +22,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ w,
   __memcpy(a, x + s * E1, 128 * E1 * sizeof(half), GDRAM2NRAM);
   int n = 0;
   for (int j = 0; j < 128; j += 8) {
-    __bang_add(b, a + j * E1, (half)0.0f, E1 * 8);
+    __memcpy(b, a + j * E1, E1 * 8 * sizeof(half), NRAM2NRAM);
     for (int k = 0; k < 8; ++k) {
       int p = (int)e[j + k];
       __bang_add(d + p * E1, d + p * E1, b + k * E1, E1);
