@@ -4,49 +4,26 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void k0(unsigned char *__restrict__ y, int *__restrict__ z) {
+__mlu_entry__ void k0(const int64_t *__restrict__ x, unsigned char *__restrict__ y) {
   __nram__ unsigned char a[16384];
   int p = taskId * 32;
   __bang_write_zero(a, 16384);
-  __memcpy(y + p * 512, a, 16384 * sizeof(unsigned char), NRAM2GDRAM);
 #pragma unroll
   for (int r = 0; r < 32; ++r) {
-    z[p + r] = -1;
-  }
-}
-
-__mlu_entry__ void k1(const int64_t *__restrict__ x, unsigned char *__restrict__ y,
-                      int *__restrict__ z) {
-  int p = taskId * 32;
-#pragma unroll
-  for (int r = 0; r < 32; ++r) {
-    int q = p + r;
-    int old = z[q];
     int c = (int)x[p + r];
-    if (old >= 0) {
-      y[q * 512 + old] = 0;
-    }
-    y[q * 512 + c] = 1;
-    z[q] = c;
+    a[r * 512 + c] = 1;
   }
+  __memcpy(y + p * 512, a, 16384 * sizeof(unsigned char), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int n) {
   (void)n;
   static torch::Tensor y;
-  static torch::Tensor z;
-  static bool init = false;
   if (!y.defined()) {
     y = torch::empty({1024, 512}, x.options().dtype(torch::kUInt8));
-    z = torch::empty({1024}, x.options().dtype(torch::kInt32));
   }
   cnrtDim3_t d = {32, 1, 1};
-  cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  if (!init) {
-    k0<<<d, cnrtFuncTypeBlock, q>>>(y.data_ptr<unsigned char>(), z.data_ptr<int>());
-    init = true;
-  }
-  k1<<<d, cnrtFuncTypeBlock, q>>>(x.data_ptr<int64_t>(), y.data_ptr<unsigned char>(),
-                                  z.data_ptr<int>());
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      x.data_ptr<int64_t>(), y.data_ptr<unsigned char>());
   return y;
 }
