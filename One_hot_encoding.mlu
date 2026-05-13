@@ -3,16 +3,16 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void k0(const int64_t *__restrict__ x, unsigned int *__restrict__ y) {
-  __nram__ unsigned int a[2048];
+__mlu_entry__ void k0(const int64_t *__restrict__ x, uint64_t *__restrict__ y) {
+  __nram__ uint64_t a[1024];
   int p = taskId * 16;
-  __bang_write_zero(a, 2048);
+  __bang_write_zero(a, 1024);
 #pragma unroll
   for (int r = 0; r < 16; ++r) {
     int c = (int)x[p + r];
-    a[r * 128 + (c >> 2)] = 1u << ((c & 3) << 3);
+    a[r * 64 + (c >> 3)] = 1ULL << ((c & 7) << 3);
   }
-  __memcpy(y + p * 128, a, 2048 * sizeof(unsigned int), NRAM2GDRAM);
+  __memcpy(y + p * 64, a, 1024 * sizeof(uint64_t), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int n) {
@@ -20,6 +20,6 @@ torch::Tensor bang_func(torch::Tensor x, int n) {
   auto y = torch::empty({1024, 512}, x.options().dtype(torch::kUInt8));
   cnrtDim3_t d = {64, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      x.data_ptr<int64_t>(), reinterpret_cast<unsigned int *>(y.data_ptr<unsigned char>()));
+      x.data_ptr<int64_t>(), reinterpret_cast<uint64_t *>(y.data_ptr<unsigned char>()));
   return y;
 }
