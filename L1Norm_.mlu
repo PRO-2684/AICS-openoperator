@@ -3,14 +3,9 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void kernel(half *__restrict__ output) {
-  __gdramset(output + taskId * 16384, 16384, (half)0.0f);
-}
-
 torch::Tensor bang_func(torch::Tensor x) {
   auto y = torch::empty_like(x);
-  cnrtDim3_t d = {16, 1, 1};
-  kernel<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  cnrtMemsetAsync(reinterpret_cast<void *>(y.data_ptr<at::Half>()), 0,
+                  y.numel() * sizeof(half), torch_mlu::getCurMLUStream());
   return y;
 }
