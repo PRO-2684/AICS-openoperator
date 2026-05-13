@@ -14,6 +14,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __nram__ half a2[8192];
   __nram__ half a3[8192];
   __nram__ float f0[8192];
+  __nram__ float f1[8192];
   __nram__ float f2[4096];
   __wram__ half w0[8192];
 
@@ -23,24 +24,30 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __memcpy(w0, a2, 8192 * sizeof(half), NRAM2WRAM);
   __bang_matmul(f0, a0, w0, 64, 64, 128);
   __bang_mul_scalar(f0, f0, 0.25f, 8192);
-  __bang_float2half_rn(a3, f0, 8192);
 #pragma unroll
   for (int i = 0; i < 64; ++i) {
-    __bang_argmax(a2 + i * 64, a3 + i * 128, 128);
-    __bang_sub_scalar(a3 + i * 128, a3 + i * 128, a2[i * 64], 128);
+    float m = f0[i * 128];
+    for (int j = 1; j < 128; ++j) {
+      float v0 = f0[i * 128 + j];
+      if (v0 > m) {
+        m = v0;
+      }
+    }
+    __bang_sub_scalar(f0 + i * 128, f0 + i * 128, m, 128);
   }
-  __bang_active_exp(a3, a3, 8192);
-  __bang_reduce_sum(a0, a3, 8192);
+  __bang_active_exp(f0, f0, 8192);
+  __bang_reduce_sum(f1, f0, 8192);
+#pragma unroll
+  for (int i = 0; i < 64; ++i) {
+    float s = f1[i * 128] + f1[i * 128 + 64];
+    __bang_mul_scalar(f0 + i * 128, f0 + i * 128, 1.0f / s, 128);
+  }
 
   __memcpy(a1, v + base, 8192 * sizeof(half), GDRAM2NRAM);
   __bang_transpose(a2, a1, 128, 64);
   __memcpy(w0, a2, 8192 * sizeof(half), NRAM2WRAM);
+  __bang_float2half_rn(a3, f0, 8192);
   __bang_matmul(f2, a3, w0, 64, 128, 64);
-#pragma unroll
-  for (int i = 0; i < 64; ++i) {
-    float s = (float)a0[i * 128] + (float)a0[i * 128 + 64];
-    __bang_mul_scalar(f2 + i * 64, f2 + i * 64, 1.0f / s, 64);
-  }
   __bang_float2half_rn(a0, f2, 4096);
   __memcpy(y + base + r * 64, a0, 4096 * sizeof(half), NRAM2GDRAM);
 }
