@@ -26,8 +26,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     int e = n * A1;
     __memcpy(a, x + q * A2 * A2 + r * A3 * A2, h * A2 * sizeof(half),
              GDRAM2NRAM);
-    __bang_sumpool(b, a, 1, h, A2, A3, A3, A3, A3);
-    __bang_mul_scalar(b, b, (half)0.008264462809917355f, e);
+    __bang_avgpool(b, a, 1, h, A2, A3, A3, A3, A3);
     __memcpy(y + q * A1 * A1 + r * A1, b, e * sizeof(half), NRAM2GDRAM);
   }
 }
