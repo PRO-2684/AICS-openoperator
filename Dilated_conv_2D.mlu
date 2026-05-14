@@ -28,7 +28,6 @@ if not hasattr(torch.nn.Conv2d, "_aics_dil_init"):
 #define T0 2048
 
 __mlu_entry__ void k2(const half *__restrict__ x, float *__restrict__ y) {
-  __bang_write_value(y, 204800, 0.0f);
   for (int i = taskId; i < 73728; i += taskDim) {
     int t = i;
     int kw = t % 3;
@@ -90,7 +89,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   static torch::Tensor w;
   static void *last = nullptr;
   if (!w.defined())
-    w = torch::empty({128, 5, 5, 64}, kernel.options().dtype(torch::kFloat32));
+    w = torch::zeros({128, 5, 5, 64}, kernel.options().dtype(torch::kFloat32));
   if (last != kernel.data_ptr()) {
     cnrtDim3_t d = {32, 1, 1};
     k2<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
