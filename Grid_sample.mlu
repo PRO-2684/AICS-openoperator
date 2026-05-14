@@ -66,6 +66,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ g,
 
       __bang_lt_scalar(mx, x0, 127, T);
       __bang_lt_scalar(my, y0, 127, T);
+      __bang_mul_scalar(mx, mx, -1, T);
+      __bang_mul_scalar(my, my, -1, T);
       __bang_int322float(mx_f, mx, T, 0);
       __bang_int322float(my_f, my, T, 0);
       __bang_add(x1, x0, mx, T);
