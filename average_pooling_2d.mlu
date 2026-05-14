@@ -8,26 +8,67 @@
 #define A2 1024
 #define A3 11
 #define A4 32
-#define A5 34
-#define A6 3
+#define A5 16
+#define A6 6
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[A5 * A3 * A2];
-  __nram__ half b[A5 * A1];
+  __nram__ half a0[A5 * A3 * A2];
+  __nram__ half a1[A5 * A3 * A2];
+  __nram__ half b0[A5 * A1];
+  __nram__ half b1[A5 * A1];
 
   for (int p = taskId; p < A0 * A6; p += taskDim) {
     int q = p / A6;
-    int r = (p - q * A6) * A5;
-    int n = A1 - r;
+    int r = p - q * A6;
+    int s = r * A5;
+    int n = A1 - s;
     if (n > A5)
       n = A5;
     int h = n * A3;
     int e = n * A1;
-    __memcpy(a, x + q * A2 * A2 + r * A3 * A2, h * A2 * sizeof(half),
-             GDRAM2NRAM);
-    __bang_sumpool(b, a, 1, h, A2, A3, A3, A3, A3);
-    __bang_mul_scalar(b, b, (half)0.008264462809917355f, e);
-    __memcpy(y + q * A1 * A1 + r * A1, b, e * sizeof(half), NRAM2GDRAM);
+    half *ain = a0;
+    half *aout = a1;
+    half *bin = b0;
+    half *bout = b1;
+    __memcpy_async(ain, x + q * A2 * A2 + s * A3 * A2, h * A2 * sizeof(half),
+                   GDRAM2NRAM);
+    __asm__ volatile("sync;");
+    for (;;) {
+      int np = p + taskDim;
+      if (np < A0 * A6) {
+        int nq = np / A6;
+        int nr = np - nq * A6;
+        int ns = nr * A5;
+        int nn = A1 - ns;
+        if (nn > A5)
+          nn = A5;
+        int nh = nn * A3;
+        __memcpy_async(aout, x + nq * A2 * A2 + ns * A3 * A2,
+                       nh * A2 * sizeof(half), GDRAM2NRAM);
+      }
+      __bang_sumpool(bin, ain, 1, h, A2, A3, A3, A3, A3);
+      __bang_mul_scalar(bin, bin, (half)0.008264462809917355f, e);
+      __memcpy_async(y + q * A1 * A1 + s * A1, bin, e * sizeof(half),
+                     NRAM2GDRAM);
+      __asm__ volatile("sync;");
+      if (np >= A0 * A6)
+        break;
+      p = np;
+      q = np / A6;
+      r = np - q * A6;
+      s = r * A5;
+      n = A1 - s;
+      if (n > A5)
+        n = A5;
+      h = n * A3;
+      e = n * A1;
+      half *tmpa = ain;
+      ain = aout;
+      aout = tmpa;
+      half *tmpb = bin;
+      bin = bout;
+      bout = tmpb;
+    }
   }
 }
 
