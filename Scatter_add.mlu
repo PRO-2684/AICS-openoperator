@@ -7,7 +7,6 @@
 #define E1 256
 #define E2 512
 #define E3 4096
-#define E4 128
 
 __mlu_entry__ void k0(float *__restrict__ y) {
   __nram__ float a[E3];
@@ -19,19 +18,16 @@ __mlu_entry__ void k0(float *__restrict__ y) {
 
 __mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
                       float *__restrict__ y) {
-  __nram__ half a[E4 * E1];
-  __nram__ float b[8 * E1];
-  __nram__ int64_t e[E4];
-  int s = taskId * E4;
-  __memcpy(e, w + s, E4 * sizeof(int64_t), GDRAM2NRAM);
-  __memcpy(a, x + s * E1, E4 * E1 * sizeof(half), GDRAM2NRAM);
-  for (int j = 0; j < E4; j += 8) {
-    __bang_half2float(b, a + j * E1, 8 * E1);
-    for (int k = 0; k < 8; ++k) {
-      int p = (int)e[j + k];
-      __bang_atomic_reduce_add_async(y + p * E1, b + k * E1, E1);
-    }
-    __sync_io();
+  __nram__ half a[E0 * E1 / 32];
+  __nram__ float b[E0 * E1 / 32];
+  __nram__ int64_t e[128];
+  int s = taskId * 128;
+  __memcpy(e, w + s, 128 * sizeof(int64_t), GDRAM2NRAM);
+  __memcpy(a, x + s * E1, 128 * E1 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(b, a, 128 * E1);
+  for (int i = 0; i < 128; ++i) {
+    int p = (int)e[i];
+    __bang_atomic_reduce_add_async(y + p * E1, b + i * E1, E1);
   }
 }
 
