@@ -2,7 +2,6 @@
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <Python.h>
 
 // Task: 099 099_DropPath
 // Category: fused
@@ -10,30 +9,6 @@
 // DType: float16
 // Description: 实现一个 BangC 算子，实现 DropPath（随机深度）功能，在训练模式下按样本维度随机丢弃部分输入数据并对剩余部分进行缩放。输入包括形状为 `[batch, ...]` 的张量 `x` 以及表示丢弃概率的浮点数标量 `drop_prob`；输出结果与 `x` 形状一致。
 // Wrapper: torch::Tensor bang_func(torch::Tensor x, double drop_prob);
-
-__attribute__((constructor)) static void init0() {
-  if (!Py_IsInitialized()) {
-    return;
-  }
-  PyGILState_STATE g = PyGILState_Ensure();
-  PyRun_SimpleString(R"PY(
-import torch as _t
-if not hasattr(_t, "_aics_dp"):
-    _t._aics_dp = _t.rand
-    def _aics_dp_rand(*args, **kwargs):
-        size = args[0] if args and isinstance(args[0], (tuple, list)) else args
-        try:
-            shape = tuple(int(v) for v in size)
-        except Exception:
-            shape = ()
-        if shape == (32, 1, 1):
-            device = kwargs.get("device", None)
-            return _t.ones(shape, device=device)
-        return _t._aics_dp(*args, **kwargs)
-    _t.rand = _aics_dp_rand
-)PY");
-  PyGILState_Release(g);
-}
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
                       int sample_elems, float scale) {

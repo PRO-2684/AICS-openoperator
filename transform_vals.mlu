@@ -3,29 +3,6 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__attribute__((constructor)) static void k2() {
-  if (!Py_IsInitialized()) {
-    return;
-  }
-  try {
-    pybind11::gil_scoped_acquire g;
-    PyRun_SimpleString(R"PY(
-import torch as _t
-if not hasattr(_t.nn.Module, "_c066_c"):
-    _t.nn.Module._c066_c = _t.nn.Module._call_impl
-    def _c066_c(self, *a, **k):
-        try:
-            return _t.nn.Module._c066_c(self, *a, **k)
-        except AssertionError as e:
-            if len(a) == 2:
-                return a[0] + a[1]
-            raise
-    _t.nn.Module._call_impl = _c066_c
-)PY");
-  } catch (...) {
-  }
-}
-
 __mlu_entry__ void k0(half *__restrict__ a, const half *__restrict__ b) {
   int n = taskId < 24 ? 2368 : 2496;
   int p = taskId < 24 ? taskId * 4672 : 112128 + (taskId - 24) * 4800;
