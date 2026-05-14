@@ -8,20 +8,18 @@
 #define E1 256
 
 __mlu_entry__ void k0(const half *__restrict__ x, int64_t *__restrict__ y) {
-  for (int p = taskId; p < E0; p += taskDim) {
-    int n = p >> 8;
-    int j = p & 255;
-    int base = n * 65536 + j;
-    half mv = x[base];
-    int mi = 0;
-    for (int i = 1; i < E1; ++i) {
-      half v = x[base + i * E1];
-      if (v > mv) {
-        mv = v;
-        mi = i;
-      }
+  __nram__ half a[65536];
+  __nram__ half b[65536];
+  __nram__ float c[256];
+  __nram__ float r[2];
+  for (int n = taskId; n < 16; n += taskDim) {
+    __memcpy(a, x + n * 65536, 65536 * sizeof(half), GDRAM2NRAM);
+    __bang_transpose(b, a, E1, E1);
+    for (int j = 0; j < E1; ++j) {
+      __bang_half2float(c, b + j * E1, E1);
+      __bang_argmax(r, c, E1);
+      y[n * E1 + j] = (int64_t)r[1];
     }
-    y[p] = (int64_t)mi;
   }
 }
 
