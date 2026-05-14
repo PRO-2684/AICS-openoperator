@@ -16,7 +16,7 @@
 #define E10 41600
 #define E11 49536
 
-__mlu_entry__ void k0(const half *__restrict__ w, half *__restrict__ z) {
+__mlu_entry__ void k0(const half *__restrict__ w, float *__restrict__ z) {
   for (int p = taskId; p < E9; p += taskDim) {
     int ci = p & 31;
     int t = p >> 5;
@@ -25,18 +25,19 @@ __mlu_entry__ void k0(const half *__restrict__ w, half *__restrict__ z) {
     int kh = t % 3;
     int co = t / 3;
     z[((co * 3 + kh) * 3 + kw) * E1 + ci] =
-        w[((ci * E2 + co) * 3 + (2 - kh)) * 3 + (2 - kw)];
+        (float)w[((ci * E2 + co) * 3 + (2 - kh)) * 3 + (2 - kw)];
   }
 }
 
-__mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
+__mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ w,
                       float *__restrict__ y) {
   __nram__ half a[E10];
   __nram__ half aa[E10];
+  __nram__ float ac[E10];
   __nram__ float b[E11];
   __nram__ float d[E11];
-  __wram__ half e[E9];
-  __memcpy(e, w, E9 * sizeof(half), GDRAM2WRAM);
+  __wram__ float e[E9];
+  __memcpy(e, w, E9 * sizeof(float), GDRAM2WRAM);
   for (int g = taskId; g < E0 * 44; g += taskDim) {
     int n = g / 44;
     int r = (g - n * 44) * E8;
@@ -57,7 +58,8 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
       }
     }
     __bang_reshape_nchw2nhwc(aa, a, 1, ih, E7, E1);
-    __bang_conv(b, aa, e, E1, ih, E7, 3, 3, 1, 1, E2);
+    __bang_half2float(ac, aa, m);
+    __bang_conv(b, ac, e, E1, ih, E7, 3, 3, 1, 1, E2);
     __bang_transpose(d, b, h * E6, E2);
     for (int co = 0; co < E2; ++co) {
       __memcpy(y + (n * E2 + co) * E5 * E6 + r * E6,
@@ -77,15 +79,14 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, int c0, int c1,
   (void)g;
   (void)b;
   auto y = torch::empty({E0, E2, E5, E6}, x.options().dtype(torch::kFloat32));
-  auto z = torch::empty({E9}, x.options());
+  auto z = torch::empty({E9}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {4, 8, 1};
   k0<<<d, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(z.data_ptr<at::Half>()));
+      z.data_ptr<float>());
   k1<<<d, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(z.data_ptr<at::Half>()),
-      y.data_ptr<float>());
+      z.data_ptr<float>(), y.data_ptr<float>());
   return y;
 }
