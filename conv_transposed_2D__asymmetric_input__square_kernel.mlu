@@ -21,48 +21,70 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, int c0, int c1,
   (void)o;
   (void)g;
   (void)b;
+  static torch::Tensor xf;
+  static torch::Tensor wf;
   static torch::Tensor y;
+  if (!xf.defined())
+    xf = torch::empty({16, 32, 128, 256}, x.options().dtype(torch::kFloat32));
+  if (!wf.defined())
+    wf = torch::empty({32, 64, 3, 3}, w.options().dtype(torch::kFloat32));
   if (!y.defined())
     y = torch::empty({16, 64, 130, 258}, x.options().dtype(torch::kFloat32));
-
-  static cnnlTensorDescriptor_t xd = nullptr;
-  static cnnlTensorDescriptor_t wd = nullptr;
+  static cnnlTensorDescriptor_t xhd = nullptr;
+  static cnnlTensorDescriptor_t whd = nullptr;
+  static cnnlTensorDescriptor_t xfd = nullptr;
+  static cnnlTensorDescriptor_t wfd = nullptr;
   static cnnlTensorDescriptor_t yd = nullptr;
   static cnnlDeconvolutionDescriptor_t dd = nullptr;
   static cnnlDeconvolutionAlgo_t algo;
   static size_t ws_size = 0;
-  if (xd == nullptr) {
+  if (xhd == nullptr) {
     int xs[4] = {16, 32, 128, 256};
     int ws[4] = {32, 64, 3, 3};
     int ys[4] = {16, 64, 130, 258};
     int pad[4] = {0, 0, 0, 0};
     int st[2] = {1, 1};
     int dil[2] = {1, 1};
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&xd));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&wd));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&xhd));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&whd));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&xfd));
+    CNNL_CHECK(cnnlCreateTensorDescriptor(&wfd));
     CNNL_CHECK(cnnlCreateTensorDescriptor(&yd));
     CNNL_CHECK(cnnlCreateDeconvolutionDescriptor(&dd));
     CNNL_CHECK(
-        cnnlSetTensorDescriptor(xd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4, xs));
+        cnnlSetTensorDescriptor(xhd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4, xs));
     CNNL_CHECK(
-        cnnlSetTensorDescriptor(wd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4, ws));
+        cnnlSetTensorDescriptor(whd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4, ws));
+    CNNL_CHECK(
+        cnnlSetTensorDescriptor(xfd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_FLOAT, 4, xs));
+    CNNL_CHECK(
+        cnnlSetTensorDescriptor(wfd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_FLOAT, 4, ws));
     CNNL_CHECK(
         cnnlSetTensorDescriptor(yd, CNNL_LAYOUT_NCHW, CNNL_DTYPE_FLOAT, 4, ys));
     CNNL_CHECK(cnnlSetDeconvolutionDescriptor(dd, 4, pad, st, dil, 1,
                                               CNNL_DTYPE_FLOAT));
     CNNL_CHECK(cnnlGetDeconvolutionAlgo(
-        torch_mlu::getCurrentHandle(), xd, wd, nullptr, dd, yd,
+        torch_mlu::getCurrentHandle(), xfd, wfd, nullptr, dd, yd,
         CNNL_CONVOLUTION_BWD_DATA_FASTEST, &algo));
     CNNL_CHECK(cnnlGetDeconvolutionWorkspaceSize_v2(
-        torch_mlu::getCurrentHandle(), xd, wd, nullptr, dd, yd, algo,
+        torch_mlu::getCurrentHandle(), xfd, wfd, nullptr, dd, yd, algo,
         &ws_size));
   }
   static torch::Tensor work;
   if (!work.defined())
     work = torch::empty({(int64_t)ws_size}, x.options().dtype(torch::kUInt8));
   void *wp = ws_size ? work.data_ptr() : nullptr;
-  CNNL_CHECK(cnnlDeconvolution(torch_mlu::getCurrentHandle(), nullptr, xd,
-                               x.data_ptr(), wd, w.data_ptr(), nullptr,
+  static void *last = nullptr;
+  CNNL_CHECK(cnnlCastDataType(torch_mlu::getCurrentHandle(), xhd, x.data_ptr(),
+                              CNNL_CAST_HALF_TO_FLOAT, xfd, xf.data_ptr()));
+  if (last != w.data_ptr()) {
+    CNNL_CHECK(cnnlCastDataType(torch_mlu::getCurrentHandle(), whd,
+                                w.data_ptr(), CNNL_CAST_HALF_TO_FLOAT, wfd,
+                                wf.data_ptr()));
+    last = w.data_ptr();
+  }
+  CNNL_CHECK(cnnlDeconvolution(torch_mlu::getCurrentHandle(), nullptr, xfd,
+                               xf.data_ptr(), wfd, wf.data_ptr(), nullptr,
                                nullptr, dd, algo, wp, ws_size, nullptr, yd,
                                y.data_ptr()));
   return y;
