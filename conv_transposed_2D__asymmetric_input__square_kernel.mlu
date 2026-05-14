@@ -57,7 +57,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     }
     __bang_reshape_nchw2nhwc(aa, a, 1, ih, E7, E1);
     __bang_conv(b, aa, e, E1, ih, E7, 3, 3, 1, 1, E2);
-    __bang_reshape_nhwc2nchw(d, b, 1, h, E6, E2);
+    __bang_transpose(d, b, h * E6, E2);
     for (int co = 0; co < E2; ++co) {
       __memcpy(y + (n * E2 + co) * E5 * E6 + r * E6,
                d + co * h * E6, h * E6 * sizeof(float), NRAM2GDRAM);
