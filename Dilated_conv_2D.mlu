@@ -23,46 +23,57 @@ if not hasattr(torch.nn.Conv2d, "_aics_dil_init"):
   PyGILState_Release(s);
 }
 
-#define E0 128
-#define E1 16384
-#define E2 262144
+#define T0 2048
+#define R0 128
+#define H0 6
+#define W0 132
+
+__mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ y) {
+  for (int i = taskId; i < 73728; i += taskDim) {
+    int t = i;
+    int c = t % 64;
+    t /= 64;
+    int w = t % 3;
+    t /= 3;
+    int h = t % 3;
+    int o = t / 3;
+    y[i] = x[((o * 64 + c) * 3 + h) * 3 + w];
+  }
+}
 
 __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                       float *__restrict__ y) {
-  __nram__ half a[E0];
-  __nram__ half k[576];
-  __nram__ float b[E0];
-  __nram__ float c[E0];
-  for (int u = taskId; u < E2; u += taskDim) {
-    int t = u;
-    int oh = t & 127;
-    t >>= 7;
-    int oc = t & 127;
+  __nram__ half a[H0 * W0 * 64];
+  __nram__ float b[2 * R0 * 64];
+  __wram__ half k[128 * 3 * 3 * 64];
+  __memcpy(k, w, 73728 * sizeof(half), GDRAM2WRAM);
+  for (int t = taskId; t < T0; t += taskDim) {
+    int tile = t & 63;
+    int g = (t >> 6) & 1;
     int n = t >> 7;
-    __bang_write_value(c, E0, 0.0f);
-    __memcpy(k, w + oc * 576, 576 * sizeof(half), GDRAM2NRAM);
-    for (int ic = 0; ic < 64; ++ic) {
-      const half *xp = x + n * 1048576 + ic * E1;
-      const half *wp = k + ic * 9;
-      for (int kh = 0; kh < 3; ++kh) {
-        int ih = oh + kh * 2 - 2;
-        if ((unsigned)ih >= 128)
-          continue;
-        const half *row = xp + ih * 128;
-        for (int kw = 0; kw < 3; ++kw) {
-          int off = kw * 2 - 2;
-          int ds = off < 0 ? -off : 0;
-          int ss = off > 0 ? off : 0;
-          int len = 128 - ds - ss;
-          __bang_write_value(a, E0, (half)0.0f);
-          __memcpy(a + ds, row + ss, len * sizeof(half), GDRAM2NRAM);
-          __bang_half2float(b, a, E0);
-          __bang_fusion(FUSION_FMA, c, b, (float)wp[kh * 3 + kw], c, E0, E0);
-        }
+    __bang_write_value(a, H0 * W0 * 64, (half)0.0f);
+    int oh = tile * 2;
+    int base_h = oh - 2;
+    int limit_h = oh + 4;
+    for (int ih = base_h; ih < limit_h; ++ih) {
+      if ((unsigned)ih >= 128)
+        continue;
+      int rh = ih - base_h;
+      for (int c = 0; c < 64; ++c) {
+        half *dst_row = a + c * H0 * W0 + rh * W0 + 2;
+        const half *src_row = x + n * 1048576 + c * 16384 + ih * 128;
+        __memcpy(dst_row, src_row, 128 * sizeof(half),
+                 GDRAM2NRAM);
       }
     }
-    __memcpy(y + n * 2097152 + oc * E1 + oh * 128, c, E0 * sizeof(float),
-             NRAM2GDRAM);
+    __bang_conv(b, a, k + g * 36864, 64, H0, W0, 3, 3, 1, 1, 64, 2, 2, 1, 1);
+    for (int r = 0; r < 2; ++r) {
+      int row = oh + r;
+      for (int oc = 0; oc < 64; ++oc) {
+        __memcpy(y + n * 2097152 + (g * 64 + oc) * 16384 + row * 128,
+                 b + oc * 256 + r * 128, 128 * sizeof(float), NRAM2GDRAM);
+      }
+    }
   }
 }
 
@@ -74,11 +85,23 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)kernel_size;
   (void)dilation;
   (void)padding;
+  static torch::Tensor w;
+  static void *last = nullptr;
+  if (!w.defined())
+    w = torch::empty({128, 3, 3, 64}, kernel.options());
+  else
+    w.resize_({128, 3, 3, 64});
+  if (last != kernel.data_ptr()) {
+    cnrtDim3_t dim = {32, 1, 1};
+    k2<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+        reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(w.data_ptr<at::Half>()));
+    last = kernel.data_ptr();
+  }
   auto y = torch::empty({16, 128, 128, 128}, x.options().dtype(torch::kFloat32));
-  cnrtDim3_t dim = {4, 8, 1};
+  cnrtDim3_t dim = {32, 1, 1};
   k1<<<dim, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
-      y.data_ptr<float>());
+      reinterpret_cast<const half *>(w.data_ptr<at::Half>()), y.data_ptr<float>());
   return y;
 }
