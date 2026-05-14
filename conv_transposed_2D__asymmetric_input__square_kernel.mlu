@@ -15,7 +15,7 @@
 #define E9 18432
 #define E10 58240
 #define E11 82560
-#define E12 16512
+#define E12 33024
 
 __mlu_entry__ void k0(const half *__restrict__ w, half *__restrict__ z) {
   for (int p = taskId; p < E9; p += taskDim) {
@@ -59,11 +59,15 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     }
     __bang_transpose(aa, a, E1, ih * E7);
     __bang_conv(b, aa, e, E1, ih, E7, 3, 3, 1, 1, E2);
-    for (int rr = 0; rr < h; ++rr) {
-      __bang_transpose(d, b + rr * E6 * E2, E6, E2);
+    for (int rr = 0; rr < h; rr += 2) {
+      int rows = 2;
+      if (rr + rows > h)
+        rows = h - rr;
+      __bang_transpose(d, b + rr * E6 * E2, E6 * rows, E2);
       for (int co = 0; co < E2; ++co) {
         __memcpy(y + (n * E2 + co) * E5 * E6 + (r + rr) * E6,
-                 d + co * E6, E6 * sizeof(float), NRAM2GDRAM);
+                 d + co * E6 * rows, rows * E6 * sizeof(float),
+                 NRAM2GDRAM);
       }
     }
   }
