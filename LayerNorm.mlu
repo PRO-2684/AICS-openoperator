@@ -12,14 +12,21 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       const half *__restrict__ b, half *__restrict__ y) {
-  (void)w;
-  (void)b;
   __nram__ half xh[R2];
   __nram__ half yh[R2];
+  __nram__ half wh[E1];
+  __nram__ half bh[E1];
   __nram__ float xf[R2];
   __nram__ float tf[R2];
+  __nram__ float wf[E1];
+  __nram__ float bf[E1];
   __nram__ float sf[64];
   __nram__ float vf[64];
+
+  __memcpy(wh, w, E1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(bh, b, E1 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(wf, wh, E1);
+  __bang_half2float(bf, bh, E1);
 
   for (int r = taskId; r < R1; r += taskDim) {
     int p = r * R2;
@@ -36,6 +43,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     for (int i = 0; i < R0; ++i) {
       float q = 1.0f / sqrtf(vf[i] * 0.001953125f + 0.00001f);
       __bang_mul_scalar(xf + i * E1, xf + i * E1, q, E1);
+      __bang_mul(xf + i * E1, xf + i * E1, wf, E1);
+      __bang_add(xf + i * E1, xf + i * E1, bf, E1);
     }
     __bang_float2half_rn(yh, xf, R2);
     __memcpy(y + p, yh, R2 * sizeof(half), NRAM2GDRAM);
