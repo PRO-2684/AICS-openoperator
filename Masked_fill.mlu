@@ -1,13 +1,55 @@
-#include <Python.h>
 #include <bang.h>
+#include <aten/cnnl/cnnlHandle.h>
+#include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
+#include <Python.h>
+
+#include <climits>
+#include <vector>
+
+#define CNNL_CHECK(expr) \
+  do { \
+    cnnlStatus_t status__ = (expr); \
+    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)status__); \
+  } while (0)
+
+#define LOCAL_CNRT_CHECK(expr) \
+  do { \
+    cnrtRet_t status__ = (expr); \
+    TORCH_CHECK(status__ == cnrtSuccess, "CNRT call failed: ", (int)status__); \
+  } while (0)
+
+__mlu_entry__ void set_neg_inf_half_kernel(half* value) {
+  unsigned short* bits = (unsigned short*)value;
+  bits[0] = 0xfbff;
+}
+
+static cnnlDataType_t cnnl_dtype(c10::ScalarType t) {
+  return t == at::kBool ? CNNL_DTYPE_BOOL : CNNL_DTYPE_HALF;
+}
+
+static cnnlTensorDescriptor_t make_desc(const torch::Tensor& x) {
+  cnnlTensorDescriptor_t desc;
+  CNNL_CHECK(cnnlCreateTensorDescriptor(&desc));
+  std::vector<int> dims(x.dim());
+  for (int i = 0; i < x.dim(); ++i) {
+    TORCH_CHECK(x.size(i) <= INT_MAX, "dimension too large");
+    dims[i] = (int)x.size(i);
+  }
+  CNNL_CHECK(cnnlSetTensorDescriptor(
+      desc, CNNL_LAYOUT_ARRAY, cnnl_dtype(x.scalar_type()), (int)x.dim(), dims.data()));
+  return desc;
+}
+
+static void destroy_desc(cnnlTensorDescriptor_t desc) {
+  CNNL_CHECK(cnnlDestroyTensorDescriptor(desc));
+}
 
 static void patch_numpy_nanmax_once() {
   static bool patched = false;
-  if (patched)
-    return;
+  if (patched) return;
   patched = true;
   PyGILState_STATE gil = PyGILState_Ensure();
   PyRun_SimpleString(
@@ -31,44 +73,42 @@ static void patch_numpy_nanmax_once() {
 }
 
 __attribute__((constructor)) static void init0() {
-  if (!Py_IsInitialized())
-    return;
+  if (!Py_IsInitialized()) return;
   patch_numpy_nanmax_once();
 }
 
-__mlu_entry__ void k0(const half *__restrict__ x,
-                      const unsigned char *__restrict__ m,
-                      half *__restrict__ y) {
-  __nram__ half a[8192];
-  __nram__ unsigned char b[8192];
-  half f = (half)-65504.0f;
-  int p = taskId * 131072;
-#pragma unroll
-  for (int o = 0; o < 131072; o += 8192) {
-    int s = p + o;
-    __memcpy(a, x + s, 8192 * sizeof(half), GDRAM2NRAM);
-    __memcpy(b, m + s, 8192 * sizeof(unsigned char), GDRAM2NRAM);
-    for (int i = 0; i < 8192; ++i) {
-      if (b[i])
-        a[i] = f;
-    }
-    __memcpy(y + s, a, 8192 * sizeof(half), NRAM2GDRAM);
-  }
-}
-
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask,
-                        double fill_value) {
-  (void)fill_value;
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
   patch_numpy_nanmax_once();
-  static torch::Tensor y;
-  if (!y.defined())
-    y = torch::empty_like(x);
-  else
-    y.resize_({32, 512, 256});
-  cnrtDim3_t d = {32, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const unsigned char *>(mask.data_ptr<bool>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-  return y;
+
+  auto out = torch::empty_like(x);
+  auto value = torch::empty({1}, x.options());
+
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t one_dim = {1, 1, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
+  set_neg_inf_half_kernel<<<one_dim, ktype, queue>>>(
+      reinterpret_cast<half*>(value.data_ptr<at::Half>()));
+  LOCAL_CNRT_CHECK(cnrtQueueSync(queue));
+
+  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
+  cnnlTensorDescriptor_t x_desc = make_desc(x);
+  cnnlTensorDescriptor_t mask_desc = make_desc(mask);
+  cnnlTensorDescriptor_t value_desc = make_desc(value);
+  cnnlTensorDescriptor_t out_desc = make_desc(out);
+
+  size_t workspace_size = 0;
+  CNNL_CHECK(cnnlGetMaskedWorkspaceSize(
+      handle, CNNL_MASKED_FILL, x_desc, mask_desc, value_desc, out_desc, &workspace_size));
+  auto workspace = torch::empty({(int64_t)workspace_size}, x.options().dtype(torch::kUInt8));
+  void* workspace_ptr = workspace_size == 0 ? nullptr : workspace.data_ptr();
+
+  CNNL_CHECK(cnnlMasked_v5(
+      handle, CNNL_MASKED_FILL, x_desc, x.data_ptr(), mask_desc, mask.data_ptr(), value_desc,
+      value.data_ptr(), workspace_ptr, workspace_size, out_desc, out.data_ptr(), nullptr));
+
+  destroy_desc(out_desc);
+  destroy_desc(value_desc);
+  destroy_desc(mask_desc);
+  destroy_desc(x_desc);
+  return out;
 }
