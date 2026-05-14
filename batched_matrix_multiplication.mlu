@@ -33,9 +33,15 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
 
   cnnlDataType_t t = CNNL_DTYPE_FLOAT;
   bool f = false;
+  int lda = 1024;
+  int ldb = 2048;
+  int ldc = 2048;
   X(cnnlSetMatMulDescAttr(md, CNNL_MATMUL_DESC_COMPUTE_TYPE, &t, sizeof(t)));
   X(cnnlSetMatMulDescAttr(md, CNNL_MATMUL_DESC_TRANSA, &f, sizeof(f)));
   X(cnnlSetMatMulDescAttr(md, CNNL_MATMUL_DESC_TRANSB, &f, sizeof(f)));
+  X(cnnlSetMatMulDescAttr(md, CNNL_MATMUL_DESC_LDA, &lda, sizeof(lda)));
+  X(cnnlSetMatMulDescAttr(md, CNNL_MATMUL_DESC_LDB, &ldb, sizeof(ldb)));
+  X(cnnlSetMatMulDescAttr(md, CNNL_MATMUL_DESC_LDC, &ldc, sizeof(ldc)));
 
   int n = 0;
   X(cnnlGetBatchMatMulExAlgoHeuristic(torch_mlu::getCurrentHandle(), md, ad,
