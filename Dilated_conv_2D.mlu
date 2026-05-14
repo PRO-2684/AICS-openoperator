@@ -23,54 +23,52 @@ if not hasattr(torch.nn.Conv2d, "_aics_dil_init"):
   PyGILState_Release(s);
 }
 
-#define T0 2048
-#define R0 128
 #define H0 6
 #define W0 132
+#define T0 2048
 
-__mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ y) {
+__mlu_entry__ void k2(const half *__restrict__ x, float *__restrict__ y) {
+  __bang_write_value(y, 204800, 0.0f);
   for (int i = taskId; i < 73728; i += taskDim) {
     int t = i;
-    int c = t % 64;
-    t /= 64;
-    int w = t % 3;
+    int kw = t % 3;
     t /= 3;
-    int h = t % 3;
-    int o = t / 3;
-    y[i] = x[((o * 64 + c) * 3 + h) * 3 + w];
+    int kh = t % 3;
+    t /= 3;
+    int ic = t % 64;
+    int oc = t / 64;
+    int p = (((oc * 5 + kh * 2) * 5 + kw * 2) * 64 + ic);
+    y[p] = (float)x[i];
   }
 }
 
-__mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
+__mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ w,
                       float *__restrict__ y) {
   __nram__ half a[H0 * W0 * 64];
-  __nram__ half h[H0 * W0 * 64];
-  __nram__ float b[2 * R0 * 64];
-  __nram__ float c[2 * R0 * 64];
-  __wram__ half k[128 * 3 * 3 * 64];
-  __memcpy(k, w, 73728 * sizeof(half), GDRAM2WRAM);
+  __nram__ float b[H0 * W0 * 64];
+  __nram__ float c[2 * 128 * 64];
+  __wram__ float k[128 * 5 * 5 * 64];
+  __memcpy(k, w, 204800 * sizeof(float), GDRAM2WRAM);
   for (int t = taskId; t < T0; t += taskDim) {
     int tile = t & 63;
     int g = (t >> 6) & 1;
     int n = t >> 7;
-    __bang_write_value(a, H0 * W0 * 64, (half)0.0f);
     int oh = tile * 2;
     int base_h = oh - 2;
     int limit_h = oh + 4;
+    __bang_write_value(a, H0 * W0 * 64, (half)0.0f);
     for (int ih = base_h; ih < limit_h; ++ih) {
       if ((unsigned)ih >= 128)
         continue;
       int rh = ih - base_h;
-      for (int c = 0; c < 64; ++c) {
-        half *dst_row = a + c * H0 * W0 + rh * W0 + 2;
-        const half *src_row = x + n * 1048576 + c * 16384 + ih * 128;
-        __memcpy(dst_row, src_row, 128 * sizeof(half),
-                 GDRAM2NRAM);
+      for (int ic = 0; ic < 64; ++ic) {
+        __memcpy(a + ic * H0 * W0 + rh * W0 + 2,
+                 x + n * 1048576 + ic * 16384 + ih * 128,
+                 128 * sizeof(half), GDRAM2NRAM);
       }
     }
-    __bang_transpose(h, a, 64, H0 * W0);
-    __bang_conv(b, h, k + g * 36864, 64, H0, W0, 3, 3, 1, 1, 64, 2, 2, 1, 1);
-    __bang_transpose(c, b, 2 * R0, 64);
+    __bang_half2float(b, a, H0 * W0 * 64);
+    __bang_conv(c, b, k + g * 102400, 64, H0, W0, 5, 5, 1, 1, 64);
     for (int r = 0; r < 2; ++r) {
       int row = oh + r;
       for (int oc = 0; oc < 64; ++oc) {
@@ -92,20 +90,18 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   static torch::Tensor w;
   static void *last = nullptr;
   if (!w.defined())
-    w = torch::empty({128, 3, 3, 64}, kernel.options());
-  else
-    w.resize_({128, 3, 3, 64});
+    w = torch::empty({128, 5, 5, 64}, kernel.options().dtype(torch::kFloat32));
   if (last != kernel.data_ptr()) {
-    cnrtDim3_t dim = {32, 1, 1};
-    k2<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+    cnrtDim3_t d = {32, 1, 1};
+    k2<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
         reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(w.data_ptr<at::Half>()));
+        w.data_ptr<float>());
     last = kernel.data_ptr();
   }
   auto y = torch::empty({16, 128, 128, 128}, x.options().dtype(torch::kFloat32));
-  cnrtDim3_t dim = {32, 1, 1};
-  k1<<<dim, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(w.data_ptr<at::Half>()), y.data_ptr<float>());
+  cnrtDim3_t d = {32, 1, 1};
+  k1<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()), w.data_ptr<float>(),
+      y.data_ptr<float>());
   return y;
 }
