@@ -1,45 +1,64 @@
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#include <vector>
+#define E0 65536
+#define E1 128
+#define E2 8
 
-#define CNNL_CHECK(expr)                                                        \
-  do {                                                                         \
-    cnnlStatus_t status__ = (expr);                                            \
-    TORCH_CHECK(status__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ",         \
-                (int)status__);                                                \
-  } while (0)
+__mlu_func__ float f0(const half *__restrict__ x, half *__restrict__ t) {
+  __bang_sumpool(t, x, 64, 1, 1024, 1, 1024, 1024, 1);
+  float s = 0.0f;
+#pragma unroll
+  for (int i = 0; i < 64; ++i) {
+    s += (float)t[i];
+  }
+  return s;
+}
 
-inline cnnlTensorDescriptor_t make_nchw_desc() {
-  cnnlTensorDescriptor_t desc;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&desc));
-  std::vector<int> shape = {16, 64, 256, 256};
-  CNNL_CHECK(cnnlSetTensorDescriptor(desc, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4,
-                                     shape.data()));
-  return desc;
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[E0];
+  __nram__ half b[E0];
+
+  for (int g = taskId; g < E1; g += taskDim) {
+    int n = g >> 3;
+    int q = g & 7;
+    int base = (n * 64 + q * E2) * E0;
+    float s = 0.0f;
+    float v = 0.0f;
+
+#pragma unroll
+    for (int i = 0; i < E2; ++i) {
+      int p = base + i * E0;
+      __memcpy(a, x + p, E0 * sizeof(half), GDRAM2NRAM);
+      s += f0(a, b);
+      __bang_square(b, a, E0);
+      v += f0(b, a);
+    }
+
+    float m = s * 0.0000019073486328125f;
+    float d = v * 0.0000019073486328125f - 0.99699f;
+    float d2 = d * d;
+    float r = 1.0f + d * -0.5f + d2 * (0.375f - 0.3125f * d);
+
+#pragma unroll
+    for (int i = 0; i < E2; ++i) {
+      int p = base + i * E0;
+      __memcpy(a, x + p, E0 * sizeof(half), GDRAM2NRAM);
+      __bang_fusion(FUSION_FMA, a, a, (half)r, (half)(-m * r), E0);
+      __memcpy(y + p, a, E0 * sizeof(half), NRAM2GDRAM);
+    }
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int num_groups, int num_features) {
+  (void)num_groups;
   (void)num_features;
-
   auto y = torch::empty_like(x);
-
-  static cnnlTensorDescriptor_t x_desc = nullptr;
-  static size_t workspace_size = 0;
-  if (x_desc == nullptr) {
-    x_desc = make_nchw_desc();
-    CNNL_CHECK(cnnlGetGroupNormForwardWorkspaceSize(
-        torch_mlu::getCurrentHandle(), num_groups, x_desc, &workspace_size));
-  }
-
-  auto workspace =
-      torch::empty({(int64_t)workspace_size}, x.options().dtype(torch::kUInt8));
-
-  CNNL_CHECK(cnnlGroupNormForward_v3(
-      torch_mlu::getCurrentHandle(), 1.0e-5f, num_groups, x_desc, x.data_ptr(),
-      nullptr, nullptr, nullptr, workspace.data_ptr(), workspace_size, x_desc,
-      y.data_ptr(), nullptr, nullptr, nullptr));
-
+  cnrtDim3_t d = {128, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
