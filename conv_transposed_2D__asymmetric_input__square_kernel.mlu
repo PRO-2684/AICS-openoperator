@@ -17,7 +17,7 @@ __mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ y) {
     t /= 3;
     int oc = t % 64;
     int ic = t / 64;
-    int p = (((oc * 3 + (2 - kh)) * 3 + (2 - kw)) * 32 + ic);
+    int p = (((oc * 3 + kh) * 3 + kw) * 32 + ic);
     y[p] = x[i];
   }
 }
