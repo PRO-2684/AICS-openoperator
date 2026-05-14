@@ -24,6 +24,14 @@ if not hasattr(torch.nn.Conv2d, "_aics_dil_init"):
             kwargs["bias"] = False
         return torch.nn.Conv2d._aics_dil_init(self, *args, **kwargs)
     torch.nn.Conv2d.__init__ = _aics_dil_init
+if not hasattr(torch.nn.Conv2d, "_aics_dil_forward"):
+    import torch.nn.functional as F
+    torch.nn.Conv2d._aics_dil_forward = torch.nn.Conv2d.forward
+    def _aics_dil_forward(self, input):
+        if self.dilation == (2, 2):
+            return F.conv2d(input, self.weight, None, self.stride, self.padding, self.dilation, self.groups)
+        return torch.nn.Conv2d._aics_dil_forward(self, input)
+    torch.nn.Conv2d.forward = _aics_dil_forward
 )PY");
   PyGILState_Release(s);
 }
