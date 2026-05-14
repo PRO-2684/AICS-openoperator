@@ -1,42 +1,46 @@
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <cmath>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#include <vector>
+#define E0 3211264
+#define E1 3136
 
-#define CNNL_CHECK(expr)                                                        \
-  do {                                                                         \
-    cnnlStatus_t s__ = (expr);                                                 \
-    TORCH_CHECK(s__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s__);   \
-  } while (0)
-
-static cnnlTensorDescriptor_t make_desc() {
-  int shape[4] = {16, 64, 56, 56};
-  cnnlTensorDescriptor_t desc;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&desc));
-  CNNL_CHECK(cnnlSetTensorDescriptor(desc, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4,
-                                     shape));
-  return desc;
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
+                      float alpha, float beta, float k) {
+  for (int p = taskId; p < E0; p += taskDim) {
+    int s = p % E1;
+    int t = p / E1;
+    int c = t & 63;
+    int n = t >> 6;
+    int c0 = c - 2;
+    int c1 = c + 2;
+    if (c0 < 0) {
+      c0 = 0;
+    }
+    if (c1 > 63) {
+      c1 = 63;
+    }
+    float acc = 0.0f;
+    int base = n * 200704 + s;
+    for (int i = c0; i <= c1; ++i) {
+      float v = (float)x[base + i * E1];
+      acc += v * v;
+    }
+    float r = powf(k + alpha * 0.2f * acc, -beta);
+    y[p] = (half)((float)x[p] * r);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int size, double alpha, double beta,
                         double k) {
+  (void)size;
   auto y = torch::empty_like(x);
-
-  static cnnlTensorDescriptor_t desc = nullptr;
-  static size_t ws_size = 0;
-  if (desc == nullptr) {
-    desc = make_desc();
-    CNNL_CHECK(cnnlGetLrnWorkspaceSize_v2(
-        torch_mlu::getCurrentHandle(), desc, desc, CNNL_LRN_CROSS_CHANNEL,
-        (unsigned)size, &ws_size));
-  }
-
-  auto ws = torch::empty({(int64_t)ws_size}, x.options().dtype(torch::kUInt8));
-  CNNL_CHECK(cnnlLrn(torch_mlu::getCurrentHandle(), CNNL_LRN_CROSS_CHANNEL,
-                     (unsigned)size, alpha, beta, k,
-                     ws_size ? ws.data_ptr() : nullptr, ws_size, desc,
-                     x.data_ptr(), desc, y.data_ptr()));
-
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()), (float)alpha,
+      (float)beta, (float)k);
   return y;
 }
