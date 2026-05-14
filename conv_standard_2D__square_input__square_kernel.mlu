@@ -12,6 +12,13 @@
 #define E6 4
 #define E7 127
 #define E8 1728
+#define E9 36864
+
+__mlu_entry__ void kz(half *__restrict__ y) {
+  for (int i = taskId; i < E9; i += taskDim) {
+    y[i] = (half)0.0f;
+  }
+}
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   for (int i = taskId; i < E8; i += taskDim) {
@@ -22,18 +29,19 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     t /= E1;
     int h = t % E1;
     int o = t / E1;
-    y[i] = x[((o * E1 + c) * E1 + h) * E1 + w];
+    y[((o * E1 + h) * E1 + w) * E2 + c] =
+        x[((o * E1 + c) * E1 + h) * E1 + w];
   }
 }
 
 __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
-  __nram__ half a[E6 * E3 * E1];
-  __nram__ half b[E6 * E3 * E1];
+  __nram__ half a[E6 * E3 * E2];
+  __nram__ half b[E6 * E3 * E2];
   __nram__ float c[E5 * E4 * E2];
   __nram__ float d[E5 * E4 * E2];
-  __wram__ half ww[E8];
-  __memcpy(ww, w, E8 * sizeof(half), GDRAM2WRAM);
+  __wram__ half ww[E9];
+  __memcpy(ww, w, E9 * sizeof(half), GDRAM2WRAM);
 
   for (int t = taskId; t < E0 * E7; t += taskDim) {
     int n = t / E7;
@@ -42,8 +50,8 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     if (oh + rows > E4)
       rows = E4 - oh;
     int ih = rows + 2;
-    int base_h = oh - 1;
-    int in_count = ih * E3 * E1;
+    int base_h = oh;
+    int in_count = ih * E3 * E2;
     __bang_write_value(a, in_count, (half)0.0f);
     for (int c0 = 0; c0 < E1; ++c0) {
       for (int r = 0; r < ih; ++r) {
@@ -55,8 +63,8 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                  E3 * sizeof(half), GDRAM2NRAM);
       }
     }
-    __bang_transpose(b, a, E1, ih * E3);
-    __bang_conv(c, b, ww, E1, ih, E3, 3, 3, 1, 1, E2);
+    __bang_transpose(b, a, E2, ih * E3);
+    __bang_conv(c, b, ww, E2, ih, E3, 3, 3, 1, 1, E2);
     __bang_transpose(d, c, rows * E4, E2);
     for (int oc = 0; oc < E2; ++oc) {
       __bang_float2half_rn(a, d + oc * rows * E4, rows * E4);
@@ -85,12 +93,13 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   else
     y.resize_({16, 64, 254, 254});
   if (!w.defined())
-    w = torch::empty({E8}, kernel.options());
+    w = torch::empty({E9}, kernel.options());
   else
-    w.resize_({E8});
+    w.resize_({E9});
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {32, 1, 1};
   if (last != kernel.data_ptr()) {
+    kz<<<d, cnrtFuncTypeBlock, q>>>(reinterpret_cast<half *>(w.data_ptr<at::Half>()));
     k0<<<d, cnrtFuncTypeBlock, q>>>(
         reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
         reinterpret_cast<half *>(w.data_ptr<at::Half>()));
