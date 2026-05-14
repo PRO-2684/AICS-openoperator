@@ -42,10 +42,11 @@ __mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
 __mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ z,
                       int *__restrict__ y) {
   __nram__ half a[E1 + 2];
+  __nram__ half b[E1];
   int p = taskId * E1;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-  __bang_gt_scalar(a, a, (half)0.0f, E1);
-  y[taskId] = (int)__bang_count(a, E1);
+  __bang_gt_scalar(b, a, (half)0.0f, E1);
+  y[taskId] = (int)__bang_count(b, E1);
   __sync_all_ipu();
 
   if (taskId == E2 - 1) {
@@ -60,10 +61,8 @@ __mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ z,
   __sync_all_ipu();
 
   int q = y[taskId];
-  __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-  __bang_fcmpfilter(CMP_GT, a, a, (half)0.0f, E1);
-  int n = *((int *)a);
-  __memcpy(z + q, a + 2, n * sizeof(half), NRAM2GDRAM);
+  int n = (int)__bang_filter(a, a, b, E1);
+  __memcpy(z + q, a, n * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor input, double v) {
