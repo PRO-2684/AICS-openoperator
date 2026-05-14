@@ -18,41 +18,32 @@ __mlu_entry__ void k0(float *__restrict__ y) {
 
 __mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
                       float *__restrict__ y) {
-  __mlu_shared__ half g[E2 * E1];
-  __mlu_shared__ int64_t h[E2];
-  __nram__ half a[E1];
-  __nram__ float b[E1];
-  __nram__ int c[128];
-  __nram__ int f[128];
-  __nram__ int64_t e[E2];
-  __nram__ float d[128 * E1];
-  __bang_write_value(c, 128, 0);
-  __bang_write_value(d, 128 * E1, 0.0f);
-  int q = taskId & 3;
-  int s = (taskId >> 2) * E2;
-  int r = q * 128;
+  __nram__ half a[E0 * E1 / 16];
+  __nram__ float b[E1 * 8];
+  __nram__ int c[E2];
+  __nram__ int f[256];
+  __nram__ int64_t e[256];
+  __nram__ float d[E2 * E1];
+  __bang_write_value(c, E2, 0);
+  __bang_write_value(d, E2 * E1, 0.0f);
+  int s = taskId * 256;
+  __memcpy(e, w + s, 256 * sizeof(int64_t), GDRAM2NRAM);
+  __memcpy(a, x + s * E1, 256 * E1 * sizeof(half), GDRAM2NRAM);
   int n = 0;
-  if (q == 0) {
-    __memcpy(g, x + s * E1, E2 * E1 * sizeof(half), GDRAM2SRAM);
-    __memcpy(h, w + s, E2 * sizeof(int64_t), GDRAM2SRAM);
-  }
-  __sync_cluster();
-  __memcpy(e, h, E2 * sizeof(int64_t), SRAM2NRAM);
-  for (int i = 0; i < E2; ++i) {
-    int p = (int)e[i] - r;
-    if ((unsigned int)p < 128) {
+  for (int j = 0; j < 256; j += 8) {
+    __bang_half2float(b, a + j * E1, E1 * 8);
+    for (int k = 0; k < 8; ++k) {
+      int p = (int)e[j + k];
       if (!c[p]) {
         c[p] = 1;
         f[n++] = p;
       }
-      __memcpy(a, g + i * E1, E1 * sizeof(half), SRAM2NRAM);
-      __bang_half2float(b, a, E1);
-      __bang_add(d + p * E1, d + p * E1, b, E1);
+      __bang_add(d + p * E1, d + p * E1, b + k * E1, E1);
     }
   }
   for (int i = 0; i < n; ++i) {
     int p = f[i];
-    __bang_atomic_reduce_add_async(y + (r + p) * E1, d + p * E1, E1);
+    __bang_atomic_reduce_add_async(y + p * E1, d + p * E1, E1);
   }
 }
 
@@ -65,10 +56,9 @@ torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
     y.resize_({E2, E1});
 
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, q>>>(
-      y.data_ptr<float>());
-  k1<<<d, cnrtFuncTypeUnion1, q>>>(
+  cnrtDim3_t d = {16, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, q>>>(y.data_ptr<float>());
+  k1<<<d, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(src.data_ptr<at::Half>()),
       index.data_ptr<int64_t>(), y.data_ptr<float>());
   return y;
