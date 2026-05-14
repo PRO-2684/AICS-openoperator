@@ -71,12 +71,8 @@ static void init(S &s, cnnlHandle_t h) {
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  static torch::Tensor C;
   static torch::Tensor w;
-  if (!C.defined())
-    C = torch::empty({128, 512, 2048}, A.options());
-  else
-    C.resize_({128, 512, 2048});
+  auto C = torch::empty({128, 512, 2048}, A.options());
 
   static S s;
   cnnlHandle_t h = torch_mlu::getCurrentHandle();
