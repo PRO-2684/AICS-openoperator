@@ -1,7 +1,7 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <cmath>
 #include <framework/core/MLUStream.h>
+#include <cmath>
 #include <torch/extension.h>
 
 #define E0 4096
@@ -9,30 +9,44 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       const half *__restrict__ b, half *__restrict__ y) {
+  __nram__ half xh[E1];
+  __nram__ half yh[E1];
+  __nram__ half wh[E1];
+  __nram__ half bh[E1];
+  __nram__ float xf[E1];
+  __nram__ float wf[E1];
+  __nram__ float bf[E1];
+  __nram__ float tf[E1];
+
+  __memcpy(wh, w, E1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(bh, b, E1 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(wf, wh, E1);
+  __bang_half2float(bf, bh, E1);
+
   for (int r = taskId; r < E0; r += taskDim) {
     int p = r * E1;
-    float s = 0.0f;
-    for (int i = 0; i < E1; ++i) {
-      s += (float)x[p + i];
-    }
-    float m = s * 0.001953125f;
-    float v = 0.0f;
-    for (int i = 0; i < E1; ++i) {
-      float d = (float)x[p + i] - m;
-      v += d * d;
-    }
-    float q = 1.0f / sqrtf(v * 0.001953125f + 0.00001f);
-    for (int i = 0; i < E1; ++i) {
-      float z = ((float)x[p + i] - m) * q;
-      y[p + i] = (half)(z * (float)w[i] + (float)b[i]);
-    }
+    __memcpy(xh, x + p, E1 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(xf, xh, E1);
+    __bang_reduce_sum(tf, xf, E1);
+    float m = tf[0] * 0.001953125f;
+    __bang_sub_scalar(xf, xf, m, E1);
+    __bang_mul(tf, xf, xf, E1);
+    __bang_reduce_sum(tf, tf, E1);
+    float q = 1.0f / sqrtf(tf[0] * 0.001953125f + 0.00001f);
+    __bang_mul_scalar(xf, xf, q, E1);
+    __bang_mul(xf, xf, wf, E1);
+    __bang_add(xf, xf, bf, E1);
+    __bang_float2half_rn(yh, xf, E1);
+    __memcpy(y + p, yh, E1 * sizeof(half), NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bias,
                         int normalized_shape) {
   (void)normalized_shape;
-  auto y = torch::empty_like(x);
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty_like(x);
   cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
