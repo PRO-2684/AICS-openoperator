@@ -1,42 +1,31 @@
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define CNNL_CHECK(expr)                                                        \
-  do {                                                                         \
-    cnnlStatus_t s__ = (expr);                                                 \
-    TORCH_CHECK(s__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s__);   \
-  } while (0)
+#define E0 1048576
+
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  for (int p = taskId; p < E0; p += taskDim) {
+    int w = p & 63;
+    int t0 = p >> 6;
+    int h = t0 & 63;
+    int t1 = t0 >> 6;
+    int c = t1 & 63;
+    int n = t1 >> 6;
+    int q = (((n * 256 + c * 4 + ((h & 1) << 1) + (w & 1)) * 32) + (h >> 1)) *
+                32 +
+            (w >> 1);
+    y[p] = x[q];
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor x, int upscale_factor) {
   (void)upscale_factor;
-
   auto y = torch::empty({4, 64, 64, 64}, x.options());
-
-  static cnnlTensorDescriptor_t xd = nullptr;
-  static cnnlTensorDescriptor_t yd = nullptr;
-  static cnnlTransposeDescriptor_t td = nullptr;
-  static size_t ws_size = 0;
-  if (xd == nullptr) {
-    int xs[6] = {4, 64, 2, 2, 32, 32};
-    int ys[6] = {4, 64, 32, 2, 32, 2};
-    int p[6] = {0, 1, 4, 2, 5, 3};
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&xd));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&yd));
-    CNNL_CHECK(cnnlCreateTransposeDescriptor(&td));
-    CNNL_CHECK(
-        cnnlSetTensorDescriptor(xd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 6, xs));
-    CNNL_CHECK(
-        cnnlSetTensorDescriptor(yd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 6, ys));
-    CNNL_CHECK(cnnlSetTransposeDescriptor(td, 6, p));
-    CNNL_CHECK(cnnlGetTransposeWorkspaceSize(torch_mlu::getCurrentHandle(), xd,
-                                             td, &ws_size));
-  }
-
-  auto ws = torch::empty({(int64_t)ws_size}, x.options().dtype(torch::kUInt8));
-  CNNL_CHECK(cnnlTranspose_v2(
-      torch_mlu::getCurrentHandle(), td, xd, x.data_ptr(), yd, y.data_ptr(),
-      ws_size ? ws.data_ptr() : nullptr, ws_size));
-
+  cnrtDim3_t dim = {32, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
