@@ -30,6 +30,7 @@ if not hasattr(torch.nn.Conv2d, "_aics_dil_init"):
 __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                       float *__restrict__ y) {
   __nram__ half a[E0];
+  __nram__ half k[576];
   __nram__ float b[E0];
   __nram__ float c[E0];
   for (int u = taskId; u < E2; u += taskDim) {
@@ -39,9 +40,10 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     int oc = t & 127;
     int n = t >> 7;
     __bang_write_value(c, E0, 0.0f);
+    __memcpy(k, w + oc * 576, 576 * sizeof(half), GDRAM2NRAM);
     for (int ic = 0; ic < 64; ++ic) {
       const half *xp = x + n * 1048576 + ic * E1;
-      const half *wp = w + (oc * 64 + ic) * 9;
+      const half *wp = k + ic * 9;
       for (int kh = 0; kh < 3; ++kh) {
         int ih = oh + kh * 2 - 2;
         if ((unsigned)ih >= 128)
