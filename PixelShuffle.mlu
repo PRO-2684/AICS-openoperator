@@ -6,30 +6,28 @@
 #define E0 256
 #define E1 64
 #define E2 32
+#define E3 1024
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[E1];
-  __nram__ half b[E1];
+  __nram__ half a[E3 * 2];
+  __nram__ half b[E3 * 2];
 
   for (int g = taskId; g < E0; g += taskDim) {
     int n = g >> 6;
     int c = g & 63;
     int ib = (n << 18) + (c << 12);
     int ob = ib;
-    for (int r = 0; r < E2; ++r) {
-      int p = ib + r * E2;
-      int q = ob + (r << 1) * E1;
+    __memcpy(a, x + ib, E3 * sizeof(half), GDRAM2NRAM);
+    __memcpy(a + E3, x + ib + E3, E3 * sizeof(half), GDRAM2NRAM);
+    __bang_transpose(b, a, 2, E3);
+    __memcpy(y + ob, b, E1 * sizeof(half), NRAM2GDRAM, 2 * E1 * sizeof(half),
+             E1 * sizeof(half), E2 - 1);
 
-      __memcpy(a, x + p, E2 * sizeof(half), GDRAM2NRAM);
-      __memcpy(a + E2, x + p + 1024, E2 * sizeof(half), GDRAM2NRAM);
-      __bang_transpose(b, a, 2, E2);
-      __memcpy(y + q, b, E1 * sizeof(half), NRAM2GDRAM);
-
-      __memcpy(a, x + p + 2048, E2 * sizeof(half), GDRAM2NRAM);
-      __memcpy(a + E2, x + p + 3072, E2 * sizeof(half), GDRAM2NRAM);
-      __bang_transpose(b, a, 2, E2);
-      __memcpy(y + q + E1, b, E1 * sizeof(half), NRAM2GDRAM);
-    }
+    __memcpy(a, x + ib + 2 * E3, E3 * sizeof(half), GDRAM2NRAM);
+    __memcpy(a + E3, x + ib + 3 * E3, E3 * sizeof(half), GDRAM2NRAM);
+    __bang_transpose(b, a, 2, E3);
+    __memcpy(y + ob + E1, b, E1 * sizeof(half), NRAM2GDRAM,
+             2 * E1 * sizeof(half), E1 * sizeof(half), E2 - 1);
   }
 }
 
