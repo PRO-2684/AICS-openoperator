@@ -1,6 +1,4 @@
-#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
-#include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
@@ -19,22 +17,10 @@
 #define PLANE_ELEMS 65536
 #define SEG_ELEMS 32768
 
-#define CHECK_CNNL(expr)                                                       \
-  do {                                                                         \
-    cnnlStatus_t _status = (expr);                                             \
-    TORCH_CHECK(_status == CNNL_STATUS_SUCCESS, "CNNL call failed: ", #expr,   \
-                " status=", static_cast<int>(_status));                        \
-  } while (0)
-
 namespace {
 
 struct LocalState {
-  torch::Tensor angle;
-  torch::Tensor sinv;
-  torch::Tensor cosv;
   torch::Tensor cache;
-
-  cnnlTensorDescriptor_t trig_desc = nullptr;
 
   bool ready = false;
   int cached_extent = 0;
@@ -44,7 +30,7 @@ struct LocalState {
 static LocalState g_state;
 static std::mutex g_lock;
 
-__mlu_entry__ void make_angle_kernel(float *angle, int extent, int width) {
+__mlu_entry__ void make_cache_kernel(half *cache, int extent, int width) {
   int half_width = width >> 1;
   int total = extent * half_width;
 
@@ -52,24 +38,11 @@ __mlu_entry__ void make_angle_kernel(float *angle, int extent, int width) {
     int p = idx / half_width;
     int k = idx - p * half_width;
 
-    // arange(...).float() * (-log(10000.0) / d_model)
     float exponent = (2.0f * (float)k) * (-9.210340371976184f / (float)width);
-    angle[idx] = (float)p * expf(exponent);
-  }
-}
-
-__mlu_entry__ void pack_cache_kernel(const float *sinv, const float *cosv,
-                                     half *cache, int extent, int width) {
-  int half_width = width >> 1;
-  int total = extent * half_width;
-
-  for (int idx = taskId; idx < total; idx += taskDim) {
-    int p = idx / half_width;
-    int k = idx - p * half_width;
-
+    float v = (float)p * expf(exponent);
     int out_base = p * width + (k << 1);
-    cache[out_base] = (half)sinv[idx];
-    cache[out_base + 1] = (half)cosv[idx];
+    cache[out_base] = (half)sinf(v);
+    cache[out_base + 1] = (half)cosf(v);
   }
 }
 
@@ -87,43 +60,18 @@ static void ensure_cache(torch::Tensor x, int width) {
 
   int half_width = width >> 1;
 
-  auto float_opts = x.options().dtype(torch::kFloat);
   auto half_opts = x.options().dtype(torch::kHalf);
 
-  g_state.angle = torch::empty({extent, half_width}, float_opts);
-  g_state.sinv = torch::empty({extent, half_width}, float_opts);
-  g_state.cosv = torch::empty({extent, half_width}, float_opts);
   g_state.cache = torch::empty({extent, width}, half_opts);
 
-  if (g_state.trig_desc == nullptr) {
-    CHECK_CNNL(cnnlCreateTensorDescriptor(&g_state.trig_desc));
-  }
-
-  int dims[2] = {extent, half_width};
-  CHECK_CNNL(cnnlSetTensorDescriptor(g_state.trig_desc, CNNL_LAYOUT_ARRAY,
-                                     CNNL_DTYPE_FLOAT, 2, dims));
-
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
 
   cnrtDim3_t dim;
   dim.x = THREADS_PER_JOB;
   dim.y = 1;
   dim.z = 1;
 
-  make_angle_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<float *>(g_state.angle.data_ptr<float>()), extent,
-      width);
-
-  CHECK_CNNL(cnnlSin(handle, g_state.trig_desc, g_state.angle.data_ptr<float>(),
-                     g_state.trig_desc, g_state.sinv.data_ptr<float>()));
-
-  CHECK_CNNL(cnnlCos(handle, g_state.trig_desc, g_state.angle.data_ptr<float>(),
-                     g_state.trig_desc, g_state.cosv.data_ptr<float>()));
-
-  pack_cache_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const float *>(g_state.sinv.data_ptr<float>()),
-      reinterpret_cast<const float *>(g_state.cosv.data_ptr<float>()),
+  make_cache_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(g_state.cache.data_ptr<at::Half>()), extent,
       width);
 
