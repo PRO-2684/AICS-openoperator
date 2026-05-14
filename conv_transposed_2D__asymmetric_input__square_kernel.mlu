@@ -57,7 +57,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ w,
         }
       }
     }
-    __bang_reshape_nchw2nhwc(aa, a, 1, ih, E7, E1);
+    __bang_transpose(aa, a, E1, ih * E7);
     __bang_half2float(ac, aa, m);
     __bang_conv(b, ac, e, E1, ih, E7, 3, 3, 1, 1, E2);
     __bang_transpose(d, b, h * E6, E2);
