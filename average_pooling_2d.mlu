@@ -13,6 +13,7 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size) {
   static cnnlTensorDescriptor_t a = nullptr;
   static cnnlTensorDescriptor_t b = nullptr;
   static cnnlPoolingDescriptor_t p = nullptr;
+  static cnnlHandle_t h = nullptr;
   static torch::Tensor y;
   static torch::Tensor w;
   static size_t z = 0;
@@ -27,16 +28,15 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size) {
     X(cnnlSetPooling2dDescriptor_v2(
         p, CNNL_POOLING_AVERAGE_COUNT_INCLUDE_PADDING, CNNL_NOT_PROPAGATE_NAN,
         11, 11, 0, 0, 0, 0, 11, 11, 1, 1, false));
-    X(cnnlGetPoolingWorkspaceSize_v2(torch_mlu::getCurrentHandle(), p, a, b,
-                                     &z));
+    h = torch_mlu::getCurrentHandle();
+    X(cnnlGetPoolingWorkspaceSize_v2(h, p, a, b, &z));
     y = torch::empty({4, 32, 93, 93}, x.options());
     w = torch::empty({(int64_t)z}, x.options().dtype(torch::kUInt8));
   }
   float alpha = 1.0f;
   float beta = 0.0f;
-  X(cnnlPoolingForward_v2(torch_mlu::getCurrentHandle(), p, &alpha, a,
-                          x.data_ptr(), &beta, nullptr, b, y.data_ptr(),
-                          w.data_ptr(), z));
+  X(cnnlPoolingForward_v2(h, p, &alpha, a, x.data_ptr(), &beta, nullptr, b,
+                          y.data_ptr(), w.data_ptr(), z));
   return y;
 }
 
