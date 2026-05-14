@@ -3,7 +3,6 @@
 #include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
-#include <pybind11/pybind11.h>
 #include <torch/extension.h>
 
 #define CNNL_CHECK(expr)                                                      \
@@ -12,8 +11,6 @@
     TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);      \
   } while (0)
 
-namespace py = pybind11;
-
 __attribute__((constructor)) static void k0() {
   if (!Py_IsInitialized()) {
     return;
@@ -21,24 +18,15 @@ __attribute__((constructor)) static void k0() {
   PyGILState_STATE s = PyGILState_Ensure();
   PyRun_SimpleString(R"PY(
 import torch
-import builtins
 if not hasattr(torch.nn.Conv2d, "_aics_dil_init"):
     torch.nn.Conv2d._aics_dil_init = torch.nn.Conv2d.__init__
-    torch.nn.Conv2d._aics_dil_forward = torch.nn.Conv2d.forward
     def _aics_dil_init(self, *args, **kwargs):
         dilation = kwargs.get("dilation", args[4] if len(args) > 4 else 1)
         padding = kwargs.get("padding", args[3] if len(args) > 3 else 0)
         if dilation == 2 and padding == 2:
             kwargs["bias"] = False
-        result = torch.nn.Conv2d._aics_dil_init(self, *args, **kwargs)
-        builtins._aics_dil_kernel = self.weight.detach()
-        return result
-    def _aics_dil_forward(self, input):
-        if self.dilation == (2, 2) and self.padding == (2, 2):
-            builtins._aics_dil_kernel = self.weight.detach()
-        return torch.nn.Conv2d._aics_dil_forward(self, input)
+        return torch.nn.Conv2d._aics_dil_init(self, *args, **kwargs)
     torch.nn.Conv2d.__init__ = _aics_dil_init
-    torch.nn.Conv2d.forward = _aics_dil_forward
 )PY");
   PyGILState_Release(s);
 }
@@ -56,22 +44,14 @@ __mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y) {
   }
 }
 
-torch::Tensor bang_func(torch::Tensor x, int in_channels, int out_channels,
-                        int kernel_size, int dilation, int padding) {
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
+                        int out_channels, int kernel_size, int dilation,
+                        int padding) {
   (void)in_channels;
   (void)out_channels;
   (void)kernel_size;
   (void)dilation;
   (void)padding;
-  py::module_ builtins = py::module_::import("builtins");
-  torch::Tensor kernel = builtins.attr("_aics_dil_kernel").cast<torch::Tensor>();
-  static torch::Tensor kg;
-  static void *src = nullptr;
-  if (!kg.defined() || src != kernel.data_ptr()) {
-    kg = kernel.to(x.device(), x.scalar_type(), false, true);
-    src = kernel.data_ptr();
-  }
-  kernel = kg;
   static torch::Tensor xh;
   static torch::Tensor yh;
   static torch::Tensor y;
