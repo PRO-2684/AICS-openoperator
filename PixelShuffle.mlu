@@ -7,6 +7,10 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[4096];
+  __nram__ half t0[1024];
+  __nram__ half t1[1024];
+  __nram__ half m0[2048];
+  __nram__ half m1[2048];
   __nram__ half b[4096];
   for (int p = taskId; p < E0; p += taskDim) {
     int n = p >> 6;
@@ -14,14 +18,20 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     int ib = (n * 256 + c * 4) * 1024;
     int ob = (n * 64 + c) * 4096;
     __memcpy(a, x + ib, 4096 * sizeof(half), GDRAM2NRAM);
-    __memcpy(b, a, sizeof(half), NRAM2NRAM, 2 * sizeof(half), sizeof(half),
-             1023);
-    __memcpy(b + 1, a + 1024, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
-             sizeof(half), 1023);
-    __memcpy(b + 2048, a + 2048, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
-             sizeof(half), 1023);
-    __memcpy(b + 2049, a + 3072, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
-             sizeof(half), 1023);
+    __bang_transpose(t0, a, 32, 32);
+    __bang_transpose(t1, a + 1024, 32, 32);
+    __memcpy(m0, t0, 32 * sizeof(half), NRAM2NRAM, 64 * sizeof(half),
+             32 * sizeof(half), 31);
+    __memcpy(m0 + 32, t1, 32 * sizeof(half), NRAM2NRAM, 64 * sizeof(half),
+             32 * sizeof(half), 31);
+    __bang_transpose(b, m0, 64, 32);
+    __bang_transpose(t0, a + 2048, 32, 32);
+    __bang_transpose(t1, a + 3072, 32, 32);
+    __memcpy(m1, t0, 32 * sizeof(half), NRAM2NRAM, 64 * sizeof(half),
+             32 * sizeof(half), 31);
+    __memcpy(m1 + 32, t1, 32 * sizeof(half), NRAM2NRAM, 64 * sizeof(half),
+             32 * sizeof(half), 31);
+    __bang_transpose(b + 2048, m1, 64, 32);
     __memcpy(y + ob, b, 64 * sizeof(half), NRAM2GDRAM, 128 * sizeof(half),
              64 * sizeof(half), 31);
     __memcpy(y + ob + 64, b + 2048, 64 * sizeof(half), NRAM2GDRAM,
