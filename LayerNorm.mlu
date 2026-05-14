@@ -7,6 +7,17 @@
 #define E0 4096
 #define E1 512
 
+__mlu_func__ float fsum512(float *__restrict__ dst,
+                           const float *__restrict__ src) {
+  __bang_reduce_sum(dst, src, E1);
+  float s = 0.0f;
+#pragma unroll
+  for (int i = 0; i < E1; i += 32) {
+    s += dst[i];
+  }
+  return s;
+}
+
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       const half *__restrict__ b, half *__restrict__ y) {
   __nram__ half xh[E1];
@@ -27,12 +38,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     int p = r * E1;
     __memcpy(xh, x + p, E1 * sizeof(half), GDRAM2NRAM);
     __bang_half2float(xf, xh, E1);
-    __bang_reduce_sum(tf, xf, E1);
-    float m = tf[0] * 0.001953125f;
+    float m = fsum512(tf, xf) * 0.001953125f;
     __bang_sub_scalar(xf, xf, m, E1);
     __bang_mul(tf, xf, xf, E1);
-    __bang_reduce_sum(tf, tf, E1);
-    float q = 1.0f / sqrtf(tf[0] * 0.001953125f + 0.00001f);
+    float q = 1.0f / sqrtf(fsum512(tf, tf) * 0.001953125f + 0.00001f);
     __bang_mul_scalar(xf, xf, q, E1);
     __bang_mul(xf, xf, wf, E1);
     __bang_add(xf, xf, bf, E1);
