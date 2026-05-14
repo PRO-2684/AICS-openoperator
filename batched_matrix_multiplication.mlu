@@ -1,5 +1,6 @@
 #include <aten/cnnl/cnnlHandle.h>
 #include <cnnl.h>
+#include <cnrt.h>
 #include <torch/extension.h>
 
 #define X(e)                                                                   \
@@ -9,59 +10,75 @@
   } while (0)
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  auto C = torch::empty({128, 512, 2048}, A.options());
+  auto C = torch::empty({128, 512, 2048}, A.options().dtype(torch::kFloat32));
 
-  cnnlTensorDescriptor_t ad;
-  cnnlTensorDescriptor_t bd;
-  cnnlTensorDescriptor_t cd;
-  cnnlMatMulDescriptor_t md;
-  cnnlMatMulAlgo_t algo;
-  cnnlMatMulHeuristicResult_t result;
-  X(cnnlCreateTensorDescriptor(&ad));
-  X(cnnlCreateTensorDescriptor(&bd));
-  X(cnnlCreateTensorDescriptor(&cd));
-  X(cnnlCreateMatMulDescriptor(&md));
-  X(cnnlCreateMatMulAlgo(&algo));
-  X(cnnlCreateMatMulHeuristicResult(&result));
+  cnnlTensorDescriptor_t a;
+  cnnlTensorDescriptor_t b;
+  cnnlTensorDescriptor_t c;
+  cnnlStrideBatchMatMulDescriptor_t d;
+  cnnlStrideBatchMatMulAlgo_t algo;
+  cnnlStrideBatchMatMulHeuristicResult_t r;
+  X(cnnlCreateTensorDescriptor(&a));
+  X(cnnlCreateTensorDescriptor(&b));
+  X(cnnlCreateTensorDescriptor(&c));
+  X(cnnlCreateStrideBatchMatMulDescriptor(&d));
+  X(cnnlCreateStrideBatchMatMulAlgo(&algo));
+  X(cnnlCreateStrideBatchMatMulHeuristicResult(&r));
 
-  int as[3] = {128, 512, 1024};
-  int bs[3] = {128, 1024, 2048};
-  int cs[3] = {128, 512, 2048};
-  X(cnnlSetTensorDescriptor(ad, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, as));
-  X(cnnlSetTensorDescriptor(bd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, bs));
-  X(cnnlSetTensorDescriptor(cd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 3, cs));
+  int as[1] = {67108864};
+  int bs[1] = {268435456};
+  int cs[1] = {134217728};
+  X(cnnlSetTensorDescriptor(a, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 1, as));
+  X(cnnlSetTensorDescriptor(b, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 1, bs));
+  X(cnnlSetTensorDescriptor(c, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT, 1, cs));
 
   cnnlDataType_t t = CNNL_DTYPE_FLOAT;
-  bool f = false;
-  int lda = 1024;
-  int ldb = 2048;
-  int ldc = 2048;
-  X(cnnlSetMatMulDescAttr(md, CNNL_MATMUL_DESC_COMPUTE_TYPE, &t, sizeof(t)));
-  X(cnnlSetMatMulDescAttr(md, CNNL_MATMUL_DESC_TRANSA, &f, sizeof(f)));
-  X(cnnlSetMatMulDescAttr(md, CNNL_MATMUL_DESC_TRANSB, &f, sizeof(f)));
-  X(cnnlSetMatMulDescAttr(md, CNNL_MATMUL_DESC_LDA, &lda, sizeof(lda)));
-  X(cnnlSetMatMulDescAttr(md, CNNL_MATMUL_DESC_LDB, &ldb, sizeof(ldb)));
-  X(cnnlSetMatMulDescAttr(md, CNNL_MATMUL_DESC_LDC, &ldc, sizeof(ldc)));
+  int u = 1;
+  int v = 0;
+  X(cnnlSetStrideBatchMatMulDescAttr(d, CNNL_STRIDE_BMM_COMPUTE_TYPE, &t,
+                                     sizeof(t)));
+  X(cnnlSetStrideBatchMatMulDescAttr(d, CNNL_STRIDE_BMM_MAX_BATCH_DIM, &u,
+                                     sizeof(u)));
+  X(cnnlSetStrideBatchMatMulDescAttr(d, CNNL_STRIDE_BMM_ALLOW_TF32, &v,
+                                     sizeof(v)));
 
-  int n = 0;
-  X(cnnlGetBatchMatMulExAlgoHeuristic(torch_mlu::getCurrentHandle(), md, ad,
-                                      bd, cd, nullptr, 1, &result, &n));
+  bool ta = false;
+  bool tb = false;
+  int m = 512;
+  int n = 2048;
+  int k = 1024;
+  int la = 1024;
+  int lb = 2048;
+  int lc = 2048;
+  int ld = 2048;
+  int batch[1] = {128};
+  int64_t sa[1] = {524288};
+  int64_t sb[1] = {2097152};
+  int64_t sc[1] = {1048576};
+  float al = 1.0f;
+  float be = 0.0f;
+  int q = 0;
+
+  cnnlHandle_t h = torch_mlu::getCurrentHandle();
+  X(cnnlGetStrideBatchMatMulAlgoHeuristic_v2(
+      h, d, a, b, c, c, ta, tb, &al, &be, m, n, k, la, lb, lc, ld, batch, sa,
+      sb, sc, sc, nullptr, 1, &r, &q));
   size_t ws = 0;
-  X(cnnlGetBatchMatMulExHeuristicResult(result, algo, &ws));
+  X(cnnlGetStrideBatchMatMulHeuristicResult(r, &algo, &ws));
   auto work = torch::empty({(int64_t)ws}, A.options().dtype(torch::kUInt8));
 
-  float alpha = 1.0f;
-  float beta = 0.0f;
-  X(cnnlBatchMatMulEx(torch_mlu::getCurrentHandle(), md, algo, &alpha, ad,
-                      A.data_ptr(), bd, B.data_ptr(), &beta, cd, C.data_ptr(),
-                      ws ? work.data_ptr() : nullptr, ws));
+  X(cnnlStrideBatchMatMul_v3(h, d, algo, ta, tb, m, n, k, batch, &al, a,
+                             A.data_ptr(), la, sa, b, B.data_ptr(), lb, sb,
+                             &be, c, C.data_ptr(), lc, sc,
+                             ws ? work.data_ptr() : nullptr, ws, c,
+                             C.data_ptr(), ld, sc));
 
-  X(cnnlDestroyMatMulHeuristicResult(result));
-  X(cnnlDestroyMatMulAlgo(algo));
-  X(cnnlDestroyMatMulDescriptor(md));
-  X(cnnlDestroyTensorDescriptor(cd));
-  X(cnnlDestroyTensorDescriptor(bd));
-  X(cnnlDestroyTensorDescriptor(ad));
+  X(cnnlDestroyStrideBatchMatMulHeuristicResult(r));
+  X(cnnlDestroyStrideBatchMatMulAlgo(algo));
+  X(cnnlDestroyStrideBatchMatMulDescriptor(d));
+  X(cnnlDestroyTensorDescriptor(c));
+  X(cnnlDestroyTensorDescriptor(b));
+  X(cnnlDestroyTensorDescriptor(a));
   return C;
 }
 
