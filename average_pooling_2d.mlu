@@ -39,7 +39,7 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size) {
   else
     y.resize_({4, 32, 93, 93});
 
-  cnrtDim3_t d = {128, 1, 1};
+  cnrtDim3_t d = {48, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
