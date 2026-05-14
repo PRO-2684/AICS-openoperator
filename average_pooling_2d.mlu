@@ -48,9 +48,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
       }
       __bang_sumpool(bin, ain, 1, h, A2, A3, A3, A3, A3);
       __bang_mul_scalar(bin, bin, (half)0.008264462809917355f, e);
-      __memcpy_async(y + q * A1 * A1 + s * A1, bin, e * sizeof(half),
-                     NRAM2GDRAM);
       __asm__ volatile("sync;");
+      __memcpy(y + q * A1 * A1 + s * A1, bin, e * sizeof(half), NRAM2GDRAM);
       if (np >= A0 * A6)
         break;
       p = np;
