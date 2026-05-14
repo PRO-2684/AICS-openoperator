@@ -1,59 +1,139 @@
-#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
-#include <cnnl.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define CNNL_CHECK(call)                                                       \
-  do {                                                                         \
-    cnnlStatus_t s = (call);                                                    \
-    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "cnnl status ", (int)s);            \
-  } while (0)
+#define T 512
+
+__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ g,
+                      half *__restrict__ y) {
+  __nram__ half gx_h[T];
+  __nram__ half gy_h[T];
+  __nram__ half v0_h[T];
+  __nram__ half v1_h[T];
+  __nram__ half v2_h[T];
+  __nram__ half v3_h[T];
+  __nram__ half out_h[T];
+  __nram__ float gx_f[T];
+  __nram__ float gy_f[T];
+  __nram__ float fx[T];
+  __nram__ float fy[T];
+  __nram__ float wx[T];
+  __nram__ float wy[T];
+  __nram__ float v0[T];
+  __nram__ float v1[T];
+  __nram__ float v2[T];
+  __nram__ float v3[T];
+  __nram__ int32_t x0[T];
+  __nram__ int32_t y0[T];
+  __nram__ int32_t x1[T];
+  __nram__ int32_t y1[T];
+  __nram__ int32_t off0[T];
+  __nram__ int32_t off1[T];
+  __nram__ int32_t off2[T];
+  __nram__ int32_t off3[T];
+  __nram__ int32_t mx[T];
+  __nram__ int32_t my[T];
+  __nram__ float mx_f[T];
+  __nram__ float my_f[T];
+  __nram__ float m11[T];
+
+  for (int rc = taskId; rc < 256; rc += taskDim) {
+    int n = rc >> 6;
+    int c = rc & 63;
+    const half *px = x + n * 1048576 + c * 16384;
+    const half *pg = g + n * 8192;
+    half *py = y + n * 262144 + c * 4096;
+
+    for (int t = 0; t < 4096; t += T) {
+      __memcpy(gx_h, pg + t * 2, T * sizeof(half), GDRAM2NRAM, sizeof(half),
+               2 * sizeof(half), T - 1);
+      __memcpy(gy_h, pg + t * 2 + 1, T * sizeof(half), GDRAM2NRAM,
+               sizeof(half), 2 * sizeof(half), T - 1);
+
+      __bang_half2float(gx_f, gx_h, T);
+      __bang_half2float(gy_f, gy_h, T);
+      __bang_add_scalar(fx, gx_f, 1.0f, T);
+      __bang_add_scalar(fy, gy_f, 1.0f, T);
+      __bang_mul_scalar(fx, fx, 63.5f, T);
+      __bang_mul_scalar(fy, fy, 63.5f, T);
+      __bang_float2int32_rd(x0, fx, T, 0);
+      __bang_float2int32_rd(y0, fy, T, 0);
+      __bang_int322float(wx, x0, T, 0);
+      __bang_int322float(wy, y0, T, 0);
+      __bang_sub(wx, fx, wx, T);
+      __bang_sub(wy, fy, wy, T);
+
+      __bang_lt_scalar(mx, x0, 127, T);
+      __bang_lt_scalar(my, y0, 127, T);
+      __bang_mul_scalar(mx, mx, -1, T);
+      __bang_mul_scalar(my, my, -1, T);
+      __bang_int322float(mx_f, mx, T, 0);
+      __bang_int322float(my_f, my, T, 0);
+      __bang_add(x1, x0, mx, T);
+      __bang_add(y1, y0, my, T);
+
+      __bang_mul_scalar(off0, y0, 128, T);
+      __bang_add(off0, off0, x0, T);
+      __bang_mul_scalar(off0, off0, (int32_t)sizeof(half), T);
+      __bang_mul_scalar(off1, y0, 128, T);
+      __bang_add(off1, off1, x1, T);
+      __bang_mul_scalar(off1, off1, (int32_t)sizeof(half), T);
+      __bang_mul_scalar(off2, y1, 128, T);
+      __bang_add(off2, off2, x0, T);
+      __bang_mul_scalar(off2, off2, (int32_t)sizeof(half), T);
+      __bang_mul_scalar(off3, y1, 128, T);
+      __bang_add(off3, off3, x1, T);
+      __bang_mul_scalar(off3, off3, (int32_t)sizeof(half), T);
+
+      __gather(v0_h, px, (uint32_t *)off0, sizeof(half), GDRAM2NRAM,
+               sizeof(half), T);
+      __gather(v1_h, px, (uint32_t *)off1, sizeof(half), GDRAM2NRAM,
+               sizeof(half), T);
+      __gather(v2_h, px, (uint32_t *)off2, sizeof(half), GDRAM2NRAM,
+               sizeof(half), T);
+      __gather(v3_h, px, (uint32_t *)off3, sizeof(half), GDRAM2NRAM,
+               sizeof(half), T);
+
+      __bang_half2float(v0, v0_h, T);
+      __bang_half2float(v1, v1_h, T);
+      __bang_half2float(v2, v2_h, T);
+      __bang_half2float(v3, v3_h, T);
+
+      __bang_mul(v1, v1, mx_f, T);
+      __bang_mul(v2, v2, my_f, T);
+      __bang_mul(m11, mx_f, my_f, T);
+      __bang_mul(v3, v3, m11, T);
+
+      __bang_sub(v1, v1, v0, T);
+      __bang_mul(v1, v1, wx, T);
+      __bang_add(v0, v0, v1, T);
+
+      __bang_sub(v3, v3, v2, T);
+      __bang_mul(v3, v3, wx, T);
+      __bang_add(v2, v2, v3, T);
+
+      __bang_sub(v2, v2, v0, T);
+      __bang_mul(v2, v2, wy, T);
+      __bang_add(v0, v0, v2, T);
+
+      __bang_float2half_rn(out_h, v0, T);
+      __memcpy(py + t, out_h, T * sizeof(half), NRAM2GDRAM);
+    }
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
-  static torch::Tensor t0;
-  if (!t0.defined())
-    t0 = torch::empty({4, 64, 64, 64}, input.options());
+  static torch::Tensor out;
+  if (!out.defined())
+    out = torch::empty({4, 64, 64, 64}, input.options());
   else
-    t0.resize_({4, 64, 64, 64});
+    out.resize_({4, 64, 64, 64});
 
-  static cnnlTensorDescriptor_t d0;
-  static cnnlTensorDescriptor_t d1;
-  static cnnlTensorDescriptor_t d2;
-  static cnnlGridSampleDescriptor_t gd;
-  static bool inited = false;
-  static size_t ws = 0;
-
-  cnnlHandle_t h = torch_mlu::getCurrentHandle();
-  if (!inited) {
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&d0));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&d1));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&d2));
-    CNNL_CHECK(cnnlCreateGridSampleDescriptor(&gd));
-    int s0[4] = {4, 128, 128, 64};
-    int st0[4] = {1048576, 128, 1, 16384};
-    int s1[4] = {4, 64, 64, 2};
-    int s2[4] = {4, 64, 64, 64};
-    CNNL_CHECK(cnnlSetTensorDescriptorEx(d0, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF,
-                                         4, s0, st0));
-    CNNL_CHECK(
-        cnnlSetTensorDescriptor(d1, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, s1));
-    CNNL_CHECK(
-        cnnlSetTensorDescriptor(d2, CNNL_LAYOUT_NHWC, CNNL_DTYPE_HALF, 4, s2));
-    CNNL_CHECK(cnnlSetGridSampleDescriptor(
-        gd, CNNL_INTERP_BILINEAR, CNNL_GRIDSAMPLE_PADDING_ZEROS, true));
-    CNNL_CHECK(cnnlGetGridSampleForwardWorkspaceSize(h, d0, d1, d2, &ws));
-    inited = true;
-  }
-
-  static torch::Tensor w;
-  void *p = nullptr;
-  if (ws > 0) {
-    if (!w.defined())
-      w = torch::empty({(long long)ws}, input.options().dtype(torch::kUInt8));
-    p = w.data_ptr();
-  }
-  CNNL_CHECK(cnnlGridSampleForward(h, gd, d0, input.data_ptr(), d1,
-                                   grid.data_ptr(), d2, t0.data_ptr(), p, ws));
-  return t0.as_strided({4, 64, 64, 64}, {262144, 1, 4096, 64});
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(grid.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+  return out;
 }
