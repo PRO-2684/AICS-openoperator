@@ -36,6 +36,10 @@ __mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
     for (int k = 0; k < 8; ++k) {
       int p = (int)e[j + k];
       __bang_add(d + p * E1, d + p * E1, b + k * E1, E1);
+    }
+    __sync_compute();
+    for (int k = 0; k < 8; ++k) {
+      int p = (int)e[j + k];
       if (c[p] == j + k) {
         __bang_atomic_reduce_add_async(y + p * E1, d + p * E1, E1);
       }
