@@ -13,10 +13,18 @@
 #define K0 3
 #define R0 2
 #define T0 64
-#define W1 9216
+#define P0 64
+#define W1 294912
+#define W2 36864
+
+__mlu_entry__ void kz(half *__restrict__ y) {
+  for (int i = taskId; i < W1; i += taskDim) {
+    y[i] = (half)0.0f;
+  }
+}
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  for (int i = taskId; i < W1; i += taskDim) {
+  for (int i = taskId; i < 9216; i += taskDim) {
     int t = i;
     int c = t % B1;
     t /= B1;
@@ -24,18 +32,20 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     t /= K0;
     int h = t % K0;
     int o = t / K0;
-    y[(o * K0 + h) * K0 * B1 + w * B1 + c] =
+    int grp = o / G0;
+    int lo = o - grp * G0;
+    y[grp * W2 + ((lo * K0 + h) * K0 + w) * P0 + c] =
         x[((o * B1 + c) * K0 + h) * K0 + w];
   }
 }
 
 __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                       float *__restrict__ y) {
-  __nram__ half a[(R0 + 2) * W0 * B1];
-  __nram__ half b[(R0 + 2) * W0 * B1];
-  __nram__ float c[R0 * W0 * G0];
-  __nram__ float d[R0 * W0 * G0];
-  __wram__ half ww[G0 * B1 * K0 * K0];
+  __nram__ half a[(R0 + 2) * W0 * P0];
+  __nram__ half b[(R0 + 2) * W0 * P0];
+  __nram__ float c[R0 * W0 * P0];
+  __nram__ float d[R0 * W0 * P0];
+  __wram__ half ww[W2];
 
   for (int g = taskId; g < B0 * B1 * T0; g += taskDim) {
     int n = g / (B1 * T0);
@@ -48,8 +58,8 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
       rows = H0 - oh;
     int ih = rows + 2;
     int in_base = (n * C0 + grp * B1) * H0 * W0;
-    int w_base = grp * G0 * B1 * K0 * K0;
-    __bang_write_value(a, ih * W0 * B1, (half)0.0f);
+    int w_base = grp * W2;
+    __bang_write_value(a, ih * W0 * P0, (half)0.0f);
     for (int ic = 0; ic < B1; ++ic) {
       for (int r = 0; r < ih; ++r) {
         int ih0 = oh - 1 + r;
@@ -60,10 +70,10 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                  W0 * sizeof(half), GDRAM2NRAM);
       }
     }
-    __memcpy(ww, w + w_base, G0 * B1 * K0 * K0 * sizeof(half), GDRAM2WRAM);
-    __bang_transpose(b, a, B1, ih * W0);
-    __bang_conv(c, b, ww, B1, ih, W0, K0, K0, 1, 1, G0);
-    __bang_transpose(d, c, rows * W0, G0);
+    __memcpy(ww, w + w_base, W2 * sizeof(half), GDRAM2WRAM);
+    __bang_transpose(b, a, P0, ih * W0);
+    __bang_conv(c, b, ww, P0, ih, W0, K0, K0, 1, 1, P0);
+    __bang_transpose(d, c, rows * W0, P0);
     for (int oc = 0; oc < G0; ++oc) {
       __memcpy(y + (n * C1 + grp * G0 + oc) * H0 * W0 + oh * W0,
                d + oc * rows * W0, rows * W0 * sizeof(float), NRAM2GDRAM);
@@ -91,6 +101,8 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {T0, 1, 1};
   if (last != kernel.data_ptr()) {
+    kz<<<d, cnrtFuncTypeBlock, q>>>(
+        reinterpret_cast<half *>(w.data_ptr<at::Half>()));
     k0<<<d, cnrtFuncTypeBlock, q>>>(
         reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
         reinterpret_cast<half *>(w.data_ptr<at::Half>()));
