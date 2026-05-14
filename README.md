@@ -137,7 +137,7 @@ python scripts/update_problems.py
 | 086 | [Batch_outer_product](Batch_outer_product.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/7a1519e) |
 | 087 | [Hadamard_product](Hadamard_product.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/1eda60594d6e0b532762d4a53c465437ad2d7e60) |
 | 088 | [Matrix_trace](Matrix_trace.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/591ffedc0fbb7528b8e252a2d94c663eb19484ec) |
-| 089 | [Diagonal_extraction](Diagonal_extraction.mlu) | N/A | 🔴 |
+| 089 | [Diagonal_extraction](Diagonal_extraction.mlu) | N/A | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/f429319) |
 | 090 | [Einsum_4D_contract](Einsum_4D_contract.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/11829f7) |
 | 091 | [Matrix_inverse](Matrix_inverse.mlu) | N/A | 🔴 |
 | 092 | [SVD_decomposition](SVD_decomposition.mlu) | N/A | 🔴 |
