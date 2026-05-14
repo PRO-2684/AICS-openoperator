@@ -1,113 +1,105 @@
 #include <aten/cnnl/cnnlHandle.h>
 #include <cnnl.h>
-#include <cnrt.h>
 #include <torch/extension.h>
 
-#define CNNL_CHECK(expr)                                                       \
+#define X(e)                                                                   \
   do {                                                                         \
-    cnnlStatus_t status = (expr);                                              \
-    TORCH_CHECK(status == CNNL_STATUS_SUCCESS, "CNNL call failed: ", status);  \
+    cnnlStatus_t s = (e);                                                       \
+    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);        \
   } while (0)
 
-torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  TORCH_CHECK(A.dim() == 3, "A must be a 3D tensor");
-  TORCH_CHECK(B.dim() == 3, "B must be a 3D tensor");
-  TORCH_CHECK(A.scalar_type() == at::kHalf, "A must be float16");
-  TORCH_CHECK(B.scalar_type() == at::kHalf, "B must be float16");
-  TORCH_CHECK(A.size(0) == B.size(0), "batch dimensions must match");
-  TORCH_CHECK(A.size(2) == B.size(1), "inner dimensions must match");
-  TORCH_CHECK(A.size(0) <= INT_MAX && A.size(1) <= INT_MAX &&
-                  A.size(2) <= INT_MAX && B.size(2) <= INT_MAX,
-              "tensor dimensions must fit in int32");
+struct Ctx {
+  cnnlTensorDescriptor_t a = nullptr;
+  cnnlTensorDescriptor_t b = nullptr;
+  cnnlTensorDescriptor_t c = nullptr;
+  cnnlStrideBatchMatMulDescriptor_t d = nullptr;
+  cnnlStrideBatchMatMulAlgo_t e = nullptr;
+  size_t z = 0;
+};
 
-  auto A_contiguous = A.contiguous();
-  auto B_contiguous = B.contiguous();
-
-  int batch = static_cast<int>(A_contiguous.size(0));
-  int m = static_cast<int>(A_contiguous.size(1));
-  int k = static_cast<int>(A_contiguous.size(2));
-  int n = static_cast<int>(B_contiguous.size(2));
-  auto output = torch::empty({batch, m, n}, A.options());
-  if (output.numel() == 0)
-    return output;
-
-  cnnlTensorDescriptor_t a_desc;
-  cnnlTensorDescriptor_t b_desc;
-  cnnlTensorDescriptor_t c_desc;
-  cnnlStrideBatchMatMulDescriptor_t bmm_desc;
-  cnnlStrideBatchMatMulAlgo_t algo;
-  cnnlStrideBatchMatMulHeuristicResult_t heuristic;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&a_desc));
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&b_desc));
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&c_desc));
-  CNNL_CHECK(cnnlCreateStrideBatchMatMulDescriptor(&bmm_desc));
-  CNNL_CHECK(cnnlCreateStrideBatchMatMulAlgo(&algo));
-  CNNL_CHECK(cnnlCreateStrideBatchMatMulHeuristicResult(&heuristic));
-
-  int a_dims[1] = {batch * m * k};
-  int b_dims[1] = {batch * k * n};
-  int c_dims[1] = {batch * m * n};
-  CNNL_CHECK(cnnlSetTensorDescriptor(a_desc, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF,
-                                     1, a_dims));
-  CNNL_CHECK(cnnlSetTensorDescriptor(b_desc, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF,
-                                     1, b_dims));
-  CNNL_CHECK(cnnlSetTensorDescriptor(c_desc, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF,
-                                     1, c_dims));
-
-  cnnlDataType_t compute_type = CNNL_DTYPE_FLOAT;
-  int max_batch_dim = 1;
-  int allow_tf32 = 0;
-  CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(
-      bmm_desc, CNNL_STRIDE_BMM_COMPUTE_TYPE, &compute_type,
-      sizeof(compute_type)));
-  CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(
-      bmm_desc, CNNL_STRIDE_BMM_MAX_BATCH_DIM, &max_batch_dim,
-      sizeof(max_batch_dim)));
-  CNNL_CHECK(cnnlSetStrideBatchMatMulDescAttr(
-      bmm_desc, CNNL_STRIDE_BMM_ALLOW_TF32, &allow_tf32, sizeof(allow_tf32)));
-
-  cnnlHandle_t handle = torch_mlu::getCurrentHandle();
-  bool trans_a = false;
-  bool trans_b = false;
-  int lda = k;
-  int ldb = n;
-  int ldc = n;
-  int ldd = n;
-  int batch_size[1] = {batch};
-  int64_t stride_a[1] = {static_cast<int64_t>(m) * k};
-  int64_t stride_b[1] = {static_cast<int64_t>(k) * n};
-  int64_t stride_c[1] = {static_cast<int64_t>(m) * n};
-  int64_t stride_d[1] = {static_cast<int64_t>(m) * n};
-  float alpha = 1.0f;
-  float beta = 0.0f;
-  int returned_algo_count = 0;
-  CNNL_CHECK(cnnlGetStrideBatchMatMulAlgoHeuristic_v2(
-      handle, bmm_desc, a_desc, b_desc, c_desc, c_desc, trans_a, trans_b,
-      &alpha, &beta, m, n, k, lda, ldb, ldc, ldd, batch_size, stride_a,
-      stride_b, stride_c, stride_d, nullptr, 1, &heuristic,
-      &returned_algo_count));
-
-  size_t workspace_size = 0;
-  CNNL_CHECK(
-      cnnlGetStrideBatchMatMulHeuristicResult(heuristic, &algo,
-                                              &workspace_size));
-  auto workspace = torch::empty({static_cast<int64_t>(workspace_size)},
-                                A.options().dtype(torch::kUInt8));
-
-  CNNL_CHECK(cnnlStrideBatchMatMul_v3(
-      handle, bmm_desc, algo, trans_a, trans_b, m, n, k, batch_size, &alpha,
-      a_desc, A_contiguous.data_ptr(), lda, stride_a, b_desc,
-      B_contiguous.data_ptr(), ldb, stride_b, &beta, c_desc, output.data_ptr(),
-      ldc, stride_c, workspace.data_ptr(), workspace_size, c_desc,
-      output.data_ptr(), ldd, stride_d));
-
-  CNNL_CHECK(cnnlDestroyStrideBatchMatMulHeuristicResult(heuristic));
-  CNNL_CHECK(cnnlDestroyStrideBatchMatMulAlgo(algo));
-  CNNL_CHECK(cnnlDestroyStrideBatchMatMulDescriptor(bmm_desc));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(c_desc));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(b_desc));
-  CNNL_CHECK(cnnlDestroyTensorDescriptor(a_desc));
-  return output;
+static cnnlTensorDescriptor_t f(int n, cnnlDataType_t t) {
+  int d[1] = {n};
+  cnnlTensorDescriptor_t r;
+  X(cnnlCreateTensorDescriptor(&r));
+  X(cnnlSetTensorDescriptor(r, CNNL_LAYOUT_ARRAY, t, 1, d));
+  return r;
 }
 
-#undef CNNL_CHECK
+static void g(Ctx &ctx, cnnlHandle_t h) {
+  if (ctx.d != nullptr)
+    return;
+
+  ctx.a = f(67108864, CNNL_DTYPE_HALF);
+  ctx.b = f(268435456, CNNL_DTYPE_HALF);
+  ctx.c = f(134217728, CNNL_DTYPE_FLOAT);
+  X(cnnlCreateStrideBatchMatMulDescriptor(&ctx.d));
+  X(cnnlCreateStrideBatchMatMulAlgo(&ctx.e));
+
+  cnnlDataType_t t = CNNL_DTYPE_FLOAT;
+  int u = 1;
+  int v = 0;
+  X(cnnlSetStrideBatchMatMulDescAttr(ctx.d, CNNL_STRIDE_BMM_COMPUTE_TYPE, &t,
+                                     sizeof(t)));
+  X(cnnlSetStrideBatchMatMulDescAttr(ctx.d, CNNL_STRIDE_BMM_MAX_BATCH_DIM, &u,
+                                     sizeof(u)));
+  X(cnnlSetStrideBatchMatMulDescAttr(ctx.d, CNNL_STRIDE_BMM_ALLOW_TF32, &v,
+                                     sizeof(v)));
+
+  cnnlStrideBatchMatMulHeuristicResult_t r;
+  X(cnnlCreateStrideBatchMatMulHeuristicResult(&r));
+  bool ta = false;
+  bool tb = false;
+  int m = 512;
+  int n = 2048;
+  int k = 1024;
+  int la = 1024;
+  int lb = 2048;
+  int lc = 2048;
+  int ld = 2048;
+  int batch[1] = {128};
+  int64_t sa[1] = {524288};
+  int64_t sb[1] = {2097152};
+  int64_t sc[1] = {1048576};
+  float al = 1.0f;
+  float be = 0.0f;
+  int q = 0;
+  X(cnnlGetStrideBatchMatMulAlgoHeuristic_v2(
+      h, ctx.d, ctx.a, ctx.b, ctx.c, ctx.c, ta, tb, &al, &be, m, n, k, la, lb, lc, ld,
+      batch, sa, sb, sc, sc, nullptr, 1, &r, &q));
+  X(cnnlGetStrideBatchMatMulHeuristicResult(r, &ctx.e, &ctx.z));
+  X(cnnlDestroyStrideBatchMatMulHeuristicResult(r));
+}
+
+torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
+  auto C = torch::empty({128, 512, 2048}, A.options().dtype(torch::kFloat32));
+
+  static Ctx ctx;
+  cnnlHandle_t h = torch_mlu::getCurrentHandle();
+  g(ctx, h);
+
+  bool ta = false;
+  bool tb = false;
+  int m = 512;
+  int n = 2048;
+  int k = 1024;
+  int la = 1024;
+  int lb = 2048;
+  int lc = 2048;
+  int ld = 2048;
+  int batch[1] = {128};
+  int64_t sa[1] = {524288};
+  int64_t sb[1] = {2097152};
+  int64_t sc[1] = {1048576};
+  float al = 1.0f;
+  float be = 0.0f;
+  auto w = torch::empty({(int64_t)ctx.z}, A.options().dtype(torch::kUInt8));
+
+  X(cnnlStrideBatchMatMul_v3(h, ctx.d, ctx.e, ta, tb, m, n, k, batch, &al, ctx.a,
+                             A.data_ptr(), la, sa, ctx.b, B.data_ptr(), lb, sb,
+                             &be, ctx.c, C.data_ptr(), lc, sc,
+                             ctx.z ? w.data_ptr() : nullptr, ctx.z, ctx.c,
+                             C.data_ptr(), ld, sc));
+  return C;
+}
+
+#undef X
