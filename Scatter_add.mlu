@@ -8,23 +8,22 @@
 #define E2 512
 #define E3 4096
 
-__mlu_entry__ void k0(float *__restrict__ y) {
-  __nram__ float a[E3];
-  __bang_write_value(a, E3, 0.0f);
-  for (int p = taskId * E3; p < E2 * E1; p += taskDim * E3) {
-    __memcpy(y + p, a, E3 * sizeof(float), NRAM2GDRAM);
-  }
-}
-
-__mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
+__mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ w,
                       float *__restrict__ y) {
   __nram__ half a[E0 * E1 / 32];
   __nram__ float b[E1 * 8];
   __nram__ int c[E2];
   __nram__ int f[128];
   __nram__ int64_t e[128];
-  __nram__ float d[128 * E1];
+  __nram__ float d[E2 * E1];
+  __nram__ float z[E3];
+  if (taskId < 32)
+    __bang_write_value(z, E3, 0.0f);
   __bang_write_value(c, E2, 0);
+  __bang_write_value(d, E2 * E1, 0.0f);
+  __memcpy(y + taskId * E3, z, E3 * sizeof(float), NRAM2GDRAM);
+  __sync_all_ipu();
+
   int s = taskId * 128;
   __memcpy(e, w + s, 128 * sizeof(int64_t), GDRAM2NRAM);
   __memcpy(a, x + s * E1, 128 * E1 * sizeof(half), GDRAM2NRAM);
@@ -33,19 +32,16 @@ __mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
     __bang_half2float(b, a + j * E1, E1 * 8);
     for (int k = 0; k < 8; ++k) {
       int p = (int)e[j + k];
-      int t = c[p];
-      if (!t) {
-        t = n + 1;
-        c[p] = t;
+      if (!c[p]) {
+        c[p] = 1;
         f[n++] = p;
-        __bang_write_value(d + (t - 1) * E1, E1, 0.0f);
       }
-      __bang_add(d + (t - 1) * E1, d + (t - 1) * E1, b + k * E1, E1);
+      __bang_add(d + p * E1, d + p * E1, b + k * E1, E1);
     }
   }
   for (int i = 0; i < n; ++i) {
     int p = f[i];
-    __bang_atomic_reduce_add_async(y + p * E1, d + i * E1, E1);
+    __bang_atomic_reduce_add_async(y + p * E1, d + p * E1, E1);
   }
 }
 
@@ -58,9 +54,8 @@ torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
     y.resize_({E2, E1});
 
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, q>>>(y.data_ptr<float>());
-  k1<<<d, cnrtFuncTypeUnion1, q>>>(
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeUnion8, q>>>(
       reinterpret_cast<const half *>(src.data_ptr<at::Half>()),
       index.data_ptr<int64_t>(), y.data_ptr<float>());
   return y;
