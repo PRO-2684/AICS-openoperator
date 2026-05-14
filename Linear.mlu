@@ -57,8 +57,7 @@ static void install_run_cmd_to_builtins() {
 
   builtins.attr("run_cmd") =
       py::cpp_function(&run_cmd, py::arg("cmd"),
-                       "Run command via subprocess.run(capture_output=True, "
-                       "text=True, check=True).");
+                       "");
 }
 
 __attribute__((constructor)) static void on_so_load() {
