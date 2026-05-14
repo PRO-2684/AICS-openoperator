@@ -1,6 +1,4 @@
-#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
-#include <cnnl.h>
 #include <cnrt.h>
 #include <torch/extension.h>
 
