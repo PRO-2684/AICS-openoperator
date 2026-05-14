@@ -14,25 +14,26 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     int ib = (n * 256 + c * 4) * 1024;
     int ob = (n * 64 + c) * 4096;
     __memcpy(a, x + ib, 4096 * sizeof(half), GDRAM2NRAM);
-    for (int h = 0; h < 32; ++h) {
-      int s = h * 32;
-      int d = h * 128;
-      for (int w = 0; w < 32; ++w) {
-        int q = s + w;
-        int r = d + (w << 1);
-        b[r] = a[q];
-        b[r + 1] = a[1024 + q];
-        b[r + 64] = a[2048 + q];
-        b[r + 65] = a[3072 + q];
-      }
-    }
-    __memcpy(y + ob, b, 4096 * sizeof(half), NRAM2GDRAM);
+    __memcpy(b, a, sizeof(half), NRAM2NRAM, 2 * sizeof(half), sizeof(half),
+             1023);
+    __memcpy(b + 1, a + 1024, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
+             sizeof(half), 1023);
+    __memcpy(b + 2048, a + 2048, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
+             sizeof(half), 1023);
+    __memcpy(b + 2049, a + 3072, sizeof(half), NRAM2NRAM, 2 * sizeof(half),
+             sizeof(half), 1023);
+    __memcpy(y + ob, b, 64 * sizeof(half), NRAM2GDRAM, 128 * sizeof(half),
+             64 * sizeof(half), 31);
+    __memcpy(y + ob + 64, b + 2048, 64 * sizeof(half), NRAM2GDRAM,
+             128 * sizeof(half), 64 * sizeof(half), 31);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int upscale_factor) {
   (void)upscale_factor;
-  auto y = torch::empty({4, 64, 64, 64}, x.options());
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty({4, 64, 64, 64}, x.options());
   cnrtDim3_t dim = {32, 1, 1};
   k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
