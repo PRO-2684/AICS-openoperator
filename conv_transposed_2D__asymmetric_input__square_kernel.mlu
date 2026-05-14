@@ -24,7 +24,8 @@ __mlu_entry__ void k0(const half *__restrict__ w, half *__restrict__ z) {
     t /= 3;
     int kh = t % 3;
     int co = t / 3;
-    z[p] = w[((ci * E2 + co) * 3 + (2 - kh)) * 3 + (2 - kw)];
+    z[((co * 3 + kh) * 3 + kw) * E1 + ci] =
+        w[((ci * E2 + co) * 3 + (2 - kh)) * 3 + (2 - kw)];
   }
 }
 
