@@ -14,6 +14,13 @@
 #define E7 6
 #define E8 32
 #define E9 64
+#define E10 73728
+
+__mlu_entry__ void kz(float *__restrict__ y) {
+  for (int i = taskId; i < E10; i += taskDim) {
+    y[i] = 0.0f;
+  }
+}
 
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
   int o = taskId;
@@ -49,7 +56,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
   for (int i = 0; i < E1; ++i) {
     int c = i / 9;
     int u = i - c * 9;
-    int dst = (o * E1 + u * E0 + c);
+    int q = (o & 3) + (((o >> 2) & 7) << 3) + (((o >> 5) & 1) << 6);
+    int dst = (q * E1 + u * E0 + c);
     y[dst] = a[i];
   }
 }
@@ -61,8 +69,8 @@ __mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ w,
   __nram__ float b[E7 * E5 * E0];
   __nram__ float c[E6 * E4 * E0];
   __nram__ float d[E6 * E4 * E0];
-  __wram__ float ww[E2];
-  __memcpy(ww, w, E2 * sizeof(float), GDRAM2WRAM);
+  __wram__ float ww[E10];
+  __memcpy(ww, w, E10 * sizeof(float), GDRAM2WRAM);
 
   for (int t = taskId; t < E3 * E8; t += taskDim) {
     int n = t >> 5;
@@ -105,13 +113,14 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, int in_channels,
   else
     y.resize_({8, 64, 128, 128});
   if (!w.defined())
-    w = torch::empty({E2}, weight.options().dtype(torch::kFloat32));
+    w = torch::empty({E10}, weight.options().dtype(torch::kFloat32));
   else
-    w.resize_({E2});
+    w.resize_({E10});
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   if (last != weight.data_ptr()) {
     cnrtDim3_t g = {E0, 1, 1};
+    kz<<<g, cnrtFuncTypeBlock, queue>>>(w.data_ptr<float>());
     k0<<<g, cnrtFuncTypeBlock, queue>>>(
         reinterpret_cast<const half *>(weight.data_ptr<at::Half>()),
         w.data_ptr<float>());

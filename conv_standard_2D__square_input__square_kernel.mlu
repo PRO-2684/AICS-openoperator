@@ -42,12 +42,16 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     if (oh + rows > E4)
       rows = E4 - oh;
     int ih = rows + 2;
+    int base_h = oh - 1;
     int in_count = ih * E3 * E1;
     __bang_write_value(a, in_count, (half)0.0f);
     for (int c0 = 0; c0 < E1; ++c0) {
       for (int r = 0; r < ih; ++r) {
+        int ih0 = base_h + r;
+        if ((unsigned)ih0 >= E3)
+          continue;
         __memcpy(a + (c0 * ih + r) * E3,
-                 x + (n * E1 + c0) * E3 * E3 + (oh + r) * E3,
+                 x + (n * E1 + c0) * E3 * E3 + ih0 * E3,
                  E3 * sizeof(half), GDRAM2NRAM);
       }
     }
