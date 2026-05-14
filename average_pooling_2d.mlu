@@ -15,20 +15,19 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[A5 * A3 * A2];
   __nram__ half b[A5 * A1];
 
-  for (int u = 0; u < 6; ++u) {
-    int p = taskId + u * 64;
-    int q = p / A6;
-    int r = (p - q * A6) * A5;
-    int n = A1 - r;
-    if (n > A5)
-      n = A5;
-    int h = n * A3;
-    int e = n * A1;
-    __memcpy(a, x + q * A2 * A2 + r * A3 * A2, h * A2 * sizeof(half),
-             GDRAM2NRAM);
-    __bang_sumpool(b, a, 1, h, A2, A3, A3, A3, A3);
-    __bang_mul_scalar(b, b, (half)0.008264462809917355f, e);
-    __memcpy(y + q * A1 * A1 + r * A1, b, e * sizeof(half), NRAM2GDRAM);
+  for (int u = 0; u < 2; ++u) {
+    int q = taskId + u * 64;
+    for (int t = 0; t < 3; ++t) {
+      int r = t * A5;
+      int n = t == 2 ? 27 : A5;
+      int h = n * A3;
+      int e = n * A1;
+      __memcpy(a, x + q * A2 * A2 + r * A3 * A2, h * A2 * sizeof(half),
+               GDRAM2NRAM);
+      __bang_sumpool(b, a, 1, h, A2, A3, A3, A3, A3);
+      __bang_mul_scalar(b, b, (half)0.008264462809917355f, e);
+      __memcpy(y + q * A1 * A1 + r * A1, b, e * sizeof(half), NRAM2GDRAM);
+    }
   }
 }
 
