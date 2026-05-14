@@ -19,7 +19,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ w,
     __bang_half2float(b, a + j * E1, E1 * 8);
     for (int k = 0; k < 8; ++k) {
       int p = (int)e[j + k];
-      __bang_atomic_reduce_add_async(y + p * E1, b + k * E1, E1);
+      __bang_atomic_reduce_add(y + p * E1, b + k * E1, E1);
     }
   }
 }
