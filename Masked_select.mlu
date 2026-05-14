@@ -50,26 +50,16 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   if (!work2.defined())
     work2 = torch::empty({33}, input.options().dtype(torch::kInt32));
 
-  torch_mlu::MLUStream stream2 =
-      torch_mlu::getStreamFromPool(false, input.get_device());
-  torch_mlu::MLUEvent ev;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtQueue_t queue2 = stream2.stream();
   cnrtDim3_t dim = {E2, 1, 1};
 
-  ev.place(torch_mlu::getCurrentMLUStream());
-  ev.wait(stream2);
-  k1<<<dim, cnrtFuncTypeUnion8, queue2>>>(
-      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      work2.data_ptr<int>());
-
-  int n = 0;
-  cnrtMemcpyAsync(&n, work2.data_ptr<int>() + E2, sizeof(int), queue2,
-                  cnrtMemcpyDevToHost);
-  cnrtQueueSync(queue2);
-  k0<<<dim, cnrtFuncTypeUnion4, queue>>>(
+  k2<<<dim, cnrtFuncTypeUnion4, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
+  int n = 0;
+  cnrtMemcpyAsync(&n, work2.data_ptr<int>() + E2, sizeof(int), queue,
+                  cnrtMemcpyDevToHost);
+  cnrtQueueSync(queue);
   out.resize_({(int64_t)n});
   return out;
 }
