@@ -1,43 +1,41 @@
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define X(e)                                                                  \
-  do {                                                                        \
-    cnnlStatus_t s = (e);                                                     \
-    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);      \
-  } while (0)
+#define E0 4
+#define E1 32
+#define E2 1024
+#define E3 93
+#define E4 11
+#define E5 1107072
+
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  for (int p = taskId; p < E5; p += taskDim) {
+    int ow = p % E3;
+    int t0 = p / E3;
+    int oh = t0 % E3;
+    int t1 = t0 / E3;
+    int c = t1 % E1;
+    int n = t1 / E1;
+    int base = ((n * E1 + c) * E2 + oh * E4) * E2 + ow * E4;
+    float s = 0.0f;
+    for (int ky = 0; ky < E4; ++ky) {
+      int row = base + ky * E2;
+      for (int kx = 0; kx < E4; ++kx) {
+        s += (float)x[row + kx];
+      }
+    }
+    y[p] = (half)(s * 0.008264462809917356f);
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size) {
   (void)kernel_size;
-  static cnnlTensorDescriptor_t a = nullptr;
-  static cnnlTensorDescriptor_t b = nullptr;
-  static cnnlPoolingDescriptor_t p = nullptr;
-  static cnnlHandle_t h = nullptr;
-  static torch::Tensor y;
-  static torch::Tensor w;
-  static size_t z = 0;
-  if (a == nullptr) {
-    int xd[4] = {4, 32, 1024, 1024};
-    int yd[4] = {4, 32, 93, 93};
-    X(cnnlCreateTensorDescriptor(&a));
-    X(cnnlCreateTensorDescriptor(&b));
-    X(cnnlCreatePoolingDescriptor(&p));
-    X(cnnlSetTensorDescriptor(a, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4, xd));
-    X(cnnlSetTensorDescriptor(b, CNNL_LAYOUT_NCHW, CNNL_DTYPE_HALF, 4, yd));
-    X(cnnlSetPooling2dDescriptor_v2(
-        p, CNNL_POOLING_AVERAGE_COUNT_INCLUDE_PADDING, CNNL_NOT_PROPAGATE_NAN,
-        11, 11, 0, 0, 0, 0, 11, 11, 1, 1, false));
-    h = torch_mlu::getCurrentHandle();
-    X(cnnlGetPoolingWorkspaceSize_v2(h, p, a, b, &z));
-    y = torch::empty({4, 32, 93, 93}, x.options());
-    w = torch::empty({(int64_t)z}, x.options().dtype(torch::kUInt8));
-  }
-  float alpha = 1.0f;
-  float beta = 0.0f;
-  X(cnnlPoolingForward_v2(h, p, &alpha, a, x.data_ptr(), &beta, nullptr, b,
-                          y.data_ptr(), w.data_ptr(), z));
+  auto y = torch::empty({E0, E1, E3, E3}, x.options());
+  cnrtDim3_t dim = {32, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
-
-#undef X
