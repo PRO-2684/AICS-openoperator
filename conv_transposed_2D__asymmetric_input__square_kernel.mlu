@@ -11,10 +11,11 @@
 #define E5 130
 #define E6 258
 #define E7 260
-#define E8 4
+#define E8 6
 #define E9 18432
-#define E10 49920
-#define E11 66048
+#define E10 66560
+#define E11 99072
+#define E12 16512
 
 __mlu_entry__ void k0(const half *__restrict__ w, half *__restrict__ z) {
   for (int p = taskId; p < E9; p += taskDim) {
@@ -34,12 +35,12 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ half a[E10];
   __nram__ half aa[E10];
   __nram__ float b[E11];
-  __nram__ float d[E11];
+  __nram__ float d[E12];
   __wram__ half e[E9];
   __memcpy(e, w, E9 * sizeof(half), GDRAM2WRAM);
-  for (int g = taskId; g < E0 * 33; g += taskDim) {
-    int n = g / 33;
-    int r = (g - n * 33) * E8;
+  for (int g = taskId; g < E0 * 22; g += taskDim) {
+    int n = g / 22;
+    int r = (g - n * 22) * E8;
     int h = E8;
     if (r + h > E5)
       h = E5 - r;
@@ -58,10 +59,12 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     }
     __bang_transpose(aa, a, E1, ih * E7);
     __bang_conv(b, aa, e, E1, ih, E7, 3, 3, 1, 1, E2);
-    __bang_transpose(d, b, h * E6, E2);
-    for (int co = 0; co < E2; ++co) {
-      __memcpy(y + (n * E2 + co) * E5 * E6 + r * E6,
-               d + co * h * E6, h * E6 * sizeof(float), NRAM2GDRAM);
+    for (int rr = 0; rr < h; ++rr) {
+      __bang_transpose(d, b + rr * E6 * E2, E6, E2);
+      for (int co = 0; co < E2; ++co) {
+        __memcpy(y + (n * E2 + co) * E5 * E6 + (r + rr) * E6,
+                 d + co * E6, E6 * sizeof(float), NRAM2GDRAM);
+      }
     }
   }
 }
