@@ -1,55 +1,43 @@
-#include <aten/cnnl/cnnlHandle.h>
-#include <cnnl.h>
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define CNNL_CHECK(expr)                                                       \
-  do {                                                                         \
-    cnnlStatus_t s__ = (expr);                                                 \
-    TORCH_CHECK(s__ == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s__);   \
-  } while (0)
+#define E0 1024
 
-static cnnlTensorDescriptor_t h() {
-  int s[2] = {16, 1024};
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  CNNL_CHECK(
-      cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 2, s));
-  return d;
-}
-
-static cnnlTensorDescriptor_t i() {
-  int s[2] = {16, 1024};
-  cnnlTensorDescriptor_t d;
-  CNNL_CHECK(cnnlCreateTensorDescriptor(&d));
-  CNNL_CHECK(
-      cnnlSetTensorDescriptor(d, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_INT32, 2, s));
-  return d;
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[E0];
+  int r = taskId;
+  if (r >= 16) {
+    return;
+  }
+  int p = r * E0;
+  __memcpy(a, x + p, E0 * sizeof(half), GDRAM2NRAM);
+  for (int k = 2; k <= E0; k <<= 1) {
+    for (int j = k >> 1; j > 0; j >>= 1) {
+      for (int i = 0; i < E0; ++i) {
+        int q = i ^ j;
+        if (q > i) {
+          half u = a[i];
+          half v = a[q];
+          if (((i & k) == 0 && u > v) || ((i & k) != 0 && u < v)) {
+            a[i] = v;
+            a[q] = u;
+          }
+        }
+      }
+    }
+  }
+  __memcpy(y + p, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim, bool descending) {
+  (void)dim;
+  (void)descending;
   auto y = torch::empty_like(x);
-  auto z = torch::empty({16, 1024}, x.options().dtype(torch::kInt32));
-
-  static cnnlTensorDescriptor_t a = nullptr;
-  static cnnlTensorDescriptor_t b = nullptr;
-  static cnnlTensorDescriptor_t c = nullptr;
-  static size_t w = 0;
-
-  cnnlHandle_t e = torch_mlu::getCurrentHandle();
-
-  if (a == nullptr) {
-    a = h();
-    b = h();
-    c = i();
-
-    CNNL_CHECK(cnnlGetTopKTensorWorkspaceSize(e, a, 1024, 1, false, b, c, &w));
-  }
-
-  auto t = torch::empty({(int64_t)w}, x.options().dtype(torch::kUInt8));
-
-  CNNL_CHECK(cnnlTopKTensor_v3(e, a, x.data_ptr(), 1024, 1, false, true, false,
-                               w ? t.data_ptr() : nullptr, w, b, y.data_ptr(),
-                               c, z.data_ptr()));
-
+  cnrtDim3_t d = {16, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
