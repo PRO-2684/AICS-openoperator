@@ -47,6 +47,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ w,
   __nram__ half h[H0 * W0 * 64];
   __nram__ float b[H0 * W0 * 64];
   __nram__ float c[2 * 128 * 64];
+  __nram__ float d[2 * 128 * 64];
   __wram__ float k[128 * 5 * 5 * 64];
   __memcpy(k, w, 204800 * sizeof(float), GDRAM2WRAM);
   for (int t = taskId; t < T0; t += taskDim) {
@@ -70,12 +71,12 @@ __mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ w,
     __bang_transpose(h, a, 64, H0 * W0);
     __bang_half2float(b, h, H0 * W0 * 64);
     __bang_conv(c, b, k + g * 102400, 64, H0, W0, 5, 5, 1, 1, 64);
-    __bang_transpose(h, c, 2 * 128, 64);
+    __bang_transpose(d, c, 2 * 128, 64);
     for (int r = 0; r < 2; ++r) {
       int row = oh + r;
       for (int oc = 0; oc < 64; ++oc) {
         __memcpy(y + n * 2097152 + (g * 64 + oc) * 16384 + row * 128,
-                 h + oc * 256 + r * 128, 128 * sizeof(float), NRAM2GDRAM);
+                 d + oc * 256 + r * 128, 128 * sizeof(float), NRAM2GDRAM);
       }
     }
   }
