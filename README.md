@@ -2,7 +2,7 @@
 
 ## 🔗 Related Links
 
-- [OpenOperator](https://openoperator.cn) | [Monitor](http://152.136.18.42:13000)
+- [OpenOperator](https://openoperator.cn) | [Monitor](http://43.143.241.66:13000)
 - [BangC Tutorial](https://gitservice.cstcloud.cn/kcxain/BangcTutorial/)
 - [南京智能计算中心算力平台](https://paas.extrotec.com:30443/)
 - [Start Kit](https://github.com/kernel-competition-bot/openoperator-start-kit)
