@@ -3,97 +3,91 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define R0 4
-#define H0 6
-#define W0 260
-#define T0 528
+#define E0 16
+#define E1 32
+#define E2 64
+#define E3 128
+#define E4 256
+#define E5 130
+#define E6 258
+#define E7 260
+#define E8 3
+#define E9 18432
+#define E10 41600
+#define E11 49536
 
-__mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ y) {
-  for (int i = taskId; i < 18432; i += taskDim) {
-    int t = i;
+__mlu_entry__ void k0(const half *__restrict__ w, half *__restrict__ z) {
+  for (int p = taskId; p < E9; p += taskDim) {
+    int ci = p & 31;
+    int t = p >> 5;
     int kw = t % 3;
     t /= 3;
     int kh = t % 3;
-    t /= 3;
-    int oc = t % 64;
-    int ic = t / 64;
-    int p = (((oc * 3 + kh) * 3 + kw) * 32 + ic);
-    y[p] = x[i];
+    int co = t / 3;
+    z[p] = w[((ci * E2 + co) * 3 + kh) * 3 + kw];
   }
 }
 
 __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
-                      float *__restrict__ y) {
-  __nram__ half a[H0 * W0 * 32];
-  __nram__ half b[H0 * W0 * 32];
-  __nram__ float c[R0 * 258 * 64];
-  __nram__ float d[R0 * 258 * 64];
-  __wram__ half k[64 * 3 * 3 * 32];
-  __memcpy(k, w, 36864 * sizeof(half), GDRAM2WRAM);
-  for (int t = taskId; t < T0; t += taskDim) {
-    int tile = t % 33;
-    int n = t / 33;
-    int oh = tile * R0;
-    int rows = 130 - oh;
-    if (rows > R0)
-      rows = R0;
-    int base = oh - 2;
-    __bang_write_value(a, H0 * W0 * 32, (half)0.0f);
-    for (int ih = 0; ih < H0; ++ih) {
-      int gh = base + ih;
-      if ((unsigned)gh >= 128)
-        continue;
-      for (int ic = 0; ic < 32; ++ic) {
-        __memcpy(a + ic * H0 * W0 + ih * W0 + 2,
-                 x + n * 1048576 + ic * 32768 + gh * 256,
-                 256 * sizeof(half), GDRAM2NRAM);
+                      half *__restrict__ y) {
+  __nram__ half a[E10];
+  __nram__ half aa[E10];
+  __nram__ float b[E11];
+  __nram__ half c[E11];
+  __nram__ half d[E11];
+  __wram__ half e[E9];
+  __memcpy(e, w, E9 * sizeof(half), GDRAM2WRAM);
+  for (int g = taskId; g < E0 * 44; g += taskDim) {
+    int n = g / 44;
+    int r = (g - n * 44) * E8;
+    int h = E8;
+    if (r + h > E5)
+      h = E5 - r;
+    int ih = h + 2;
+    int m = E1 * ih * E7;
+    __bang_write_value(a, m, (half)0.0f);
+    for (int ci = 0; ci < E1; ++ci) {
+      for (int rr = 0; rr < ih; ++rr) {
+        int xr = r + rr - 2;
+        if (xr >= 0 && xr < E3) {
+          __memcpy(a + (ci * ih + rr) * E7 + 2,
+                   x + (n * E1 + ci) * E3 * E4 + xr * E4,
+                   E4 * sizeof(half), GDRAM2NRAM);
+        }
       }
     }
-    __bang_transpose(b, a, 32, H0 * W0);
-    __bang_conv(c, b, k, 32, H0, W0, 3, 3, 1, 1, 64);
-    __bang_transpose(d, c, R0 * 258, 64);
-    for (int r = 0; r < rows; ++r) {
-      int row = oh + r;
-      for (int oc = 0; oc < 64; ++oc) {
-        __memcpy(y + n * 64 * 130 * 258 + oc * 130 * 258 + row * 258,
-                 d + oc * 1032 + r * 258, 258 * sizeof(float), NRAM2GDRAM);
-      }
+    __bang_reshape_nchw2nhwc(aa, a, 1, ih, E7, E1);
+    __bang_conv(b, aa, e, E1, ih, E7, 3, 3, 1, 1, E2);
+    int num = h * E6 * E2;
+    __bang_float2half_rn(c, b, num);
+    __bang_reshape_nhwc2nchw(d, c, 1, h, E6, E2);
+    for (int co = 0; co < E2; ++co) {
+      __memcpy(y + (n * E2 + co) * E5 * E6 + r * E6,
+               d + co * h * E6, h * E6 * sizeof(half), NRAM2GDRAM);
     }
   }
 }
 
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
-                        int out_channels, int kernel_size, int stride,
-                        int padding, int output_padding, int groups,
-                        bool bias) {
-  (void)in_channels;
-  (void)out_channels;
-  (void)kernel_size;
-  (void)stride;
-  (void)padding;
-  (void)output_padding;
-  (void)groups;
-  (void)bias;
-  static torch::Tensor y;
-  if (!y.defined())
-    y = torch::empty({16, 64, 130, 258}, x.options().dtype(torch::kFloat32));
-  else
-    y.resize_({16, 64, 130, 258});
-  static torch::Tensor w;
-  static void *last = nullptr;
-  if (!w.defined())
-    w = torch::empty({64, 3, 3, 32}, kernel.options().dtype(torch::kHalf));
-  if (last != kernel.data_ptr()) {
-    cnrtDim3_t d = {32, 1, 1};
-    k2<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-        reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(w.data_ptr<at::Half>()));
-    last = kernel.data_ptr();
-  }
-  cnrtDim3_t d = {32, 1, 1};
-  k1<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, int c0, int c1,
+                        int k, int s, int p, int o, int g, bool b) {
+  (void)c0;
+  (void)c1;
+  (void)k;
+  (void)s;
+  (void)p;
+  (void)o;
+  (void)g;
+  (void)b;
+  auto y = torch::empty({E0, E2, E5, E6}, x.options());
+  auto z = torch::empty({E9}, x.options());
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  cnrtDim3_t d = {4, 8, 1};
+  k0<<<d, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
-      y.data_ptr<float>());
+      reinterpret_cast<half *>(z.data_ptr<at::Half>()));
+  k1<<<d, cnrtFuncTypeUnion1, q>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(z.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
