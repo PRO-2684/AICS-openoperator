@@ -85,7 +85,8 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
     wf.resize_({128, 3, 3, 64});
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  if (last != kernel.data_ptr()) {
+  bool changed = last != kernel.data_ptr();
+  if (changed) {
     cnrtDim3_t dim = {32, 1, 1};
     k1<<<dim, cnrtFuncTypeBlock, queue>>>(
         reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
@@ -165,8 +166,10 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
                               x.data_ptr(), xhd, xh.data_ptr(), wp, ws_size));
   CNNL_CHECK(cnnlCastDataType(torch_mlu::getCurrentHandle(), xhd, xh.data_ptr(),
                               CNNL_CAST_HALF_TO_FLOAT, xfd, xf.data_ptr()));
-  CNNL_CHECK(cnnlCastDataType(torch_mlu::getCurrentHandle(), wd, w.data_ptr(),
-                              CNNL_CAST_HALF_TO_FLOAT, wfd, wf.data_ptr()));
+  if (changed) {
+    CNNL_CHECK(cnnlCastDataType(torch_mlu::getCurrentHandle(), wd, w.data_ptr(),
+                                CNNL_CAST_HALF_TO_FLOAT, wfd, wf.data_ptr()));
+  }
   CNNL_CHECK(cnnlConvolutionForward(
       torch_mlu::getCurrentHandle(), cd, algo, nullptr, xfd, xf.data_ptr(), wfd,
       wf.data_ptr(), nullptr, nullptr, wp, ws_size, nullptr, yhd,
