@@ -10,7 +10,7 @@
 
 __mlu_entry__ void k0(float *__restrict__ y) {
   __nram__ float a[E3];
-  __bang_write_zero(a, E3);
+  __bang_write_value(a, E3, 0.0f);
   for (int p = taskId * E3; p < E2 * E1; p += taskDim * E3) {
     __memcpy(y + p, a, E3 * sizeof(float), NRAM2GDRAM);
   }
@@ -24,8 +24,8 @@ __mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
   __nram__ int f[128];
   __nram__ int64_t e[128];
   __nram__ float d[E2 * E1];
-  __bang_write_zero(c, E2);
-  __bang_write_zero(d, E2 * E1);
+  __bang_write_value(c, E2, 0);
+  __bang_write_value(d, E2 * E1, 0.0f);
   int s = taskId * 128;
   __memcpy(e, w + s, 128 * sizeof(int64_t), GDRAM2NRAM);
   __memcpy(a, x + s * E1, 128 * E1 * sizeof(half), GDRAM2NRAM);
@@ -54,6 +54,7 @@ torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
     y = torch::empty({E2, E1}, src.options().dtype(torch::kFloat32));
   else
     y.resize_({E2, E1});
+
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {4, 8, 1};
   k0<<<d, cnrtFuncTypeUnion1, q>>>(y.data_ptr<float>());
