@@ -19,11 +19,11 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
   __nram__ float s[R0];
   int p = taskId * R1;
   int q = p + 32 * R1;
-  __memcpy_async(h0, x + p, R1 * sizeof(half), GDRAM2NRAM);
-  __memcpy_async(r0, r + p, R1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(h0, x + p, R1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(r0, r + p, R1 * sizeof(half), GDRAM2NRAM);
   __sync_io();
-  __memcpy_async(h1, x + q, R1 * sizeof(half), GDRAM2NRAM);
-  __memcpy_async(r1, r + q, R1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(h1, x + q, R1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(r1, r + q, R1 * sizeof(half), GDRAM2NRAM);
 
   __bang_add(h0, h0, r0, R1);
   __bang_square(r0, h0, R1);
@@ -37,7 +37,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
     __bang_mul_scalar(h0 + i * E0, h0 + i * E0, (half)s[i], E0);
   }
   __sync_io_move_compute();
-  __memcpy_async(y + p, h0, R1 * sizeof(half), NRAM2GDRAM);
+  __memcpy(y + p, h0, R1 * sizeof(half), NRAM2GDRAM);
 
   __bang_add(h1, h1, r1, R1);
   __bang_square(r1, h1, R1);
@@ -51,7 +51,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
     __bang_mul_scalar(h1 + i * E0, h1 + i * E0, (half)s[i], E0);
   }
   __sync_io_move_compute();
-  __memcpy_async(y + q, h1, R1 * sizeof(half), NRAM2GDRAM);
+  __memcpy(y + q, h1, R1 * sizeof(half), NRAM2GDRAM);
   __sync_io();
 }
 
@@ -62,8 +62,8 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor residual,
   static torch::Tensor y;
   if (!y.defined())
     y = torch::empty_like(x);
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(residual.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(weight.data_ptr<at::Half>()),
