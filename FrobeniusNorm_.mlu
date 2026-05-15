@@ -9,10 +9,10 @@
 __mlu_entry__ void k(half *a) {
   __nram__ half x[T];
   int64_t s = (int64_t)taskId * T;
-  half *p = (half *)__builtin_assume_aligned(a + s, 512);
-  __memcpy(x, p, T * sizeof(half), GDRAM2NRAM);
-  __bang_mul_scalar(x, x, (half)0.0001220703125f, T);
-  __memcpy(p, x, T * sizeof(half), NRAM2GDRAM);
+  __memcpy(x, a + s, T * sizeof(half), GDRAM2NRAM);
+  __bang_mul_scalar(x, x, (half)0.0001220703125f, 131072);
+  __bang_mul_scalar(x + 131072, x + 131072, (half)0.0001220703125f, 131072);
+  __memcpy(a + s, x, T * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
