@@ -7,7 +7,7 @@
 #define W0 132
 #define T0 2048
 
-__mlu_entry__ void k2(const half *__restrict__ x, float *__restrict__ y) {
+__mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ y) {
   for (int i = taskId; i < 73728; i += taskDim) {
     int t = i;
     int kw = t % 3;
@@ -19,18 +19,18 @@ __mlu_entry__ void k2(const half *__restrict__ x, float *__restrict__ y) {
     int q = (oc & 3) + (((oc >> 6) & 1) << 2) + (((oc >> 2) & 7) << 3) +
             (((oc >> 5) & 1) << 6);
     int p = (((q * 3 + kh) * 3 + kw) * 64 + ic);
-    y[p] = (float)x[i];
+    y[p] = x[i];
   }
 }
 
-__mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ w,
+__mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                       float *__restrict__ y) {
   __nram__ half a[H0 * W0 * 64];
   __nram__ half h[H0 * W0 * 64];
   __nram__ float c[2 * 128 * 128];
   __nram__ float d[2 * 128 * 128];
-  __wram__ float k[128 * 3 * 3 * 64];
-  __memcpy(k, w, 73728 * sizeof(float), GDRAM2WRAM);
+  __wram__ half k[128 * 3 * 3 * 64];
+  __memcpy(k, w, 73728 * sizeof(half), GDRAM2WRAM);
   for (int t = taskId; t < T0; t += taskDim) {
     int tile = t & 63;
     int n = t >> 7;
@@ -72,18 +72,19 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   static torch::Tensor w;
   static void *last = nullptr;
   if (!w.defined())
-    w = torch::empty({128, 3, 3, 64}, kernel.options().dtype(torch::kFloat32));
+    w = torch::empty({128, 3, 3, 64}, kernel.options().dtype(torch::kHalf));
   if (last != kernel.data_ptr()) {
     cnrtDim3_t d = {32, 1, 1};
     k2<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
         reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
-        w.data_ptr<float>());
+        reinterpret_cast<half *>(w.data_ptr<at::Half>()));
     last = kernel.data_ptr();
   }
   auto y = torch::empty({16, 128, 128, 128}, x.options().dtype(torch::kFloat32));
   cnrtDim3_t d = {32, 1, 1};
   k1<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()), w.data_ptr<float>(),
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
       y.data_ptr<float>());
   return y;
 }
