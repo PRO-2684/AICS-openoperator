@@ -7,52 +7,81 @@ __mlu_func__ void k1(float *__restrict__ a, float *__restrict__ b) {
   __bang_write_value(a + 4000, 96, 0.0f);
   __bang_write_value(b, 1, 0.0f);
   __memcpy(b + 1, a, 4095 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 4000);
+  __bang_add(a, a, b, 4096);
   __bang_write_value(b, 2, 0.0f);
   __memcpy(b + 2, a, 4094 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 4000);
+  __bang_add(a, a, b, 4096);
   __bang_write_value(b, 4, 0.0f);
   __memcpy(b + 4, a, 4092 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 4000);
+  __bang_add(a, a, b, 4096);
   __bang_write_value(b, 8, 0.0f);
   __memcpy(b + 8, a, 4088 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 4000);
+  __bang_add(a, a, b, 4096);
   __bang_write_value(b, 16, 0.0f);
   __memcpy(b + 16, a, 4080 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 4000);
+  __bang_add(a, a, b, 4096);
   __bang_write_value(b, 32, 0.0f);
   __memcpy(b + 32, a, 4064 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 4000);
+  __bang_add(a, a, b, 4096);
   __bang_write_value(b, 64, 0.0f);
   __memcpy(b + 64, a, 4032 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 4000);
+  __bang_add(a, a, b, 4096);
   __bang_write_value(b, 128, 0.0f);
   __memcpy(b + 128, a, 3968 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 4000);
+  __bang_add(a, a, b, 4096);
   __bang_write_value(b, 256, 0.0f);
   __memcpy(b + 256, a, 3840 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 4000);
+  __bang_add(a, a, b, 4096);
   __bang_write_value(b, 512, 0.0f);
   __memcpy(b + 512, a, 3584 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 4000);
+  __bang_add(a, a, b, 4096);
   __bang_write_value(b, 1024, 0.0f);
   __memcpy(b + 1024, a, 3072 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 4000);
+  __bang_add(a, a, b, 4096);
   __bang_write_value(b, 2048, 0.0f);
   __memcpy(b + 2048, a, 2048 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 4000);
+  __bang_add(a, a, b, 4096);
+}
+
+__mlu_func__ void k2(half *__restrict__ h, float *__restrict__ a,
+                     float *__restrict__ b) {
+  __bang_half2float(a, h, 4000);
+  k1(a, b);
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
-  __nram__ half h[4000];
-  __nram__ float a[4096];
-  __nram__ float b[4096];
-  for (int r = taskId; r < 128; r += taskDim) {
-    __memcpy(h, x + r * 4000, 4000 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(a, h, 4000);
-    k1(a, b);
-    __memcpy(y + r * 4000, a, 4000 * sizeof(float), NRAM2GDRAM);
+  __nram__ half h0[4000];
+  __nram__ half h1[4000];
+  __nram__ float a0[4096];
+  __nram__ float a1[4096];
+  __nram__ float b0[4096];
+  __nram__ float b1[4096];
+  int r = taskId;
+  if (r < 128) {
+    __memcpy_async(h0, x + r * 4000, 4000 * sizeof(half), GDRAM2NRAM);
+    __sync_io();
   }
+  int q = 0;
+  for (; r < 128; r += taskDim) {
+    int nr = r + taskDim;
+    if (nr < 128) {
+      if (q == 0)
+        __memcpy_async(h1, x + nr * 4000, 4000 * sizeof(half), GDRAM2NRAM);
+      else
+        __memcpy_async(h0, x + nr * 4000, 4000 * sizeof(half), GDRAM2NRAM);
+    }
+    if (q == 0)
+      k2(h0, a0, b0);
+    else
+      k2(h1, a1, b1);
+    __sync_io_move_compute();
+    if (q == 0)
+      __memcpy_async(y + r * 4000, a0, 4000 * sizeof(float), NRAM2GDRAM);
+    else
+      __memcpy_async(y + r * 4000, a1, 4000 * sizeof(float), NRAM2GDRAM);
+    q ^= 1;
+  }
+  __sync_io();
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
