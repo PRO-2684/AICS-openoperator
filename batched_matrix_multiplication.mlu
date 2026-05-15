@@ -8,12 +8,12 @@
 #define K0 1024
 #define N0 2048
 #define TM 64
-#define TN 256
+#define TN 512
 #define TK 128
 #define BM 8
-#define BN 8
-#define RB 4
-#define BG 2
+#define BN 4
+#define RB 2
+#define BG 4
 #define TC (B0 * BG * BN)
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
@@ -21,7 +21,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   __nram__ half ah[TM * TK];
   __nram__ half bh[TK * TN];
   __nram__ half bt[TN * TK];
-  __nram__ half hf[TN * TK];
   __nram__ float acc[RB * TM * TN];
   __nram__ float tmp[TM * TN];
   __wram__ half ww[TN * TK];
@@ -38,8 +37,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
       __memcpy(bh, bp + kk * N0, TN * sizeof(half), GDRAM2NRAM,
                TN * sizeof(half), N0 * sizeof(half), TK - 1);
       __bang_transpose(bt, bh, TK, TN);
-      __bang_reshape_filter(hf, bt, TN, 1, 1, TK);
-      __memcpy(ww, hf, TN * TK * sizeof(half), NRAM2WRAM);
+      __bang_reshape_filter(bh, bt, TN, 1, 1, TK);
+      __memcpy(ww, bh, TN * TK * sizeof(half), NRAM2WRAM);
       for (int rb = 0; rb < RB; ++rb) {
         int mi = base_m + rb * TM;
         if (mi >= M0)
