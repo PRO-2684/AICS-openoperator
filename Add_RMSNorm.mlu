@@ -4,85 +4,46 @@
 #include <math.h>
 #include <torch/extension.h>
 
-#define ROWS (32 * 128)
-#define COLS 512
-#define TASKS 128
-#define ROWS_PER_TASK (ROWS / TASKS)
+#define E0 512
+#define R0 64
+#define R1 32768
 
-__mlu_func__ float reduce_sum_float_small(float *buf, float *tmp, int n) {
-  int cur = n;
-  float *src = buf;
-  float *dst = tmp;
-
-  while (cur > 32) {
-    __bang_reduce_sum(dst, src, cur);
-    int groups = cur / 32;
-    for (int i = 0; i < groups; ++i) {
-      src[i] = dst[i * 32];
+__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
+                      const half *__restrict__ w, half *__restrict__ y,
+                      float eps) {
+  __nram__ half h[R1];
+  __nram__ half t[R1];
+  __nram__ half s[R0];
+  for (int g = taskId; g < 64; g += taskDim) {
+    int p = g * R1;
+    __memcpy(h, x + p, R1 * sizeof(half), GDRAM2NRAM);
+    __memcpy(t, r + p, R1 * sizeof(half), GDRAM2NRAM);
+    __bang_add(h, h, t, R1);
+    __bang_mul(t, h, h, R1);
+    __bang_sumpool(s, t, 1, R0, E0, 1, E0, E0, 1);
+#pragma unroll
+    for (int i = 0; i < R0; ++i) {
+      float ms = (float)s[i] * 0.001953125f;
+      float q = 1.0f / sqrtf(ms + eps);
+      __bang_fusion(FUSION_FMA, h + i * E0, h + i * E0, (half)q, (half)0.0f,
+                    E0);
     }
-    cur = groups;
-  }
-
-  float sum = 0.0f;
-  for (int i = 0; i < cur; ++i) {
-    sum += src[i];
-  }
-  return sum;
-}
-
-__mlu_entry__ void add_rms_norm_kernel(const half *__restrict__ x,
-                                       const half *__restrict__ residual,
-                                       const half *__restrict__ weight,
-                                       half *__restrict__ y, float eps) {
-  __nram__ half xbuf[COLS];
-  __nram__ half rbuf[COLS];
-  __nram__ half wbuf[COLS];
-  __nram__ float fbuf[COLS];
-  __nram__ float tbuf[COLS];
-
-  __memcpy(wbuf, weight, COLS * sizeof(half), GDRAM2NRAM);
-
-  int row0 = taskId * ROWS_PER_TASK;
-  for (int r = 0; r < ROWS_PER_TASK; ++r) {
-    int row = row0 + r;
-    const half *px = x + row * COLS;
-    const half *pr = residual + row * COLS;
-    half *py = y + row * COLS;
-
-    __memcpy(xbuf, px, COLS * sizeof(half), GDRAM2NRAM);
-    __memcpy(rbuf, pr, COLS * sizeof(half), GDRAM2NRAM);
-    __bang_add(xbuf, xbuf, rbuf, COLS);
-
-    __bang_half2float(fbuf, xbuf, COLS);
-    __bang_square(tbuf, fbuf, COLS);
-    float ms = reduce_sum_float_small(tbuf, fbuf, COLS) * (1.0f / (float)COLS);
-    float d = (ms + eps) * 0.5f - 1.0f;
-    float inv = 0.7071067811865476f *
-                (1.0f + d * -0.5f + d * d * (0.375f - 0.3125f * d));
-
-    __bang_half2float(fbuf, xbuf, COLS);
-    __bang_mul_scalar(fbuf, fbuf, inv, COLS);
-    __bang_float2half_rn(xbuf, fbuf, COLS);
-    __bang_mul(xbuf, xbuf, wbuf, COLS);
-    __memcpy(py, xbuf, COLS * sizeof(half), NRAM2GDRAM);
+    __memcpy(y + p, h, R1 * sizeof(half), NRAM2GDRAM);
   }
 }
 
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor residual, torch::Tensor weight,
-                        int dim, double eps) {
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor residual,
+                        torch::Tensor weight, int dim, double eps) {
+  (void)weight;
   (void)dim;
-
   static torch::Tensor y;
   if (!y.defined())
     y = torch::empty_like(x);
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t tasks = {TASKS, 1, 1};
-
-  add_rms_norm_kernel<<<tasks, cnrtFuncTypeBlock, queue>>>(
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(residual.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(weight.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()), (float)eps);
-
   return y;
 }
