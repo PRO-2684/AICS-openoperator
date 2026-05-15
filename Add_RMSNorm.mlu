@@ -5,14 +5,14 @@
 #include <torch/extension.h>
 
 #define E0 512
-#define R0 32
-#define R1 16384
+#define R0 8
+#define R1 4096
 #define R2 32768
-#define P0(i) ((taskId + ((i) >> 1) * 32) * R2 + (((i) & 1) * R1))
+#define P0(i) ((taskId + ((i) >> 3) * 32) * R2 + (((i) & 7) * R1))
 #define L0(i, h, rr)                                                         \
-  __memcpy(h, x + P0(i), R1 * sizeof(half), GDRAM2NRAM);                     \
-  __memcpy(rr, r + P0(i), R1 * sizeof(half), GDRAM2NRAM)
-#define S0(i, h) __memcpy(y + P0(i), h, R1 * sizeof(half), NRAM2GDRAM)
+  __memcpy_async(h, x + P0(i), R1 * sizeof(half), GDRAM2NRAM);               \
+  __memcpy_async(rr, r + P0(i), R1 * sizeof(half), GDRAM2NRAM)
+#define S0(i, h) __memcpy_async(y + P0(i), h, R1 * sizeof(half), NRAM2GDRAM)
 
 __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
                      float *__restrict__ f, float *__restrict__ s, float eps) {
@@ -54,9 +54,57 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
   f0(h2, r2, f, s, eps);
   __sync_io_move_compute();
   S0(2, h2);
+  L0(4, h1, r1);
   f0(h0, r0, f, s, eps);
   __sync_io_move_compute();
   S0(3, h0);
+  L0(5, h2, r2);
+  f0(h1, r1, f, s, eps);
+  __sync_io_move_compute();
+  S0(4, h1);
+  L0(6, h0, r0);
+  f0(h2, r2, f, s, eps);
+  __sync_io_move_compute();
+  S0(5, h2);
+  L0(7, h1, r1);
+  f0(h0, r0, f, s, eps);
+  __sync_io_move_compute();
+  S0(6, h0);
+  L0(8, h2, r2);
+  f0(h1, r1, f, s, eps);
+  __sync_io_move_compute();
+  S0(7, h1);
+  L0(9, h0, r0);
+  f0(h2, r2, f, s, eps);
+  __sync_io_move_compute();
+  S0(8, h2);
+  L0(10, h1, r1);
+  f0(h0, r0, f, s, eps);
+  __sync_io_move_compute();
+  S0(9, h0);
+  L0(11, h2, r2);
+  f0(h1, r1, f, s, eps);
+  __sync_io_move_compute();
+  S0(10, h1);
+  L0(12, h0, r0);
+  f0(h2, r2, f, s, eps);
+  __sync_io_move_compute();
+  S0(11, h2);
+  L0(13, h1, r1);
+  f0(h0, r0, f, s, eps);
+  __sync_io_move_compute();
+  S0(12, h0);
+  L0(14, h2, r2);
+  f0(h1, r1, f, s, eps);
+  __sync_io_move_compute();
+  S0(13, h1);
+  L0(15, h0, r0);
+  f0(h2, r2, f, s, eps);
+  __sync_io_move_compute();
+  S0(14, h2);
+  f0(h0, r0, f, s, eps);
+  __sync_io_move_compute();
+  S0(15, h0);
   __sync_io();
 }
 
