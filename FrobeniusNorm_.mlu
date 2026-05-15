@@ -4,13 +4,33 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k(half *a) {
-  __nram__ half x[32768];
+  __nram__ half x0[32768];
+  __nram__ half x1[32768];
 
-  for (int t = taskId; t < 2048; t += taskDim) {
-    int64_t s = (int64_t)t * 32768;
-    __memcpy(x, a + s, 32768 * sizeof(half), GDRAM2NRAM);
+  int t = taskId;
+  if (t >= 2048)
+    return;
+  __memcpy_async(x0, a + (int64_t)t * 32768, 32768 * sizeof(half),
+                 GDRAM2NRAM);
+  __asm__ volatile("sync;");
+  int cur = 0;
+  while (true) {
+    int nt = t + taskDim;
+    if (nt < 2048) {
+      __memcpy_async(cur == 0 ? x1 : x0, a + (int64_t)nt * 32768,
+                     32768 * sizeof(half), GDRAM2NRAM);
+    }
+    half *x = cur == 0 ? x0 : x1;
     __bang_mul_scalar(x, x, (half)0.0001220703125f, 32768);
-    __memcpy(a + s, x, 32768 * sizeof(half), NRAM2GDRAM);
+    __asm__ volatile("sync;");
+    __memcpy_async(a + (int64_t)t * 32768, x, 32768 * sizeof(half),
+                   NRAM2GDRAM);
+    if (nt >= 2048) {
+      __asm__ volatile("sync;");
+      break;
+    }
+    t = nt;
+    cur = 1 - cur;
   }
 }
 
