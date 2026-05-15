@@ -8,14 +8,27 @@
 #define A2 1024
 #define A3 11
 #define A4 64
-#define A5 34
-#define A6 3
+#define A5 17
+#define A6 6
+#define A7 (A5 * A3 * A2)
+#define A8 (A5 * A1)
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[A5 * A3 * A2];
-  __nram__ half b[A5 * A1];
+  __nram__ half a[A7 * 2];
+  __nram__ half b[A8 * 2];
 
-  for (int u = 0; u < 6; ++u) {
+  int o = 0;
+  int p0 = taskId;
+  int q0 = p0 / A6;
+  int r0 = (p0 - q0 * A6) * A5;
+  int n0 = A1 - r0;
+  if (n0 > A5)
+    n0 = A5;
+  __memcpy_async(a, x + q0 * A2 * A2 + r0 * A3 * A2,
+                 n0 * A3 * A2 * sizeof(half), GDRAM2NRAM);
+  __asm__ volatile("sync;\n\t");
+
+  for (int u = 0; u < 12; ++u) {
     int p = taskId + u * 64;
     int q = p / A6;
     int r = (p - q * A6) * A5;
@@ -24,10 +37,24 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
       n = A5;
     int h = n * A3;
     int e = n * A1;
-    __memcpy(a, x + q * A2 * A2 + r * A3 * A2, h * A2 * sizeof(half),
-             GDRAM2NRAM);
-    __bang_avgpool(b, a, 1, h, A2, A3, A3, A3, A3);
-    __memcpy(y + q * A1 * A1 + r * A1, b, e * sizeof(half), NRAM2GDRAM);
+    int z = o ^ 1;
+    if (u + 1 < 12) {
+      int np = taskId + (u + 1) * 64;
+      int nq = np / A6;
+      int nr = (np - nq * A6) * A5;
+      int nn = A1 - nr;
+      if (nn > A5)
+        nn = A5;
+      __memcpy_async(a + z * A7, x + nq * A2 * A2 + nr * A3 * A2,
+                     nn * A3 * A2 * sizeof(half), GDRAM2NRAM);
+    }
+    __bang_sumpool(b + o * A8, a + o * A7, 1, h, A2, A3, A3, A3, A3);
+    __bang_mul_scalar(b + o * A8, b + o * A8,
+                      (half)0.008264462809917355f, e);
+    __memcpy_async(y + q * A1 * A1 + r * A1, b + o * A8, e * sizeof(half),
+                   NRAM2GDRAM);
+    __asm__ volatile("sync;\n\t");
+    o = z;
   }
 }
 
