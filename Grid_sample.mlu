@@ -115,14 +115,15 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int *__restrict__ off,
                        GDRAM2NRAM);
       }
 
-      __gather(v0h, px, (uint32_t *)(o0 + cur), sizeof(half), GDRAM2NRAM,
-               sizeof(half), T);
-      __gather(v1h, px, (uint32_t *)(o1 + cur), sizeof(half), GDRAM2NRAM,
-               sizeof(half), T);
-      __gather(v2h, px, (uint32_t *)(o2 + cur), sizeof(half), GDRAM2NRAM,
-               sizeof(half), T);
-      __gather(v3h, px, (uint32_t *)(o3 + cur), sizeof(half), GDRAM2NRAM,
-               sizeof(half), T);
+      __gather_async(v0h, px, (uint32_t *)(o0 + cur), sizeof(half),
+                     GDRAM2NRAM, sizeof(half), T);
+      __gather_async(v1h, px, (uint32_t *)(o1 + cur), sizeof(half),
+                     GDRAM2NRAM, sizeof(half), T);
+      __gather_async(v2h, px, (uint32_t *)(o2 + cur), sizeof(half),
+                     GDRAM2NRAM, sizeof(half), T);
+      __gather_async(v3h, px, (uint32_t *)(o3 + cur), sizeof(half),
+                     GDRAM2NRAM, sizeof(half), T);
+      __asm__ volatile("sync;\n\t");
       __bang_mul(v0h, v0h, c0h + cur, T);
       __bang_mul(v1h, v1h, c1h + cur, T);
       __bang_mul(v2h, v2h, c2h + cur, T);
@@ -132,7 +133,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int *__restrict__ off,
       __bang_add(v0h, v0h, v2h, T);
       __memcpy(py + t, v0h, T * sizeof(half), NRAM2GDRAM);
       if (t + T < P) {
-        __asm__ volatile("sync;\n\t");
         cur = nxt;
       }
     }
