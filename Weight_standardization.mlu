@@ -46,10 +46,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __bang_mul_scalar(a, a, r, E1);
 
   for (int i = 0; i < E1; ++i) {
-    int c = i / 9;
-    int u = i - c * 9;
-    int dst = (o * E1 + u * E0 + c);
-    y[dst] = (half)a[i];
+    y[o * E1 + i] = (half)a[i];
   }
 }
 
