@@ -15,6 +15,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
                       half *__restrict__ y, float *__restrict__ s, float ls,
                       int red, int ign) {
   __nram__ int64_t ids[R0];
+  __nram__ half tvbuf[1];
   float acc = 0.0f;
 
   int r0 = taskId * R0;
@@ -29,7 +30,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
       continue;
     }
 
-    float tv = (float)x[(int64_t)r * B2 + (int)id];
+    __memcpy(tvbuf, x + (int64_t)r * B2 + (int)id, sizeof(half), GDRAM2NRAM);
+    float tv = (float)tvbuf[0];
 
     if (red) {
       acc += tv;
