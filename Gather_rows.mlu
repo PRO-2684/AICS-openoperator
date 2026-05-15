@@ -7,7 +7,7 @@
 #define E0 32
 #define E1 64
 #define E2 1024
-#define E3 128
+#define E3 256
 
 __mlu_entry__ void k0(const half *__restrict__ x,
                       const int64_t *__restrict__ idx,
@@ -15,7 +15,7 @@ __mlu_entry__ void k0(const half *__restrict__ x,
   __nram__ uint32_t o[E3];
   __nram__ half a[E3];
 
-  int r = taskId << 2;
+  int r = taskId << 3;
   int p = r * E0;
   __memcpy(o, idx + p, sizeof(uint32_t), GDRAM2NRAM, sizeof(uint32_t),
            sizeof(int64_t), E3 - 1);
@@ -27,6 +27,14 @@ __mlu_entry__ void k0(const half *__restrict__ x,
                     (uint32_t)((r + 2) * E2 * sizeof(half)), E0);
   __bang_add_scalar(o + E0 * 3, o + E0 * 3,
                     (uint32_t)((r + 3) * E2 * sizeof(half)), E0);
+  __bang_add_scalar(o + E0 * 4, o + E0 * 4,
+                    (uint32_t)((r + 4) * E2 * sizeof(half)), E0);
+  __bang_add_scalar(o + E0 * 5, o + E0 * 5,
+                    (uint32_t)((r + 5) * E2 * sizeof(half)), E0);
+  __bang_add_scalar(o + E0 * 6, o + E0 * 6,
+                    (uint32_t)((r + 6) * E2 * sizeof(half)), E0);
+  __bang_add_scalar(o + E0 * 7, o + E0 * 7,
+                    (uint32_t)((r + 7) * E2 * sizeof(half)), E0);
   __gather(a, x, o, sizeof(half), GDRAM2NRAM, sizeof(half), E3);
   __memcpy(y + p, a, E3 * sizeof(half), NRAM2GDRAM);
 }
@@ -35,7 +43,7 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor index) {
   static torch::Tensor out;
   if (!out.defined())
     out = torch::empty({E1, E0}, input.options());
-  cnrtDim3_t d = {16, 1, 1};
+  cnrtDim3_t d = {8, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(index.data_ptr<int64_t>()),
