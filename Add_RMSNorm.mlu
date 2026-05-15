@@ -11,28 +11,47 @@
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
                       const half *__restrict__ w, half *__restrict__ y,
                       float eps) {
-  __nram__ half h[R1];
-  __nram__ half rh[R1];
-  __nram__ half t[R1];
+  __nram__ half h0[R1];
+  __nram__ half h1[R1];
+  __nram__ half r0[R1];
+  __nram__ half r1[R1];
   __nram__ float f[R1];
   __nram__ float s[R0];
-  for (int g = taskId; g < 64; g += taskDim) {
-    int p = g * R1;
-    __memcpy(h, x + p, R1 * sizeof(half), GDRAM2NRAM);
-    __memcpy(rh, r + p, R1 * sizeof(half), GDRAM2NRAM);
-    __bang_add(h, h, rh, R1);
-    __bang_square(t, h, R1);
-    __bang_half2float(f, t, R1);
+  int p = taskId * R1;
+  int q = p + 32 * R1;
+  __memcpy_async(h0, x + p, R1 * sizeof(half), GDRAM2NRAM);
+  __memcpy_async(r0, r + p, R1 * sizeof(half), GDRAM2NRAM);
+  __sync_io();
+  __memcpy_async(h1, x + q, R1 * sizeof(half), GDRAM2NRAM);
+  __memcpy_async(r1, r + q, R1 * sizeof(half), GDRAM2NRAM);
+
+  __bang_add(h0, h0, r0, R1);
+  __bang_square(r0, h0, R1);
+  __bang_half2float(f, r0, R1);
+  __bang_sumpool(s, f, 1, R0, E0, 1, E0, E0, 1);
+  __bang_mul_scalar(s, s, 0.001953125f, R0);
+  __bang_add_scalar(s, s, eps, R0);
+  __bang_rsqrt(s, s, R0);
+#pragma unroll
+  for (int i = 0; i < R0; ++i) {
+    __bang_mul_scalar(h0 + i * E0, h0 + i * E0, (half)s[i], E0);
+  }
+  __sync_io();
+  __memcpy_async(y + p, h0, R1 * sizeof(half), NRAM2GDRAM);
+
+  __bang_add(h1, h1, r1, R1);
+  __bang_square(r1, h1, R1);
+  __bang_half2float(f, r1, R1);
     __bang_sumpool(s, f, 1, R0, E0, 1, E0, E0, 1);
     __bang_mul_scalar(s, s, 0.001953125f, R0);
     __bang_add_scalar(s, s, eps, R0);
-    __bang_active_rsqrt(s, s, R0);
+  __bang_rsqrt(s, s, R0);
 #pragma unroll
-    for (int i = 0; i < R0; ++i) {
-      __bang_mul_scalar(h + i * E0, h + i * E0, (half)s[i], E0);
-    }
-    __memcpy(y + p, h, R1 * sizeof(half), NRAM2GDRAM);
+  for (int i = 0; i < R0; ++i) {
+    __bang_mul_scalar(h1 + i * E0, h1 + i * E0, (half)s[i], E0);
   }
+  __memcpy_async(y + q, h1, R1 * sizeof(half), NRAM2GDRAM);
+  __sync_io();
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor residual,
