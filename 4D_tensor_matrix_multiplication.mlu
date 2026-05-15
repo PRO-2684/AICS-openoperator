@@ -8,19 +8,22 @@
 #define K0 256
 #define TM 64
 #define TN 128
+#define TK 128
 #define TR 32768
 #define TC 6
 #define TT (TR * TC)
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       float *__restrict__ c) {
-  __nram__ half ah[TM * K0];
-  __nram__ half bh[K0 * TN];
-  __nram__ float af[TM * K0];
-  __nram__ float bf[K0 * TN];
-  __nram__ float bt[TN * K0];
+  __nram__ half ah[TM * TK];
+  __nram__ half bh[TK * TN];
+  __nram__ float af[TM * TK];
+  __nram__ float bf[TK * TN];
+  __nram__ float bt[TN * TK];
+  __nram__ float acc[TM * TN];
   __nram__ float tmp[TM * TN];
-  __wram__ float ww[TN * K0];
+  __wram__ float ww0[TN * TK];
+  __wram__ float ww1[TN * TK];
 
   int col = taskId % TC;
   int lane = taskId / TC;
@@ -28,22 +31,36 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   int nj = col * TN;
 
   __memcpy(bh, b + nj, TN * sizeof(half), GDRAM2NRAM, TN * sizeof(half),
-           N0 * sizeof(half), K0 - 1);
-  __bang_half2float(bf, bh, K0 * TN);
-  __bang_transpose(bt, bf, K0, TN);
-  __bang_reshape_filter(bf, bt, TN, 1, 1, K0);
-  __memcpy(ww, bf, TN * K0 * sizeof(float), NRAM2WRAM);
+           N0 * sizeof(half), TK - 1);
+  __bang_half2float(bf, bh, TK * TN);
+  __bang_transpose(bt, bf, TK, TN);
+  __bang_reshape_filter(bf, bt, TN, 1, 1, TK);
+  __memcpy(ww0, bf, TN * TK * sizeof(float), NRAM2WRAM);
+
+  __memcpy(bh, b + TK * N0 + nj, TN * sizeof(half), GDRAM2NRAM,
+           TN * sizeof(half), N0 * sizeof(half), TK - 1);
+  __bang_half2float(bf, bh, TK * TN);
+  __bang_transpose(bt, bf, TK, TN);
+  __bang_reshape_filter(bf, bt, TN, 1, 1, TK);
+  __memcpy(ww1, bf, TN * TK * sizeof(float), NRAM2WRAM);
 
   for (int row = lane; row < TR; row += lanes) {
     int mi = row * TM;
     const half *ap = a + mi * K0;
     float *cp = c + mi * N0 + nj;
 
-    __memcpy(ah, ap, K0 * sizeof(half), GDRAM2NRAM, K0 * sizeof(half),
+    __bang_write_zero(acc, TM * TN);
+    __memcpy(ah, ap, TK * sizeof(half), GDRAM2NRAM, TK * sizeof(half),
              K0 * sizeof(half), TM - 1);
-    __bang_half2float(af, ah, TM * K0);
-    __bang_matmul(tmp, af, ww, TM, K0, TN);
-    __memcpy(cp, tmp, TN * sizeof(float), NRAM2GDRAM, N0 * sizeof(float),
+    __bang_half2float(af, ah, TM * TK);
+    __bang_matmul(tmp, af, ww0, TM, TK, TN);
+    __bang_add(acc, acc, tmp, TM * TN);
+    __memcpy(ah, ap + TK, TK * sizeof(half), GDRAM2NRAM, TK * sizeof(half),
+             K0 * sizeof(half), TM - 1);
+    __bang_half2float(af, ah, TM * TK);
+    __bang_matmul(tmp, af, ww1, TM, TK, TN);
+    __bang_add(acc, acc, tmp, TM * TN);
+    __memcpy(cp, acc, TN * sizeof(float), NRAM2GDRAM, N0 * sizeof(float),
              TN * sizeof(float), TM - 1);
   }
 }
