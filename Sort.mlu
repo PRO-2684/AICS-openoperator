@@ -41,7 +41,10 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E0];
-  __nram__ half t[E0];
+  __nram__ half lo[512];
+  __nram__ half hi[512];
+  __nram__ half mn[512];
+  __nram__ half mx[512];
   int r = taskId;
   if (r >= 16) {
     return;
@@ -50,26 +53,22 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __memcpy(a, x + p, E0 * sizeof(half), GDRAM2NRAM);
   for (int k = 2; k <= E0; k <<= 1) {
     for (int j = k >> 1; j > 0; j >>= 1) {
+      int n = 512 / j;
+      int span = (j << 1) * sizeof(half);
+      int size = j * sizeof(half);
+      __memcpy(lo, a, size, NRAM2NRAM, size, span, n - 1);
+      __memcpy(hi, a + j, size, NRAM2NRAM, size, span, n - 1);
+      __bang_minequal(mn, lo, hi, 512);
+      __bang_maxequal(mx, lo, hi, 512);
       for (int b = 0; b < E0; b += k) {
-        for (int s = 0; s < k; s += (j << 1)) {
-          int o = b + s;
-          if (j < 32) {
-            if ((b & k) == 0) {
-              for (int z = 0; z < j; ++z) {
-                SSEG(o + z, o + j + z);
-              }
-            } else {
-              for (int z = 0; z < j; ++z) {
-                RSEG(o + z, o + j + z);
-              }
-            }
-          } else {
-            if ((b & k) == 0) {
-              ASEG(o, o + j, j);
-            } else {
-              DSEG(o, o + j, j);
-            }
-          }
+        int g = k / (j << 1);
+        int off = b >> 1;
+        if ((b & k) == 0) {
+          __memcpy(a + b, mn + off, size, NRAM2NRAM, span, size, g - 1);
+          __memcpy(a + b + j, mx + off, size, NRAM2NRAM, span, size, g - 1);
+        } else {
+          __memcpy(a + b, mx + off, size, NRAM2NRAM, span, size, g - 1);
+          __memcpy(a + b + j, mn + off, size, NRAM2NRAM, span, size, g - 1);
         }
       }
     }
