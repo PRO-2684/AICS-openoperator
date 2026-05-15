@@ -18,20 +18,17 @@ __mlu_entry__ void trace_half_float_reduce_kernel(const half *__restrict__ a,
   const int base = b * n * n;
 
   __nram__ half hbuf[TRACE_N];
-  __nram__ float fbuf[TRACE_N];
 
   __memcpy_async(hbuf, a + base, sizeof(half), GDRAM2NRAM, sizeof(half),
                  (n + 1) * sizeof(half), n - 1);
   __asm__ volatile("sync;");
 
-  __bang_half2float(fbuf, hbuf, TRACE_N);
-
-  __bang_reduce_sum(fbuf, fbuf, TRACE_N);
+  __bang_reduce_sum(hbuf, hbuf, TRACE_N);
 
   float s = 0.0f;
 #pragma unroll
-  for (int i = 0; i < TRACE_N; i += 32) {
-    s += fbuf[i];
+  for (int i = 0; i < TRACE_N; i += 64) {
+    s += (float)hbuf[i];
   }
 
   out[b] = s;
