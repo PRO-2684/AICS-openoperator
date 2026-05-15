@@ -4,73 +4,51 @@
 #include <torch/extension.h>
 
 #define E0 1024
+#define E1 512
 
-#define ASEG(P, Q, N)                 \
-  do {                                \
-    __bang_minequal(t, a + (P), a + (Q), (N)); \
-    __bang_maxequal(a + (Q), a + (P), a + (Q), (N)); \
+#define CSEG(P, Q, N, U)                        \
+  do {                                          \
+    if (U) {                                    \
+      __bang_minequal(t, a + (P), a + (Q), (N)); \
+      __bang_maxequal(a + (Q), a + (P), a + (Q), (N)); \
+    } else {                                    \
+      __bang_maxequal(t, a + (P), a + (Q), (N)); \
+      __bang_minequal(a + (Q), a + (P), a + (Q), (N)); \
+    }                                           \
     __memcpy(a + (P), t, (N) * sizeof(half), NRAM2NRAM); \
-  } while (0)
-
-#define DSEG(P, Q, N)                 \
-  do {                                \
-    __bang_maxequal(t, a + (P), a + (Q), (N)); \
-    __bang_minequal(a + (Q), a + (P), a + (Q), (N)); \
-    __memcpy(a + (P), t, (N) * sizeof(half), NRAM2NRAM); \
-  } while (0)
-
-#define SSEG(P, Q)                    \
-  do {                                \
-    half u = a[(P)];                  \
-    half v = a[(Q)];                  \
-    if (u > v) {                      \
-      a[(P)] = v;                     \
-      a[(Q)] = u;                     \
-    }                                 \
-  } while (0)
-
-#define RSEG(P, Q)                    \
-  do {                                \
-    half u = a[(P)];                  \
-    half v = a[(Q)];                  \
-    if (u < v) {                      \
-      a[(P)] = v;                     \
-      a[(Q)] = u;                     \
-    }                                 \
   } while (0)
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[E0];
-  __nram__ half lo[512];
-  __nram__ half hi[512];
-  __nram__ half mn[512];
-  __nram__ half mx[512];
-  int r = taskId;
-  if (r >= 16) {
-    return;
-  }
-  int p = r * E0;
-  __memcpy(a, x + p, E0 * sizeof(half), GDRAM2NRAM);
-  for (int k = 2; k <= E0; k <<= 1) {
+  __nram__ half a[E1];
+  __nram__ half t[E1];
+  int id = taskId;
+  int r = id >> 1;
+  int h = id & 1;
+  int p = r * E0 + h * E1;
+  __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
+  for (int k = 2; k <= E1; k <<= 1) {
     for (int j = k >> 1; j > 0; j >>= 1) {
-      int n = 512 / j;
-      int span = (j << 1) * sizeof(half);
-      int size = j * sizeof(half);
-      __memcpy(lo, a, size, NRAM2NRAM, size, span, n - 1);
-      __memcpy(hi, a + j, size, NRAM2NRAM, size, span, n - 1);
-      __bang_minequal(mn, lo, hi, 512);
-      __bang_maxequal(mx, lo, hi, 512);
-      for (int b = 0; b < E0; b += k) {
-        int g = k / (j << 1);
-        int off = b >> 1;
-        if ((b & k) == 0) {
-          __memcpy(a + b, mn + off, size, NRAM2NRAM, span, size, g - 1);
-          __memcpy(a + b + j, mx + off, size, NRAM2NRAM, span, size, g - 1);
-        } else {
-          __memcpy(a + b, mx + off, size, NRAM2NRAM, span, size, g - 1);
-          __memcpy(a + b + j, mn + off, size, NRAM2NRAM, span, size, g - 1);
+      for (int b = 0; b < E1; b += k) {
+        for (int s = 0; s < k; s += (j << 1)) {
+          int o = b + s;
+          bool u = ((b & k) == 0) ^ h;
+          CSEG(o, o + j, j, u);
         }
       }
+    }
+  }
+  __memcpy(y + p, a, E1 * sizeof(half), NRAM2GDRAM);
+}
+
+__mlu_entry__ void k1(half *__restrict__ y) {
+  __nram__ half a[E0];
+  __nram__ half t[E0];
+  int r = taskId;
+  int p = r * E0;
+  __memcpy(a, y + p, E0 * sizeof(half), GDRAM2NRAM);
+  for (int j = E1; j > 0; j >>= 1) {
+    for (int s = 0; s < E0; s += (j << 1)) {
+      CSEG(s, s + j, j, true);
     }
   }
   __memcpy(y + p, a, E0 * sizeof(half), NRAM2GDRAM);
@@ -80,9 +58,13 @@ torch::Tensor bang_func(torch::Tensor x, int dim, bool descending) {
   (void)dim;
   (void)descending;
   auto y = torch::empty_like(x);
-  cnrtDim3_t d = {16, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  cnrtDim3_t d0 = {32, 1, 1};
+  cnrtDim3_t d1 = {16, 1, 1};
+  k0<<<d0, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  k1<<<d1, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
