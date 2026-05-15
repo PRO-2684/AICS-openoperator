@@ -14,8 +14,8 @@
 #define R0 2
 #define T0 64
 #define P0 64
-#define W1 294912
-#define W2 36864
+#define W1 73728
+#define W2 9216
 
 __mlu_entry__ void kz(half *__restrict__ y) {
   for (int i = taskId; i < W1; i += taskDim) {
@@ -43,8 +43,8 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                       float *__restrict__ y) {
   __nram__ half a[(R0 + 2) * W0 * P0];
   __nram__ half b[(R0 + 2) * W0 * P0];
-  __nram__ float c[R0 * W0 * P0];
-  __nram__ float d[R0 * W0 * P0];
+  __nram__ float c[R0 * W0 * G0];
+  __nram__ float d[R0 * W0 * G0];
   __wram__ half ww[W2];
 
   for (int g = taskId; g < B0 * B1 * T0; g += taskDim) {
@@ -72,8 +72,8 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     }
     __memcpy(ww, w + w_base, W2 * sizeof(half), GDRAM2WRAM);
     __bang_transpose(b, a, P0, ih * W0);
-    __bang_conv(c, b, ww, P0, ih, W0, K0, K0, 1, 1, P0);
-    __bang_transpose(d, c, rows * W0, P0);
+    __bang_conv(c, b, ww, P0, ih, W0, K0, K0, 1, 1, G0);
+    __bang_transpose(d, c, rows * W0, G0);
     for (int oc = 0; oc < G0; ++oc) {
       __memcpy(y + (n * C1 + grp * G0 + oc) * H0 * W0 + oh * W0,
                d + oc * rows * W0, rows * W0 * sizeof(float), NRAM2GDRAM);
