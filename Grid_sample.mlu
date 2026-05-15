@@ -80,9 +80,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int *__restrict__ off,
   __nram__ half v2h[T];
   __nram__ half v3h[T];
 
-  for (int gc = taskId; gc < 64; gc += taskDim) {
-    int n = gc >> 4;
-    int cb = (gc & 15) << 2;
+  for (int gc = taskId; gc < 128; gc += taskDim) {
+    int n = gc >> 5;
+    int cb = (gc & 31) << 1;
     const int *po = off + n * P * 4;
     const half *pc = cf + n * P * 4;
     __memcpy(o0, po, T * sizeof(int), GDRAM2NRAM);
@@ -113,7 +113,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int *__restrict__ off,
                        GDRAM2NRAM);
       }
 
-      for (int j = 0; j < 4; ++j) {
+      for (int j = 0; j < 2; ++j) {
         int c = cb + j;
         const half *px = x + n * 1048576 + c * 16384;
         half *py = y + n * 262144 + c * 4096;
@@ -126,11 +126,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int *__restrict__ off,
         __gather(v3h, px, (uint32_t *)(o3 + cur), sizeof(half), GDRAM2NRAM,
                  sizeof(half), T);
         __bang_mul(v0h, v0h, c0h + cur, T);
-        __bang_mul(v1h, v1h, c1h + cur, T);
+        __bang_fusion(FUSION_FMA, v0h, v1h, c1h + cur, v0h, T, T);
         __bang_mul(v2h, v2h, c2h + cur, T);
-        __bang_mul(v3h, v3h, c3h + cur, T);
-        __bang_add(v0h, v0h, v1h, T);
-        __bang_add(v2h, v2h, v3h, T);
+        __bang_fusion(FUSION_FMA, v2h, v3h, c3h + cur, v2h, T, T);
         __bang_add(v0h, v0h, v2h, T);
         __memcpy(py + t, v0h, T * sizeof(half), NRAM2GDRAM);
       }
@@ -153,7 +151,7 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
   }
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t dp = {4, 1, 1};
-  cnrtDim3_t d = {64, 1, 1};
+  cnrtDim3_t d = {128, 1, 1};
   kprep<<<dp, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(grid.data_ptr<at::Half>()),
       off.data_ptr<int>(), reinterpret_cast<half *>(cf.data_ptr<at::Half>()));
