@@ -8,7 +8,7 @@
 #define R0 8
 #define R1 4096
 #define R2 32768
-#define R3 32
+#define R3 16
 #define P0(i) ((taskId + ((i) >> 3) * 32) * R2 + (((i) & 7) * R1))
 #define L0(i, h, rr)                                                         \
   __memcpy_async(h, x + P0(i), R1 * sizeof(half), GDRAM2NRAM);               \
@@ -20,12 +20,11 @@ __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
                      float *__restrict__ s, float eps) {
   __bang_add(h, h, r, R1);
   __bang_square(r, h, R1);
-  __bang_sumpool(g, r, 1, R0, E0, 1, 128, 128, 1);
+  __bang_sumpool(g, r, 1, R0, E0, 1, 256, 256, 1);
   __bang_half2float(f, g, R3);
 #pragma unroll
   for (int i = 0; i < R0; ++i) {
-    int j = i * 4;
-    s[i] = f[j] + f[j + 1] + f[j + 2] + f[j + 3];
+    s[i] = f[i * 2] + f[i * 2 + 1];
   }
   __bang_mul_scalar(s, s, 0.001953125f, R0);
   __bang_add_scalar(s, s, eps, R0);
