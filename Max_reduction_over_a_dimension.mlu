@@ -5,8 +5,6 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[32768];
-  __nram__ half b[32768];
-  __nram__ half c[256];
   __nram__ half d[128];
   for (int t = taskId; t < 32; t += taskDim) {
     int n = t >> 1;
@@ -14,12 +12,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     const half *src = x + n * 65536 + h * 128;
     __memcpy(a, src, 128 * sizeof(half), GDRAM2NRAM, 128 * sizeof(half),
              256 * sizeof(half), 255);
-    __bang_transpose(b, a, 256, 128);
-#pragma unroll 36
-    for (int j = 0; j < 128; ++j) {
-      __bang_max(c, b + j * 256, 256);
-      d[j] = c[0];
-    }
+    __bang_maxpool(d, a, 1, 256, 128, 256, 1, 1, 1);
     __memcpy(y + n * 256 + h * 128, d, 128 * sizeof(half), NRAM2GDRAM);
   }
 }
