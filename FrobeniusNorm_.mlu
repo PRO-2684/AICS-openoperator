@@ -28,7 +28,7 @@ __mlu_entry__ void k(half *a) {
 
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtDim3_t d;
-  d.x = 32;
+  d.x = 64;
   d.y = 1;
   d.z = 1;
 
