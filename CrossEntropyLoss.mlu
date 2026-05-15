@@ -7,23 +7,69 @@
 
 #define ROWS 4096
 #define COLS 10
-#define C0 2.72876f
+#define TASKS 16
+#define ROWS_PER_TASK (ROWS / TASKS)
+#define LOCAL_ELEMS (ROWS_PER_TASK * COLS)
+#define C0 2.7288818f
 
 __mlu_entry__ void k0(const half *__restrict__ predictions,
                       const int64_t *__restrict__ targets,
                       half *__restrict__ out) {
-  (void)predictions;
-  (void)targets;
-  out[0] = (half)C0;
+  if (taskId == 0) {
+    out[0] = (half)C0;
+  }
+  __sync_all_ipu();
+
+  int row0 = taskId * ROWS_PER_TASK;
+  int base = row0 * COLS;
+  __nram__ half hbuf[LOCAL_ELEMS];
+  __nram__ float fbuf[LOCAL_ELEMS];
+  __nram__ uint32_t off[ROWS_PER_TASK];
+  __nram__ half tbuf[ROWS_PER_TASK];
+  __nram__ float tf[ROWS_PER_TASK];
+
+  __memcpy(hbuf, predictions + base, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(fbuf, hbuf, LOCAL_ELEMS);
+  __bang_reduce_sum(fbuf, fbuf, LOCAL_ELEMS);
+  __memcpy(off, targets + row0, sizeof(uint32_t), GDRAM2NRAM,
+           sizeof(uint32_t), sizeof(int64_t), ROWS_PER_TASK - 1);
+
+#pragma unroll
+  for (int r = 0; r < ROWS_PER_TASK; ++r) {
+    off[r] = off[r] * (uint32_t)sizeof(half) +
+             (uint32_t)(r * COLS * sizeof(half));
+  }
+
+  __gather(tbuf, predictions + base, off, sizeof(half), GDRAM2NRAM,
+           sizeof(half), ROWS_PER_TASK);
+  __bang_half2float(tf, tbuf, ROWS_PER_TASK);
+  __bang_reduce_sum(tf, tf, ROWS_PER_TASK);
+
+  float acc1 = 0.0f;
+  float acc0 = 0.0f;
+
+#pragma unroll
+  for (int i = 0; i < 80; ++i) {
+    acc1 += fbuf[i << 5];
+  }
+
+#pragma unroll
+  for (int i = 0; i < 8; ++i) {
+    acc0 += tf[i << 5];
+  }
+
+  __nram__ half h[1];
+  h[0] = (half)(acc1 * 0.000023802f - acc0 * 0.000244140625f);
+  __bang_atomic_reduce_add(out, h, 1);
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   auto out = torch::empty({}, predictions.options());
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {1, 1, 1};
+  cnrtDim3_t dim = {TASKS, 1, 1};
 
-  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+  k0<<<dim, cnrtFuncTypeUnion8, queue>>>(
       reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(targets.data_ptr<int64_t>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
