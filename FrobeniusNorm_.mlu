@@ -3,7 +3,7 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define T 262144
+#define T 327680
 #define N 67108864
 
 __mlu_entry__ void k(half *a) {
@@ -13,8 +13,9 @@ __mlu_entry__ void k(half *a) {
     int n = T;
     if (s + n > N)
       n = N - s;
-    __memcpy(a + s, x, n * sizeof(half), NRAM2GDRAM);
+    __memcpy_async(a + s, x, n * sizeof(half), NRAM2GDRAM);
   }
+  __sync_io();
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
