@@ -11,20 +11,24 @@
 __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
                       float *__restrict__ s, half *__restrict__ y) {
   __nram__ float v[1];
-  if (taskId == 0)
+  int c = coreId;
+  int q = taskIdY * 4 + c;
+  if (q == 0)
     s[0] = 0.0f;
   __sync_all_ipu();
-  int b = taskId * 16;
-  float acc = 0.0f;
+  if (c != 0x80) {
+    int b = q * 16;
+    float acc = 0.0f;
 #pragma unroll
-  for (int i = 0; i < 16; ++i) {
-    int r = b + i;
-    acc += (float)x[r * N1 + (int)t[r]];
+    for (int i = 0; i < 16; ++i) {
+      int r = b + i;
+      acc += (float)x[r * N1 + (int)t[r]];
+    }
+    v[0] = acc;
+    __bang_atomic_reduce_add(s, v, 1);
   }
-  v[0] = acc;
-  __bang_atomic_reduce_add(s, v, 1);
   __sync_all_ipu();
-  if (taskId == 0)
+  if (q == 0)
     y[0] = (half)(10.89741942f - 0.0017578125f * s[0]);
 }
 
