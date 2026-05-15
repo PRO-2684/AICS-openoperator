@@ -4,8 +4,8 @@
 #include <torch/extension.h>
 
 #define E0 1048576
-#define E1 32768
-#define E2 32
+#define E1 65536
+#define E2 16
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
                       int *__restrict__ y) {
@@ -14,17 +14,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_fcmpfilter(CMP_GT, a, a, (half)0.0f, E1);
   int n = *((int *)a);
-
-  int q = y[taskId];
-  __memcpy(z + q, a + 2, n * sizeof(half), NRAM2GDRAM);
-}
-
-__mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
-  __nram__ half a[E1];
-  int p = taskId * E1;
-  __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-  __bang_gt_scalar(a, a, (half)0.0f, E1);
-  y[taskId] = (int)__bang_count(a, E1);
+  y[taskId] = n;
   __sync_all_ipu();
 
   if (taskId == E2 - 1) {
@@ -36,6 +26,10 @@ __mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
     }
     y[E2] = q;
   }
+  __sync_all_ipu();
+
+  int q = y[taskId];
+  __memcpy(z + q, a + 2, n * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor input, double v) {
@@ -47,21 +41,18 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   else
     out.resize_({E0});
   if (!work2.defined())
-    work2 = torch::empty({33}, input.options().dtype(torch::kInt32));
+    work2 = torch::empty({E2 + 1}, input.options().dtype(torch::kInt32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {E2, 1, 1};
 
-  k1<<<dim, cnrtFuncTypeUnion8, queue>>>(
+  k0<<<dim, cnrtFuncTypeUnion4, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      work2.data_ptr<int>());
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
 
   int n = 0;
   cnrtMemcpyAsync(&n, work2.data_ptr<int>() + E2, sizeof(int), queue,
                   cnrtMemcpyDevToHost);
-  k0<<<dim, cnrtFuncTypeUnion4, queue>>>(
-      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
   cnrtQueueSync(queue);
   out.resize_({(int64_t)n});
   return out;
