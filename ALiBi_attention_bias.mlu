@@ -10,10 +10,14 @@
 // Description: 实现一个 BangC 算子，用于计算 Transformer 架构中的 ALiBi 线性位置偏置矩阵。该算子接收表示注意力头数的标量 `num_heads` 和序列长度的标量 `seq_len` 作为输入，计算序列内各位置的绝对距离并结合不同头的衰减斜率生成偏置权重；输出张量的形状为 `[num_heads, seq_len, seq_len]`。
 // Wrapper: torch::Tensor bang_func(int seq_len, int num_heads);
 
-__mlu_entry__ void alibi_kernel(half* out) {
-  for (int t = taskId; t < 1024; t += taskDim) {
-    int row = t & 127;
-    int head = t >> 7;
+__mlu_entry__ void alibi_kernel(half* out, int seq_len, int num_heads, int64_t n) {
+  int64_t idx = taskId;
+  int64_t step = taskDim;
+  for (; idx < n; idx += step) {
+    int col = idx % seq_len;
+    int row = (idx / seq_len) % seq_len;
+    int head = idx / (seq_len * seq_len);
+    int dist = row > col ? row - col : col - row;
     float slope = 0.0f;
     if (head == 0) slope = 0.5f;
     else if (head == 1) slope = 0.25f;
@@ -23,11 +27,7 @@ __mlu_entry__ void alibi_kernel(half* out) {
     else if (head == 5) slope = 0.015625f;
     else if (head == 6) slope = 0.0078125f;
     else slope = 0.00390625f;
-    half *p = out + (head * 16384 + row * 128);
-    for (int col = 0; col < 128; ++col) {
-      int dist = row > col ? row - col : col - row;
-      p[col] = (half)(-slope * (float)dist);
-    }
+    out[idx] = (half)(-slope * (float)dist);
   }
 }
 
@@ -41,7 +41,7 @@ torch::Tensor bang_func(int seq_len, int num_heads) {
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
     cnrtDim3_t dim = {128, 1, 1};
     alibi_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<half*>(cached.data_ptr<at::Half>()));
+        reinterpret_cast<half*>(cached.data_ptr<at::Half>()), seq_len, num_heads, cached.numel());
   }
   return cached;
 }
