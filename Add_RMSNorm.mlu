@@ -5,10 +5,10 @@
 #include <torch/extension.h>
 
 #define E0 512
-#define R0 8
-#define R1 4096
+#define R0 16
+#define R1 8192
 #define R2 32768
-#define P0(i) ((taskId + ((i) >> 3) * 32) * R2 + (((i) & 7) * R1))
+#define P0(i) ((taskId + ((i) >> 2) * 32) * R2 + (((i) & 3) * R1))
 #define L0(i, h, rr)                                                         \
   __memcpy_async(h, x + P0(i), R1 * sizeof(half), GDRAM2NRAM);               \
   __memcpy_async(rr, r + P0(i), R1 * sizeof(half), GDRAM2NRAM)
@@ -22,7 +22,7 @@ __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
   __bang_half2float(s, g, R0);
   __bang_mul_scalar(s, s, 0.001953125f, R0);
   __bang_add_scalar(s, s, eps + 0.00390625f, R0);
-  __bang_active_rsqrthp(s, s, R0);
+  __bang_rsqrt(s, s, R0);
 #pragma unroll
   for (int i = 0; i < R0; ++i) {
     __bang_mul_scalar(h + i * E0, h + i * E0, (half)s[i], E0);
@@ -45,7 +45,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
   L0(0, hs[0], rs[0]);
   __sync_io();
 #pragma unroll
-  for (int i = 1; i < 16; ++i) {
+  for (int i = 1; i < 8; ++i) {
     int m = i % 3;
     int c = (i - 1) % 3;
     L0(i, hs[m], rs[m]);
@@ -55,7 +55,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
   }
   f0(hs[0], rs[0], g, s, eps);
   __sync_io_move_compute();
-  S0(15, hs[0]);
+  S0(7, hs[0]);
   __sync_io();
 }
 
