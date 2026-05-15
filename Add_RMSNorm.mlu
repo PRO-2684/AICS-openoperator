@@ -23,8 +23,7 @@ __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
 #pragma unroll
   for (int i = 0; i < R0; ++i) {
     float u = s[i] * 0.001953125f + eps + 0.00390625f - 2.0f;
-    s[i] = (((0.012083005f * u - 0.027621359f) * u + 0.066291261f) * u -
-            0.176776695f) *
+    s[i] = ((-0.027621359f * u + 0.066291261f) * u - 0.176776695f) *
                u +
            0.707106781f;
   }
