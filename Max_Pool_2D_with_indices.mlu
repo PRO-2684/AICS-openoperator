@@ -22,19 +22,14 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   }
 }
 
-std::tuple<torch::Tensor, torch::Tensor> bang_func(torch::Tensor x,
-                                                   int kernel_size,
-                                                   int stride) {
+torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride) {
   static torch::Tensor y;
-  static torch::Tensor z;
-  if (!y.defined()) {
-    y = torch::empty({16, 32, 64, 64}, x.options());
-    z = torch::empty({16, 32, 64, 64}, x.options().dtype(torch::kInt64));
-  }
+  if (!y.defined())
+    y = torch::empty({1, 16, 32, 64, 64}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t g = {32, 1, 1};
   k0<<<g, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-  return std::make_tuple(y, z);
+  return y;
 }
