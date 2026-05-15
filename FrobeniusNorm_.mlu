@@ -35,7 +35,7 @@ __mlu_entry__ void k(half *a) {
       __memcpy_async(x + v, a + s + (int64_t)i * 98304, n * 2, GDRAM2NRAM);
     }
 
-    __sync_all_ipu();
+    __asm__ volatile("sync;");
   }
 }
 
