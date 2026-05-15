@@ -36,7 +36,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
   for (int i = 0; i < R0; ++i) {
     __bang_mul_scalar(h0 + i * E0, h0 + i * E0, (half)s[i], E0);
   }
-  __sync_io();
+  __sync_io_move_compute();
   __memcpy_async(y + p, h0, R1 * sizeof(half), NRAM2GDRAM);
 
   __bang_add(h1, h1, r1, R1);
@@ -50,6 +50,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
   for (int i = 0; i < R0; ++i) {
     __bang_mul_scalar(h1 + i * E0, h1 + i * E0, (half)s[i], E0);
   }
+  __sync_io_move_compute();
   __memcpy_async(y + q, h1, R1 * sizeof(half), NRAM2GDRAM);
   __sync_io();
 }
