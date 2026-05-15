@@ -114,7 +114,7 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   k3<<<dim, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<half *>(tmp.data_ptr<at::Half>()), work2.data_ptr<int>());
-  int c[8];
+  static int c[8];
   cnrtMemcpyAsync(c, work2.data_ptr<int>() + E2, 8 * sizeof(int), queue,
                   cnrtMemcpyDevToHost);
   cnrtQueueSync(queue);
