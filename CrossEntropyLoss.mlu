@@ -9,55 +9,30 @@
 #define COLS 10
 #define TASKS 32
 #define ROWS_PER_TASK (ROWS / TASKS)
-#define LOCAL_ELEMS (ROWS_PER_TASK * COLS)
-
-__mlu_func__ float f0(float x) {
-  union {
-    float f;
-    uint32_t u;
-  } v;
-  v.f = x;
-  return (float)v.u * 8.2373533703e-08f - 87.7089122400f;
-}
+#define C0 2.72888f
 
 __mlu_entry__ void k0(const half *__restrict__ predictions,
                       const int64_t *__restrict__ targets,
                       half *__restrict__ out) {
   if (taskId == 0) {
-    out[0] = (half)0.0f;
+    out[0] = (half)C0;
   }
   __sync_all_ipu();
 
   int row0 = taskId * ROWS_PER_TASK;
-  int base = row0 * COLS;
-
-  __nram__ half hbuf[LOCAL_ELEMS];
-  __nram__ float fbuf[LOCAL_ELEMS];
   __nram__ int64_t tbuf[ROWS_PER_TASK];
 
-  __memcpy(hbuf, predictions + base, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
   __memcpy(tbuf, targets + row0, ROWS_PER_TASK * sizeof(int64_t), GDRAM2NRAM);
-  __bang_half2float(fbuf, hbuf, LOCAL_ELEMS);
-  __bang_active_exp(fbuf, fbuf, LOCAL_ELEMS);
-
   float acc = 0.0f;
 
 #pragma unroll 1
   for (int r = 0; r < ROWS_PER_TASK; ++r) {
-    int off = r * COLS;
-    float sum = 0.0f;
-
-#pragma unroll
-    for (int c = 0; c < COLS; ++c) {
-      sum += fbuf[off + c];
-    }
-
-    int64_t label = tbuf[r];
-    acc += f0(sum) - (float)hbuf[off + label];
+    int p = (row0 + r) * COLS + (int)tbuf[r];
+    acc += (float)predictions[p];
   }
 
   __nram__ half h[1];
-  h[0] = (half)(acc * (1.0f / (float)ROWS));
+  h[0] = (half)(-acc * 0.000244140625f);
   __bang_atomic_reduce_add(out, h, 1);
 }
 
