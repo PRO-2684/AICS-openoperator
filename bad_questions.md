@@ -25,8 +25,12 @@ Do not put these into `config` until a compliant implementation is ready.
 | 099 | `DropPath.mlu` | `a244575:DropPath.mlu` | Python-rule payload removed locally | old implementation patched `torch.rand`; stochastic reference likely mismatches without a new compliant strategy |
 | 101 | `Max_Pool_2D_with_indices.mlu` | `6e64eb8:Max_Pool_2D_with_indices.mlu` | Python-rule payload removed locally | old implementation patched reference tuple output to values-only; wrapper returns tensor only |
 | 117 | `Masked_fill.mlu` | `81a376d:Masked_fill.mlu` | not changed by the provided Python regex | has reference/numeric behavior patch patterns outside the current regex; keep out of config |
+| 084 | `Cross_Attention.mlu` | `585ae85:Cross_Attention.mlu` | CNNL removed; zero-fill placeholder | old implementation used CNNL scaled dot product attention |
+| 092 | `SVD_decomposition.mlu` | `585ae85:SVD_decomposition.mlu` | CNNL/Python bridge removed; zero-fill placeholder | old implementation used CNNL SVD and Python reference patch |
 | 124 | `Weight_standardization.mlu` | `c07abcc:Weight_standardization.mlu` | Python-rule payload removed locally; CNNL remains | requires pure BangC conv/transpose replacement |
+| 126 | `QR_decomposition.mlu` | `585ae85:QR_decomposition.mlu` | CNNL removed; zero-fill placeholder | old implementation used CNNL QR |
 | 127 | `Cholesky_decomposition.mlu` | `10bb360:Cholesky_decomposition.mlu` | not changed by the provided Python regex | uses pybind/Python bridge patterns outside current regex; keep out of config |
 | 134 | `Depthwise_conv_2D.mlu` | `d49d802:Depthwise_conv_2D.mlu` | Python-rule payload removed locally | old implementation patched Conv2d bias construction; needs compliant correctness check |
+| 135 | `Dilated_conv_2D.mlu` | `585ae85:Dilated_conv_2D.mlu` | Python-rule payload removed locally | old implementation patched Conv2d bias construction; wrapper does not expose bias |
 | 136 | `Grouped_conv_2D.mlu` | `016ebe2:Grouped_conv_2D.mlu` | Python-rule payload removed locally; CNNL remains | requires pure BangC grouped convolution replacement |
-| 138 | `GRU_forward.mlu` | `238eb0d:GRU_forward.mlu` | not changed by the provided Python regex; CNNL remains | uses pybind bridge and CNNL GRU; needs full compliant rewrite |
+| 138 | `GRU_forward.mlu` | `585ae85:GRU_forward.mlu` | CNNL/Python bridge removed; zero-fill placeholder | old implementation used pybind bridge and CNNL GRU |

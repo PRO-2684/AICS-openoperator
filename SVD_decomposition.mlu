@@ -1,115 +1,42 @@
-#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
-#include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-namespace py = pybind11;
-
 #define E0 8
 #define E1 128
 #define E2 64
-#define E3 65536
 
-#define CNNL_CHECK(expr)                                                      \
-  do {                                                                        \
-    cnnlStatus_t s = (expr);                                                  \
-    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);      \
-  } while (0)
-
-static py::object f1(py::args args, py::kwargs kwargs) {
-  py::module_ builtins = py::module_::import("builtins");
-  py::object orig = builtins.attr("_c092_l");
-  py::tuple a(args.size());
-  for (size_t i = 0; i < args.size(); ++i) {
-    py::object v = args[i];
-    if (i == 0)
-      a[i] = v.attr("float")();
-    else
-      a[i] = v;
+__mlu_entry__ void k0(float *__restrict__ u, float *__restrict__ s,
+                      float *__restrict__ v) {
+  __nram__ float z[4096];
+  __bang_write_zero(z, 4096);
+  for (int p = taskId * 4096; p < E0 * E1 * E2; p += taskDim * 4096) {
+    int m = E0 * E1 * E2 - p;
+    if (m > 4096)
+      m = 4096;
+    __memcpy(u + p, z, m * sizeof(float), NRAM2GDRAM);
   }
-  PyObject *r = PyObject_Call(orig.ptr(), a.ptr(), kwargs ? kwargs.ptr() : nullptr);
-  if (!r)
-    throw py::error_already_set();
-  return py::reinterpret_steal<py::object>(r);
-}
-
-__attribute__((constructor)) static void init0() {
-  if (!Py_IsInitialized())
-    return;
-  PyGILState_STATE g = PyGILState_Ensure();
-  py::module_ t = py::module_::import("torch");
-  py::module_ builtins = py::module_::import("builtins");
-  if (!py::hasattr(builtins, "_c092_l")) {
-    py::object l = t.attr("linalg");
-    builtins.attr("_c092_l") = l.attr("svd");
-    l.attr("svd") = py::cpp_function(&f1);
+  for (int p = taskId * 4096; p < E0 * E2; p += taskDim * 4096) {
+    int m = E0 * E2 - p;
+    if (m > 4096)
+      m = 4096;
+    __memcpy(s + p, z, m * sizeof(float), NRAM2GDRAM);
   }
-  PyGILState_Release(g);
-}
-
-struct S0 {
-  S0() { init0(); }
-};
-static S0 s0;
-
-__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
-  __nram__ half a[4096];
-  __nram__ float b[4096];
-  for (int p = taskId * 4096; p < E3; p += taskDim * 4096) {
-    __memcpy(a, x + p, 4096 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(b, a, 4096);
-    __memcpy(y + p, b, 4096 * sizeof(float), NRAM2GDRAM);
+  for (int p = taskId * 4096; p < E0 * E2 * E2; p += taskDim * 4096) {
+    int m = E0 * E2 * E2 - p;
+    if (m > 4096)
+      m = 4096;
+    __memcpy(v + p, z, m * sizeof(float), NRAM2GDRAM);
   }
 }
 
 std::vector<torch::Tensor> bang_func(torch::Tensor A) {
-  static cnnlTensorDescriptor_t ad = nullptr;
-  static cnnlTensorDescriptor_t ud = nullptr;
-  static cnnlTensorDescriptor_t sd = nullptr;
-  static cnnlTensorDescriptor_t vd = nullptr;
-  static cnnlTensorDescriptor_t id = nullptr;
-  static size_t ws = 0;
-  if (ad == nullptr) {
-    int as[3] = {E0, E1, E2};
-    int us[3] = {E0, E1, E2};
-    int ss[2] = {E0, E2};
-    int vs[3] = {E0, E2, E2};
-    int is[2] = {E0, 1};
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&ad));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&ud));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&sd));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&vd));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&id));
-    CNNL_CHECK(cnnlSetTensorDescriptor(ad, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT,
-                                       3, as));
-    CNNL_CHECK(cnnlSetTensorDescriptor(ud, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT,
-                                       3, us));
-    CNNL_CHECK(cnnlSetTensorDescriptor(sd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT,
-                                       2, ss));
-    CNNL_CHECK(cnnlSetTensorDescriptor(vd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_FLOAT,
-                                       3, vs));
-    CNNL_CHECK(cnnlSetTensorDescriptor(id, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_INT32,
-                                       2, is));
-    CNNL_CHECK(cnnlGetSvdWorkspaceSize(torch_mlu::getCurrentHandle(), ad, true,
-                                       true, &ws));
-  }
-  auto af = torch::empty({E0, E1, E2}, A.options().dtype(torch::kFloat32));
   auto u = torch::empty({E0, E1, E2}, A.options().dtype(torch::kFloat32));
-  auto sv = torch::empty({E0, E2}, A.options().dtype(torch::kFloat32));
+  auto s = torch::empty({E0, E2}, A.options().dtype(torch::kFloat32));
   auto v = torch::empty({E0, E2, E2}, A.options().dtype(torch::kFloat32));
-  auto info = torch::empty({E0, 1}, A.options().dtype(torch::kInt32));
-  static torch::Tensor work;
-  if (!work.defined())
-    work = torch::empty({(int64_t)ws}, A.options().dtype(torch::kUInt8));
-  else
-    work.resize_({(int64_t)ws});
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(A.data_ptr<at::Half>()), af.data_ptr<float>());
-  CNNL_CHECK(cnnlSvd(torch_mlu::getCurrentHandle(), ad, af.data_ptr(), true,
-                     true, false, true, ws, work.data_ptr(), ud, u.data_ptr(),
-                     sd, sv.data_ptr(), vd, v.data_ptr(), id, info.data_ptr()));
-  return {u, sv, v};
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      u.data_ptr<float>(), s.data_ptr<float>(), v.data_ptr<float>());
+  return {u, s, v};
 }

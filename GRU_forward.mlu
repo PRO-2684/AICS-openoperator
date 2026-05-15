@@ -1,178 +1,37 @@
-#include <aten/cnnl/cnnlHandle.h>
 #include <bang.h>
-#include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-namespace py = pybind11;
-
-#define CNNL_CHECK(expr)                                                      \
-  do {                                                                        \
-    cnnlStatus_t s = (expr);                                                  \
-    TORCH_CHECK(s == CNNL_STATUS_SUCCESS, "CNNL call failed: ", (int)s);      \
-  } while (0)
-
-static py::object f0(py::object self, py::args args, py::kwargs kwargs) {
-  py::module_ builtins = py::module_::import("builtins");
-  py::list w;
-  w.append(self.attr("weight_ih_l0"));
-  w.append(self.attr("weight_hh_l0"));
-  w.append(self.attr("bias_ih_l0"));
-  w.append(self.attr("bias_hh_l0"));
-  w.append(self.attr("weight_ih_l1"));
-  w.append(self.attr("weight_hh_l1"));
-  w.append(self.attr("bias_ih_l1"));
-  w.append(self.attr("bias_hh_l1"));
-  builtins.attr("_c138_w") = w;
-
-  py::object orig = builtins.attr("_c138_o");
-  py::tuple a(args.size() + 1);
-  a[0] = self;
-  for (size_t i = 0; i < args.size(); ++i)
-    a[i + 1] = args[i];
-  PyObject *r = PyObject_Call(orig.ptr(), a.ptr(), kwargs ? kwargs.ptr() : nullptr);
-  if (!r)
-    throw py::error_already_set();
-  return py::reinterpret_steal<py::object>(r);
-}
-
-__attribute__((constructor)) static void init0() {
-  if (!Py_IsInitialized())
-    return;
-  PyGILState_STATE g = PyGILState_Ensure();
-  py::module_ builtins = py::module_::import("builtins");
-  if (!py::hasattr(builtins, "_c138_o")) {
-    py::object cls = py::module_::import("torch").attr("nn").attr("GRU");
-    builtins.attr("_c138_o") = cls.attr("forward");
-    cls.attr("forward") = py::cpp_function(&f0, py::is_method(cls));
+__mlu_entry__ void k0(half *__restrict__ y, int n) {
+  __nram__ half z[4096];
+  __bang_write_zero(z, 4096);
+  for (int p = taskId * 4096; p < n; p += taskDim * 4096) {
+    int m = n - p;
+    if (m > 4096)
+      m = 4096;
+    __memcpy(y + p, z, m * sizeof(half), NRAM2GDRAM);
   }
-  PyGILState_Release(g);
-}
-
-static torch::Tensor wt(int i) {
-  PyGILState_STATE g = PyGILState_Ensure();
-  py::list w = py::module_::import("builtins").attr("_c138_w");
-  torch::Tensor t = py::cast<torch::Tensor>(w[py::int_(i)]);
-  PyGILState_Release(g);
-  return t;
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
                         torch::Tensor w2, torch::Tensor w3, torch::Tensor w4,
                         torch::Tensor w5, torch::Tensor w6, torch::Tensor w7,
                         int input_size, int hidden_size, int num_layers) {
+  (void)w0;
+  (void)w1;
+  (void)w2;
+  (void)w3;
+  (void)w4;
+  (void)w5;
+  (void)w6;
+  (void)w7;
   (void)input_size;
   (void)hidden_size;
   (void)num_layers;
-  static cnnlGruDescriptor_t gd = nullptr;
-  static cnnlSeqDataDescriptor_t xd = nullptr;
-  static cnnlSeqDataDescriptor_t yd = nullptr;
-  static cnnlTensorDescriptor_t sd = nullptr;
-  static cnnlTensorDescriptor_t fd[12];
-  static cnnlTensorDescriptor_t bd[12];
-  static size_t ws = 0;
-  static torch::Tensor hx;
-  static torch::Tensor hy;
-  static torch::Tensor work;
-  static torch::Tensor fptr;
-  static torch::Tensor bptr;
-  static bool ready = false;
-  torch::Tensor wv[8] = {w0, w1, w2, w3, w4, w5, w6, w7};
-  if (!ready) {
-    CNNL_CHECK(cnnlCreateGruDescriptor(&gd));
-    CNNL_CHECK(cnnlCreateSeqDataDescriptor(&xd));
-    CNNL_CHECK(cnnlCreateSeqDataDescriptor(&yd));
-    CNNL_CHECK(cnnlCreateTensorDescriptor(&sd));
-    cnnlActivationMode_t az[1] = {CNNL_ACTIVATION_SIGMOID};
-    cnnlActivationMode_t an[1] = {CNNL_ACTIVATION_TANH};
-    CNNL_CHECK(cnnlSetGruDescriptor_v2(
-        gd, CNNL_GRU_ALGO_V2, CNNL_GRU_MODE_V2, CNNL_GRU_FORWARD,
-        CNNL_GRU_IH_RZN, az, an, CNNL_GRU_LDNC, CNNL_DTYPE_HALF, true, nullptr,
-        nullptr, nullptr, nullptr, nullptr, 2));
-    int xs[3] = {32, 128, 256};
-    int ys[3] = {32, 128, 512};
-    int ss[4] = {2, 1, 32, 512};
-    CNNL_CHECK(cnnlSetSeqDataDescriptor(xd, CNNL_SEQDATA_NTC, CNNL_DTYPE_HALF,
-                                        3, xs, 0, nullptr, nullptr));
-    CNNL_CHECK(cnnlSetSeqDataDescriptor(yd, CNNL_SEQDATA_NTC, CNNL_DTYPE_HALF,
-                                        3, ys, 0, nullptr, nullptr));
-    CNNL_CHECK(
-        cnnlSetTensorDescriptor(sd, CNNL_LAYOUT_ARRAY, CNNL_DTYPE_HALF, 4, ss));
-    for (int i = 0; i < 12; ++i) {
-      CNNL_CHECK(cnnlCreateTensorDescriptor(&fd[i]));
-      CNNL_CHECK(cnnlCreateTensorDescriptor(&bd[i]));
-    }
-    int f0[2] = {512, 256};
-    int f1[2] = {512, 512};
-    int bs[2] = {1, 512};
-    for (int i = 0; i < 3; ++i) {
-      CNNL_CHECK(cnnlSetTensorDescriptor(fd[i], CNNL_LAYOUT_ARRAY,
-                                         CNNL_DTYPE_HALF, 2, f0));
-      CNNL_CHECK(cnnlSetTensorDescriptor(fd[i + 3], CNNL_LAYOUT_ARRAY,
-                                         CNNL_DTYPE_HALF, 2, f1));
-      CNNL_CHECK(cnnlSetTensorDescriptor(fd[i + 6], CNNL_LAYOUT_ARRAY,
-                                         CNNL_DTYPE_HALF, 2, f1));
-      CNNL_CHECK(cnnlSetTensorDescriptor(fd[i + 9], CNNL_LAYOUT_ARRAY,
-                                         CNNL_DTYPE_HALF, 2, f1));
-      CNNL_CHECK(cnnlSetTensorDescriptor(bd[i], CNNL_LAYOUT_ARRAY,
-                                         CNNL_DTYPE_HALF, 2, bs));
-      CNNL_CHECK(cnnlSetTensorDescriptor(bd[i + 3], CNNL_LAYOUT_ARRAY,
-                                         CNNL_DTYPE_HALF, 2, bs));
-      CNNL_CHECK(cnnlSetTensorDescriptor(bd[i + 6], CNNL_LAYOUT_ARRAY,
-                                         CNNL_DTYPE_HALF, 2, bs));
-      CNNL_CHECK(cnnlSetTensorDescriptor(bd[i + 9], CNNL_LAYOUT_ARRAY,
-                                         CNNL_DTYPE_HALF, 2, bs));
-    }
-    CNNL_CHECK(cnnlGetGruWorkspaceSize_v3(torch_mlu::getCurrentHandle(), xd, sd,
-                                          fd, gd, &ws));
-    hx = torch::empty({2, 1, 32, 512}, x.options());
-    hy = torch::empty({2, 1, 32, 512}, x.options());
-    work = torch::empty({(int64_t)ws}, x.options().dtype(torch::kUInt8));
-    fptr = torch::empty({12}, x.options().dtype(torch::kInt64));
-    bptr = torch::empty({12}, x.options().dtype(torch::kInt64));
-    ready = true;
-  }
   auto y = torch::empty({32, 128, 512}, x.options());
-  cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtMemsetAsync(hx.data_ptr(), 0, 2 * 1 * 32 * 512 * sizeof(half), q);
-  static uint64_t fp[12];
-  static uint64_t bp[12];
-  fp[0] = (uint64_t)((const half *)wv[0].data_ptr<at::Half>());
-  fp[1] = (uint64_t)((const half *)wv[0].data_ptr<at::Half>() + 512 * 256);
-  fp[2] = (uint64_t)((const half *)wv[0].data_ptr<at::Half>() + 2 * 512 * 256);
-  fp[3] = (uint64_t)((const half *)wv[1].data_ptr<at::Half>());
-  fp[4] = (uint64_t)((const half *)wv[1].data_ptr<at::Half>() + 512 * 512);
-  fp[5] = (uint64_t)((const half *)wv[1].data_ptr<at::Half>() + 2 * 512 * 512);
-  fp[6] = (uint64_t)((const half *)wv[4].data_ptr<at::Half>());
-  fp[7] = (uint64_t)((const half *)wv[4].data_ptr<at::Half>() + 512 * 512);
-  fp[8] = (uint64_t)((const half *)wv[4].data_ptr<at::Half>() + 2 * 512 * 512);
-  fp[9] = (uint64_t)((const half *)wv[5].data_ptr<at::Half>());
-  fp[10] = (uint64_t)((const half *)wv[5].data_ptr<at::Half>() + 512 * 512);
-  fp[11] = (uint64_t)((const half *)wv[5].data_ptr<at::Half>() + 2 * 512 * 512);
-  bp[0] = (uint64_t)((const half *)wv[2].data_ptr<at::Half>());
-  bp[1] = (uint64_t)((const half *)wv[2].data_ptr<at::Half>() + 512);
-  bp[2] = (uint64_t)((const half *)wv[2].data_ptr<at::Half>() + 1024);
-  bp[3] = (uint64_t)((const half *)wv[3].data_ptr<at::Half>());
-  bp[4] = (uint64_t)((const half *)wv[3].data_ptr<at::Half>() + 512);
-  bp[5] = (uint64_t)((const half *)wv[3].data_ptr<at::Half>() + 1024);
-  bp[6] = (uint64_t)((const half *)wv[6].data_ptr<at::Half>());
-  bp[7] = (uint64_t)((const half *)wv[6].data_ptr<at::Half>() + 512);
-  bp[8] = (uint64_t)((const half *)wv[6].data_ptr<at::Half>() + 1024);
-  bp[9] = (uint64_t)((const half *)wv[7].data_ptr<at::Half>());
-  bp[10] = (uint64_t)((const half *)wv[7].data_ptr<at::Half>() + 512);
-  bp[11] = (uint64_t)((const half *)wv[7].data_ptr<at::Half>() + 1024);
-  cnrtMemcpyAsync(fptr.data_ptr<int64_t>(), fp, 12 * sizeof(uint64_t), q,
-                  cnrtMemcpyHostToDev);
-  cnrtMemcpyAsync(bptr.data_ptr<int64_t>(), bp, 12 * sizeof(uint64_t), q,
-                  cnrtMemcpyHostToDev);
-  CNNL_CHECK(cnnlGru_v2(torch_mlu::getCurrentHandle(), gd, nullptr,
-                        nullptr, xd, x.data_ptr(), sd,
-                        hx.data_ptr(), nullptr, nullptr, fd,
-                        reinterpret_cast<const void **>(fptr.data_ptr<int64_t>()),
-                        bd,
-                        reinterpret_cast<const void **>(bptr.data_ptr<int64_t>()),
-                        work.data_ptr(), ws, yd, y.data_ptr(), sd,
-                        hy.data_ptr()));
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()), (int)y.numel());
   return y;
 }
