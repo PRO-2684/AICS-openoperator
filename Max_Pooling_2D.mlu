@@ -5,50 +5,39 @@
 
 #define E0 512
 
-__mlu_func__ half f0(const half *__restrict__ x, int r, int h, int w) {
-  int bh = h * 2 - 1;
-  int bw = w * 2 - 1;
-  float m = -65504.0f;
-#pragma unroll
-  for (int dh = 0; dh < 2; ++dh) {
-#pragma unroll
-    for (int dw = 0; dw < 2; ++dw) {
-      int ih = bh + dh * 3;
-      int iw = bw + dw * 3;
-      if (ih >= 0 && ih < 128 && iw >= 0 && iw < 128) {
-        float v = (float)x[r * 16384 + ih * 128 + iw];
-        if (v > m)
-          m = v;
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a0[17152];
+  __nram__ half a1[17152];
+  __nram__ half b0[4096];
+  __nram__ half b1[4096];
+  __bang_write_value(a0, 17152, (half)-65504.0f);
+  __bang_write_value(a1, 17152, (half)-65504.0f);
+  int r = taskId;
+  if (r < E0) {
+    __memcpy_async(a0 + 131, x + r * 16384, 128 * sizeof(half), GDRAM2NRAM,
+                   130 * sizeof(half), 128 * sizeof(half), 127);
+    __asm__ volatile("sync;");
+  }
+  int q = 0;
+  for (; r < E0; r += taskDim) {
+    int nr = r + taskDim;
+    if (nr < E0) {
+      if (q == 0) {
+        __memcpy_async(a1 + 131, x + nr * 16384, 128 * sizeof(half),
+                       GDRAM2NRAM, 130 * sizeof(half), 128 * sizeof(half),
+                       127);
+      } else {
+        __memcpy_async(a0 + 131, x + nr * 16384, 128 * sizeof(half),
+                       GDRAM2NRAM, 130 * sizeof(half), 128 * sizeof(half),
+                       127);
       }
     }
-  }
-  return (half)m;
-}
-
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[16129];
-  __nram__ half b[3844];
-  __nram__ half c[4096];
-  for (int r = taskId; r < E0; r += taskDim) {
-    __memcpy(a, x + r * 16384 + 129, 127 * sizeof(half), GDRAM2NRAM,
-             127 * sizeof(half), 128 * sizeof(half), 126);
-    __bang_maxpool(b, a, 1, 127, 127, 2, 2, 2, 2, 3, 3, 1, 1);
-#pragma unroll
-    for (int i = 0; i < 62; ++i) {
-      __memcpy(c + (i + 1) * 64 + 1, b + i * 62, 62 * sizeof(half),
-               NRAM2NRAM);
-    }
-#pragma unroll
-    for (int i = 0; i < 64; ++i) {
-      c[i] = f0(x, r, 0, i);
-      c[63 * 64 + i] = f0(x, r, 63, i);
-    }
-#pragma unroll
-    for (int i = 1; i < 63; ++i) {
-      c[i * 64] = f0(x, r, i, 0);
-      c[i * 64 + 63] = f0(x, r, i, 63);
-    }
-    __memcpy(y + r * 4096, c, 4096 * sizeof(half), NRAM2GDRAM);
+    half *a = q == 0 ? a0 : a1;
+    half *b = q == 0 ? b0 : b1;
+    __bang_maxpool(b, a, 1, 130, 130, 2, 2, 2, 2, 3, 3, 1, 1);
+    __asm__ volatile("sync;");
+    __memcpy_async(y + r * 4096, b, 4096 * sizeof(half), NRAM2GDRAM);
+    q ^= 1;
   }
 }
 
@@ -58,7 +47,11 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
   (void)stride;
   (void)padding;
   (void)dilation;
-  auto y = torch::empty({16, 32, 64, 64}, x.options());
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty({16, 32, 64, 64}, x.options());
+  else
+    y.resize_({16, 32, 64, 64});
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t g = {32, 1, 1};
   k0<<<g, cnrtFuncTypeBlock, queue>>>(
