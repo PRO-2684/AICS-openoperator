@@ -9,27 +9,40 @@
 #define N1 32768
 
 __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
-                      float *__restrict__ s, half *__restrict__ y) {
-  __nram__ float v[1];
-  int c = coreId;
-  int q = taskIdY * 4 + (c & 3);
-  if (q == 0 && c != 0x80)
-    s[0] = 0.0f;
-  __sync_all_ipu();
-  if (c != 0x80) {
-    int b = q * 16;
+                      float *__restrict__ s) {
+  __mlu_shared__ float local[4];
+  int raw = coreId;
+  int c = raw & 3;
+  int q = taskIdY * 4 + c;
+  if (c == 0 && raw != 0x80) {
+    local[0] = 0.0f;
+    local[1] = 0.0f;
+    local[2] = 0.0f;
+    local[3] = 0.0f;
+  }
+  __sync_cluster();
+  if (raw != 0x80) {
     float acc = 0.0f;
 #pragma unroll
     for (int i = 0; i < 16; ++i) {
-      int r = b + i;
+      int r = q * 16 + i;
       acc += (float)x[r * N1 + (int)t[r]];
     }
-    v[0] = acc;
-    __bang_atomic_reduce_add(s, v, 1);
+    local[c] = acc;
   }
-  __sync_all_ipu();
-  if (q == 0 && c != 0x80)
-    y[0] = (half)(10.89741942f - 0.0017578125f * s[0]);
+  __sync_cluster();
+  if (c == 0 && raw != 0x80) {
+    s[taskIdY] = local[0] + local[1] + local[2] + local[3];
+  }
+}
+
+__mlu_entry__ void k1(const float *__restrict__ s, half *__restrict__ y) {
+  float acc = 0.0f;
+#pragma unroll
+  for (int i = 0; i < 8; ++i) {
+    acc += s[i];
+  }
+  y[0] = (half)(10.89741942f - 0.0017578125f * acc);
 }
 
 torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
@@ -42,21 +55,23 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
   (void)reduce_loss;
   (void)ignore_idx;
 
-  static torch::Tensor out;
   static torch::Tensor tmp;
+  static torch::Tensor out;
+  if (!tmp.defined())
+    tmp = torch::empty({8}, _input.options().dtype(torch::kFloat32));
   if (!out.defined())
     out = torch::empty({1}, _input.options());
   else
     out.resize_({1});
-  if (!tmp.defined())
-    tmp = torch::empty({1}, _input.options().dtype(torch::kFloat32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, queue>>>(
+  cnrtDim3_t d0 = {4, 8, 1};
+  k0<<<d0, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(_input.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(target.data_ptr<int64_t>()),
-      tmp.data_ptr<float>(),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+      tmp.data_ptr<float>());
+  cnrtDim3_t d1 = {1, 1, 1};
+  k1<<<d1, cnrtFuncTypeBlock, queue>>>(
+      tmp.data_ptr<float>(), reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
 }
