@@ -9,14 +9,17 @@
 __mlu_entry__ void k(half *a) {
   __nram__ half x[T];
   int64_t s = (int64_t)taskId * T;
-  __memcpy(x, a + s, T * sizeof(half), GDRAM2NRAM);
-  __bang_mul_scalar(x, x, (half)0.0001220703125f, T);
-  __memcpy(a + s, x, T * sizeof(half), NRAM2GDRAM);
+  int64_t step = (int64_t)taskDim * T;
+  for (; s < N; s += step) {
+    __memcpy(x, a + s, T * sizeof(half), GDRAM2NRAM);
+    __bang_mul_scalar(x, x, (half)0.0001220703125f, T);
+    __memcpy(a + s, x, T * sizeof(half), NRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtDim3_t d;
-  d.x = 256;
+  d.x = 128;
   d.y = 1;
   d.z = 1;
 
