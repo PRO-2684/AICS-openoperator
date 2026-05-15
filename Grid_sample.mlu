@@ -3,7 +3,7 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define T 2048
+#define T 4096
 #define P 4096
 
 __mlu_entry__ void kprep(const half *__restrict__ g, int *__restrict__ off,
