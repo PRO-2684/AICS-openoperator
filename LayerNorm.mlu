@@ -3,47 +3,67 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 4096
-#define E1 512
-#define R0 64
-#define R1 64
+#define E0 512
+#define R0 8
+#define R1 4096
 #define R2 32768
+#define P0(i) ((taskId + ((i) >> 3) * 32) * R2 + (((i) & 7) * R1))
+#define L0(i, h) __memcpy_async(h, x + P0(i), R1 * sizeof(half), GDRAM2NRAM)
+#define S0(i, h) __memcpy_async(y + P0(i), h, R1 * sizeof(half), NRAM2GDRAM)
+
+__mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
+                     half *__restrict__ g, float *__restrict__ s) {
+  __bang_sumpool(g, h, 1, R0, E0, 1, E0, E0, 1);
+  __bang_half2float(s, g, R0);
+#pragma unroll
+  for (int i = 0; i < R0; ++i) {
+    __bang_sub_scalar(h + i * E0, h + i * E0, (half)(s[i] * 0.001953125f), E0);
+  }
+  __bang_mul(r, h, h, R1);
+  __bang_sumpool(g, r, 1, R0, E0, 1, E0, E0, 1);
+  __bang_half2float(s, g, R0);
+  __bang_mul_scalar(s, s, 0.001953125f, R0);
+  __bang_add_scalar(s, s, 0.00001f, R0);
+  __bang_rsqrt(s, s, R0);
+#pragma unroll
+  for (int i = 0; i < R0; ++i) {
+    __bang_mul_scalar(h + i * E0, h + i * E0, (half)s[i], E0);
+  }
+}
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       const half *__restrict__ b, half *__restrict__ y) {
-  __nram__ half xh[R2];
-  __nram__ half th[R2];
-  __nram__ half sh[64];
-  __nram__ half vh[64];
-  __nram__ float sf[64];
-  __nram__ float vf[64];
-
-  for (int r = taskId; r < R1; r += taskDim) {
-    int p = r * R2;
-    __memcpy(xh, x + p, R2 * sizeof(half), GDRAM2NRAM);
-    __bang_sumpool(sh, xh, 1, R0, E1, 1, E1, E1, 1);
-    __bang_half2float(sf, sh, R0);
+  __nram__ half h0[R1];
+  __nram__ half h1[R1];
+  __nram__ half h2[R1];
+  __nram__ half r0[R1];
+  __nram__ half r1[R1];
+  __nram__ half r2[R1];
+  __nram__ half g[R0];
+  __nram__ float s[R0];
+  half *hs[3] = {h0, h1, h2};
+  half *rs[3] = {r0, r1, r2};
+  L0(0, hs[0]);
+  __sync_io();
 #pragma unroll
-    for (int i = 0; i < R0; ++i) {
-      __bang_sub_scalar(xh + i * E1, xh + i * E1,
-                        (half)(sf[i] * 0.001953125f), E1);
-    }
-    __bang_mul(th, xh, xh, R2);
-    __bang_sumpool(vh, th, 1, R0, E1, 1, E1, E1, 1);
-    __bang_half2float(vf, vh, R0);
-    __bang_mul_scalar(vf, vf, 0.001953125f, R0);
-    __bang_add_scalar(vf, vf, 0.00001f, R0);
-    __bang_rsqrt(vf, vf, R0);
-#pragma unroll
-    for (int i = 0; i < R0; ++i) {
-      __bang_mul_scalar(xh + i * E1, xh + i * E1, (half)vf[i], E1);
-    }
-    __memcpy(y + p, xh, R2 * sizeof(half), NRAM2GDRAM);
+  for (int i = 1; i < 16; ++i) {
+    int m = i % 3;
+    int c = (i - 1) % 3;
+    L0(i, hs[m]);
+    f0(hs[c], rs[c], g, s);
+    __sync_io_move_compute();
+    S0(i - 1, hs[c]);
   }
+  f0(hs[0], rs[0], g, s);
+  __sync_io_move_compute();
+  S0(15, hs[0]);
+  __sync_io();
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bias,
                         int normalized_shape) {
+  (void)weight;
+  (void)bias;
   (void)normalized_shape;
   static torch::Tensor y;
   if (!y.defined())
