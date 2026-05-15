@@ -15,11 +15,11 @@
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       float *__restrict__ c) {
-  __nram__ half ah[TM * TK];
+  __nram__ half ah[2 * TM * TK];
   __nram__ half bh[TK * TN];
   __nram__ half bt[TN * TK];
   __nram__ half hf[TN * TK];
-  __nram__ float tmp[TM * TN];
+  __nram__ float tmp[2 * TM * TN];
   __wram__ half ww[TN * TK];
 
   int col = taskId % TC;
@@ -33,16 +33,33 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   __bang_reshape_filter(hf, bt, TN, 1, 1, TK);
   __memcpy(ww, hf, TN * TK * sizeof(half), NRAM2WRAM);
 
-  for (int row = lane; row < TR; row += lanes) {
-    int mi = row * TM;
-    const half *ap = a + mi * K0;
-    float *cp = c + mi * N0 + nj;
+  int row = lane;
+  if (row >= TR)
+    return;
 
-    __memcpy(ah, ap, TK * sizeof(half), GDRAM2NRAM, TK * sizeof(half),
-             K0 * sizeof(half), TM - 1);
-    __bang_matmul(tmp, ah, ww, TM, TK, TN);
-    __memcpy(cp, tmp, TN * sizeof(float), NRAM2GDRAM, N0 * sizeof(float),
-             TN * sizeof(float), TM - 1);
+  __memcpy(ah, a + row * TM * K0, TK * sizeof(half), GDRAM2NRAM,
+           TK * sizeof(half), K0 * sizeof(half), TM - 1);
+
+  int cur = 0;
+  int next = row + lanes;
+  while (true) {
+    if (next < TR) {
+      __memcpy_async(ah + (1 - cur) * TM * TK, a + next * TM * K0,
+                     TK * sizeof(half), GDRAM2NRAM, TK * sizeof(half),
+                     K0 * sizeof(half), TM - 1);
+    }
+    __bang_matmul(tmp + cur * TM * TN, ah + cur * TM * TK, ww, TM, TK, TN);
+    __asm__ volatile("sync;");
+    __memcpy_async(c + row * TM * N0 + nj, tmp + cur * TM * TN,
+                   TN * sizeof(float), NRAM2GDRAM, N0 * sizeof(float),
+                   TN * sizeof(float), TM - 1);
+    if (next >= TR) {
+      __asm__ volatile("sync;");
+      break;
+    }
+    row = next;
+    next += lanes;
+    cur = 1 - cur;
   }
 }
 
