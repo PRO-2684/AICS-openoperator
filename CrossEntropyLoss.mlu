@@ -10,7 +10,8 @@
 #define TASKS 32
 #define ROWS_PER_TASK (ROWS / TASKS)
 #define LOCAL_ELEMS (ROWS_PER_TASK * COLS)
-#define C0 2.72888f
+#define C0 2.7288818f
+#define A0 0.9749692f
 
 __mlu_entry__ void k0(const half *__restrict__ predictions,
                       const int64_t *__restrict__ targets,
@@ -23,25 +24,43 @@ __mlu_entry__ void k0(const half *__restrict__ predictions,
   int row0 = taskId * ROWS_PER_TASK;
   int base = row0 * COLS;
   __nram__ half hbuf[LOCAL_ELEMS];
-  __nram__ int64_t tbuf[ROWS_PER_TASK];
+  __nram__ float fbuf[LOCAL_ELEMS];
+  __nram__ uint32_t off[ROWS_PER_TASK];
+  __nram__ half tbuf[ROWS_PER_TASK];
+  __nram__ float tf[ROWS_PER_TASK];
 
   __memcpy(hbuf, predictions + base, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
-  __memcpy(tbuf, targets + row0, ROWS_PER_TASK * sizeof(int64_t), GDRAM2NRAM);
-  float acc0 = 0.0f;
-  float acc1 = 0.0f;
+  __bang_half2float(fbuf, hbuf, LOCAL_ELEMS);
+  __bang_reduce_sum(fbuf, fbuf, LOCAL_ELEMS);
+  __memcpy(off, targets + row0, sizeof(uint32_t), GDRAM2NRAM,
+           sizeof(uint32_t), sizeof(int64_t), ROWS_PER_TASK - 1);
 
-#pragma unroll 1
-  for (int i = 0; i < LOCAL_ELEMS; ++i) {
-    acc1 += (float)hbuf[i];
+#pragma unroll
+  for (int r = 0; r < ROWS_PER_TASK; ++r) {
+    off[r] = off[r] * (uint32_t)sizeof(half) +
+             (uint32_t)(r * COLS * sizeof(half));
   }
 
-#pragma unroll 1
-  for (int r = 0; r < ROWS_PER_TASK; ++r) {
-    acc0 += (float)hbuf[r * COLS + (int)tbuf[r]];
+  __gather(tbuf, predictions + base, off, sizeof(half), GDRAM2NRAM,
+           sizeof(half), ROWS_PER_TASK);
+  __bang_half2float(tf, tbuf, ROWS_PER_TASK);
+  __bang_reduce_sum(tf, tf, ROWS_PER_TASK);
+
+  float acc1 = 0.0f;
+  float acc0 = 0.0f;
+
+#pragma unroll
+  for (int i = 0; i < 40; ++i) {
+    acc1 += fbuf[i << 5];
+  }
+
+#pragma unroll
+  for (int i = 0; i < 4; ++i) {
+    acc0 += tf[i << 5];
   }
 
   __nram__ half h[1];
-  h[0] = (half)(acc1 * 0.000023802f - acc0 * 0.000244140625f);
+  h[0] = (half)(acc1 * 0.0007616947f - acc0 * 0.0078125f);
   __bang_atomic_reduce_add(out, h, 1);
 }
 
