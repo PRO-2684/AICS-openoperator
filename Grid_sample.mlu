@@ -146,7 +146,7 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
   }
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t dp = {4, 1, 1};
-  cnrtDim3_t d = {32, 1, 1};
+  cnrtDim3_t d = {64, 1, 1};
   kprep<<<dp, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(grid.data_ptr<at::Half>()),
       off.data_ptr<int>(), reinterpret_cast<half *>(cf.data_ptr<at::Half>()));
