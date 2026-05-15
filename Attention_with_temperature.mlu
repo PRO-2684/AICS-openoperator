@@ -1,6 +1,7 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <math.h>
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
@@ -31,21 +32,21 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
 #pragma unroll
   for (int i = 0; i < 64; ++i) {
     float m = f0[i * 128];
-#pragma unroll
     for (int j = 1; j < 128; ++j) {
       float z = f0[i * 128 + j];
       if (z > m)
         m = z;
     }
-    __bang_sub_scalar(f0 + i * 128, f0 + i * 128, m, 128);
-  }
-  __bang_active_exp(f0, f0, 8192);
-  __bang_reduce_sum(f3, f0, 8192);
-#pragma unroll
-  for (int i = 0; i < 64; ++i) {
-    float s = f3[i * 128] + f3[i * 128 + 32] + f3[i * 128 + 64] +
-              f3[i * 128 + 96];
-    __bang_mul_scalar(f0 + i * 128, f0 + i * 128, 1.0f / s, 128);
+    float s = 0.0f;
+    for (int j = 0; j < 128; ++j) {
+      float z = expf(f0[i * 128 + j] - m);
+      f0[i * 128 + j] = z;
+      s += z;
+    }
+    float inv = 1.0f / s;
+    for (int j = 0; j < 128; ++j) {
+      f0[i * 128 + j] *= inv;
+    }
   }
 
   __memcpy(a1, v + base, 8192 * sizeof(half), GDRAM2NRAM);
