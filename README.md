@@ -142,7 +142,7 @@ python scripts/update_problems.py
 | 091 | [Matrix_inverse](Matrix_inverse.mlu) | N/A | 🔴 |
 | 092 | [SVD_decomposition](SVD_decomposition.mlu) | N/A | 🔴 |
 | 093 | [Batch_triangular_solve](Batch_triangular_solve.mlu) | N/A | 🔴 |
-| 094 | [LayerNorm](LayerNorm.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/0987065) |
+| 094 | [LayerNorm](LayerNorm.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/7d7a757) |
 | 095 | [Add_RMSNorm](Add_RMSNorm.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/c184df8) |
 | 096 | [LocalResponseNorm](LocalResponseNorm.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/a51eccac04a84d9890f26378fd087b08757c90e8) |
 | 097 | [PixelShuffle](PixelShuffle.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/27b8f1a13e2c7751c4b68a790c275ce7cdf0d470) |
