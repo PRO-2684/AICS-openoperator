@@ -5,6 +5,7 @@
 
 #define E0 1024
 #define E1 512
+#define E2 256
 
 #define CSEG(P, Q, N, U)                        \
   do {                                          \
@@ -19,28 +20,59 @@
   } while (0)
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[E1];
-  __nram__ half t[E1];
+  __nram__ half a[E2];
+  __nram__ half t[E2];
   int id = taskId;
-  int r = id >> 1;
-  int h = id & 1;
-  int p = r * E0 + h * E1;
-  __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-  for (int k = 2; k <= E1; k <<= 1) {
+  int r = id >> 2;
+  int h = id & 3;
+  int d = (h == 1 || h == 2);
+  int p = r * E0 + h * E2;
+  __memcpy(a, x + p, E2 * sizeof(half), GDRAM2NRAM);
+  for (int k = 2; k <= E2; k <<= 1) {
     for (int j = k >> 1; j > 0; j >>= 1) {
-      for (int b = 0; b < E1; b += k) {
+      for (int b = 0; b < E2; b += k) {
         for (int s = 0; s < k; s += (j << 1)) {
           int o = b + s;
-          bool u = ((b & k) == 0) ^ h;
+          bool u = ((b & k) == 0) ^ d;
           CSEG(o, o + j, j, u);
         }
       }
     }
   }
-  __memcpy(y + p, a, E1 * sizeof(half), NRAM2GDRAM);
+  __memcpy(y + p, a, E2 * sizeof(half), NRAM2GDRAM);
 }
 
 __mlu_entry__ void k1(half *__restrict__ y) {
+  __nram__ half a[E1];
+  __nram__ half lo[E2];
+  __nram__ half hi[E2];
+  __nram__ half mn[E2];
+  __nram__ half mx[E2];
+  int id = taskId;
+  int r = id >> 1;
+  int h = id & 1;
+  int p = r * E0 + h * E1;
+  __memcpy(a, y + p, E1 * sizeof(half), GDRAM2NRAM);
+  for (int j = E2; j > 0; j >>= 1) {
+    int n = E2 / j;
+    int size = j * sizeof(half);
+    int span = (j << 1) * sizeof(half);
+    __memcpy(lo, a, size, NRAM2NRAM, size, span, n - 1);
+    __memcpy(hi, a + j, size, NRAM2NRAM, size, span, n - 1);
+    __bang_minequal(mn, lo, hi, E2);
+    __bang_maxequal(mx, lo, hi, E2);
+    if (h == 0) {
+      __memcpy(a, mn, size, NRAM2NRAM, span, size, n - 1);
+      __memcpy(a + j, mx, size, NRAM2NRAM, span, size, n - 1);
+    } else {
+      __memcpy(a, mx, size, NRAM2NRAM, span, size, n - 1);
+      __memcpy(a + j, mn, size, NRAM2NRAM, span, size, n - 1);
+    }
+  }
+  __memcpy(y + p, a, E1 * sizeof(half), NRAM2GDRAM);
+}
+
+__mlu_entry__ void k2(half *__restrict__ y) {
   __nram__ half a[E0];
   __nram__ half lo[E1];
   __nram__ half hi[E1];
@@ -69,12 +101,15 @@ torch::Tensor bang_func(torch::Tensor x, int dim, bool descending) {
   if (!y.defined())
     y = torch::empty_like(x);
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d0 = {32, 1, 1};
-  cnrtDim3_t d1 = {16, 1, 1};
+  cnrtDim3_t d0 = {64, 1, 1};
+  cnrtDim3_t d1 = {32, 1, 1};
+  cnrtDim3_t d2 = {16, 1, 1};
   k0<<<d0, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   k1<<<d1, cnrtFuncTypeBlock, q>>>(
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  k2<<<d2, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
