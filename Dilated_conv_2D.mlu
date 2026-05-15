@@ -3,10 +3,10 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define H0 8
-#define R0 4
+#define H0 9
+#define R0 5
 #define W0 132
-#define T0 512
+#define T0 416
 
 __mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ y) {
   for (int i = taskId; i < 73728; i += taskDim) {
@@ -26,16 +26,16 @@ __mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ y) {
 
 __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                       float *__restrict__ y) {
-  __nram__ char s[270336];
+  __nram__ char s[327680];
   half *a = (half *)s;
-  half *h = (half *)(s + 135168);
+  half *h = (half *)(s + 152064);
   float *d = (float *)s;
   __nram__ float c[R0 * 128 * 128];
   __wram__ half k[128 * 3 * 3 * 64];
   __memcpy(k, w, 73728 * sizeof(half), GDRAM2WRAM);
   for (int t = taskId; t < T0; t += taskDim) {
-    int tile = t & 31;
-    int n = t >> 5;
+    int tile = t % 26;
+    int n = t / 26;
     int oh = tile * R0;
     int base_h = oh - 2;
     int limit_h = oh + R0 + 2;
@@ -53,9 +53,16 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     __bang_transpose(h, a, 64, H0 * W0);
     __bang_conv(c, h, k, 64, H0, W0, 3, 3, 1, 1, 128, 2, 2, 1, 1);
     __bang_transpose(d, c, R0 * 128, 128);
-    for (int oc = 0; oc < 128; ++oc) {
-      __memcpy(y + n * 2097152 + oc * 16384 + oh * 128,
-               d + oc * R0 * 128, R0 * 128 * sizeof(float), NRAM2GDRAM);
+    if (tile == 25) {
+      for (int oc = 0; oc < 128; ++oc) {
+        __memcpy(y + n * 2097152 + oc * 16384 + oh * 128,
+                 d + oc * R0 * 128, 384 * sizeof(float), NRAM2GDRAM);
+      }
+    } else {
+      for (int oc = 0; oc < 128; ++oc) {
+        __memcpy(y + n * 2097152 + oc * 16384 + oh * 128,
+                 d + oc * R0 * 128, R0 * 128 * sizeof(float), NRAM2GDRAM);
+      }
     }
   }
 }
