@@ -41,7 +41,7 @@ __mlu_entry__ void k0(const half *__restrict__ predictions,
   }
 
   __nram__ half h[1];
-  h[0] = (half)(acc1 * 0.0000244140625f - acc0 * 0.000244140625f);
+  h[0] = (half)(acc1 * 0.000023802f - acc0 * 0.000244140625f);
   __bang_atomic_reduce_add(out, h, 1);
 }
 
