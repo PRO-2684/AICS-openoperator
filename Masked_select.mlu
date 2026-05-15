@@ -97,6 +97,17 @@ __mlu_entry__ void k4(const half *__restrict__ x, half *__restrict__ z,
     __memcpy(z + q + s, b, r * sizeof(half), NRAM2GDRAM);
 }
 
+__mlu_entry__ void k5(int *__restrict__ y) {
+  int q = 0;
+#pragma unroll
+  for (int i = 0; i < 8; ++i) {
+    int n = y[E2 + i];
+    y[E2 + 8 + i] = q;
+    q += n;
+  }
+  y[E2 + 16] = q;
+}
+
 torch::Tensor bang_func(torch::Tensor input, double v) {
   (void)v;
   static torch::Tensor out;
@@ -107,28 +118,22 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   if (!tmp.defined())
     tmp = torch::empty({E0}, input.options());
   if (!work2.defined())
-    work2 = torch::empty({E2 + 16}, input.options().dtype(torch::kInt32));
+    work2 = torch::empty({E2 + 17}, input.options().dtype(torch::kInt32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {4, 8, 1};
   k3<<<dim, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<half *>(tmp.data_ptr<at::Half>()), work2.data_ptr<int>());
-  static int c[8];
-  cnrtMemcpyAsync(c, work2.data_ptr<int>() + E2, 8 * sizeof(int), queue,
-                  cnrtMemcpyDevToHost);
-  cnrtQueueSync(queue);
-  int q = 0;
-  for (int i = 0; i < 8; ++i) {
-    int n = c[i];
-    c[i] = q;
-    q += n;
-  }
-  cnrtMemcpyAsync(work2.data_ptr<int>() + E2 + 8, c, 8 * sizeof(int), queue,
-                  cnrtMemcpyHostToDev);
+  cnrtDim3_t one = {1, 1, 1};
+  k5<<<one, cnrtFuncTypeBlock, queue>>>(work2.data_ptr<int>());
   k4<<<dim, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(tmp.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
+  int q = 0;
+  cnrtMemcpyAsync(&q, work2.data_ptr<int>() + E2 + 16, sizeof(int), queue,
+                  cnrtMemcpyDevToHost);
+  cnrtQueueSync(queue);
   out.resize_({(int64_t)q});
   return out;
 }
