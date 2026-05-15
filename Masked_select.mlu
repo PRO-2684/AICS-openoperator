@@ -4,9 +4,9 @@
 #include <torch/extension.h>
 
 #define E0 1048576
-#define E1 32768
-#define E2 32
-#define E3 32
+#define E1 16384
+#define E2 64
+#define E3 64
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
                       const int *__restrict__ y) {
@@ -76,5 +76,6 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   cnrtMemcpyAsync(&q, work2.data_ptr<int>() + E2, sizeof(int), queue,
                   cnrtMemcpyDevToHost);
   cnrtQueueSync(queue);
-  return out.as_strided({(int64_t)q}, {1});
+  out.resize_({(int64_t)q});
+  return out;
 }
