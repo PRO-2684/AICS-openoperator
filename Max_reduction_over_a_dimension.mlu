@@ -9,15 +9,13 @@
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[65536];
   __nram__ half b[65536];
-  __nram__ float c[256];
-  __nram__ float r[2];
+  __nram__ half c[256];
   for (int n = taskId; n < 16; n += taskDim) {
     __memcpy(a, x + n * 65536, 65536 * sizeof(half), GDRAM2NRAM);
     __bang_transpose(b, a, E1, E1);
     for (int j = 0; j < E1; ++j) {
-      __bang_half2float(c, b + j * E1, E1);
-      __bang_argmax(r, c, E1);
-      y[n * E1 + j] = (half)r[0];
+      __bang_max(c, b + j * E1, E1);
+      y[n * E1 + j] = c[0];
     }
   }
 }
