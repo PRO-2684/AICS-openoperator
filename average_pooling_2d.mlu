@@ -8,7 +8,7 @@
 #define A2 1024
 #define A3 11
 #define A4 64
-#define A5 31
+#define A5 33
 #define A6 3
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
