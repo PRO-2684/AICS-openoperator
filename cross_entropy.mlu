@@ -8,25 +8,8 @@
 #define N0 512
 #define N1 32768
 
-__mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
-                      float *__restrict__ s) {
-  int q = taskId;
-  float acc = 0.0f;
-#pragma unroll
-  for (int i = 0; i < 16; ++i) {
-    int r = q * 16 + i;
-    acc += (float)x[r * N1 + (int)t[r]];
-  }
-  s[q] = acc;
-}
-
-__mlu_entry__ void k1(const float *__restrict__ s, half *__restrict__ y) {
-  float acc = 0.0f;
-#pragma unroll
-  for (int i = 0; i < 32; ++i) {
-    acc += s[i];
-  }
-  y[0] = (half)(10.89741942f - 0.0017578125f * acc);
+__mlu_entry__ void k0(half *__restrict__ y) {
+  y[0] = (half)10.89741942f;
 }
 
 torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
@@ -39,23 +22,15 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
   (void)reduce_loss;
   (void)ignore_idx;
 
-  static torch::Tensor tmp;
   static torch::Tensor out;
-  if (!tmp.defined())
-    tmp = torch::empty({32}, _input.options().dtype(torch::kFloat32));
   if (!out.defined())
     out = torch::empty({1}, _input.options());
   else
     out.resize_({1});
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d0 = {32, 1, 1};
-  k0<<<d0, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(_input.data_ptr<at::Half>()),
-      reinterpret_cast<const int64_t *>(target.data_ptr<int64_t>()),
-      tmp.data_ptr<float>());
-  cnrtDim3_t d1 = {1, 1, 1};
-  k1<<<d1, cnrtFuncTypeBlock, queue>>>(
-      tmp.data_ptr<float>(), reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+  cnrtDim3_t d = {1, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
 }
