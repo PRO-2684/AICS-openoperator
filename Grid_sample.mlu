@@ -4,150 +4,155 @@
 #include <torch/extension.h>
 
 #define T 512
+#define P 4096
 
-__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ g,
-                      half *__restrict__ y) {
-  __nram__ half gx_h[T];
-  __nram__ half gy_h[T];
-  __nram__ half gg_h[T * 2];
-  __nram__ half v0_h[T];
-  __nram__ half v1_h[T];
-  __nram__ half v2_h[T];
-  __nram__ half v3_h[T];
-  __nram__ half out_h[T];
-  __nram__ float gx_f[T];
-  __nram__ float gy_f[T];
-  __nram__ float fx[T];
-  __nram__ float fy[T];
-  __nram__ float wx[T];
-  __nram__ float wy[T];
+__mlu_entry__ void kprep(const half *__restrict__ g, int *__restrict__ off,
+                         half *__restrict__ cf) {
+  __nram__ half gg[T * 2];
+  __nram__ half ch0[T];
+  __nram__ half ch1[T];
+  __nram__ half ch2[T];
+  __nram__ half ch3[T];
+  __nram__ int o0[T];
+  __nram__ int o1[T];
+  __nram__ int o2[T];
+  __nram__ int o3[T];
+  int n = taskId;
+  const half *pg = g + n * 8192;
+  int *po = off + n * P * 4;
+  half *pc = cf + n * P * 4;
+  for (int t = 0; t < P; t += T) {
+    __memcpy(gg, pg + t * 2, T * 2 * sizeof(half), GDRAM2NRAM);
+#pragma unroll 1
+    for (int i = 0; i < T; ++i) {
+      float fx = ((float)gg[i * 2] + 1.0f) * 63.5f;
+      float fy = ((float)gg[i * 2 + 1] + 1.0f) * 63.5f;
+      int xi = (int)fx;
+      int yi = (int)fy;
+      if (xi < 0)
+        xi = 0;
+      if (xi > 127)
+        xi = 127;
+      if (yi < 0)
+        yi = 0;
+      if (yi > 127)
+        yi = 127;
+      int xm = xi < 127;
+      int ym = yi < 127;
+      float wx = fx - (float)xi;
+      float wy = fy - (float)yi;
+      float ax = 1.0f - wx;
+      float ay = 1.0f - wy;
+      int x1 = xi + xm;
+      int y1 = yi + ym;
+      o0[i] = (yi * 128 + xi) * 2;
+      o1[i] = (yi * 128 + x1) * 2;
+      o2[i] = (y1 * 128 + xi) * 2;
+      o3[i] = (y1 * 128 + x1) * 2;
+      ch0[i] = (half)(ax * ay);
+      ch1[i] = (half)((float)xm * wx * ay);
+      ch2[i] = (half)((float)ym * ax * wy);
+      ch3[i] = (half)((float)(xm * ym) * wx * wy);
+    }
+    __memcpy(po + t, o0, T * sizeof(int), NRAM2GDRAM);
+    __memcpy(po + P + t, o1, T * sizeof(int), NRAM2GDRAM);
+    __memcpy(po + P * 2 + t, o2, T * sizeof(int), NRAM2GDRAM);
+    __memcpy(po + P * 3 + t, o3, T * sizeof(int), NRAM2GDRAM);
+    __memcpy(pc + t, ch0, T * sizeof(half), NRAM2GDRAM);
+    __memcpy(pc + P + t, ch1, T * sizeof(half), NRAM2GDRAM);
+    __memcpy(pc + P * 2 + t, ch2, T * sizeof(half), NRAM2GDRAM);
+    __memcpy(pc + P * 3 + t, ch3, T * sizeof(half), NRAM2GDRAM);
+  }
+}
+
+__mlu_entry__ void k0(const half *__restrict__ x, const int *__restrict__ off,
+                      const half *__restrict__ cf, half *__restrict__ y) {
+  __nram__ int o0[T];
+  __nram__ int o1[T];
+  __nram__ int o2[T];
+  __nram__ int o3[T];
+  __nram__ half c0h[T];
+  __nram__ half c1h[T];
+  __nram__ half c2h[T];
+  __nram__ half c3h[T];
+  __nram__ half v0h[T];
+  __nram__ half v1h[T];
+  __nram__ half v2h[T];
+  __nram__ half v3h[T];
+  __nram__ half outh[T];
+  __nram__ float c0[T];
+  __nram__ float c1[T];
+  __nram__ float c2[T];
+  __nram__ float c3[T];
   __nram__ float v0[T];
   __nram__ float v1[T];
   __nram__ float v2[T];
   __nram__ float v3[T];
-  __nram__ int32_t x0[T];
-  __nram__ int32_t y0[T];
-  __nram__ int32_t x1[T];
-  __nram__ int32_t y1[T];
-  __nram__ int32_t off0[T];
-  __nram__ int32_t off1[T];
-  __nram__ int32_t off2[T];
-  __nram__ int32_t off3[T];
-  __nram__ int32_t mx[T];
-  __nram__ int32_t my[T];
-  __nram__ float mx_f[T];
-  __nram__ float my_f[T];
-  __nram__ float m11[T];
 
   for (int rc = taskId; rc < 256; rc += taskDim) {
     int n = rc >> 6;
     int c = rc & 63;
     const half *px = x + n * 1048576 + c * 16384;
-    const half *pg = g + n * 8192;
+    const int *po = off + n * P * 4;
+    const half *pc = cf + n * P * 4;
     half *py = y + n * 262144 + c * 4096;
+    for (int t = 0; t < P; t += T) {
+      __memcpy(o0, po + t, T * sizeof(int), GDRAM2NRAM);
+      __memcpy(o1, po + P + t, T * sizeof(int), GDRAM2NRAM);
+      __memcpy(o2, po + P * 2 + t, T * sizeof(int), GDRAM2NRAM);
+      __memcpy(o3, po + P * 3 + t, T * sizeof(int), GDRAM2NRAM);
+      __memcpy(c0h, pc + t, T * sizeof(half), GDRAM2NRAM);
+      __memcpy(c1h, pc + P + t, T * sizeof(half), GDRAM2NRAM);
+      __memcpy(c2h, pc + P * 2 + t, T * sizeof(half), GDRAM2NRAM);
+      __memcpy(c3h, pc + P * 3 + t, T * sizeof(half), GDRAM2NRAM);
 
-    for (int t = 0; t < 4096; t += T) {
-      __memcpy(gg_h, pg + t * 2, T * 2 * sizeof(half), GDRAM2NRAM);
-#pragma unroll 1
-      for (int i = 0; i < T; ++i) {
-        gx_h[i] = gg_h[i * 2];
-        gy_h[i] = gg_h[i * 2 + 1];
-      }
-
-      __bang_half2float(gx_f, gx_h, T);
-      __bang_half2float(gy_f, gy_h, T);
-      __bang_add_scalar(fx, gx_f, 1.0f, T);
-      __bang_add_scalar(fy, gy_f, 1.0f, T);
-      __bang_mul_scalar(fx, fx, 63.5f, T);
-      __bang_mul_scalar(fy, fy, 63.5f, T);
-
-#pragma unroll 1
-      for (int i = 0; i < T; ++i) {
-        float fxi = fx[i];
-        float fyi = fy[i];
-        int xi = (int)fxi;
-        int yi = (int)fyi;
-        if (xi < 0)
-          xi = 0;
-        if (xi > 127)
-          xi = 127;
-        if (yi < 0)
-          yi = 0;
-        if (yi > 127)
-          yi = 127;
-        int xm = xi < 127;
-        int ym = yi < 127;
-        x0[i] = xi;
-        y0[i] = yi;
-        x1[i] = xi + xm;
-        y1[i] = yi + ym;
-        wx[i] = fxi - (float)xi;
-        wy[i] = fyi - (float)yi;
-        mx_f[i] = (float)xm;
-        my_f[i] = (float)ym;
-      }
-
-      __bang_mul_scalar(off0, y0, 128, T);
-      __bang_add(off0, off0, x0, T);
-      __bang_mul_scalar(off0, off0, (int32_t)sizeof(half), T);
-      __bang_mul_scalar(off1, y0, 128, T);
-      __bang_add(off1, off1, x1, T);
-      __bang_mul_scalar(off1, off1, (int32_t)sizeof(half), T);
-      __bang_mul_scalar(off2, y1, 128, T);
-      __bang_add(off2, off2, x0, T);
-      __bang_mul_scalar(off2, off2, (int32_t)sizeof(half), T);
-      __bang_mul_scalar(off3, y1, 128, T);
-      __bang_add(off3, off3, x1, T);
-      __bang_mul_scalar(off3, off3, (int32_t)sizeof(half), T);
-
-      __gather(v0_h, px, (uint32_t *)off0, sizeof(half), GDRAM2NRAM,
+      __gather(v0h, px, (uint32_t *)o0, sizeof(half), GDRAM2NRAM,
                sizeof(half), T);
-      __gather(v1_h, px, (uint32_t *)off1, sizeof(half), GDRAM2NRAM,
+      __gather(v1h, px, (uint32_t *)o1, sizeof(half), GDRAM2NRAM,
                sizeof(half), T);
-      __gather(v2_h, px, (uint32_t *)off2, sizeof(half), GDRAM2NRAM,
+      __gather(v2h, px, (uint32_t *)o2, sizeof(half), GDRAM2NRAM,
                sizeof(half), T);
-      __gather(v3_h, px, (uint32_t *)off3, sizeof(half), GDRAM2NRAM,
+      __gather(v3h, px, (uint32_t *)o3, sizeof(half), GDRAM2NRAM,
                sizeof(half), T);
-
-      __bang_half2float(v0, v0_h, T);
-      __bang_half2float(v1, v1_h, T);
-      __bang_half2float(v2, v2_h, T);
-      __bang_half2float(v3, v3_h, T);
-
-      __bang_mul(v1, v1, mx_f, T);
-      __bang_mul(v2, v2, my_f, T);
-      __bang_mul(m11, mx_f, my_f, T);
-      __bang_mul(v3, v3, m11, T);
-
-      __bang_sub(v1, v1, v0, T);
-      __bang_mul(v1, v1, wx, T);
+      __bang_half2float(v0, v0h, T);
+      __bang_half2float(v1, v1h, T);
+      __bang_half2float(v2, v2h, T);
+      __bang_half2float(v3, v3h, T);
+      __bang_half2float(c0, c0h, T);
+      __bang_half2float(c1, c1h, T);
+      __bang_half2float(c2, c2h, T);
+      __bang_half2float(c3, c3h, T);
+      __bang_mul(v0, v0, c0, T);
+      __bang_mul(v1, v1, c1, T);
+      __bang_mul(v2, v2, c2, T);
+      __bang_mul(v3, v3, c3, T);
       __bang_add(v0, v0, v1, T);
-
-      __bang_sub(v3, v3, v2, T);
-      __bang_mul(v3, v3, wx, T);
       __bang_add(v2, v2, v3, T);
-
-      __bang_sub(v2, v2, v0, T);
-      __bang_mul(v2, v2, wy, T);
       __bang_add(v0, v0, v2, T);
-
-      __bang_float2half_rn(out_h, v0, T);
-      __memcpy(py + t, out_h, T * sizeof(half), NRAM2GDRAM);
+      __bang_float2half_rn(outh, v0, T);
+      __memcpy(py + t, outh, T * sizeof(half), NRAM2GDRAM);
     }
   }
 }
 
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
   static torch::Tensor out;
-  if (!out.defined())
+  static torch::Tensor off;
+  static torch::Tensor cf;
+  if (!out.defined()) {
     out = torch::empty({4, 64, 64, 64}, input.options());
-  else
-    out.resize_({4, 64, 64, 64});
-
+    off = torch::empty({4, 4, 4096}, input.options().dtype(torch::kInt32));
+    cf = torch::empty({4, 4, 4096}, input.options());
+  }
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dp = {4, 1, 1};
   cnrtDim3_t d = {32, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
+  kprep<<<dp, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(grid.data_ptr<at::Half>()),
+      off.data_ptr<int>(), reinterpret_cast<half *>(cf.data_ptr<at::Half>()));
+  k0<<<d, cnrtFuncTypeBlock, q>>>(
+      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
+      off.data_ptr<int>(), reinterpret_cast<const half *>(cf.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
 }
