@@ -10,31 +10,59 @@
   a = b;                                                                      \
   b = t;
 
-#define R(P)                                                                  \
-  a = u;                                                                      \
-  b = v;                                                                      \
-  __memcpy(a, x + (P)*4000, 8000, GDRAM2NRAM);                                \
-  S(1)                                                                        \
-  S(2) S(4) S(8) S(16) S(32) S(64) S(128) S(256) S(512) S(1024) S(2048)       \
-      __memcpy(y + (P)*4000, a, 8000, NRAM2GDRAM);
+__mlu_func__ void f0(half *__restrict__ x, half *__restrict__ y) {
+  half *a = x;
+  half *b = y;
+  half *t;
+  S(1)
+  S(2)
+  S(4)
+  S(8)
+  S(16)
+  S(32)
+  S(64)
+  S(128)
+  S(256)
+  S(512)
+  S(1024)
+  S(2048)
+}
 
 __mlu_entry__ void k(const half *x, half *y) {
   int q = taskId << 2;
 
-  __nram__ half u[4096];
-  __nram__ half v[4096];
+  __nram__ half h0[4096];
+  __nram__ half h1[4096];
+  __nram__ half s0[4096];
+  __nram__ half s1[4096];
 
-  half *a;
-  half *b;
-  half *t;
-
-  R(q)
-  R(q + 1)
-  R(q + 2)
-  R(q + 3)
+  __memcpy_async(h0, x + q * 4000, 8000, GDRAM2NRAM);
+  __sync_io();
+  int p = q;
+  int z = 0;
+  for (int i = 0; i < 4; ++i, ++p) {
+    if (i + 1 < 4) {
+      if (z == 0)
+        __memcpy_async(h1, x + (p + 1) * 4000, 8000, GDRAM2NRAM);
+      else
+        __memcpy_async(h0, x + (p + 1) * 4000, 8000, GDRAM2NRAM);
+    }
+    if (z == 0)
+      f0(h0, s0);
+    else
+      f0(h1, s1);
+    __sync_io_move_compute();
+    if (z == 0)
+      __memcpy_async(y + p * 4000, h0, 8000, NRAM2GDRAM);
+    else
+      __memcpy_async(y + p * 4000, h1, 8000, NRAM2GDRAM);
+    z ^= 1;
+  }
+  __sync_io();
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
+  (void)dim;
   auto y = torch::empty_like(x);
 
   cnrtDim3_t d = {4, 8, 1};
@@ -45,5 +73,4 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   return y;
 }
 
-#undef R
 #undef S
