@@ -39,7 +39,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     int oh = tile * R0;
     int base_h = oh - 2;
     int limit_h = oh + R0 + 2;
-    __bang_write_value(a, H0 * W0 * 64, (half)0.0f);
+    __bang_write_zero(a, H0 * W0 * 64);
     if (tile > 0 && tile < 31) {
       for (int ic = 0; ic < 64; ++ic) {
         __memcpy(a + ic * H0 * W0 + 2,
@@ -62,10 +62,9 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     __bang_transpose(h, a, 64, H0 * W0);
     __bang_conv(c, h, k, 64, H0, W0, 3, 3, 1, 1, 128, 2, 2, 1, 1);
     __bang_transpose(d, c, R0 * 128, 128);
-    for (int oc = 0; oc < 128; ++oc) {
-      __memcpy(y + n * 2097152 + oc * 16384 + oh * 128,
-               d + oc * R0 * 128, R0 * 128 * sizeof(float), NRAM2GDRAM);
-    }
+    __memcpy(y + n * 2097152 + oh * 128, d, R0 * 128 * sizeof(float),
+             NRAM2GDRAM, 16384 * sizeof(float), R0 * 128 * sizeof(float),
+             127);
   }
 }
 
@@ -89,7 +88,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
     last = kernel.data_ptr();
   }
   auto y = torch::empty({16, 128, 128, 128}, x.options().dtype(torch::kFloat32));
-  cnrtDim3_t d = {4, 8, 1};
+  cnrtDim3_t d = {32, 1, 1};
   k1<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
