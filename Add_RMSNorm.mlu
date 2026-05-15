@@ -26,7 +26,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
     __bang_sumpool(s, f, 1, R0, E0, 1, E0, E0, 1);
     __bang_mul_scalar(s, s, 0.001953125f, R0);
     __bang_add_scalar(s, s, eps, R0);
-    __bang_rsqrt(s, s, R0);
+    __bang_active_rsqrt(s, s, R0);
 #pragma unroll
     for (int i = 0; i < R0; ++i) {
       __bang_mul_scalar(h + i * E0, h + i * E0, (half)s[i], E0);
