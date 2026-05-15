@@ -76,6 +76,5 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   cnrtMemcpyAsync(&q, work2.data_ptr<int>() + E2, sizeof(int), queue,
                   cnrtMemcpyDevToHost);
   cnrtQueueSync(queue);
-  out.resize_({(int64_t)q});
-  return out;
+  return out.as_strided({(int64_t)q}, {1});
 }
