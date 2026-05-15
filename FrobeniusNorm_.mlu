@@ -4,17 +4,17 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k(half *a) {
-  __nram__ half x[294912];
+  __nram__ half x[32768];
 
-  int64_t s = (int64_t)taskId * 65536;
-  __memcpy(x, a + s, 65536 * sizeof(half), GDRAM2NRAM);
-  __bang_mul_scalar(x, x, (half)0.0001220703125f, 65536);
-  __memcpy(a + s, x, 65536 * sizeof(half), NRAM2GDRAM);
+  int64_t s = (int64_t)taskId * 32768;
+  __memcpy(x, a + s, 32768 * sizeof(half), GDRAM2NRAM);
+  __bang_mul_scalar(x, x, (half)0.0001220703125f, 32768);
+  __memcpy(a + s, x, 32768 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtDim3_t d;
-  d.x = 1024;
+  d.x = 2048;
   d.y = 1;
   d.z = 1;
 
