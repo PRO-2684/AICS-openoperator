@@ -15,8 +15,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[A5 * A3 * A2];
   __nram__ half b[A5 * A1];
 
-  for (int u = 0; u < 6; ++u) {
-    int p = taskId + u * 64;
+  for (int p = taskId; p < 384; p += taskDim) {
     int q = p / A6;
     int r = (p - q * A6) * A5;
     int n = A1 - r;
@@ -38,7 +37,7 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size) {
   if (!y.defined())
     y = torch::empty({4, 32, A1, A1}, x.options());
 
-  cnrtDim3_t d = {A4, 1, 1};
+  cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
