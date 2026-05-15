@@ -9,13 +9,14 @@
 #define C1 128
 #define H0 128
 #define W0 128
+#define W3 130
 #define G0 16
 #define K0 3
 #define R0 2
 #define T0 64
 #define P0 64
-#define W1 73728
-#define W2 9216
+#define W1 294912
+#define W2 36864
 
 __mlu_entry__ void kz(half *__restrict__ y) {
   for (int i = taskId; i < W1; i += taskDim) {
@@ -41,10 +42,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 
 __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                       float *__restrict__ y) {
-  __nram__ half a[(R0 + 2) * W0 * P0];
-  __nram__ half b[(R0 + 2) * W0 * P0];
-  __nram__ float c[R0 * W0 * G0];
-  __nram__ float d[R0 * W0 * G0];
+  __nram__ half a[(R0 + 2) * W3 * P0];
+  __nram__ half b[(R0 + 2) * W3 * P0];
+  __nram__ float c[R0 * W0 * P0];
+  __nram__ float d[R0 * W0 * P0];
   __wram__ half ww[W2];
 
   for (int g = taskId; g < B0 * B1 * T0; g += taskDim) {
@@ -59,21 +60,21 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     int ih = rows + 2;
     int in_base = (n * C0 + grp * B1) * H0 * W0;
     int w_base = grp * W2;
-    __bang_write_value(a, ih * W0 * P0, (half)0.0f);
+    __bang_write_value(a, ih * W3 * P0, (half)0.0f);
     for (int ic = 0; ic < B1; ++ic) {
       for (int r = 0; r < ih; ++r) {
         int ih0 = oh - 1 + r;
         if ((unsigned)ih0 >= H0)
           continue;
-        __memcpy(a + (ic * ih + r) * W0,
+        __memcpy(a + (ic * ih + r) * W3 + 1,
                  x + in_base + ic * H0 * W0 + ih0 * W0,
                  W0 * sizeof(half), GDRAM2NRAM);
       }
     }
     __memcpy(ww, w + w_base, W2 * sizeof(half), GDRAM2WRAM);
-    __bang_transpose(b, a, P0, ih * W0);
-    __bang_conv(c, b, ww, P0, ih, W0, K0, K0, 1, 1, G0);
-    __bang_transpose(d, c, rows * W0, G0);
+    __bang_transpose(b, a, P0, ih * W3);
+    __bang_conv(c, b, ww, P0, ih, W3, K0, K0, 1, 1, P0);
+    __bang_transpose(d, c, rows * W0, P0);
     for (int oc = 0; oc < G0; ++oc) {
       __memcpy(y + (n * C1 + grp * G0 + oc) * H0 * W0 + oh * W0,
                d + oc * rows * W0, rows * W0 * sizeof(float), NRAM2GDRAM);
