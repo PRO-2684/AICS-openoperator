@@ -5,9 +5,14 @@
 #include <torch/extension.h>
 
 #define E0 512
-#define R0 16
-#define R1 8192
+#define R0 8
+#define R1 4096
 #define R2 32768
+#define P0(i) ((taskId + ((i) >> 3) * 32) * R2 + (((i) & 7) * R1))
+#define L0(i, h, rr)                                                         \
+  __memcpy(h, x + P0(i), R1 * sizeof(half), GDRAM2NRAM);                     \
+  __memcpy(rr, r + P0(i), R1 * sizeof(half), GDRAM2NRAM)
+#define S0(i, h) __memcpy(y + P0(i), h, R1 * sizeof(half), NRAM2GDRAM)
 
 __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
                      float *__restrict__ f, float *__restrict__ s, float eps) {
@@ -35,49 +40,71 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
   __nram__ half r2[R1];
   __nram__ float f[R1];
   __nram__ float s[R0];
-  int b0 = taskId * R2;
-  int b1 = b0 + 32 * R2;
-  __memcpy(h0, x + b0, R1 * sizeof(half), GDRAM2NRAM);
-  __memcpy(r0, r + b0, R1 * sizeof(half), GDRAM2NRAM);
+  L0(0, h0, r0);
   __sync_io();
-  __memcpy(h1, x + b0 + R1, R1 * sizeof(half), GDRAM2NRAM);
-  __memcpy(r1, r + b0 + R1, R1 * sizeof(half), GDRAM2NRAM);
+  L0(1, h1, r1);
   f0(h0, r0, f, s, eps);
   __sync_io_move_compute();
-  __memcpy(y + b0, h0, R1 * sizeof(half), NRAM2GDRAM);
-  __memcpy(h2, x + b0 + 2 * R1, R1 * sizeof(half), GDRAM2NRAM);
-  __memcpy(r2, r + b0 + 2 * R1, R1 * sizeof(half), GDRAM2NRAM);
+  S0(0, h0);
+  L0(2, h2, r2);
   f0(h1, r1, f, s, eps);
   __sync_io_move_compute();
-  __memcpy(y + b0 + R1, h1, R1 * sizeof(half), NRAM2GDRAM);
-  __memcpy(h0, x + b0 + 3 * R1, R1 * sizeof(half), GDRAM2NRAM);
-  __memcpy(r0, r + b0 + 3 * R1, R1 * sizeof(half), GDRAM2NRAM);
+  S0(1, h1);
+  L0(3, h0, r0);
   f0(h2, r2, f, s, eps);
   __sync_io_move_compute();
-  __memcpy(y + b0 + 2 * R1, h2, R1 * sizeof(half), NRAM2GDRAM);
-  __memcpy(h1, x + b1, R1 * sizeof(half), GDRAM2NRAM);
-  __memcpy(r1, r + b1, R1 * sizeof(half), GDRAM2NRAM);
+  S0(2, h2);
+  L0(4, h1, r1);
   f0(h0, r0, f, s, eps);
   __sync_io_move_compute();
-  __memcpy(y + b0 + 3 * R1, h0, R1 * sizeof(half), NRAM2GDRAM);
-  __memcpy(h2, x + b1 + R1, R1 * sizeof(half), GDRAM2NRAM);
-  __memcpy(r2, r + b1 + R1, R1 * sizeof(half), GDRAM2NRAM);
+  S0(3, h0);
+  L0(5, h2, r2);
   f0(h1, r1, f, s, eps);
   __sync_io_move_compute();
-  __memcpy(y + b1, h1, R1 * sizeof(half), NRAM2GDRAM);
-  __memcpy(h0, x + b1 + 2 * R1, R1 * sizeof(half), GDRAM2NRAM);
-  __memcpy(r0, r + b1 + 2 * R1, R1 * sizeof(half), GDRAM2NRAM);
+  S0(4, h1);
+  L0(6, h0, r0);
   f0(h2, r2, f, s, eps);
   __sync_io_move_compute();
-  __memcpy(y + b1 + R1, h2, R1 * sizeof(half), NRAM2GDRAM);
-  __memcpy(h1, x + b1 + 3 * R1, R1 * sizeof(half), GDRAM2NRAM);
-  __memcpy(r1, r + b1 + 3 * R1, R1 * sizeof(half), GDRAM2NRAM);
+  S0(5, h2);
+  L0(7, h1, r1);
   f0(h0, r0, f, s, eps);
   __sync_io_move_compute();
-  __memcpy(y + b1 + 2 * R1, h0, R1 * sizeof(half), NRAM2GDRAM);
+  S0(6, h0);
+  L0(8, h2, r2);
   f0(h1, r1, f, s, eps);
   __sync_io_move_compute();
-  __memcpy(y + b1 + 3 * R1, h1, R1 * sizeof(half), NRAM2GDRAM);
+  S0(7, h1);
+  L0(9, h0, r0);
+  f0(h2, r2, f, s, eps);
+  __sync_io_move_compute();
+  S0(8, h2);
+  L0(10, h1, r1);
+  f0(h0, r0, f, s, eps);
+  __sync_io_move_compute();
+  S0(9, h0);
+  L0(11, h2, r2);
+  f0(h1, r1, f, s, eps);
+  __sync_io_move_compute();
+  S0(10, h1);
+  L0(12, h0, r0);
+  f0(h2, r2, f, s, eps);
+  __sync_io_move_compute();
+  S0(11, h2);
+  L0(13, h1, r1);
+  f0(h0, r0, f, s, eps);
+  __sync_io_move_compute();
+  S0(12, h0);
+  L0(14, h2, r2);
+  f0(h1, r1, f, s, eps);
+  __sync_io_move_compute();
+  S0(13, h1);
+  L0(15, h0, r0);
+  f0(h2, r2, f, s, eps);
+  __sync_io_move_compute();
+  S0(14, h2);
+  f0(h0, r0, f, s, eps);
+  __sync_io_move_compute();
+  S0(15, h0);
   __sync_io();
 }
 
