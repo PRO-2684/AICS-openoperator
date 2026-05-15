@@ -1,28 +1,42 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
-#include <math.h>
 #include <torch/extension.h>
 
+#define E0 4096
 #define E1 512
 #define R0 64
+#define R1 64
 #define R2 32768
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       const half *__restrict__ b, half *__restrict__ y) {
-  __nram__ half h[32768];
-  __nram__ half s[64];
-  for (int r = taskId; r < 64; r += taskDim) {
-    int p = r * 32768;
-    __memcpy(h, x + p, 32768 * sizeof(half), GDRAM2NRAM);
-    __bang_sumpool(s, h, 1, R0, E1, 1, E1, E1, 1);
+  __nram__ half xh[R2];
+  __nram__ float xf[R2];
+  __nram__ float tf[R2];
+  __nram__ float sf[64];
+  __nram__ float vf[64];
+
+  for (int r = taskId; r < R1; r += taskDim) {
+    int p = r * R2;
+    __memcpy(xh, x + p, R2 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(xf, xh, R2);
+    __bang_sumpool(sf, xf, 1, R0, E1, 1, E1, E1, 1);
 #pragma unroll
     for (int i = 0; i < R0; ++i) {
-      float m = (float)s[i] * 0.001953125f;
-      __bang_fusion(FUSION_FMA, h + i * E1, h + i * E1, (half)1.0f,
-                    (half)(-m), E1);
+      __bang_sub_scalar(xf + i * E1, xf + i * E1, sf[i] * 0.001953125f, E1);
     }
-    __memcpy(y + p, h, 32768 * sizeof(half), NRAM2GDRAM);
+    __bang_mul(tf, xf, xf, R2);
+    __bang_sumpool(vf, tf, 1, R0, E1, 1, E1, E1, 1);
+    __bang_mul_scalar(vf, vf, 0.001953125f, R0);
+    __bang_add_scalar(vf, vf, 0.00001f, R0);
+    __bang_rsqrt(vf, vf, R0);
+#pragma unroll
+    for (int i = 0; i < R0; ++i) {
+      __bang_mul_scalar(xf + i * E1, xf + i * E1, vf[i], E1);
+    }
+    __bang_float2half_rn(xh, xf, R2);
+    __memcpy(y + p, xh, R2 * sizeof(half), NRAM2GDRAM);
   }
 }
 
