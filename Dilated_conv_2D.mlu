@@ -18,7 +18,7 @@ __mlu_entry__ void k2(const half *__restrict__ x, float *__restrict__ y) {
     int oc = t / 64;
     int q = (oc & 3) + (((oc >> 6) & 1) << 2) + (((oc >> 2) & 7) << 3) +
             (((oc >> 5) & 1) << 6);
-    int p = (((q * 5 + kh * 2) * 5 + kw * 2) * 64 + ic);
+    int p = (((q * 3 + kh) * 3 + kw) * 64 + ic);
     y[p] = (float)x[i];
   }
 }
@@ -29,8 +29,8 @@ __mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ w,
   __nram__ half h[H0 * W0 * 64];
   __nram__ float c[2 * 128 * 128];
   __nram__ float d[2 * 128 * 128];
-  __wram__ float k[128 * 5 * 5 * 64];
-  __memcpy(k, w, 204800 * sizeof(float), GDRAM2WRAM);
+  __wram__ float k[128 * 3 * 3 * 64];
+  __memcpy(k, w, 73728 * sizeof(float), GDRAM2WRAM);
   for (int t = taskId; t < T0; t += taskDim) {
     int tile = t & 63;
     int n = t >> 7;
@@ -49,7 +49,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ w,
       }
     }
     __bang_transpose(h, a, 64, H0 * W0);
-    __bang_conv(c, h, k, 64, H0, W0, 5, 5, 1, 1, 128);
+    __bang_conv(c, h, k, 64, H0, W0, 3, 3, 1, 1, 128, 2, 2, 1, 1);
     __bang_transpose(d, c, 2 * 128, 128);
     for (int r = 0; r < 2; ++r) {
       int row = oh + r;
@@ -72,7 +72,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   static torch::Tensor w;
   static void *last = nullptr;
   if (!w.defined())
-    w = torch::zeros({128, 5, 5, 64}, kernel.options().dtype(torch::kFloat32));
+    w = torch::empty({128, 3, 3, 64}, kernel.options().dtype(torch::kFloat32));
   if (last != kernel.data_ptr()) {
     cnrtDim3_t d = {32, 1, 1};
     k2<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
