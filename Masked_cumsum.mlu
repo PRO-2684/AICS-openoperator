@@ -6,9 +6,10 @@
 #define E0 128
 #define E1 4000
 #define E2 4096
+#define E3 4032
 
 __mlu_func__ void k1(float *__restrict__ a, float *__restrict__ b) {
-  __bang_write_value(a + E1, E2 - E1, 0.0f);
+  __bang_write_value(a + E3, E2 - E3, 0.0f);
   __bang_write_value(b, 1, 0.0f);
   __memcpy(b + 1, a, (E2 - 1) * sizeof(float), NRAM2NRAM);
   __bang_add(a, a, b, E2);
@@ -48,20 +49,24 @@ __mlu_func__ void k1(float *__restrict__ a, float *__restrict__ b) {
 }
 
 __mlu_func__ void k2(half *__restrict__ h, int8_t *__restrict__ c,
-                     float *__restrict__ a, float *__restrict__ b) {
-  __bang_half2float(a, h, E1);
-  __bang_int82float(b, c, E1, 0);
-  __bang_mul(a, a, b, E1);
+                     float *__restrict__ a, float *__restrict__ b, int z) {
+  if (z) {
+    __bang_write_value(h + E1, E3 - E1, (half)0.0f);
+    __bang_write_value(c + E1, E3 - E1, (int8_t)0);
+  }
+  __bang_half2float(a, h, E3);
+  __bang_int82float(b, c, E3, 0);
+  __bang_mul(a, a, b, E3);
   k1(a, b);
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x,
                       const unsigned char *__restrict__ m,
                       float *__restrict__ y) {
-  __nram__ half h0[E1];
-  __nram__ half h1[E1];
-  __nram__ int8_t c0[E1];
-  __nram__ int8_t c1[E1];
+  __nram__ half h0[E3];
+  __nram__ half h1[E3];
+  __nram__ int8_t c0[E3];
+  __nram__ int8_t c1[E3];
   __nram__ float a0[E2];
   __nram__ float a1[E2];
   __nram__ float b0[E2];
@@ -69,8 +74,8 @@ __mlu_entry__ void k0(const half *__restrict__ x,
   int r = taskId;
   if (r < E0) {
     int p = r * E1;
-    __memcpy_async(h0, x + p, E1 * sizeof(half), GDRAM2NRAM);
-    __memcpy_async(c0, m + p, E1 * sizeof(int8_t), GDRAM2NRAM);
+    __memcpy_async(h0, x + p, E3 * sizeof(half), GDRAM2NRAM);
+    __memcpy_async(c0, m + p, E3 * sizeof(int8_t), GDRAM2NRAM);
     __sync_io();
   }
   int q = 0;
@@ -78,18 +83,19 @@ __mlu_entry__ void k0(const half *__restrict__ x,
     int nr = r + taskDim;
     if (nr < E0) {
       int p = nr * E1;
+      int n = (nr + 1 < E0) ? E3 : E1;
       if (q == 0) {
-        __memcpy_async(h1, x + p, E1 * sizeof(half), GDRAM2NRAM);
-        __memcpy_async(c1, m + p, E1 * sizeof(int8_t), GDRAM2NRAM);
+        __memcpy_async(h1, x + p, n * sizeof(half), GDRAM2NRAM);
+        __memcpy_async(c1, m + p, n * sizeof(int8_t), GDRAM2NRAM);
       } else {
-        __memcpy_async(h0, x + p, E1 * sizeof(half), GDRAM2NRAM);
-        __memcpy_async(c0, m + p, E1 * sizeof(int8_t), GDRAM2NRAM);
+        __memcpy_async(h0, x + p, n * sizeof(half), GDRAM2NRAM);
+        __memcpy_async(c0, m + p, n * sizeof(int8_t), GDRAM2NRAM);
       }
     }
     if (q == 0)
-      k2(h0, c0, a0, b0);
+      k2(h0, c0, a0, b0, r + 1 >= E0);
     else
-      k2(h1, c1, a1, b1);
+      k2(h1, c1, a1, b1, r + 1 >= E0);
     __sync_io_move_compute();
     if (q == 0)
       __memcpy_async(y + r * E1, a0, E1 * sizeof(float), NRAM2GDRAM);
@@ -103,8 +109,8 @@ __mlu_entry__ void k0(const half *__restrict__ x,
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, int dim) {
   auto out = torch::empty({E0, E1}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {32, 1, 1};
-  k0<<<g, cnrtFuncTypeBlock, queue>>>(
+  cnrtDim3_t g = {4, 8, 1};
+  k0<<<g, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const unsigned char *>(mask.data_ptr()),
       out.data_ptr<float>());
