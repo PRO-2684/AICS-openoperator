@@ -18,8 +18,11 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[256 * (E5 + 2)];
   __nram__ half b[E1 * E5 * 18];
   int total = E4 * 3 * 4;
+  int z = 0;
   for (int g = taskId; g < total; g += taskDim) {
-    half *d = b;
+    if (z >= 2)
+      __sync_io();
+    half *d = b + (z & 1) * E1 * E5 * 9;
     int h = g & 3;
     int u = g >> 2;
     int c = u % 3;
@@ -49,8 +52,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
                    E1 * m * sizeof(half), NRAM2GDRAM);
     __memcpy_async(y + (p + 8) * E2 + r * E1, d + E1 * E5 * 8,
                    E1 * m * sizeof(half), NRAM2GDRAM);
-    __asm__ volatile("sync;");
+    ++z;
   }
+  __sync_io();
 }
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
