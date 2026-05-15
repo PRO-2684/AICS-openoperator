@@ -14,7 +14,7 @@
 #define E7 6
 #define E8 32
 #define E9 64
-__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   int o = taskId;
   if (o >= E0)
     return;
@@ -49,18 +49,18 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
     int c = i / 9;
     int u = i - c * 9;
     int dst = (o * E1 + u * E0 + c);
-    y[dst] = a[i];
+    y[dst] = (half)a[i];
   }
 }
 
-__mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ w,
+__mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                       float *__restrict__ y) {
   __nram__ half a[E7 * E5 * E0];
   __nram__ half aa[E7 * E5 * E0];
   __nram__ float c[E6 * E4 * E0];
   __nram__ float d[E6 * E4 * E0];
-  __wram__ float ww[E2];
-  __memcpy(ww, w, E2 * sizeof(float), GDRAM2WRAM);
+  __wram__ half ww[E2];
+  __memcpy(ww, w, E2 * sizeof(half), GDRAM2WRAM);
 
   for (int t = taskId; t < E3 * E8; t += taskDim) {
     int n = t >> 5;
@@ -102,7 +102,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, int in_channels,
   else
     y.resize_({8, 64, 128, 128});
   if (!w.defined())
-    w = torch::empty({E2}, weight.options().dtype(torch::kFloat32));
+    w = torch::empty({E2}, weight.options());
   else
     w.resize_({E2});
 
@@ -111,14 +111,14 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, int in_channels,
     cnrtDim3_t g = {E0, 1, 1};
     k0<<<g, cnrtFuncTypeBlock, queue>>>(
         reinterpret_cast<const half *>(weight.data_ptr<at::Half>()),
-        w.data_ptr<float>());
+        reinterpret_cast<half *>(w.data_ptr<at::Half>()));
     last = weight.data_ptr();
   }
 
   cnrtDim3_t d = {32, 1, 1};
   k1<<<d, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      w.data_ptr<float>(),
+      reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
       y.data_ptr<float>());
   return y;
 }
