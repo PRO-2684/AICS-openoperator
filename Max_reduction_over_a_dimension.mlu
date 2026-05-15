@@ -5,20 +5,13 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[65536];
-  __nram__ half b[65536];
-  __nram__ half c[256];
   __nram__ half d[256];
   for (int n = taskId; n < 16; n += taskDim) {
     const half *src =
         (const half *)__builtin_assume_aligned(x + n * 65536, 512);
     half *dst = (half *)__builtin_assume_aligned(y + n * 256, 512);
     __memcpy(a, src, 65536 * sizeof(half), GDRAM2NRAM);
-    __bang_transpose(b, a, 256, 256);
-#pragma unroll 32
-    for (int j = 0; j < 256; ++j) {
-      __bang_max(c, b + j * 256, 256);
-      d[j] = c[0];
-    }
+    __bang_maxpool(d, a, 1, 256, 256, 256, 1, 1, 1);
     __memcpy(dst, d, 256 * sizeof(half), NRAM2GDRAM);
   }
 }
