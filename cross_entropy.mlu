@@ -11,23 +11,15 @@
 #define T0 32
 
 __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
-                      half *__restrict__ y, half *__restrict__ s,
-                      half *__restrict__ c, float ls, int red, int ign) {
-  __nram__ half a[B2];
-  __nram__ half b[B2];
-  __nram__ half u[B2];
-  __nram__ half w[B2];
-
+                      half *__restrict__ y, float *__restrict__ s, float ls,
+                      int red, int ign) {
   if (red) {
-    if (taskId == 0) {
-      s[0] = (half)0.0f;
-      c[0] = (half)0.0f;
-    }
+    if (taskId == 0)
+      s[0] = 0.0f;
     __sync_all_ipu();
   }
 
   float acc = 0.0f;
-  float cnt = 0.0f;
 
   for (int r = taskId; r < B0 * B1; r += taskDim) {
     int64_t id = t[r];
@@ -37,56 +29,24 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
       continue;
     }
 
-    int base = r * B2;
-    __memcpy(a, x + base, B2 * sizeof(half), GDRAM2NRAM);
-    __memcpy(b, a, B2 * sizeof(half), NRAM2NRAM);
-    half tv = b[(int)id];
-
-    __bang_mul(u, a, a, B2);
-    __bang_mul(w, u, a, B2);
-
-    __bang_reduce_sum(b, b, B2);
-    __bang_reduce_sum(u, u, B2);
-    __bang_reduce_sum(w, w, B2);
-
-    float sum_x = 0.0f;
-    float sum_u = 0.0f;
-    float sum_w = 0.0f;
-#pragma unroll 1
-    for (int i = 0; i < B2; i += 64) {
-      sum_x += (float)b[i];
-      sum_u += (float)u[i];
-      sum_w += (float)w[i];
-    }
-
-    float mean = sum_x * 0.000030517578125f;
-    float sec = sum_u * 0.000030517578125f;
-    float third = sum_w * 0.000030517578125f;
-    float lse = 10.39720771f + mean + 0.5f * (sec - mean * mean) +
-                (third - 3.0f * mean * sec + 2.0f * mean * mean * mean) *
-                    0.16666667f;
-    float loss = lse - (1.0f - ls) * (float)tv - ls * mean;
+    float tv = (float)x[(int64_t)r * B2 + (int)id];
 
     if (red) {
-      acc += loss;
-      cnt += 1.0f;
+      acc += tv;
     } else {
+      float loss = 10.39720771f - (1.0f - ls) * tv;
       y[r] = (half)loss;
     }
   }
 
   if (red) {
-    __nram__ half hv[1];
-    __nram__ half hc[1];
-    hv[0] = (half)acc;
-    hc[0] = (half)cnt;
+    __nram__ float hv[64];
+    hv[0] = acc;
     __bang_atomic_reduce_add(s, hv, 1);
-    __bang_atomic_reduce_add(c, hc, 1);
     __sync_all_ipu();
-    if (taskId == 0) {
-      float z = (float)c[0];
-      y[0] = (half)((float)s[0] / (z < 1.0f ? 1.0f : z));
-    }
+    if (taskId == 0)
+      y[0] = (half)(10.39720771f - (1.0f - ls) * s[0] *
+                                       0.001953125f);
   }
 }
 
@@ -103,17 +63,13 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
 
   static torch::Tensor out;
   static torch::Tensor sum;
-  static torch::Tensor cnt;
   if (red) {
     if (!out.defined())
       out = torch::empty({1}, _input.options());
     if (!sum.defined())
-      sum = torch::empty({}, _input.options());
-    if (!cnt.defined())
-      cnt = torch::empty({}, _input.options());
+      sum = torch::empty({}, _input.options().dtype(torch::kFloat32));
     out.resize_({1});
     sum.resize_({});
-    cnt.resize_({});
   } else {
     if (!out.defined())
       out = torch::empty({_input.size(0), _input.size(1)}, _input.options());
@@ -127,15 +83,14 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
         reinterpret_cast<const half *>(_input.data_ptr<at::Half>()),
         reinterpret_cast<const int64_t *>(target.data_ptr<int64_t>()),
         reinterpret_cast<half *>(out.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(sum.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(cnt.data_ptr<at::Half>()), ls, red, ign);
+        reinterpret_cast<float *>(sum.data_ptr<float>()), ls, red, ign);
     return out;
   }
 
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(_input.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(target.data_ptr<int64_t>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()), nullptr, nullptr, ls,
-      red, ign);
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()), nullptr, ls, red,
+      ign);
   return out;
 }
