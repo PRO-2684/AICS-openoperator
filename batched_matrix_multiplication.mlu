@@ -12,7 +12,7 @@
 #define TK 128
 #define BM 8
 #define BN 8
-#define RB 7
+#define RB 4
 #define BG 2
 #define TC (B0 * BG * BN)
 
