@@ -15,7 +15,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __bang_argmax(c, a, E1);
   float m = c[0];
   __bang_sub_scalar(a, a, c[0], E1);
-  __bang_active_exp(a, a, E1);
+  __bang_active_exp_less_0(a, a, E1);
   __bang_reduce_sum(a, a, E1);
   float s = 0.0f;
   for (int i = 0; i < E1; i += 64) {
