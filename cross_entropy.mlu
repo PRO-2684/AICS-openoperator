@@ -12,7 +12,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
                       float *__restrict__ s, half *__restrict__ y) {
   __nram__ float v[1];
   int c = coreId;
-  int q = taskIdY * 4 + c;
+  int q = taskId;
   if (q == 0)
     s[0] = 0.0f;
   __sync_all_ipu();
