@@ -5,8 +5,23 @@
 
 #define E0 1024
 
+#define ASEG(P, Q, N)                 \
+  do {                                \
+    __bang_minequal(t, a + (P), a + (Q), (N)); \
+    __bang_maxequal(a + (Q), a + (P), a + (Q), (N)); \
+    __memcpy(a + (P), t, (N) * sizeof(half), NRAM2NRAM); \
+  } while (0)
+
+#define DSEG(P, Q, N)                 \
+  do {                                \
+    __bang_maxequal(t, a + (P), a + (Q), (N)); \
+    __bang_minequal(a + (Q), a + (P), a + (Q), (N)); \
+    __memcpy(a + (P), t, (N) * sizeof(half), NRAM2NRAM); \
+  } while (0)
+
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E0];
+  __nram__ half t[E0];
   int r = taskId;
   if (r >= 16) {
     return;
@@ -15,14 +30,13 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __memcpy(a, x + p, E0 * sizeof(half), GDRAM2NRAM);
   for (int k = 2; k <= E0; k <<= 1) {
     for (int j = k >> 1; j > 0; j >>= 1) {
-      for (int i = 0; i < E0; ++i) {
-        int q = i ^ j;
-        if (q > i) {
-          half u = a[i];
-          half v = a[q];
-          if (((i & k) == 0 && u > v) || ((i & k) != 0 && u < v)) {
-            a[i] = v;
-            a[q] = u;
+      for (int b = 0; b < E0; b += k) {
+        for (int s = 0; s < k; s += (j << 1)) {
+          int o = b + s;
+          if ((b & k) == 0) {
+            ASEG(o, o + j, j);
+          } else {
+            DSEG(o, o + j, j);
           }
         }
       }
