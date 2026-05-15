@@ -18,16 +18,42 @@ __mlu_func__ void k1(float *__restrict__ a) {
   __bang_add(a, a, a + 2048, 1952);
 }
 
+__mlu_func__ void k2(half *__restrict__ h, float *__restrict__ a) {
+  __bang_half2float(a, h, 4000);
+  k1(a);
+}
+
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
-  __nram__ half h[4096];
-  __nram__ float a[4096];
-  for (int row = taskId; row < 128; row += taskDim) {
-    int p = row * 4000;
-    __memcpy(h, x + p, 4000 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(a, h, 4000);
-    k1(a);
-    __memcpy(y + p, a, 4000 * sizeof(float), NRAM2GDRAM);
+  __nram__ half h0[4096];
+  __nram__ half h1[4096];
+  __nram__ float a0[4096];
+  __nram__ float a1[4096];
+  int row = taskId;
+  if (row < 128) {
+    __memcpy_async(h0, x + row * 4000, 4000 * sizeof(half), GDRAM2NRAM);
+    __sync_io();
   }
+  int q = 0;
+  for (; row < 128; row += taskDim) {
+    int nr = row + taskDim;
+    if (nr < 128) {
+      if (q == 0)
+        __memcpy_async(h1, x + nr * 4000, 4000 * sizeof(half), GDRAM2NRAM);
+      else
+        __memcpy_async(h0, x + nr * 4000, 4000 * sizeof(half), GDRAM2NRAM);
+    }
+    if (q == 0)
+      k2(h0, a0);
+    else
+      k2(h1, a1);
+    __sync_io_move_compute();
+    if (q == 0)
+      __memcpy_async(y + row * 4000, a0, 4000 * sizeof(float), NRAM2GDRAM);
+    else
+      __memcpy_async(y + row * 4000, a1, 4000 * sizeof(float), NRAM2GDRAM);
+    q ^= 1;
+  }
+  __sync_io();
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
