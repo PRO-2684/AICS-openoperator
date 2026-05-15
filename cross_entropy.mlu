@@ -45,9 +45,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
 
     __memcpy(h, x + (int64_t)row * E1, E1 * sizeof(half), GDRAM2NRAM);
     __bang_half2float(a, h, E1);
-    float sx = f0(a, c);
-
-    __bang_half2float(a, h, E1);
+    __memcpy(b, a, E1 * sizeof(float), NRAM2NRAM);
+    float sx = f0(b, c);
     __bang_argmax(c, a, E1);
     float m = c[0];
     float v = a[(int)label];
