@@ -53,7 +53,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
       for (int b = 0; b < E0; b += k) {
         for (int s = 0; s < k; s += (j << 1)) {
           int o = b + s;
-          if (j < 8) {
+          if (j < 32) {
             if ((b & k) == 0) {
               for (int z = 0; z < j; ++z) {
                 SSEG(o + z, o + j + z);
