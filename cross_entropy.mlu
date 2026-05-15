@@ -52,7 +52,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
     float m = c[0];
     float v = a[(int)label];
     __bang_sub_scalar(b, a, m, E1);
-    __bang_active_exp(b, b, E1);
+    __bang_active_exp_less_0(b, b, E1);
     float se = f0(b, c);
     float loss = logf(se) + m - (1.0f - ls) * v - ls * sx * 3.0517578125e-05f;
 
