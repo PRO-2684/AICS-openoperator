@@ -10,26 +10,15 @@
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
                       int *__restrict__ y) {
   __nram__ half a[E1 + 2];
+  __nram__ int qn[1];
+  __nram__ int nn[1];
   int p = taskId * E1;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_fcmpfilter(CMP_GT, a, a, (half)0.0f, E1);
   int n = *((int *)a);
-  y[taskId] = n;
-  __sync_all_ipu();
-
-  if (taskId == E2 - 1) {
-    int q = 0;
-    for (int i = 0; i < E2; ++i) {
-      int t = y[i];
-      y[i] = q;
-      q += t;
-    }
-    y[E2] = q;
-  }
-  __sync_all_ipu();
-
-  int q = y[taskId];
-  __memcpy(z + q, a + 2, n * sizeof(half), NRAM2GDRAM);
+  nn[0] = n;
+  __bang_atomic_add(qn, y + E2, nn, 1);
+  __memcpy(z + qn[0], a + 2, n * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor input, double v) {
@@ -46,6 +35,7 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {E2, 1, 1};
 
+  cnrtMemsetAsync(work2.data_ptr<int>() + E2, 0, sizeof(int), queue);
   k0<<<dim, cnrtFuncTypeUnion8, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
