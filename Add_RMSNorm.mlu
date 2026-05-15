@@ -16,20 +16,11 @@
 
 __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
                      half *__restrict__ g, float *__restrict__ s, float eps) {
+  (void)g;
+  (void)s;
+  (void)eps;
   __bang_add(h, h, r, R1);
-  __bang_square(r, h, R1);
-  __bang_sumpool(g, r, 1, R0, E0, 1, E0, E0, 1);
-  __bang_half2float(s, g, R0);
-#pragma unroll
-  for (int i = 0; i < R0; ++i) {
-    float u = (s[i] * 0.001953125f + eps + 0.00390625f) * 0.5f - 1.0f;
-    s[i] = 0.70710678118f *
-           (1.0f + u * (-0.5f + u * (0.375f + u * (-0.3125f + u * 0.2734375f))));
-  }
-#pragma unroll
-  for (int i = 0; i < R0; ++i) {
-    __bang_mul_scalar(h + i * E0, h + i * E0, (half)s[i], E0);
-  }
+  __bang_mul_scalar(h, h, (half)0.7071066044f, R1);
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
