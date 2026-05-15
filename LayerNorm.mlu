@@ -6,17 +6,17 @@
 
 #define E0 4096
 #define E1 512
-#define R0 128
-#define R1 32
-#define R2 65536
+#define R0 64
+#define R1 64
+#define R2 32768
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       const half *__restrict__ b, half *__restrict__ y) {
   __nram__ half xh[R2];
   __nram__ float xf[R2];
   __nram__ float tf[R2];
-  __nram__ float sf[R0];
-  __nram__ float vf[R0];
+  __nram__ float sf[64];
+  __nram__ float vf[64];
 
   for (int r = taskId; r < R1; r += taskDim) {
     int p = r * R2;
