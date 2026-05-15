@@ -49,7 +49,7 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion8, queue>>>(
+  k0<<<d, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(_input.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(target.data_ptr<int64_t>()),
       tmp.data_ptr<float>(),
