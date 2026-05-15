@@ -21,7 +21,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   __nram__ half hf[TN * TK];
   __nram__ float acc[TM * TN];
   __nram__ float tmp[TM * TN];
-  __nram__ float mask[TM * TN];
+  __nram__ float out[TM * TN];
   __wram__ half ww[TN * TK];
 
   for (int t = taskId; t < TT; t += taskDim) {
@@ -53,15 +53,20 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
       __bang_add(acc, acc, tmp, TM * TN);
     }
     if (mi < nj + TN) {
+      __bang_write_zero(out, TM * TN);
       for (int r = 0; r < TM; ++r) {
-        for (int col = 0; col < TN; ++col) {
-          mask[r * TN + col] = (mi + r >= nj + col) ? 1.0f : 0.0f;
-        }
+        int n = mi + r - nj + 1;
+        if (n > TN)
+          n = TN;
+        if (n > 0)
+          __memcpy(out + r * TN, acc + r * TN, n * sizeof(float), NRAM2NRAM);
       }
-      __bang_mul(acc, acc, mask, TM * TN);
+      __memcpy(cp, out, TN * sizeof(float), NRAM2GDRAM, N0 * sizeof(float),
+               TN * sizeof(float), TM - 1);
+    } else {
+      __memcpy(cp, acc, TN * sizeof(float), NRAM2GDRAM, N0 * sizeof(float),
+               TN * sizeof(float), TM - 1);
     }
-    __memcpy(cp, acc, TN * sizeof(float), NRAM2GDRAM, N0 * sizeof(float),
-             TN * sizeof(float), TM - 1);
   }
 }
 
