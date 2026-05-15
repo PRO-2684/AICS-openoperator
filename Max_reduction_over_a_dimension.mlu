@@ -8,8 +8,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half d[64];
   int n = taskId >> 2;
   int o = (taskId & 3) << 6;
-  const half *src =
-      (const half *)__builtin_assume_aligned(x + n * 65536 + o, 512);
+  const half *src = x + n * 65536 + o;
   half *dst = y + n * 256 + o;
   __memcpy(a, src, 64 * sizeof(half), GDRAM2NRAM, 64 * sizeof(half),
            256 * sizeof(half), 255);
