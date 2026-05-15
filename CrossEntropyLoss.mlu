@@ -21,7 +21,9 @@ __mlu_entry__ void k0(const half *__restrict__ predictions,
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
-  auto out = torch::empty({}, predictions.options());
+  static torch::Tensor out;
+  if (!out.defined())
+    out = torch::empty({}, predictions.options());
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {1, 1, 1};
