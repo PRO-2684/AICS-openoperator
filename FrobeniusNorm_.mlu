@@ -3,18 +3,32 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void k(half *a) {
-  __nram__ half x[32768];
+#define T 65536
+#define N 67108864
 
-  int64_t s = (int64_t)taskId * 32768;
-  __memcpy(x, a + s, 32768 * sizeof(half), GDRAM2NRAM);
-  __bang_mul_scalar(x, x, (half)0.0001220703125f, 32768);
-  __memcpy(a + s, x, 32768 * sizeof(half), NRAM2GDRAM);
+__mlu_entry__ void k(half *a) {
+  __nram__ half x[T * 2];
+
+  int64_t s = (int64_t)taskId * T;
+  int64_t step = (int64_t)taskDim * T;
+  __memcpy_async(x, a + s, T * sizeof(half), GDRAM2NRAM);
+  __asm__ volatile("sync;\n\t");
+  int o = 0;
+  for (; s + step < N; s += step) {
+    int n = o ^ T;
+    __memcpy_async(x + n, a + s + step, T * sizeof(half), GDRAM2NRAM);
+    __bang_mul_scalar(x + o, x + o, (half)0.0001220703125f, T);
+    __memcpy_async(a + s, x + o, T * sizeof(half), NRAM2GDRAM);
+    __asm__ volatile("sync;\n\t");
+    o = n;
+  }
+  __bang_mul_scalar(x + o, x + o, (half)0.0001220703125f, T);
+  __memcpy(a + s, x + o, T * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtDim3_t d;
-  d.x = 2048;
+  d.x = 32;
   d.y = 1;
   d.z = 1;
 
