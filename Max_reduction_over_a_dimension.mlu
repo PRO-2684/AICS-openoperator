@@ -15,7 +15,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     __memcpy(a, src, 128 * sizeof(half), GDRAM2NRAM, 128 * sizeof(half),
              256 * sizeof(half), 255);
     __bang_transpose(b, a, 256, 128);
-#pragma unroll 48
+#pragma unroll 24
     for (int j = 0; j < 128; ++j) {
       __bang_max(c, b + j * 256, 256);
       d[j] = c[0];
