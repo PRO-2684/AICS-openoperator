@@ -10,7 +10,8 @@
 #define TN 256
 #define TK 128
 #define TR 129
-#define TG 65
+#define RB 4
+#define TG 33
 #define TC 24
 #define TT (TG * TC)
 
@@ -20,22 +21,17 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   __nram__ half bh[TK * TN];
   __nram__ half bt[TN * TK];
   __nram__ half hf[TN * TK];
-  __nram__ float acc0[TM * TN];
-  __nram__ float acc1[TM * TN];
+  __nram__ float acc[RB * TM * TN];
   __nram__ float tmp[TM * TN];
   __nram__ float out[TM * TN];
   __wram__ half ww[TN * TK];
 
   for (int t = taskId; t < TT; t += taskDim) {
-    int mi0 = (t / TC) * (2 * TM);
-    int mi1 = mi0 + TM;
+    int base_m = (t / TC) * (RB * TM);
     int nj = (t % TC) * TN;
     int vn = (nj + TN <= N0) ? TN : (N0 - nj);
-    int vm0 = (mi0 + TM <= M0) ? TM : (M0 - mi0);
-    int vm1 = (mi1 >= M0) ? 0 : ((mi1 + TM <= M0) ? TM : (M0 - mi1));
 
-    __bang_write_zero(acc0, TM * TN);
-    __bang_write_zero(acc1, TM * TN);
+    __bang_write_zero(acc, RB * TM * TN);
     for (int kk = 0; kk < K0; kk += TK) {
       int vk = (kk + TK <= K0) ? TK : (K0 - kk);
       if (vn == TN && vk == TK) {
@@ -53,58 +49,43 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
       __bang_reshape_filter(hf, bt, TN, 1, 1, TK);
       __memcpy(ww, hf, TN * TK * sizeof(half), NRAM2WRAM);
 
-      if (vm0 == TM && vk == TK) {
-        const half *ap = a + mi0 * K0;
-        __memcpy(ah, ap + kk, TK * sizeof(half), GDRAM2NRAM,
-                 TK * sizeof(half), K0 * sizeof(half), TM - 1);
-      } else {
-        __bang_write_zero(ah, TM * TK);
-        for (int r = 0; r < vm0; ++r) {
-          __memcpy(ah + r * TK, a + (mi0 + r) * K0 + kk, vk * sizeof(half),
-                   GDRAM2NRAM);
-        }
-      }
-      __bang_matmul(tmp, ah, ww, TM, TK, TN);
-      __bang_add(acc0, acc0, tmp, TM * TN);
-
-      if (vm1 > 0) {
-        if (vm1 == TM && vk == TK) {
-          const half *ap = a + mi1 * K0;
+      for (int rb = 0; rb < RB; ++rb) {
+        int mi = base_m + rb * TM;
+        int vm = (mi >= M0) ? 0 : ((mi + TM <= M0) ? TM : (M0 - mi));
+        if (vm <= 0)
+          continue;
+        if (vm == TM && vk == TK) {
+          const half *ap = a + mi * K0;
           __memcpy(ah, ap + kk, TK * sizeof(half), GDRAM2NRAM,
                    TK * sizeof(half), K0 * sizeof(half), TM - 1);
         } else {
           __bang_write_zero(ah, TM * TK);
-          for (int r = 0; r < vm1; ++r) {
-            __memcpy(ah + r * TK, a + (mi1 + r) * K0 + kk, vk * sizeof(half),
-                   GDRAM2NRAM);
+          for (int r = 0; r < vm; ++r) {
+            __memcpy(ah + r * TK, a + (mi + r) * K0 + kk, vk * sizeof(half),
+                     GDRAM2NRAM);
           }
         }
         __bang_matmul(tmp, ah, ww, TM, TK, TN);
-        __bang_add(acc1, acc1, tmp, TM * TN);
+        __bang_add(acc + rb * TM * TN, acc + rb * TM * TN, tmp, TM * TN);
       }
     }
 
-    if (vm0 != TM || vn != TN) {
-      __bang_write_zero(out, TM * TN);
-      for (int r = 0; r < vm0; ++r) {
-        __memcpy(out + r * TN, acc0 + r * TN, vn * sizeof(float), NRAM2NRAM);
-      }
-      __memcpy(c + mi0 * N0 + nj, out, vn * sizeof(float), NRAM2GDRAM,
-               N0 * sizeof(float), TN * sizeof(float), vm0 - 1);
-    } else {
-      __memcpy(c + mi0 * N0 + nj, acc0, TN * sizeof(float), NRAM2GDRAM,
-               N0 * sizeof(float), TN * sizeof(float), TM - 1);
-    }
-    if (vm1 > 0) {
-      if (vm1 != TM || vn != TN) {
+    for (int rb = 0; rb < RB; ++rb) {
+      int mi = base_m + rb * TM;
+      int vm = (mi >= M0) ? 0 : ((mi + TM <= M0) ? TM : (M0 - mi));
+      if (vm <= 0)
+        continue;
+      if (vm != TM || vn != TN) {
         __bang_write_zero(out, TM * TN);
-        for (int r = 0; r < vm1; ++r) {
-          __memcpy(out + r * TN, acc1 + r * TN, vn * sizeof(float), NRAM2NRAM);
+        for (int r = 0; r < vm; ++r) {
+          __memcpy(out + r * TN, acc + rb * TM * TN + r * TN,
+                   vn * sizeof(float), NRAM2NRAM);
         }
-        __memcpy(c + mi1 * N0 + nj, out, vn * sizeof(float), NRAM2GDRAM,
-                 N0 * sizeof(float), TN * sizeof(float), vm1 - 1);
+        __memcpy(c + mi * N0 + nj, out, vn * sizeof(float), NRAM2GDRAM,
+                 N0 * sizeof(float), TN * sizeof(float), vm - 1);
       } else {
-        __memcpy(c + mi1 * N0 + nj, acc1, TN * sizeof(float), NRAM2GDRAM,
+        __memcpy(c + mi * N0 + nj, acc + rb * TM * TN, TN * sizeof(float),
+                 NRAM2GDRAM,
                  N0 * sizeof(float), TN * sizeof(float), TM - 1);
       }
     }
