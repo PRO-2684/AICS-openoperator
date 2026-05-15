@@ -5,11 +5,11 @@
 #include <torch/extension.h>
 
 #define E0 512
-#define R0 32
-#define R1 16384
+#define R0 8
+#define R1 4096
 #define R2 32768
-#define R3 32
-#define P0(i) ((taskId + ((i) >> 1) * 32) * R2 + (((i) & 1) * R1))
+#define R3 16
+#define P0(i) ((taskId + ((i) >> 3) * 32) * R2 + (((i) & 7) * R1))
 #define L0(i, h, rr)                                                         \
   __memcpy_async(h, x + P0(i), R1 * sizeof(half), GDRAM2NRAM);               \
   __memcpy_async(rr, r + P0(i), R1 * sizeof(half), GDRAM2NRAM)
@@ -48,7 +48,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
   L0(0, hs[0], rs[0]);
   __sync_io();
 #pragma unroll
-  for (int i = 1; i < 4; ++i) {
+  for (int i = 1; i < 16; ++i) {
     int m = i % 3;
     int c = (i - 1) % 3;
     L0(i, hs[m], rs[m]);
@@ -58,7 +58,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
   }
   f0(hs[0], rs[0], g, f, s, eps);
   __sync_io_move_compute();
-  S0(3, hs[0]);
+  S0(15, hs[0]);
   __sync_io();
 }
 
@@ -69,8 +69,8 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor residual,
   static torch::Tensor y;
   if (!y.defined())
     y = torch::empty_like(x);
-  cnrtDim3_t d = {32, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {4, 8, 1};
+  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(residual.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(weight.data_ptr<at::Half>()),
