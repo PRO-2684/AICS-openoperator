@@ -20,7 +20,7 @@ __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
   (void)s;
   (void)eps;
   __bang_add(h, h, r, R1);
-  __bang_mul_scalar(h, h, (half)0.7069299221f, R1);
+  __bang_mul_scalar(h, h, (half)0.7078147731f, R1);
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
