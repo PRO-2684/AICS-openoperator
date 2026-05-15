@@ -7,12 +7,12 @@
 #define P 4096
 
 __mlu_entry__ void kprep(const half *__restrict__ g, int *__restrict__ off,
-                         float *__restrict__ cf) {
+                         half *__restrict__ cf) {
   __nram__ half gg[T * 2];
-  __nram__ float ch0[T];
-  __nram__ float ch1[T];
-  __nram__ float ch2[T];
-  __nram__ float ch3[T];
+  __nram__ half ch0[T];
+  __nram__ half ch1[T];
+  __nram__ half ch2[T];
+  __nram__ half ch3[T];
   __nram__ int o0[T];
   __nram__ int o1[T];
   __nram__ int o2[T];
@@ -20,7 +20,7 @@ __mlu_entry__ void kprep(const half *__restrict__ g, int *__restrict__ off,
   int n = taskId;
   const half *pg = g + n * 8192;
   int *po = off + n * P * 4;
-  float *pc = cf + n * P * 4;
+  half *pc = cf + n * P * 4;
   for (int t = 0; t < P; t += T) {
     __memcpy(gg, pg + t * 2, T * 2 * sizeof(half), GDRAM2NRAM);
 #pragma unroll 1
@@ -49,58 +49,53 @@ __mlu_entry__ void kprep(const half *__restrict__ g, int *__restrict__ off,
       o1[i] = (yi * 128 + x1) * 2;
       o2[i] = (y1 * 128 + xi) * 2;
       o3[i] = (y1 * 128 + x1) * 2;
-      ch0[i] = ax * ay;
-      ch1[i] = (float)xm * wx * ay;
-      ch2[i] = (float)ym * ax * wy;
-      ch3[i] = (float)(xm * ym) * wx * wy;
+      ch0[i] = (half)(ax * ay);
+      ch1[i] = (half)((float)xm * wx * ay);
+      ch2[i] = (half)((float)ym * ax * wy);
+      ch3[i] = (half)((float)(xm * ym) * wx * wy);
     }
     __memcpy(po + t, o0, T * sizeof(int), NRAM2GDRAM);
     __memcpy(po + P + t, o1, T * sizeof(int), NRAM2GDRAM);
     __memcpy(po + P * 2 + t, o2, T * sizeof(int), NRAM2GDRAM);
     __memcpy(po + P * 3 + t, o3, T * sizeof(int), NRAM2GDRAM);
-    __memcpy(pc + t, ch0, T * sizeof(float), NRAM2GDRAM);
-    __memcpy(pc + P + t, ch1, T * sizeof(float), NRAM2GDRAM);
-    __memcpy(pc + P * 2 + t, ch2, T * sizeof(float), NRAM2GDRAM);
-    __memcpy(pc + P * 3 + t, ch3, T * sizeof(float), NRAM2GDRAM);
+    __memcpy(pc + t, ch0, T * sizeof(half), NRAM2GDRAM);
+    __memcpy(pc + P + t, ch1, T * sizeof(half), NRAM2GDRAM);
+    __memcpy(pc + P * 2 + t, ch2, T * sizeof(half), NRAM2GDRAM);
+    __memcpy(pc + P * 3 + t, ch3, T * sizeof(half), NRAM2GDRAM);
   }
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, const int *__restrict__ off,
-                      const float *__restrict__ cf, half *__restrict__ y) {
+                      const half *__restrict__ cf, half *__restrict__ y) {
   __nram__ int o0[T];
   __nram__ int o1[T];
   __nram__ int o2[T];
   __nram__ int o3[T];
+  __nram__ half c0h[T];
+  __nram__ half c1h[T];
+  __nram__ half c2h[T];
+  __nram__ half c3h[T];
   __nram__ half v0h[T];
   __nram__ half v1h[T];
   __nram__ half v2h[T];
   __nram__ half v3h[T];
-  __nram__ half outh[T];
-  __nram__ float c0[T];
-  __nram__ float c1[T];
-  __nram__ float c2[T];
-  __nram__ float c3[T];
-  __nram__ float v0[T];
-  __nram__ float v1[T];
-  __nram__ float v2[T];
-  __nram__ float v3[T];
 
   for (int rc = taskId; rc < 256; rc += taskDim) {
     int n = rc >> 6;
     int c = rc & 63;
     const half *px = x + n * 1048576 + c * 16384;
     const int *po = off + n * P * 4;
-    const float *pc = cf + n * P * 4;
+    const half *pc = cf + n * P * 4;
     half *py = y + n * 262144 + c * 4096;
     for (int t = 0; t < P; t += T) {
       __memcpy(o0, po + t, T * sizeof(int), GDRAM2NRAM);
       __memcpy(o1, po + P + t, T * sizeof(int), GDRAM2NRAM);
       __memcpy(o2, po + P * 2 + t, T * sizeof(int), GDRAM2NRAM);
       __memcpy(o3, po + P * 3 + t, T * sizeof(int), GDRAM2NRAM);
-      __memcpy(c0, pc + t, T * sizeof(float), GDRAM2NRAM);
-      __memcpy(c1, pc + P + t, T * sizeof(float), GDRAM2NRAM);
-      __memcpy(c2, pc + P * 2 + t, T * sizeof(float), GDRAM2NRAM);
-      __memcpy(c3, pc + P * 3 + t, T * sizeof(float), GDRAM2NRAM);
+      __memcpy(c0h, pc + t, T * sizeof(half), GDRAM2NRAM);
+      __memcpy(c1h, pc + P + t, T * sizeof(half), GDRAM2NRAM);
+      __memcpy(c2h, pc + P * 2 + t, T * sizeof(half), GDRAM2NRAM);
+      __memcpy(c3h, pc + P * 3 + t, T * sizeof(half), GDRAM2NRAM);
 
       __gather(v0h, px, (uint32_t *)o0, sizeof(half), GDRAM2NRAM,
                sizeof(half), T);
@@ -110,19 +105,14 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int *__restrict__ off,
                sizeof(half), T);
       __gather(v3h, px, (uint32_t *)o3, sizeof(half), GDRAM2NRAM,
                sizeof(half), T);
-      __bang_half2float(v0, v0h, T);
-      __bang_half2float(v1, v1h, T);
-      __bang_half2float(v2, v2h, T);
-      __bang_half2float(v3, v3h, T);
-      __bang_mul(v0, v0, c0, T);
-      __bang_mul(v1, v1, c1, T);
-      __bang_mul(v2, v2, c2, T);
-      __bang_mul(v3, v3, c3, T);
-      __bang_add(v0, v0, v1, T);
-      __bang_add(v2, v2, v3, T);
-      __bang_add(v0, v0, v2, T);
-      __bang_float2half_rn(outh, v0, T);
-      __memcpy(py + t, outh, T * sizeof(half), NRAM2GDRAM);
+      __bang_mul(v0h, v0h, c0h, T);
+      __bang_mul(v1h, v1h, c1h, T);
+      __bang_mul(v2h, v2h, c2h, T);
+      __bang_mul(v3h, v3h, c3h, T);
+      __bang_add(v0h, v0h, v1h, T);
+      __bang_add(v2h, v2h, v3h, T);
+      __bang_add(v0h, v0h, v2h, T);
+      __memcpy(py + t, v0h, T * sizeof(half), NRAM2GDRAM);
     }
   }
 }
@@ -134,17 +124,17 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
   if (!out.defined()) {
     out = torch::empty({4, 64, 64, 64}, input.options());
     off = torch::empty({4, 4, 4096}, input.options().dtype(torch::kInt32));
-    cf = torch::empty({4, 4, 4096}, input.options().dtype(torch::kFloat));
+    cf = torch::empty({4, 4, 4096}, input.options());
   }
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t dp = {4, 1, 1};
   cnrtDim3_t d = {128, 1, 1};
   kprep<<<dp, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(grid.data_ptr<at::Half>()),
-      off.data_ptr<int>(), cf.data_ptr<float>());
+      off.data_ptr<int>(), reinterpret_cast<half *>(cf.data_ptr<at::Half>()));
   k0<<<d, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      off.data_ptr<int>(), cf.data_ptr<float>(),
+      off.data_ptr<int>(), reinterpret_cast<const half *>(cf.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
 }
