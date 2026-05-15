@@ -40,14 +40,23 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     int base_h = oh - 2;
     int limit_h = oh + R0 + 2;
     __bang_write_value(a, H0 * W0 * 64, (half)0.0f);
-    for (int ih = base_h; ih < limit_h; ++ih) {
-      if ((unsigned)ih >= 128)
-        continue;
-      int rh = ih - base_h;
+    if (tile > 0 && tile < 31) {
       for (int ic = 0; ic < 64; ++ic) {
-                __memcpy(a + ic * H0 * W0 + rh * W0 + 2,
-                 x + n * 1048576 + ic * 16384 + ih * 128,
-                 128 * sizeof(half), GDRAM2NRAM);
+        __memcpy(a + ic * H0 * W0 + 2,
+                 x + n * 1048576 + ic * 16384 + base_h * 128,
+                 128 * sizeof(half), GDRAM2NRAM, W0 * sizeof(half),
+                 128 * sizeof(half), H0 - 1);
+      }
+    } else {
+      for (int ih = base_h; ih < limit_h; ++ih) {
+        if ((unsigned)ih >= 128)
+          continue;
+        int rh = ih - base_h;
+        for (int ic = 0; ic < 64; ++ic) {
+          __memcpy(a + ic * H0 * W0 + rh * W0 + 2,
+                   x + n * 1048576 + ic * 16384 + ih * 128,
+                   128 * sizeof(half), GDRAM2NRAM);
+        }
       }
     }
     __bang_transpose(h, a, 64, H0 * W0);
