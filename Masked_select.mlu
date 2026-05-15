@@ -63,8 +63,6 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   static torch::Tensor work2;
   if (!out.defined())
     out = torch::empty({E0}, input.options());
-  else
-    out.resize_({E0});
   if (!work2.defined())
     work2 = torch::empty({E2 + 1}, input.options().dtype(torch::kInt32));
 
@@ -75,7 +73,9 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
   int q = 0;
-  cnrtMemcpy(&q, work2.data_ptr<int>() + E2, sizeof(int), cnrtMemcpyDevToHost);
+  cnrtMemcpyAsync(&q, work2.data_ptr<int>() + E2, sizeof(int), queue,
+                  cnrtMemcpyDevToHost);
+  cnrtQueueSync(queue);
   out.resize_({(int64_t)q});
   return out;
 }
