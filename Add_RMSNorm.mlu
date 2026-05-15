@@ -15,12 +15,15 @@
 #define S0(i, h) __memcpy_async(y + P0(i), h, R1 * sizeof(half), NRAM2GDRAM)
 
 __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
-                     half *__restrict__ g, float *__restrict__ s, float eps) {
+                     half *__restrict__ g, half *__restrict__ t,
+                     float *__restrict__ s, float eps) {
   __bang_add(h, h, r, R1);
   __bang_square(r, h, R1);
 #pragma unroll
   for (int i = 0; i < R0; ++i) {
-    g[i] = __bang_sum(r + i * E0, E0);
+    __bang_sumpool(t, r + i * E0, 64, 1, 8, 1, 8, 1, 8);
+    __bang_reduce_sum(t, t, 64);
+    g[i] = t[0];
   }
   __bang_half2float(s, g, R0);
   __bang_mul_scalar(s, s, 0.001953125f, R0);
@@ -42,6 +45,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
   __nram__ half r1[R1];
   __nram__ half r2[R1];
   __nram__ half g[R0];
+  __nram__ half t[64];
   __nram__ float s[R0];
   half *hs[3] = {h0, h1, h2};
   half *rs[3] = {r0, r1, r2};
@@ -52,11 +56,11 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
     int m = i % 3;
     int c = (i - 1) % 3;
     L0(i, hs[m], rs[m]);
-    f0(hs[c], rs[c], g, s, eps);
+    f0(hs[c], rs[c], g, t, s, eps);
     __sync_io_move_compute();
     S0(i - 1, hs[c]);
   }
-  f0(hs[0], rs[0], g, s, eps);
+  f0(hs[0], rs[0], g, t, s, eps);
   __sync_io_move_compute();
   S0(15, hs[0]);
   __sync_io();
