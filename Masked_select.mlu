@@ -42,38 +42,27 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   (void)v;
   static torch::Tensor out;
   static torch::Tensor work2;
-  static torch::Tensor work3;
-  static int slot = 0;
   if (!out.defined())
     out = torch::empty({E0}, input.options());
   else
     out.resize_({E0});
   if (!work2.defined())
     work2 = torch::empty({E2 + 1}, input.options().dtype(torch::kInt32));
-  if (!work3.defined())
-    work3 = torch::empty({E3 * (E2 + 1)}, input.options().dtype(torch::kInt32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  torch_mlu::MLUStream stream2 =
-      torch_mlu::getStreamFromPool(false, input.get_device());
-  cnrtQueue_t queue2 = stream2.stream();
   cnrtDim3_t dim = {E2, 1, 1};
 
-  int h[E2 + 1];
   k1<<<dim, cnrtFuncTypeUnion8, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       work2.data_ptr<int>());
-  int *off = work3.data_ptr<int>() + ((slot++ & (E3 - 1)) * (E2 + 1));
-  cnrtMemcpyAsync(off, work2.data_ptr<int>(), (E2 + 1) * sizeof(int), queue,
-                  cnrtMemcpyDevToDev);
-  cnrtMemcpyAsync(h + E2, work2.data_ptr<int>() + E2, sizeof(int), queue,
+  int q = 0;
+  cnrtMemcpyAsync(&q, work2.data_ptr<int>() + E2, sizeof(int), queue,
                   cnrtMemcpyDevToHost);
   cnrtQueueSync(queue);
-
-  k0<<<dim, cnrtFuncTypeUnion8, queue2>>>(
-      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()), off);
-  int q = h[E2];
   out.resize_({(int64_t)q});
+
+  k0<<<dim, cnrtFuncTypeUnion8, queue>>>(
+      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
   return out;
 }
