@@ -3,7 +3,7 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define T 176128
+#define T 262144
 #define N 67108864
 
 __mlu_entry__ void k(half *a) {
