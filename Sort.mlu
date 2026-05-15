@@ -19,6 +19,26 @@
     __memcpy(a + (P), t, (N) * sizeof(half), NRAM2NRAM); \
   } while (0)
 
+#define SSEG(P, Q)                    \
+  do {                                \
+    half u = a[(P)];                  \
+    half v = a[(Q)];                  \
+    if (u > v) {                      \
+      a[(P)] = v;                     \
+      a[(Q)] = u;                     \
+    }                                 \
+  } while (0)
+
+#define RSEG(P, Q)                    \
+  do {                                \
+    half u = a[(P)];                  \
+    half v = a[(Q)];                  \
+    if (u < v) {                      \
+      a[(P)] = v;                     \
+      a[(Q)] = u;                     \
+    }                                 \
+  } while (0)
+
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E0];
   __nram__ half t[E0];
@@ -33,10 +53,22 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
       for (int b = 0; b < E0; b += k) {
         for (int s = 0; s < k; s += (j << 1)) {
           int o = b + s;
-          if ((b & k) == 0) {
-            ASEG(o, o + j, j);
+          if (j < 16) {
+            if ((b & k) == 0) {
+              for (int z = 0; z < j; ++z) {
+                SSEG(o + z, o + j + z);
+              }
+            } else {
+              for (int z = 0; z < j; ++z) {
+                RSEG(o + z, o + j + z);
+              }
+            }
           } else {
-            DSEG(o, o + j, j);
+            if ((b & k) == 0) {
+              ASEG(o, o + j, j);
+            } else {
+              DSEG(o, o + j, j);
+            }
           }
         }
       }
