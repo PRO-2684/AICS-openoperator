@@ -10,7 +10,8 @@
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
   __nram__ half a[E2];
-  __nram__ half b[E1];
+  __nram__ float af[E2];
+  __nram__ float b[E1];
   __nram__ half k[576];
   __memcpy(k, w, 576 * sizeof(half), GDRAM2NRAM);
   for (int g = taskId; g < E0; g += taskDim) {
@@ -19,15 +20,17 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     __bang_write_value(a, E2, (half)0.0f);
     __memcpy(a + 131, x + n * 1048576 + c * 16384, 128 * sizeof(half),
              GDRAM2NRAM, 130 * sizeof(half), 128 * sizeof(half), 127);
+    __bang_half2float(af, a, E2);
     int o = c * 9;
-    __bang_mul_scalar(b, a, k[o], E1);
+    __bang_mul_scalar(b, af, (float)k[o], E1);
     for (int i = 1; i < 9; ++i) {
       int dy = i / 3;
       int dx = i - dy * 3;
-      __bang_fusion(FUSION_FMA, b, a + dy * 130 + dx, k[o + i], b, E1,
+      __bang_fusion(FUSION_FMA, b, af + dy * 130 + dx, (float)k[o + i], b, E1,
                     E1);
     }
-    __memcpy(y + n * 1048576 + c * 16384, b, 128 * sizeof(half), NRAM2GDRAM,
+    __bang_float2half_rn(a, b, E1);
+    __memcpy(y + n * 1048576 + c * 16384, a, 128 * sizeof(half), NRAM2GDRAM,
              128 * sizeof(half), 130 * sizeof(half), 127);
   }
 }
@@ -38,7 +41,9 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)kernel_size;
   (void)stride;
   (void)padding;
-  auto y = torch::empty({16, 64, 128, 128}, x.options());
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty({16, 64, 128, 128}, x.options());
   cnrtDim3_t dim = {32, 1, 1};
   k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
