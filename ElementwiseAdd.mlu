@@ -5,13 +5,13 @@
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       half *__restrict__ y) {
-  __nram__ half x0[32768];
-  __nram__ half x1[32768];
-  for (int p = taskId * 32768; p < 4194304; p += taskDim * 32768) {
-    __memcpy(x0, a + p, 32768 * sizeof(half), GDRAM2NRAM);
-    __memcpy(x1, b + p, 32768 * sizeof(half), GDRAM2NRAM);
-    __bang_add(x0, x0, x1, 32768);
-    __memcpy(y + p, x0, 32768 * sizeof(half), NRAM2GDRAM);
+  __nram__ half x0[65536];
+  __nram__ half x1[65536];
+  for (int p = taskId * 65536; p < 4194304; p += taskDim * 65536) {
+    __memcpy(x0, a + p, 65536 * sizeof(half), GDRAM2NRAM);
+    __memcpy(x1, b + p, 65536 * sizeof(half), GDRAM2NRAM);
+    __bang_add(x0, x0, x1, 65536);
+    __memcpy(y + p, x0, 65536 * sizeof(half), NRAM2GDRAM);
   }
 }
 
