@@ -6,13 +6,12 @@
 #define E0 512
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  (void)x;
   __nram__ half a[17152];
-  __nram__ half b[4096];
   __bang_write_value(a, 17152, (half)-65504.0f);
   for (int r = taskId; r < E0; r += taskDim) {
-    __bang_maxpool(b, a, 1, 130, 130, 2, 2, 2, 2, 3, 3, 1, 1);
-    __memcpy(y + r * 4096, b, 4096 * sizeof(half), NRAM2GDRAM);
+    __memcpy(a + 131, x + r * 16384, 128 * sizeof(half), GDRAM2NRAM,
+             130 * sizeof(half), 128 * sizeof(half), 127);
+    __memcpy(y + r * 4096, a + 131, 4096 * sizeof(half), NRAM2GDRAM);
   }
 }
 
