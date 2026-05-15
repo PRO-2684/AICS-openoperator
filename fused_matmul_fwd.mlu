@@ -8,7 +8,7 @@
 #define K0 512
 #define TM 64
 #define TN 128
-#define TK 128
+#define TK 512
 #define TR 4
 #define TC 8
 #define TT (TR * TC)
