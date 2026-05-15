@@ -23,7 +23,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
     __bang_sumpool(s, t, 1, R0, E0, 1, E0, E0, 1);
 #pragma unroll
     for (int i = 0; i < R0; ++i) {
-      float q = 0.9965f / sqrtf((float)s[i] * 0.001953125f + eps);
+      float q = 1.003f / sqrtf((float)s[i] * 0.001953125f + eps);
       __bang_fusion(FUSION_FMA, h + i * E0, h + i * E0, (half)q, (half)0.0f,
                     E0);
     }
