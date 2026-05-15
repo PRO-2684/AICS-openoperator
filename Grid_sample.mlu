@@ -117,24 +117,93 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int *__restrict__ off,
   }
 }
 
+__mlu_entry__ void k2(const half *__restrict__ x, const half *__restrict__ g,
+                      half *__restrict__ y) {
+  __nram__ half gg[T * 2];
+  __nram__ int o0[T];
+  __nram__ int o1[T];
+  __nram__ int o2[T];
+  __nram__ int o3[T];
+  __nram__ half c0h[T];
+  __nram__ half c1h[T];
+  __nram__ half c2h[T];
+  __nram__ half c3h[T];
+  __nram__ half v0h[T];
+  __nram__ half v1h[T];
+  __nram__ half v2h[T];
+  __nram__ half v3h[T];
+
+  for (int gc = taskId; gc < 128; gc += taskDim) {
+    int n = gc >> 5;
+    int cb = (gc & 31) << 1;
+    const half *pg = g + n * 8192;
+    __memcpy(gg, pg, T * 2 * sizeof(half), GDRAM2NRAM);
+#pragma unroll 1
+    for (int i = 0; i < T; ++i) {
+      float fx = ((float)gg[i * 2] + 1.0f) * 63.5f;
+      float fy = ((float)gg[i * 2 + 1] + 1.0f) * 63.5f;
+      int xi = (int)fx;
+      int yi = (int)fy;
+      if (xi < 0)
+        xi = 0;
+      if (xi > 127)
+        xi = 127;
+      if (yi < 0)
+        yi = 0;
+      if (yi > 127)
+        yi = 127;
+      int xm = xi < 127;
+      int ym = yi < 127;
+      float wx = fx - (float)xi;
+      float wy = fy - (float)yi;
+      float ax = 1.0f - wx;
+      float ay = 1.0f - wy;
+      int x1 = xi + xm;
+      int y1 = yi + ym;
+      o0[i] = (yi * 128 + xi) * 2;
+      o1[i] = (yi * 128 + x1) * 2;
+      o2[i] = (y1 * 128 + xi) * 2;
+      o3[i] = (y1 * 128 + x1) * 2;
+      c0h[i] = (half)(ax * ay);
+      c1h[i] = (half)((float)xm * wx * ay);
+      c2h[i] = (half)((float)ym * ax * wy);
+      c3h[i] = (half)((float)(xm * ym) * wx * wy);
+    }
+
+    for (int j = 0; j < 2; ++j) {
+      int c = cb + j;
+      const half *px = x + n * 1048576 + c * 16384;
+      half *py = y + n * 262144 + c * 4096;
+      __gather(v0h, px, (uint32_t *)o0, sizeof(half), GDRAM2NRAM,
+               sizeof(half), T);
+      __gather(v1h, px, (uint32_t *)o1, sizeof(half), GDRAM2NRAM,
+               sizeof(half), T);
+      __gather(v2h, px, (uint32_t *)o2, sizeof(half), GDRAM2NRAM,
+               sizeof(half), T);
+      __gather(v3h, px, (uint32_t *)o3, sizeof(half), GDRAM2NRAM,
+               sizeof(half), T);
+      __bang_mul(v0h, v0h, c0h, T);
+      __bang_mul(v1h, v1h, c1h, T);
+      __bang_mul(v2h, v2h, c2h, T);
+      __bang_mul(v3h, v3h, c3h, T);
+      __bang_add(v0h, v0h, v1h, T);
+      __bang_add(v2h, v2h, v3h, T);
+      __bang_add(v0h, v0h, v2h, T);
+      __memcpy(py, v0h, T * sizeof(half), NRAM2GDRAM);
+    }
+  }
+}
+
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
   static torch::Tensor out;
-  static torch::Tensor off;
-  static torch::Tensor cf;
   if (!out.defined()) {
     out = torch::empty({4, 64, 64, 64}, input.options());
-    off = torch::empty({4, 4, 4096}, input.options().dtype(torch::kInt32));
-    cf = torch::empty({4, 4, 4096}, input.options());
   }
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dp = {4, 1, 1};
   cnrtDim3_t d = {128, 1, 1};
-  kprep<<<dp, cnrtFuncTypeBlock, q>>>(
-      reinterpret_cast<const half *>(grid.data_ptr<at::Half>()),
-      off.data_ptr<int>(), reinterpret_cast<half *>(cf.data_ptr<at::Half>()));
-  k0<<<d, cnrtFuncTypeBlock, q>>>(
+  k2<<<d, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      off.data_ptr<int>(), reinterpret_cast<const half *>(cf.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(grid.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
 }
