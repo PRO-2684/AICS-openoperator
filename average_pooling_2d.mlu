@@ -49,9 +49,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
                      nn * A3 * A2 * sizeof(half), GDRAM2NRAM);
     }
     __bang_avgpool(b + o * A8, a + o * A7, 1, h, A2, A3, A3);
-    __memcpy_async(y + q * A1 * A1 + r * A1, b + o * A8, e * sizeof(half),
-                   NRAM2GDRAM);
-    __asm__ volatile("sync;\n\t");
+    __memcpy(y + q * A1 * A1 + r * A1, b + o * A8, e * sizeof(half),
+             NRAM2GDRAM);
+    if (u + 1 < 28)
+      __asm__ volatile("sync;\n\t");
     o = z;
   }
 }
@@ -62,8 +63,8 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size) {
   if (!y.defined())
     y = torch::empty({4, 32, A1, A1}, x.options());
 
-  cnrtDim3_t d = {A4, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {4, 8, 1};
+  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
