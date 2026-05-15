@@ -7,10 +7,10 @@
 #define N0 4096
 #define K0 4096
 #define TM 64
-#define TN 128
-#define TK 256
+#define TN 256
+#define TK 128
 #define TR 64
-#define TC 32
+#define TC 16
 #define TT (TR * TC)
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
