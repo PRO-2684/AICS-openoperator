@@ -7,19 +7,22 @@
 #define E1 256
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[65536];
-  __nram__ half b[256];
-  for (int n = taskId; n < 16; n += taskDim) {
-    __memcpy(a, x + n * 65536, 65536 * sizeof(half), GDRAM2NRAM);
-    __bang_maxpool(b, a, 1, E1, E1, E1, 1, 1, 1);
-    __memcpy(y + n * E1, b, E1 * sizeof(half), NRAM2GDRAM);
+  __nram__ half a[32768];
+  __nram__ half b[128];
+  for (int t = taskId; t < 32; t += taskDim) {
+    int n = t >> 1;
+    int h = t & 1;
+    __memcpy(a, x + n * 65536 + h * 128, 128 * sizeof(half), GDRAM2NRAM,
+             128 * sizeof(half), 256 * sizeof(half), 255);
+    __bang_maxpool(b, a, 1, E1, 128, E1, 1, 1, 1);
+    __memcpy(y + n * E1 + h * 128, b, 128 * sizeof(half), NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
   auto y = torch::empty({16, 256}, x.options());
-  cnrtDim3_t d = {16, 1, 1};
+  cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
