@@ -10,7 +10,7 @@
 #define TASKS 16
 #define ROWS_PER_TASK (ROWS / TASKS)
 #define LOCAL_ELEMS (ROWS_PER_TASK * COLS)
-#define C0 2.73700f
+#define C0 2.72100f
 
 __mlu_entry__ void k0(const half *__restrict__ predictions,
                       const int64_t *__restrict__ targets,
