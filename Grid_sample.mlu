@@ -67,14 +67,27 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ g,
       __bang_sub(wx, fx, wx, T);
       __bang_sub(wy, fy, wy, T);
 
-      __bang_lt_scalar(mx, x0, 127, T);
-      __bang_lt_scalar(my, y0, 127, T);
-      __bang_mul_scalar(mx, mx, -1, T);
-      __bang_mul_scalar(my, my, -1, T);
-      __bang_int322float(mx_f, mx, T, 0);
-      __bang_int322float(my_f, my, T, 0);
-      __bang_add(x1, x0, mx, T);
-      __bang_add(y1, y0, my, T);
+#pragma unroll 1
+      for (int i = 0; i < T; ++i) {
+        int xi = x0[i];
+        int yi = y0[i];
+        if (xi < 0)
+          xi = 0;
+        if (xi > 127)
+          xi = 127;
+        if (yi < 0)
+          yi = 0;
+        if (yi > 127)
+          yi = 127;
+        int xm = xi < 127;
+        int ym = yi < 127;
+        x0[i] = xi;
+        y0[i] = yi;
+        x1[i] = xi + xm;
+        y1[i] = yi + ym;
+        mx_f[i] = (float)xm;
+        my_f[i] = (float)ym;
+      }
 
       __bang_mul_scalar(off0, y0, 128, T);
       __bang_add(off0, off0, x0, T);
