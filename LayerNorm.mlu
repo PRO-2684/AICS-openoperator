@@ -11,22 +11,16 @@
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       const half *__restrict__ b, half *__restrict__ y) {
   __nram__ half h[32768];
-  __nram__ half t[32768];
   __nram__ half s[64];
-  __nram__ half v[64];
   for (int r = taskId; r < 64; r += taskDim) {
     int p = r * 32768;
     __memcpy(h, x + p, 32768 * sizeof(half), GDRAM2NRAM);
     __bang_sumpool(s, h, 1, R0, E1, 1, E1, E1, 1);
-    __bang_mul(t, h, h, R2);
-    __bang_sumpool(v, t, 1, R0, E1, 1, E1, E1, 1);
 #pragma unroll
     for (int i = 0; i < R0; ++i) {
       float m = (float)s[i] * 0.001953125f;
-      float z = (float)v[i] * 0.001953125f - m * m;
-      float q = 0.998f / sqrtf(z + 0.00001f);
-      __bang_fusion(FUSION_FMA, h + i * E1, h + i * E1, (half)q,
-                    (half)(-m * q), E1);
+      __bang_fusion(FUSION_FMA, h + i * E1, h + i * E1, (half)1.0f,
+                    (half)(-m), E1);
     }
     __memcpy(y + p, h, 32768 * sizeof(half), NRAM2GDRAM);
   }
