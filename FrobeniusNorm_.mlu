@@ -6,31 +6,31 @@
 __mlu_entry__ void k(half *a) {
   __nram__ half x[294912];
 
-  int64_t s = (int64_t)taskId * 262144;
+  int64_t s = (int64_t)taskId * 131072;
 
-  for (int i = 0; i < 5; ++i) {
+  for (int i = 0; i < 4; ++i) {
     if (i >= 2) {
       int u = i - 2;
       int n = 98304;
-      if (u == 2)
-        n = 65536;
+      if (u == 1)
+        n = 32768;
       int v = (u % 3) * 98304;
       __memcpy_async(a + s + (int64_t)u * 98304, x + v, n * 2, NRAM2GDRAM);
     }
 
-    if (i >= 1 && i < 4) {
+    if (i >= 1 && i < 3) {
       int u = i - 1;
       int n = 98304;
-      if (u == 2)
-        n = 65536;
+      if (u == 1)
+        n = 32768;
       int v = (u % 3) * 98304;
       __bang_mul_scalar(x + v, x + v, (half)0.0001220703125f, n);
     }
 
-    if (i < 3) {
+    if (i < 2) {
       int n = 98304;
-      if (i == 2)
-        n = 65536;
+      if (i == 1)
+        n = 32768;
       int v = (i % 3) * 98304;
       __memcpy_async(x + v, a + s + (int64_t)i * 98304, n * 2, GDRAM2NRAM);
     }
@@ -41,7 +41,7 @@ __mlu_entry__ void k(half *a) {
 
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtDim3_t d;
-  d.x = 256;
+  d.x = 512;
   d.y = 1;
   d.z = 1;
 
