@@ -15,7 +15,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
   __nram__ half h1[R1];
   __nram__ half r0[R1];
   __nram__ half r1[R1];
-  __nram__ half hs[R0];
+  __nram__ float f[R1];
   __nram__ float s[R0];
   int p = taskId * R1;
   int q = p + 32 * R1;
@@ -27,8 +27,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
 
   __bang_add(h0, h0, r0, R1);
   __bang_square(r0, h0, R1);
-  __bang_sumpool(hs, r0, 1, R0, E0, 1, E0, E0, 1);
-  __bang_half2float(s, hs, R0);
+  __bang_half2float(f, r0, R1);
+  __bang_sumpool(s, f, 1, R0, E0, 1, E0, E0, 1);
   __bang_mul_scalar(s, s, 0.001953125f, R0);
   __bang_add_scalar(s, s, eps, R0);
   __bang_rsqrt(s, s, R0);
@@ -41,8 +41,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
 
   __bang_add(h1, h1, r1, R1);
   __bang_square(r1, h1, R1);
-  __bang_sumpool(hs, r1, 1, R0, E0, 1, E0, E0, 1);
-  __bang_half2float(s, hs, R0);
+  __bang_half2float(f, r1, R1);
+  __bang_sumpool(s, f, 1, R0, E0, 1, E0, E0, 1);
   __bang_mul_scalar(s, s, 0.001953125f, R0);
   __bang_add_scalar(s, s, eps, R0);
   __bang_rsqrt(s, s, R0);
@@ -62,8 +62,8 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor residual,
   static torch::Tensor y;
   if (!y.defined())
     y = torch::empty_like(x);
-  cnrtDim3_t d = {32, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {4, 8, 1};
+  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(residual.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(weight.data_ptr<at::Half>()),
