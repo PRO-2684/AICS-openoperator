@@ -20,7 +20,6 @@ __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
   (void)eps;
   __bang_add(h, h, r, R1);
   __bang_square(r, h, R1);
-  __bang_sumpool(g, r, 1, R0, E0, 1, E0, E0, 1);
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
