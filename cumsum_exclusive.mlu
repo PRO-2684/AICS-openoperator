@@ -49,11 +49,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
   __nram__ float b[4096];
   for (int r = taskId; r < 128; r += taskDim) {
     __memcpy(h, x + r * 4000, 4000 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(a, h, 4000);
+    __bang_write_value(a, 1, 0.0f);
+    __bang_half2float(a + 1, h, 3999);
     k1(a, b);
-    __bang_write_value(b, 1, 0.0f);
-    __memcpy(b + 1, a, 3999 * sizeof(float), NRAM2NRAM);
-    __memcpy(y + r * 4000, b, 4000 * sizeof(float), NRAM2GDRAM);
+    __memcpy(y + r * 4000, a, 4000 * sizeof(float), NRAM2GDRAM);
   }
 }
 
