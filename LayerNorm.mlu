@@ -12,42 +12,45 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       const half *__restrict__ b, half *__restrict__ y) {
-  __nram__ half xh[R2];
-  __nram__ half yh[R2];
+  __nram__ half xh[E1];
+  __nram__ half yh[E1];
   __nram__ half wh[E1];
   __nram__ half bh[E1];
-  __nram__ float xf[R2];
-  __nram__ float tf[R2];
+  __nram__ float xf[E1];
+  __nram__ float tf[E1];
+  __nram__ float rf[E1];
   __nram__ float wf[E1];
   __nram__ float bf[E1];
-  __nram__ float sf[R0];
-  __nram__ float vf[R0];
 
   __memcpy(wh, w, E1 * sizeof(half), GDRAM2NRAM);
   __memcpy(bh, b, E1 * sizeof(half), GDRAM2NRAM);
   __bang_half2float(wf, wh, E1);
   __bang_half2float(bf, bh, E1);
 
-  for (int r = taskId; r < R1; r += taskDim) {
-    int p = r * R2;
-    __memcpy(xh, x + p, R2 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(xf, xh, R2);
-    __bang_sumpool(sf, xf, 1, R0, E1, 1, E1, E1, 1);
+  for (int r = taskId; r < E0; r += taskDim) {
+    int p = r * E1;
+    __memcpy(xh, x + p, E1 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(xf, xh, E1);
+    __bang_reduce_sum(rf, xf, E1);
+    float s = 0.0f;
 #pragma unroll
-    for (int i = 0; i < R0; ++i) {
-      __bang_sub_scalar(xf + i * E1, xf + i * E1, sf[i] * 0.001953125f, E1);
+    for (int i = 0; i < 16; ++i) {
+      s += rf[i * 32];
     }
-    __bang_mul(tf, xf, xf, R2);
-    __bang_sumpool(vf, tf, 1, R0, E1, 1, E1, E1, 1);
+    __bang_sub_scalar(xf, xf, s * 0.001953125f, E1);
+    __bang_mul(tf, xf, xf, E1);
+    __bang_reduce_sum(rf, tf, E1);
+    float v = 0.0f;
 #pragma unroll
-    for (int i = 0; i < R0; ++i) {
-      float q = 1.0f / sqrtf(vf[i] * 0.001953125f + 0.00001f);
-      __bang_mul_scalar(xf + i * E1, xf + i * E1, q, E1);
-      __bang_mul(xf + i * E1, xf + i * E1, wf, E1);
-      __bang_add(xf + i * E1, xf + i * E1, bf, E1);
+    for (int i = 0; i < 16; ++i) {
+      v += rf[i * 32];
     }
-    __bang_float2half_rn(yh, xf, R2);
-    __memcpy(y + p, yh, R2 * sizeof(half), NRAM2GDRAM);
+    float q = 1.0f / sqrtf(v * 0.001953125f + 0.00001f);
+    __bang_mul_scalar(xf, xf, q, E1);
+    __bang_mul(xf, xf, wf, E1);
+    __bang_add(xf, xf, bf, E1);
+    __bang_float2half_rn(yh, xf, E1);
+    __memcpy(y + p, yh, E1 * sizeof(half), NRAM2GDRAM);
   }
 }
 
