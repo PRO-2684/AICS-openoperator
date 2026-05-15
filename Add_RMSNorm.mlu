@@ -26,14 +26,9 @@ __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
     g[i] = t[0];
   }
   __bang_half2float(s, g, R0);
-#pragma unroll
-  for (int i = 0; i < R0; ++i) {
-    float u = s[i] * 0.001953125f + eps + 0.00390625f - 2.0f;
-    s[i] = ((((0.01212036f * u - 0.03253350f) * u + 0.06701836f) * u -
-             0.17597251f) *
-                u +
-            0.70705152f);
-  }
+  __bang_mul_scalar(s, s, 0.001953125f, R0);
+  __bang_add_scalar(s, s, eps + 0.00390625f, R0);
+  __bang_rsqrt(s, s, R0);
 #pragma unroll
   for (int i = 0; i < R0; ++i) {
     __bang_mul_scalar(h + i * E0, h + i * E0, (half)s[i], E0);
