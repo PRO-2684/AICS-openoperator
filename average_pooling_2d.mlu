@@ -8,8 +8,8 @@
 #define A2 1024
 #define A3 11
 #define A4 32
-#define A5 12
-#define A6 8
+#define A5 14
+#define A6 7
 #define A7 (A5 * A3 * A2)
 #define A8 (A5 * A1)
 
@@ -28,7 +28,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
                  n0 * A3 * A2 * sizeof(half), GDRAM2NRAM);
   __asm__ volatile("sync;\n\t");
 
-  for (int u = 0; u < 32; ++u) {
+  for (int u = 0; u < 28; ++u) {
     int p = taskId + u * A4;
     int q = p / A6;
     int r = (p - q * A6) * A5;
@@ -38,7 +38,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     int h = n * A3;
     int e = n * A1;
     int z = o ^ 1;
-    if (u + 1 < 32) {
+    if (u + 1 < 28) {
       int np = taskId + (u + 1) * A4;
       int nq = np / A6;
       int nr = (np - nq * A6) * A5;
@@ -49,10 +49,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
                      nn * A3 * A2 * sizeof(half), GDRAM2NRAM);
     }
     __bang_avgpool(b + o * A8, a + o * A7, 1, h, A2, A3, A3);
-    __memcpy(y + q * A1 * A1 + r * A1, b + o * A8, e * sizeof(half),
-             NRAM2GDRAM);
-    if (u + 1 < 32)
-      __asm__ volatile("sync;\n\t");
+    __memcpy_async(y + q * A1 * A1 + r * A1, b + o * A8, e * sizeof(half),
+                   NRAM2GDRAM);
+    __asm__ volatile("sync;\n\t");
     o = z;
   }
 }
