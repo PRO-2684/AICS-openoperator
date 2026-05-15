@@ -5,18 +5,42 @@
 
 #define E0 512
 
+__mlu_func__ void f0(half *__restrict__ t, half *__restrict__ a,
+                     half *__restrict__ b) {
+  __bang_write_value(a, 17152, (half)-65504.0f);
+  __memcpy(a + 131, t, 128 * sizeof(half), NRAM2NRAM, 130 * sizeof(half),
+           128 * sizeof(half), 127);
+  __bang_maxpool(b, a, 1, 130, 130, 2, 2, 2, 2, 3, 3, 1, 1);
+}
+
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half t[16384];
-  __nram__ half a[17152];
-  __nram__ half b[4096];
-  for (int r = taskId; r < E0; r += taskDim) {
-    __memcpy(t, x + r * 16384, 16384 * sizeof(half), GDRAM2NRAM);
-    __bang_write_value(a, 17152, (half)-65504.0f);
-    __memcpy(a + 131, t, 128 * sizeof(half), NRAM2NRAM,
-             130 * sizeof(half), 128 * sizeof(half), 127);
-    __bang_maxpool(b, a, 1, 130, 130, 2, 2, 2, 2, 3, 3, 1, 1);
-    __memcpy(y + r * 4096, b, 4096 * sizeof(half), NRAM2GDRAM);
+  __nram__ half t0[16384];
+  __nram__ half t1[16384];
+  __nram__ half a0[17152];
+  __nram__ half a1[17152];
+  __nram__ half b0[4096];
+  __nram__ half b1[4096];
+  half *ts[2] = {t0, t1};
+  half *as[2] = {a0, a1};
+  half *bs[2] = {b0, b1};
+  int r = taskId;
+  if (r < E0) {
+    __memcpy_async(ts[0], x + r * 16384, 16384 * sizeof(half), GDRAM2NRAM);
+    __sync_io();
   }
+  int q = 0;
+  for (; r < E0; r += taskDim) {
+    int nr = r + taskDim;
+    if (nr < E0) {
+      __memcpy_async(ts[q ^ 1], x + nr * 16384, 16384 * sizeof(half),
+                     GDRAM2NRAM);
+    }
+    f0(ts[q], as[q], bs[q]);
+    __sync_io_move_compute();
+    __memcpy_async(y + r * 4096, bs[q], 4096 * sizeof(half), NRAM2GDRAM);
+    q ^= 1;
+  }
+  __sync_io();
 }
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
