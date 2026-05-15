@@ -8,6 +8,7 @@
 #define R0 8
 #define R1 4096
 #define R2 32768
+#define R3 16
 #define P0(i) ((taskId + ((i) >> 3) * 32) * R2 + (((i) & 7) * R1))
 #define L0(i, h, rr)                                                         \
   __memcpy_async(h, x + P0(i), R1 * sizeof(half), GDRAM2NRAM);               \
@@ -15,16 +16,16 @@
 #define S0(i, h) __memcpy_async(y + P0(i), h, R1 * sizeof(half), NRAM2GDRAM)
 
 __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
-                     half *__restrict__ g0, half *__restrict__ g1,
-                     float *__restrict__ f0b, float *__restrict__ f1b,
+                     half *__restrict__ g, float *__restrict__ f,
                      float *__restrict__ s, float eps) {
   __bang_add(h, h, r, R1);
   __bang_square(r, h, R1);
-  __bang_sumpool(g0, r, 1, R0, 256, 1, 256, 256, 1);
-  __bang_sumpool(g1, r + 256, 1, R0, 256, 1, 256, 256, 1);
-  __bang_half2float(f0b, g0, R0);
-  __bang_half2float(f1b, g1, R0);
-  __bang_add(s, f0b, f1b, R0);
+  __bang_sumpool(g, r, 1, R0, E0, 1, 256, 256, 1);
+  __bang_half2float(f, g, R3);
+#pragma unroll
+  for (int i = 0; i < R0; ++i) {
+    s[i] = f[i * 2] + f[i * 2 + 1];
+  }
   __bang_mul_scalar(s, s, 0.001953125f, R0);
   __bang_add_scalar(s, s, eps, R0);
   __bang_rsqrt(s, s, R0);
@@ -43,10 +44,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
   __nram__ half r0[R1];
   __nram__ half r1[R1];
   __nram__ half r2[R1];
-  __nram__ half g0[R0];
-  __nram__ half g1[R0];
-  __nram__ float f0b[R0];
-  __nram__ float f1b[R0];
+  __nram__ half g[R3];
+  __nram__ float f[R3];
   __nram__ float s[R0];
   half *hs[3] = {h0, h1, h2};
   half *rs[3] = {r0, r1, r2};
@@ -57,11 +56,11 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
     int m = i % 3;
     int c = (i - 1) % 3;
     L0(i, hs[m], rs[m]);
-    f0(hs[c], rs[c], g0, g1, f0b, f1b, s, eps);
+    f0(hs[c], rs[c], g, f, s, eps);
     __sync_io_move_compute();
     S0(i - 1, hs[c]);
   }
-  f0(hs[0], rs[0], g0, g1, f0b, f1b, s, eps);
+  f0(hs[0], rs[0], g, f, s, eps);
   __sync_io_move_compute();
   S0(15, hs[0]);
   __sync_io();
