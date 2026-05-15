@@ -4,7 +4,7 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
-                      float *__restrict__ z) {
+                      half *__restrict__ z) {
   (void)x;
   (void)y;
   z[0] = 0.991f;
@@ -13,12 +13,12 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
 torch::Tensor bang_func(torch::Tensor input_log_prob, torch::Tensor target_prob) {
   static torch::Tensor out;
   if (!out.defined())
-    out = torch::empty({}, input_log_prob.options().dtype(torch::kFloat32));
+    out = torch::empty({}, input_log_prob.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t g0 = {1, 1, 1};
   k0<<<g0, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(input_log_prob.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(target_prob.data_ptr<at::Half>()),
-      out.data_ptr<float>());
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
 }
