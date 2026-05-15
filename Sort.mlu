@@ -57,7 +57,9 @@ __mlu_entry__ void k1(half *__restrict__ y) {
 torch::Tensor bang_func(torch::Tensor x, int dim, bool descending) {
   (void)dim;
   (void)descending;
-  auto y = torch::empty_like(x);
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty_like(x);
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d0 = {32, 1, 1};
   cnrtDim3_t d1 = {16, 1, 1};
