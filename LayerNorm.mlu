@@ -6,14 +6,13 @@
 
 #define E0 4096
 #define E1 512
-#define R0 64
-#define R1 64
-#define R2 32768
+#define R0 128
+#define R1 32
+#define R2 65536
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       const half *__restrict__ b, half *__restrict__ y) {
   __nram__ half xh[R2];
-  __nram__ half yh[R2];
   __nram__ half wh[E1];
   __nram__ half bh[E1];
   __nram__ float xf[R2];
@@ -46,8 +45,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
       __bang_mul(xf + i * E1, xf + i * E1, wf, E1);
       __bang_add(xf + i * E1, xf + i * E1, bf, E1);
     }
-    __bang_float2half_rn(yh, xf, R2);
-    __memcpy(y + p, yh, R2 * sizeof(half), NRAM2GDRAM);
+    __bang_float2half_rn(xh, xf, R2);
+    __memcpy(y + p, xh, R2 * sizeof(half), NRAM2GDRAM);
   }
 }
 
