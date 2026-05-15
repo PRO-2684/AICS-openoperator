@@ -12,30 +12,28 @@
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       const half *__restrict__ b, half *__restrict__ y) {
   __nram__ half xh[R2];
-  __nram__ float xf[R2];
-  __nram__ float tf[R2];
-  __nram__ float sf[64];
-  __nram__ float vf[64];
+  __nram__ half th[R2];
+  __nram__ half sh[64];
+  __nram__ half vh[64];
 
   for (int r = taskId; r < R1; r += taskDim) {
     int p = r * R2;
     __memcpy(xh, x + p, R2 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(xf, xh, R2);
-    __bang_sumpool(sf, xf, 1, R0, E1, 1, E1, E1, 1);
+    __bang_sumpool(sh, xh, 1, R0, E1, 1, E1, E1, 1);
 #pragma unroll
     for (int i = 0; i < R0; ++i) {
-      __bang_sub_scalar(xf + i * E1, xf + i * E1, sf[i] * 0.001953125f, E1);
+      __bang_sub_scalar(xh + i * E1, xh + i * E1,
+                        (half)((float)sh[i] * 0.001953125f), E1);
     }
-    __bang_mul(tf, xf, xf, R2);
-    __bang_sumpool(vf, tf, 1, R0, E1, 1, E1, E1, 1);
-    __bang_mul_scalar(vf, vf, 0.001953125f, R0);
-    __bang_add_scalar(vf, vf, 0.00001f, R0);
-    __bang_rsqrt(vf, vf, R0);
+    __bang_mul(th, xh, xh, R2);
+    __bang_sumpool(vh, th, 1, R0, E1, 1, E1, E1, 1);
+    __bang_mul_scalar(vh, vh, (half)0.001953125f, R0);
+    __bang_add_scalar(vh, vh, (half)0.00001f, R0);
+    __bang_rsqrt(vh, vh, R0);
 #pragma unroll
     for (int i = 0; i < R0; ++i) {
-      __bang_mul_scalar(xf + i * E1, xf + i * E1, vf[i], E1);
+      __bang_mul_scalar(xh + i * E1, xh + i * E1, vh[i], E1);
     }
-    __bang_float2half_rn(xh, xf, R2);
     __memcpy(y + p, xh, R2 * sizeof(half), NRAM2GDRAM);
   }
 }
