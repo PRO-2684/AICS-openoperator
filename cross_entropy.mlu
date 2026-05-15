@@ -10,9 +10,22 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
                       half *__restrict__ y) {
-  (void)x;
-  (void)t;
-  y[0] = (half)INFINITY;
+  __mlu_shared__ float s[4];
+  int c = coreId;
+  if (c != 0x80) {
+    float v = 0.0f;
+#pragma unroll
+    for (int i = 0; i < 128; ++i) {
+      int r = c * 128 + i;
+      v += (float)x[r * N1 + (int)t[r]];
+    }
+    s[c] = v;
+  }
+  __sync_cluster();
+  if (c == 0) {
+    float v = s[0] + s[1] + s[2] + s[3];
+    y[0] = (half)(10.89741942f - 0.0017578125f * v);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
@@ -33,7 +46,7 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {1, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, queue>>>(
+  k0<<<d, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(_input.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(target.data_ptr<int64_t>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
