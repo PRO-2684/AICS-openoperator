@@ -10,8 +10,10 @@ __mlu_entry__ void k(half *a) {
   __nram__ half x[T];
   int64_t s = (int64_t)taskId * T;
   __memcpy(x, a + s, T * sizeof(half), GDRAM2NRAM);
-  __bang_mul_scalar(x, x, (half)0.0001220703125f, 131072);
-  __bang_mul_scalar(x + 131072, x + 131072, (half)0.0001220703125f, 131072);
+  __bang_mul_scalar(x, x, (half)0.0001220703125f, 65536);
+  __bang_mul_scalar(x + 65536, x + 65536, (half)0.0001220703125f, 65536);
+  __bang_mul_scalar(x + 131072, x + 131072, (half)0.0001220703125f, 65536);
+  __bang_mul_scalar(x + 196608, x + 196608, (half)0.0001220703125f, 65536);
   __memcpy(a + s, x, T * sizeof(half), NRAM2GDRAM);
 }
 
