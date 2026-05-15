@@ -24,7 +24,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {TASKS, 1, 1};
 
-  l2_norm_scale_kernel<<<dim, cnrtFuncTypeUnion4, queue>>>(
+  l2_norm_scale_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
 
   return x;
