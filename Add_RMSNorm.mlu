@@ -18,19 +18,14 @@ __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
                      half *__restrict__ g, float *__restrict__ s, float eps) {
   __bang_add(h, h, r, R1);
   __bang_square(r, h, R1);
-  __bang_sumpool(g, r, 1, R0, E0, 1, E0, E0, 1);
-  __bang_half2float(s, g, R0);
 #pragma unroll
   for (int i = 0; i < R0; ++i) {
-    float u = s[i] * 0.001953125f + eps + 0.00390625f - 2.0f;
-    s[i] = (((((-0.00516180f * u + 0.01287034f) * u - 0.02773136f) *
-                  u +
-              0.06623076f) *
-                 u -
-             0.17677157f) *
-                u +
-            0.70710747f;
+    g[i] = __bang_sum(r + i * E0, E0);
   }
+  __bang_half2float(s, g, R0);
+  __bang_mul_scalar(s, s, 0.001953125f, R0);
+  __bang_add_scalar(s, s, eps + 0.00390625f, R0);
+  __bang_rsqrt(s, s, R0);
 #pragma unroll
   for (int i = 0; i < R0; ++i) {
     __bang_mul_scalar(h + i * E0, h + i * E0, (half)s[i], E0);
