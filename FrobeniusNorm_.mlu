@@ -3,7 +3,7 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define T 360448
+#define T 176128
 #define N 67108864
 
 __mlu_entry__ void k(half *a) {
@@ -22,7 +22,7 @@ __mlu_entry__ void k(half *a) {
 
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtDim3_t d;
-  d.x = 187;
+  d.x = 32;
   d.y = 1;
   d.z = 1;
 
