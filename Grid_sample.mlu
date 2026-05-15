@@ -80,13 +80,11 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int *__restrict__ off,
   __nram__ half v2h[T];
   __nram__ half v3h[T];
 
-  for (int rc = taskId; rc < 256; rc += taskDim) {
-    int n = rc >> 6;
-    int c = rc & 63;
-    const half *px = x + n * 1048576 + c * 16384;
+  for (int gc = taskId; gc < 64; gc += taskDim) {
+    int n = gc >> 4;
+    int cb = (gc & 15) << 2;
     const int *po = off + n * P * 4;
     const half *pc = cf + n * P * 4;
-    half *py = y + n * 262144 + c * 4096;
     for (int t = 0; t < P; t += T) {
       __memcpy(o0, po + t, T * sizeof(int), GDRAM2NRAM);
       __memcpy(o1, po + P + t, T * sizeof(int), GDRAM2NRAM);
@@ -97,22 +95,27 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int *__restrict__ off,
       __memcpy(c2h, pc + P * 2 + t, T * sizeof(half), GDRAM2NRAM);
       __memcpy(c3h, pc + P * 3 + t, T * sizeof(half), GDRAM2NRAM);
 
-      __gather(v0h, px, (uint32_t *)o0, sizeof(half), GDRAM2NRAM,
-               sizeof(half), T);
-      __gather(v1h, px, (uint32_t *)o1, sizeof(half), GDRAM2NRAM,
-               sizeof(half), T);
-      __gather(v2h, px, (uint32_t *)o2, sizeof(half), GDRAM2NRAM,
-               sizeof(half), T);
-      __gather(v3h, px, (uint32_t *)o3, sizeof(half), GDRAM2NRAM,
-               sizeof(half), T);
-      __bang_mul(v0h, v0h, c0h, T);
-      __bang_mul(v1h, v1h, c1h, T);
-      __bang_mul(v2h, v2h, c2h, T);
-      __bang_mul(v3h, v3h, c3h, T);
-      __bang_add(v0h, v0h, v1h, T);
-      __bang_add(v2h, v2h, v3h, T);
-      __bang_add(v0h, v0h, v2h, T);
-      __memcpy(py + t, v0h, T * sizeof(half), NRAM2GDRAM);
+      for (int k = 0; k < 4; ++k) {
+        int c = cb + k;
+        const half *px = x + n * 1048576 + c * 16384;
+        half *py = y + n * 262144 + c * 4096;
+        __gather(v0h, px, (uint32_t *)o0, sizeof(half), GDRAM2NRAM,
+                 sizeof(half), T);
+        __gather(v1h, px, (uint32_t *)o1, sizeof(half), GDRAM2NRAM,
+                 sizeof(half), T);
+        __gather(v2h, px, (uint32_t *)o2, sizeof(half), GDRAM2NRAM,
+                 sizeof(half), T);
+        __gather(v3h, px, (uint32_t *)o3, sizeof(half), GDRAM2NRAM,
+                 sizeof(half), T);
+        __bang_mul(v0h, v0h, c0h, T);
+        __bang_mul(v1h, v1h, c1h, T);
+        __bang_mul(v2h, v2h, c2h, T);
+        __bang_mul(v3h, v3h, c3h, T);
+        __bang_add(v0h, v0h, v1h, T);
+        __bang_add(v2h, v2h, v3h, T);
+        __bang_add(v0h, v0h, v2h, T);
+        __memcpy(py + t, v0h, T * sizeof(half), NRAM2GDRAM);
+      }
     }
   }
 }
@@ -128,7 +131,7 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
   }
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t dp = {4, 1, 1};
-  cnrtDim3_t d = {128, 1, 1};
+  cnrtDim3_t d = {64, 1, 1};
   kprep<<<dp, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(grid.data_ptr<at::Half>()),
       off.data_ptr<int>(), reinterpret_cast<half *>(cf.data_ptr<at::Half>()));
