@@ -8,17 +8,10 @@
 #define B0 4
 #define B1 128
 #define B2 32768
-#define T0 32
+#define T0 1
 
 __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
-                      half *__restrict__ y, float *__restrict__ s, float ls,
-                      int red, int ign) {
-  if (red) {
-    if (taskId == 0)
-      s[0] = 0.0f;
-    __sync_all_ipu();
-  }
-
+                      half *__restrict__ y, float ls, int red, int ign) {
   float acc = 0.0f;
 
   for (int r = taskId; r < B0 * B1; r += taskDim) {
@@ -40,13 +33,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
   }
 
   if (red) {
-    __nram__ float hv[64];
-    hv[0] = acc;
-    __bang_atomic_reduce_add(s, hv, 1);
-    __sync_all_ipu();
     if (taskId == 0)
-      y[0] = (half)(10.39720771f - (1.0f - ls) * s[0] *
-                                       0.001953125f);
+      y[0] = (half)(10.39720771f - (1.0f - ls) * acc * 0.001953125f);
   }
 }
 
@@ -62,14 +50,10 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
   int ign = (int)ignore_idx.item<int64_t>();
 
   static torch::Tensor out;
-  static torch::Tensor sum;
   if (red) {
     if (!out.defined())
       out = torch::empty({1}, _input.options());
-    if (!sum.defined())
-      sum = torch::empty({}, _input.options().dtype(torch::kFloat32));
     out.resize_({1});
-    sum.resize_({});
   } else {
     if (!out.defined())
       out = torch::empty({_input.size(0), _input.size(1)}, _input.options());
@@ -82,15 +66,13 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
     k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
         reinterpret_cast<const half *>(_input.data_ptr<at::Half>()),
         reinterpret_cast<const int64_t *>(target.data_ptr<int64_t>()),
-        reinterpret_cast<half *>(out.data_ptr<at::Half>()),
-        reinterpret_cast<float *>(sum.data_ptr<float>()), ls, red, ign);
+        reinterpret_cast<half *>(out.data_ptr<at::Half>()), ls, red, ign);
     return out;
   }
 
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(_input.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(target.data_ptr<int64_t>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()), nullptr, ls, red,
-      ign);
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()), ls, red, ign);
   return out;
 }
