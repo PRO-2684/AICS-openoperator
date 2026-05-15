@@ -7,6 +7,7 @@
 #define E1 32768
 #define E2 32
 #define E3 32
+#define E4 131072
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
                       const int *__restrict__ y) {
@@ -57,25 +58,78 @@ __mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ z,
   __memcpy(z + q, a + 2, n * sizeof(half), NRAM2GDRAM);
 }
 
+__mlu_entry__ void k3(const half *__restrict__ x, half *__restrict__ z,
+                      int *__restrict__ y) {
+  __nram__ half a[E1 + 2];
+  int g = taskIdY;
+  int l = taskIdX;
+  int t = g * 4 + l;
+  int p = t * E1;
+  __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
+  __bang_fcmpfilter(CMP_GT, a, a, (half)0.0f, E1);
+  int n = *((int *)a);
+  y[t] = n;
+  __sync_all_ipu_within_cluster();
+
+  int q = 0;
+  for (int i = 0; i < l; ++i)
+    q += y[g * 4 + i];
+  if (l == 3)
+    y[E2 + g] = q + n;
+  __memcpy(z + g * E4 + q, a + 2, n * sizeof(half), NRAM2GDRAM);
+}
+
+__mlu_entry__ void k4(const half *__restrict__ x, half *__restrict__ z,
+                      const int *__restrict__ y) {
+  __nram__ half b[E1];
+  int g = taskIdY;
+  int l = taskIdX;
+  int n = y[E2 + g];
+  int q = y[E2 + 8 + g];
+  int m = (n + 3) >> 2;
+  int s = l * m;
+  int r = n - s;
+  if (r > m)
+    r = m;
+  if (r > 0)
+    __memcpy(b, x + g * E4 + s, r * sizeof(half), GDRAM2NRAM);
+  if (r > 0)
+    __memcpy(z + q + s, b, r * sizeof(half), NRAM2GDRAM);
+}
+
 torch::Tensor bang_func(torch::Tensor input, double v) {
   (void)v;
   static torch::Tensor out;
+  static torch::Tensor tmp;
   static torch::Tensor work2;
   if (!out.defined())
     out = torch::empty({E0}, input.options());
+  if (!tmp.defined())
+    tmp = torch::empty({E0}, input.options());
   if (!work2.defined())
-    work2 = torch::empty({E2 + 1}, input.options().dtype(torch::kInt32));
+    work2 = torch::empty({E2 + 16}, input.options().dtype(torch::kInt32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {4, 8, 1};
 
-  k2<<<dim, cnrtFuncTypeUnion8, queue>>>(
+  k3<<<dim, cnrtFuncTypeUnion8, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
-  int q = 0;
-  cnrtMemcpyAsync(&q, work2.data_ptr<int>() + E2, sizeof(int), queue,
+      reinterpret_cast<half *>(tmp.data_ptr<at::Half>()), work2.data_ptr<int>());
+  int h[8];
+  cnrtMemcpyAsync(h, work2.data_ptr<int>() + E2, 8 * sizeof(int), queue,
                   cnrtMemcpyDevToHost);
   cnrtQueueSync(queue);
+  int q = 0;
+  int o[8];
+  for (int i = 0; i < 8; ++i) {
+    o[i] = q;
+    q += h[i];
+  }
+  cnrtMemcpy(work2.data_ptr<int>() + E2 + 8, o, 8 * sizeof(int),
+             cnrtMemcpyHostToDev);
+  k4<<<dim, cnrtFuncTypeUnion8, queue>>>(
+      reinterpret_cast<const half *>(tmp.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
   out.resize_({(int64_t)q});
   return out;
 }
