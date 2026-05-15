@@ -67,14 +67,14 @@ __mlu_entry__ void kprep(const half *__restrict__ g, int *__restrict__ off,
 
 __mlu_entry__ void k0(const half *__restrict__ x, const int *__restrict__ off,
                       const half *__restrict__ cf, half *__restrict__ y) {
-  __nram__ int o0[T * 2];
-  __nram__ int o1[T * 2];
-  __nram__ int o2[T * 2];
-  __nram__ int o3[T * 2];
-  __nram__ half c0h[T * 2];
-  __nram__ half c1h[T * 2];
-  __nram__ half c2h[T * 2];
-  __nram__ half c3h[T * 2];
+  __nram__ int o0[T];
+  __nram__ int o1[T];
+  __nram__ int o2[T];
+  __nram__ int o3[T];
+  __nram__ half c0h[T];
+  __nram__ half c1h[T];
+  __nram__ half c2h[T];
+  __nram__ half c3h[T];
   __nram__ half v0h[T];
   __nram__ half v1h[T];
   __nram__ half v2h[T];
@@ -93,49 +93,26 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int *__restrict__ off,
     __memcpy(c1h, pc + P, T * sizeof(half), GDRAM2NRAM);
     __memcpy(c2h, pc + P * 2, T * sizeof(half), GDRAM2NRAM);
     __memcpy(c3h, pc + P * 3, T * sizeof(half), GDRAM2NRAM);
-    int cur = 0;
-    for (int t = 0; t < P; t += T) {
-      int nxt = cur ^ T;
-      if (t + T < P) {
-        __memcpy_async(o0 + nxt, po + t + T, T * sizeof(int), GDRAM2NRAM);
-        __memcpy_async(o1 + nxt, po + P + t + T, T * sizeof(int),
-                       GDRAM2NRAM);
-        __memcpy_async(o2 + nxt, po + P * 2 + t + T, T * sizeof(int),
-                       GDRAM2NRAM);
-        __memcpy_async(o3 + nxt, po + P * 3 + t + T, T * sizeof(int),
-                       GDRAM2NRAM);
-        __memcpy_async(c0h + nxt, pc + t + T, T * sizeof(half), GDRAM2NRAM);
-        __memcpy_async(c1h + nxt, pc + P + t + T, T * sizeof(half),
-                       GDRAM2NRAM);
-        __memcpy_async(c2h + nxt, pc + P * 2 + t + T, T * sizeof(half),
-                       GDRAM2NRAM);
-        __memcpy_async(c3h + nxt, pc + P * 3 + t + T, T * sizeof(half),
-                       GDRAM2NRAM);
-      }
-
-      for (int j = 0; j < 2; ++j) {
-        int c = cb + j;
-        const half *px = x + n * 1048576 + c * 16384;
-        half *py = y + n * 262144 + c * 4096;
-        __gather(v0h, px, (uint32_t *)(o0 + cur), sizeof(half), GDRAM2NRAM,
-                 sizeof(half), T);
-        __gather(v1h, px, (uint32_t *)(o1 + cur), sizeof(half), GDRAM2NRAM,
-                 sizeof(half), T);
-        __gather(v2h, px, (uint32_t *)(o2 + cur), sizeof(half), GDRAM2NRAM,
-                 sizeof(half), T);
-        __gather(v3h, px, (uint32_t *)(o3 + cur), sizeof(half), GDRAM2NRAM,
-                 sizeof(half), T);
-        __bang_mul(v0h, v0h, c0h + cur, T);
-        __bang_fusion(FUSION_FMA, v0h, v1h, c1h + cur, v0h, T, T);
-        __bang_mul(v2h, v2h, c2h + cur, T);
-        __bang_fusion(FUSION_FMA, v2h, v3h, c3h + cur, v2h, T, T);
-        __bang_add(v0h, v0h, v2h, T);
-        __memcpy(py + t, v0h, T * sizeof(half), NRAM2GDRAM);
-      }
-      if (t + T < P) {
-        __asm__ volatile("sync;\n\t");
-        cur = nxt;
-      }
+    for (int j = 0; j < 2; ++j) {
+      int c = cb + j;
+      const half *px = x + n * 1048576 + c * 16384;
+      half *py = y + n * 262144 + c * 4096;
+      __gather(v0h, px, (uint32_t *)o0, sizeof(half), GDRAM2NRAM,
+               sizeof(half), T);
+      __gather(v1h, px, (uint32_t *)o1, sizeof(half), GDRAM2NRAM,
+               sizeof(half), T);
+      __gather(v2h, px, (uint32_t *)o2, sizeof(half), GDRAM2NRAM,
+               sizeof(half), T);
+      __gather(v3h, px, (uint32_t *)o3, sizeof(half), GDRAM2NRAM,
+               sizeof(half), T);
+      __bang_mul(v0h, v0h, c0h, T);
+      __bang_mul(v1h, v1h, c1h, T);
+      __bang_mul(v2h, v2h, c2h, T);
+      __bang_mul(v3h, v3h, c3h, T);
+      __bang_add(v0h, v0h, v1h, T);
+      __bang_add(v2h, v2h, v3h, T);
+      __bang_add(v0h, v0h, v2h, T);
+      __memcpy(py, v0h, T * sizeof(half), NRAM2GDRAM);
     }
   }
 }
