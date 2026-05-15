@@ -25,6 +25,17 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __memcpy(w0, a2, 8192 * sizeof(half), NRAM2WRAM);
   __bang_matmul(f0, a0, w0, 64, 64, 128);
   __bang_mul_scalar(f0, f0, scale, 8192);
+#pragma unroll
+  for (int i = 0; i < 64; ++i) {
+    float m = f0[i * 128];
+#pragma unroll
+    for (int j = 1; j < 128; ++j) {
+      float z = f0[i * 128 + j];
+      if (z > m)
+        m = z;
+    }
+    __bang_sub_scalar(f0 + i * 128, f0 + i * 128, m, 128);
+  }
   __bang_float2half_rn(a3, f0, 8192);
   __bang_active_exp(a3, a3, 8192);
   __bang_reduce_sum(a0, a3, 8192);
