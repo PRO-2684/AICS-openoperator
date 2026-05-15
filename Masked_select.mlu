@@ -122,13 +122,16 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {E2, 1, 1};
-  k2<<<dim, cnrtFuncTypeUnion8, queue>>>(
+  k1<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
+      work2.data_ptr<int>());
   int q = 0;
   cnrtMemcpyAsync(&q, work2.data_ptr<int>() + E2, sizeof(int), queue,
                   cnrtMemcpyDevToHost);
   cnrtQueueSync(queue);
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
   out.resize_({(int64_t)q});
   return out;
 }
