@@ -8,11 +8,11 @@
 #define K0 1024
 #define N0 2048
 #define TM 64
-#define TN 128
+#define TN 256
 #define TK 128
 #define BM 8
-#define BN 16
-#define TC 16384
+#define BN 8
+#define TC 8192
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       float *__restrict__ c) {
