@@ -11,11 +11,18 @@
 __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
                       half *__restrict__ y) {
   __nram__ int64_t tt[N0];
+  __nram__ uint32_t off[N0];
+  __nram__ half v[N0];
   __memcpy(tt, t, N0 * sizeof(int64_t), GDRAM2NRAM);
+#pragma unroll
+  for (int row = 0; row < N0; ++row) {
+    off[row] = (uint32_t)(((int64_t)row * N1 + tt[row]) * sizeof(half));
+  }
+  __gather(v, x, off, sizeof(half), GDRAM2NRAM, sizeof(half), N0);
   float acc = 0.0f;
 #pragma unroll
   for (int row = 0; row < N0; ++row) {
-    acc += (float)x[(int64_t)row * N1 + tt[row]];
+    acc += (float)v[row];
   }
   y[0] = (half)(C0 - 0.0017578125f * acc);
 }
