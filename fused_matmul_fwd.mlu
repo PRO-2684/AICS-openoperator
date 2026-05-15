@@ -6,11 +6,11 @@
 #define M0 256
 #define N0 1024
 #define K0 512
-#define TM 64
-#define TN 64
+#define TM 128
+#define TN 128
 #define TK 512
-#define TR 4
-#define TC 16
+#define TR 2
+#define TC 8
 #define TT (TR * TC)
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
