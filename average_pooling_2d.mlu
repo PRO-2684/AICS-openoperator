@@ -15,7 +15,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[A5 * A3 * A2];
   __nram__ half b[A5 * A1];
 
-#pragma unroll
   for (int u = 0; u < 6; ++u) {
     int p = taskId + u * 64;
     int q = p / A6;
