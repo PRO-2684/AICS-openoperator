@@ -15,7 +15,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     __memcpy(a, src, 128 * sizeof(half), GDRAM2NRAM, 128 * sizeof(half),
              256 * sizeof(half), 255);
     __bang_transpose(b, a, 256, 128);
-#pragma unroll 64
+#pragma unroll 32
     for (int j = 0; j < 128; ++j) {
       __bang_max(c, b + j * 256, 256);
       d[j] = c[0];
@@ -29,8 +29,6 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   static torch::Tensor y;
   if (!y.defined())
     y = torch::empty({16, 256}, x.options());
-  else
-    y.resize_({16, 256});
   cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
