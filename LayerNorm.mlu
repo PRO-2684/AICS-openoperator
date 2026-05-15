@@ -19,16 +19,6 @@ __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
   for (int i = 0; i < R0; ++i) {
     __bang_sub_scalar(h + i * E0, h + i * E0, (half)(s[i] * 0.001953125f), E0);
   }
-  __bang_mul(r, h, h, R1);
-  __bang_sumpool(g, r, 1, R0, E0, 1, E0, E0, 1);
-  __bang_half2float(s, g, R0);
-  __bang_mul_scalar(s, s, 0.001953125f, R0);
-  __bang_add_scalar(s, s, 0.00001f, R0);
-  __bang_rsqrt(s, s, R0);
-#pragma unroll
-  for (int i = 0; i < R0; ++i) {
-    __bang_mul_scalar(h + i * E0, h + i * E0, (half)s[i], E0);
-  }
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
