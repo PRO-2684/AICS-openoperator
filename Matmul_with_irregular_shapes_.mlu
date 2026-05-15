@@ -7,12 +7,12 @@
 #define N0 5921
 #define K0 2949
 #define TM 64
-#define TN 256
+#define TN 128
 #define TK 128
 #define TR 129
-#define RB 6
-#define TG 22
-#define TC 24
+#define RB 12
+#define TG 11
+#define TC 47
 #define TT (TG * TC)
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
