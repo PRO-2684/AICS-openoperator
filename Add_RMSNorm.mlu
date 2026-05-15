@@ -23,10 +23,10 @@ __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
 #pragma unroll
   for (int i = 0; i < R0; ++i) {
     float u = s[i] * 0.001953125f + eps + 0.00390625f - 2.0f;
-    if (u < 0.0f) {
-      s[i] = (0.101499348f * u - 0.167360067f) * u + 0.707604080f;
+    if (u < -0.100000001f) {
+      s[i] = (0.108794677f * u - 0.161810231f) * u + 0.708528191f;
     } else {
-      s[i] = (0.042768453f * u - 0.170116613f) * u + 0.706688937f;
+      s[i] = (0.045337268f * u - 0.172478324f) * u + 0.707120397f;
     }
   }
 #pragma unroll
