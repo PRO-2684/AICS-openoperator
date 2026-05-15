@@ -3,27 +3,26 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define T 262144
+#define T 327680
 #define N 67108864
 
 __mlu_entry__ void k(half *a) {
   __nram__ half x[T];
   int64_t s = (int64_t)taskId * T;
-  __memcpy(x, a + s, T * sizeof(half), GDRAM2NRAM);
-  __bang_mul_scalar(x, x, (half)0.0001220703125f, 32768);
-  __bang_mul_scalar(x + 32768, x + 32768, (half)0.0001220703125f, 32768);
-  __bang_mul_scalar(x + 65536, x + 65536, (half)0.0001220703125f, 32768);
-  __bang_mul_scalar(x + 98304, x + 98304, (half)0.0001220703125f, 32768);
-  __bang_mul_scalar(x + 131072, x + 131072, (half)0.0001220703125f, 32768);
-  __bang_mul_scalar(x + 163840, x + 163840, (half)0.0001220703125f, 32768);
-  __bang_mul_scalar(x + 196608, x + 196608, (half)0.0001220703125f, 32768);
-  __bang_mul_scalar(x + 229376, x + 229376, (half)0.0001220703125f, 32768);
-  __memcpy(a + s, x, T * sizeof(half), NRAM2GDRAM);
+  if (s >= N)
+    return;
+  int n = T;
+  if (s + n > N)
+    n = N - s;
+  half *p = (half *)__builtin_assume_aligned(a + s, 512);
+  __memcpy(x, p, n * sizeof(half), GDRAM2NRAM);
+  __bang_mul_scalar(x, x, (half)0.0001220703125f, n);
+  __memcpy(p, x, n * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtDim3_t d;
-  d.x = 256;
+  d.x = 205;
   d.y = 1;
   d.z = 1;
 
