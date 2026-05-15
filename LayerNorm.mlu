@@ -6,9 +6,9 @@
 
 #define E0 4096
 #define E1 512
-#define R0 64
-#define R1 64
-#define R2 32768
+#define R0 32
+#define R1 128
+#define R2 16384
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       const half *__restrict__ b, half *__restrict__ y) {
@@ -20,8 +20,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ float tf[R2];
   __nram__ float wf[E1];
   __nram__ float bf[E1];
-  __nram__ float sf[64];
-  __nram__ float vf[64];
+  __nram__ float sf[R0];
+  __nram__ float vf[R0];
 
   __memcpy(wh, w, E1 * sizeof(half), GDRAM2NRAM);
   __memcpy(bh, b, E1 * sizeof(half), GDRAM2NRAM);
