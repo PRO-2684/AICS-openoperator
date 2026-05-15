@@ -20,8 +20,9 @@ __mlu_entry__ void trace_half_float_reduce_kernel(const half *__restrict__ a,
   __nram__ half hbuf[TRACE_N];
   __nram__ float fbuf[TRACE_N];
 
-  __memcpy(hbuf, a + base, sizeof(half), GDRAM2NRAM, sizeof(half),
-           (n + 1) * sizeof(half), n - 1);
+  __memcpy_async(hbuf, a + base, sizeof(half), GDRAM2NRAM, sizeof(half),
+                 (n + 1) * sizeof(half), n - 1);
+  __asm__ volatile("sync;");
 
   __bang_half2float(fbuf, hbuf, TRACE_N);
 
