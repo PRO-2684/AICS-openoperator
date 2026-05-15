@@ -5,7 +5,7 @@
 
 #define H0 6
 #define W0 132
-#define T0 2048
+#define T0 1024
 
 __mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ y) {
   for (int i = taskId; i < 73728; i += taskDim) {
@@ -33,7 +33,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
   __memcpy(k, w, 73728 * sizeof(half), GDRAM2WRAM);
   for (int t = taskId; t < T0; t += taskDim) {
     int tile = t & 63;
-    int n = t >> 7;
+    int n = t >> 6;
     int oh = tile * 2;
     int base_h = oh - 2;
     int limit_h = oh + 4;
