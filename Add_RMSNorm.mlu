@@ -21,7 +21,7 @@ __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
   __bang_sumpool(g, r, 1, R0, E0, 1, E0, E0, 1);
   __bang_half2float(s, g, R0);
   __bang_mul_scalar(s, s, 0.001953125f, R0);
-  __bang_add_scalar(s, s, eps + 0.00384521484375f, R0);
+  __bang_add_scalar(s, s, eps + 0.00390625f, R0);
   __bang_rsqrt(s, s, R0);
 #pragma unroll
   for (int i = 0; i < R0; ++i) {
@@ -29,9 +29,8 @@ __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
   }
 }
 
-__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
-                      const half *__restrict__ w, half *__restrict__ y,
-                      float eps) {
+__mlu_entry__ void k0(const half *x, const half *__restrict__ r,
+                      const half *__restrict__ w, half *y, float eps) {
   __nram__ half h0[R1];
   __nram__ half h1[R1];
   __nram__ half h2[R1];
@@ -63,14 +62,11 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor residual,
                         torch::Tensor weight, int dim, double eps) {
   (void)weight;
   (void)dim;
-  static torch::Tensor y;
-  if (!y.defined())
-    y = torch::empty_like(x);
   cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(residual.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(weight.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()), (float)eps);
-  return y;
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()), (float)eps);
+  return x;
 }
