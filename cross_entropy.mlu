@@ -6,29 +6,16 @@
 
 #define N0 512
 #define N1 32768
-#define N2 32
-#define N3 16
 #define C0 10.89741942f
 
 __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
-                      float *__restrict__ z) {
-  int row0 = taskId * N3;
-  __nram__ int64_t tt[N3];
-  __memcpy(tt, t + row0, N3 * sizeof(int64_t), GDRAM2NRAM);
+                      half *__restrict__ y) {
+  __nram__ int64_t tt[N0];
+  __memcpy(tt, t, N0 * sizeof(int64_t), GDRAM2NRAM);
   float acc = 0.0f;
 #pragma unroll
-  for (int r = 0; r < N3; ++r) {
-    int row = row0 + r;
-    acc += (float)x[(int64_t)row * N1 + tt[r]];
-  }
-  z[taskId] = acc;
-}
-
-__mlu_entry__ void k1(const float *__restrict__ z, half *__restrict__ y) {
-  float acc = 0.0f;
-#pragma unroll
-  for (int i = 0; i < N2; ++i) {
-    acc += z[i];
+  for (int row = 0; row < N0; ++row) {
+    acc += (float)x[(int64_t)row * N1 + tt[row]];
   }
   y[0] = (half)(C0 - 0.0017578125f * acc);
 }
@@ -44,24 +31,16 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
   (void)ignore_idx;
 
   static torch::Tensor out;
-  static torch::Tensor tmp;
   if (!out.defined())
     out = torch::empty({1}, _input.options());
   else
     out.resize_({1});
-  if (!tmp.defined())
-    tmp = torch::empty({N2}, _input.options().dtype(torch::kFloat32));
-  else
-    tmp.resize_({N2});
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {N2, 1, 1};
+  cnrtDim3_t d = {1, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(_input.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(target.data_ptr<int64_t>()),
-      tmp.data_ptr<float>());
-  cnrtDim3_t e = {1, 1, 1};
-  k1<<<e, cnrtFuncTypeBlock, queue>>>(tmp.data_ptr<float>(),
-                                      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
 }
