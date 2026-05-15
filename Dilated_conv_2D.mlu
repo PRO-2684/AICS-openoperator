@@ -27,7 +27,6 @@ __mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ w,
                       float *__restrict__ y) {
   __nram__ half a[H0 * W0 * 64];
   __nram__ half h[H0 * W0 * 64];
-  __nram__ float b[H0 * W0 * 64];
   __nram__ float c[2 * 128 * 128];
   __nram__ float d[2 * 128 * 128];
   __wram__ float k[128 * 5 * 5 * 64];
@@ -50,8 +49,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ w,
       }
     }
     __bang_transpose(h, a, 64, H0 * W0);
-    __bang_half2float(b, h, H0 * W0 * 64);
-    __bang_conv(c, b, k, 64, H0, W0, 5, 5, 1, 1, 128);
+    __bang_conv(c, h, k, 64, H0, W0, 5, 5, 1, 1, 128);
     __bang_transpose(d, c, 2 * 128, 128);
     for (int r = 0; r < 2; ++r) {
       int row = oh + r;
