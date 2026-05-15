@@ -4,7 +4,7 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
-                      const half *__restrict__ v, half *__restrict__ y,
+                      const half *__restrict__ v, float *__restrict__ y,
                       float scale) {
   int p = taskId;
   int h = p >> 1;
@@ -53,15 +53,14 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __bang_half2float(f1, a2, 8192);
   __memcpy(w1, f1, 8192 * sizeof(float), NRAM2WRAM);
   __bang_matmul(f2, f0, w1, 64, 128, 64);
-  __bang_float2half_rn(a0, f2, 4096);
-  __memcpy(y + base + r * 64, a0, 4096 * sizeof(half), NRAM2GDRAM);
+  __memcpy(y + base + r * 64, f2, 4096 * sizeof(float), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
                         double temperature) {
   static torch::Tensor y;
   if (!y.defined())
-    y = torch::empty_like(q);
+    y = torch::empty({2, 8, 128, 64}, q.options().dtype(torch::kFloat32));
   else
     y.resize_({2, 8, 128, 64});
   float scale = 0.125f / (float)temperature;
@@ -70,6 +69,6 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
       reinterpret_cast<const half *>(q.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(k.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(v.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()), scale);
+      y.data_ptr<float>(), scale);
   return y;
 }
