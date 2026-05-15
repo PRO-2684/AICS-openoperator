@@ -19,28 +19,29 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   __nram__ half bh[TK * TN];
   __nram__ half bt[TN * TK];
   __nram__ half hf[TN * TK];
-  __nram__ float acc[TM * TN];
   __nram__ float tmp[TM * TN];
   __wram__ half ww[TN * TK];
 
-  for (int t = taskId; t < TT; t += taskDim) {
-    int mi = (t / TC) * TM;
-    int nj = (t % TC) * TN;
+  int col = taskId % TC;
+  int lane = taskId / TC;
+  int lanes = (taskDim - 1 - col) / TC + 1;
+  int nj = col * TN;
+
+  __memcpy(bh, b + nj, TN * sizeof(half), GDRAM2NRAM, TN * sizeof(half),
+           N0 * sizeof(half), TK - 1);
+  __bang_transpose(bt, bh, TK, TN);
+  __bang_reshape_filter(hf, bt, TN, 1, 1, TK);
+  __memcpy(ww, hf, TN * TK * sizeof(half), NRAM2WRAM);
+
+  for (int row = lane; row < TR; row += lanes) {
+    int mi = row * TM;
     const half *ap = a + mi * K0;
-    const half *bp = b + nj;
     float *cp = c + mi * N0 + nj;
 
-    __bang_write_zero(acc, TM * TN);
     __memcpy(ah, ap, TK * sizeof(half), GDRAM2NRAM, TK * sizeof(half),
              K0 * sizeof(half), TM - 1);
-    __memcpy(bh, bp, TN * sizeof(half), GDRAM2NRAM, TN * sizeof(half),
-             N0 * sizeof(half), TK - 1);
-    __bang_transpose(bt, bh, TK, TN);
-    __bang_reshape_filter(hf, bt, TN, 1, 1, TK);
-    __memcpy(ww, hf, TN * TK * sizeof(half), NRAM2WRAM);
     __bang_matmul(tmp, ah, ww, TM, TK, TN);
-    __bang_add(acc, acc, tmp, TM * TN);
-    __memcpy(cp, acc, TN * sizeof(float), NRAM2GDRAM, N0 * sizeof(float),
+    __memcpy(cp, tmp, TN * sizeof(float), NRAM2GDRAM, N0 * sizeof(float),
              TN * sizeof(float), TM - 1);
   }
 }
