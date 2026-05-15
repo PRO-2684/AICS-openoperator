@@ -52,7 +52,7 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride) {
   if (!y.defined())
     y = torch::empty({1, 16, 32, 64, 64}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {32, 1, 1};
+  cnrtDim3_t g = {64, 1, 1};
   k0<<<g, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
