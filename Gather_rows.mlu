@@ -7,7 +7,7 @@
 #define E0 32
 #define E1 64
 #define E2 1024
-#define E3 32
+#define E3 64
 
 __mlu_entry__ void k0(const half *__restrict__ x,
                       const int64_t *__restrict__ idx,
@@ -20,14 +20,11 @@ __mlu_entry__ void k0(const half *__restrict__ x,
   __memcpy(o, idx + p, sizeof(uint32_t), GDRAM2NRAM, sizeof(uint32_t),
            sizeof(int64_t), E3 - 1);
   __bang_mul_scalar(o, o, (uint32_t)sizeof(half), E3);
-  __gather(a, x + r * E2, o, sizeof(half), GDRAM2NRAM, sizeof(half), E3);
+  __bang_add_scalar(o, o, (uint32_t)(r * E2 * sizeof(half)), E0);
+  __bang_add_scalar(o + E0, o + E0,
+                    (uint32_t)((r + 1) * E2 * sizeof(half)), E0);
+  __gather(a, x, o, sizeof(half), GDRAM2NRAM, sizeof(half), E3);
   __memcpy(y + p, a, E3 * sizeof(half), NRAM2GDRAM);
-
-  __memcpy(o, idx + p + E0, sizeof(uint32_t), GDRAM2NRAM, sizeof(uint32_t),
-           sizeof(int64_t), E3 - 1);
-  __bang_mul_scalar(o, o, (uint32_t)sizeof(half), E3);
-  __gather(a, x + (r + 1) * E2, o, sizeof(half), GDRAM2NRAM, sizeof(half), E3);
-  __memcpy(y + p + E0, a, E3 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor index) {

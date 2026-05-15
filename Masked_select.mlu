@@ -108,41 +108,6 @@ __mlu_entry__ void k5(int *__restrict__ y) {
   y[E2 + 16] = q;
 }
 
-__mlu_entry__ void k6(const half *__restrict__ x, half *__restrict__ z,
-                      int *__restrict__ y) {
-  __nram__ half a[E1 + 2];
-  int p = taskId * E1;
-  __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-  __bang_fcmpfilter(CMP_GT, a, a, (half)0.0f, E1);
-  int n = *((int *)a);
-  y[taskId] = n;
-  __memcpy(z + p, a + 2, n * sizeof(half), NRAM2GDRAM);
-  __sync_all_ipu();
-
-  if (taskId == E2 - 1) {
-    int q = 0;
-    for (int i = 0; i < E2; ++i) {
-      int t = y[i];
-      y[i] = q;
-      q += t;
-    }
-    y[E2] = q;
-  }
-}
-
-__mlu_entry__ void k7(const half *__restrict__ x, half *__restrict__ z,
-                      const int *__restrict__ y) {
-  __nram__ half a[E1];
-  int p = taskId * E1;
-  int q = y[taskId];
-  int n = y[taskId + 1] - q;
-  if (taskId == E2 - 1) {
-    n = y[E2] - q;
-  }
-  __memcpy(a, x + p, n * sizeof(half), GDRAM2NRAM);
-  __memcpy(z + q, a, n * sizeof(half), NRAM2GDRAM);
-}
-
 torch::Tensor bang_func(torch::Tensor input, double v) {
   (void)v;
   static torch::Tensor out;
@@ -157,15 +122,15 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {E2, 1, 1};
-  k6<<<dim, cnrtFuncTypeUnion8, queue>>>(
+  k1<<<dim, cnrtFuncTypeUnion8, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(tmp.data_ptr<at::Half>()), work2.data_ptr<int>());
+      work2.data_ptr<int>());
   int q = 0;
   cnrtMemcpyAsync(&q, work2.data_ptr<int>() + E2, sizeof(int), queue,
                   cnrtMemcpyDevToHost);
   cnrtQueueSync(queue);
-  k7<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(tmp.data_ptr<at::Half>()),
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
   out.resize_({(int64_t)q});
   return out;
