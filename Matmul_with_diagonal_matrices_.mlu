@@ -4,28 +4,30 @@
 #include <torch/extension.h>
 
 #define E0 4096
-#define E1 131072
-#define E2 32
+#define E1 98304
+#define E2 24
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       half *__restrict__ c) {
   __nram__ half x[E1];
   int row_base = taskId * E2;
+  int rows = row_base + E2 <= E0 ? E2 : E0 - row_base;
   int p = row_base * E0;
 
-  __memcpy(x, b + p, E1 * sizeof(half), GDRAM2NRAM);
-  for (int r = 0; r < E2; ++r) {
+  __memcpy(x, b + p, rows * E0 * sizeof(half), GDRAM2NRAM);
+  for (int r = 0; r < rows; ++r) {
     __bang_mul_scalar(x + r * E0, x + r * E0, a[row_base + r], E0);
   }
 
-  __memcpy(c + p, x, E1 * sizeof(half), NRAM2GDRAM);
+  __memcpy(c + p, x, rows * E0 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  cnrtDim3_t d = {128, 1, 1};
+  auto C = torch::empty({E0, E0}, B.options());
+  cnrtDim3_t d = {171, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(B.data_ptr<at::Half>()));
-  return B;
+      reinterpret_cast<half *>(C.data_ptr<at::Half>()));
+  return C;
 }
