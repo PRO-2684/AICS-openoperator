@@ -13,25 +13,22 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
                       float eps) {
   __nram__ half h[R1];
   __nram__ half rh[R1];
-  __nram__ float f[R1];
-  __nram__ float t[R1];
-  __nram__ float s[R0];
+  __nram__ half t[R1];
+  __nram__ half s[R0];
   for (int g = taskId; g < 64; g += taskDim) {
     int p = g * R1;
     __memcpy(h, x + p, R1 * sizeof(half), GDRAM2NRAM);
     __memcpy(rh, r + p, R1 * sizeof(half), GDRAM2NRAM);
     __bang_add(h, h, rh, R1);
-    __bang_half2float(f, h, R1);
-    __bang_square(t, f, R1);
+    __bang_mul(t, h, h, R1);
     __bang_sumpool(s, t, 1, R0, E0, 1, E0, E0, 1);
-    __bang_mul_scalar(s, s, 0.001953125f, R0);
-    __bang_add_scalar(s, s, eps, R0);
-    __bang_rsqrt(s, s, R0);
+    __bang_mul_scalar(s, s, (half)0.001953125f, R0);
+    __bang_add_scalar(s, s, (half)eps, R0);
+    __bang_active_rsqrthp(s, s, R0);
 #pragma unroll
     for (int i = 0; i < R0; ++i) {
-      __bang_mul_scalar(f + i * E0, f + i * E0, s[i], E0);
+      __bang_mul_scalar(h + i * E0, h + i * E0, s[i], E0);
     }
-    __bang_float2half_rn(h, f, R1);
     __memcpy(y + p, h, R1 * sizeof(half), NRAM2GDRAM);
   }
 }
