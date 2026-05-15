@@ -12,44 +12,53 @@
 #define TK 128
 #define BM 8
 #define BN 8
-#define TC 8192
+#define RB 7
+#define BG 2
+#define TC (B0 * BG * BN)
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       float *__restrict__ c) {
   __nram__ half ah[TM * TK];
   __nram__ half bh[TK * TN];
-  __nram__ float af[TM * TK];
-  __nram__ float bf[TK * TN];
-  __nram__ float bt[TN * TK];
-  __nram__ float acc[TM * TN];
+  __nram__ half bt[TN * TK];
+  __nram__ half hf[TN * TK];
+  __nram__ float acc[RB * TM * TN];
   __nram__ float tmp[TM * TN];
-  __wram__ float ww[TN * TK];
+  __wram__ half ww[TN * TK];
 
   for (int t = taskId; t < TC; t += taskDim) {
-    int batch = t / (BM * BN);
-    int r = t - batch * BM * BN;
-    int mi = (r / BN) * TM;
+    int batch = t / (BG * BN);
+    int r = t - batch * BG * BN;
+    int base_m = (r / BN) * RB * TM;
     int nj = (r - (r / BN) * BN) * TN;
-    const half *ap = a + batch * M0 * K0 + mi * K0;
     const half *bp = b + batch * K0 * N0 + nj;
-    float *cp = c + batch * M0 * N0 + mi * N0 + nj;
 
-    __bang_write_zero(acc, TM * TN);
+    __bang_write_zero(acc, RB * TM * TN);
     for (int kk = 0; kk < K0; kk += TK) {
-      __memcpy(ah, ap + kk, TK * sizeof(half), GDRAM2NRAM,
-               TK * sizeof(half), K0 * sizeof(half), TM - 1);
       __memcpy(bh, bp + kk * N0, TN * sizeof(half), GDRAM2NRAM,
                TN * sizeof(half), N0 * sizeof(half), TK - 1);
-      __bang_half2float(af, ah, TM * TK);
-      __bang_half2float(bf, bh, TK * TN);
-      __bang_transpose(bt, bf, TK, TN);
-      __bang_reshape_filter(bf, bt, TN, 1, 1, TK);
-      __memcpy(ww, bf, TN * TK * sizeof(float), NRAM2WRAM);
-      __bang_matmul(tmp, af, ww, TM, TK, TN);
-      __bang_add(acc, acc, tmp, TM * TN);
+      __bang_transpose(bt, bh, TK, TN);
+      __bang_reshape_filter(hf, bt, TN, 1, 1, TK);
+      __memcpy(ww, hf, TN * TK * sizeof(half), NRAM2WRAM);
+      for (int rb = 0; rb < RB; ++rb) {
+        int mi = base_m + rb * TM;
+        if (mi >= M0)
+          continue;
+        const half *ap = a + batch * M0 * K0 + mi * K0;
+        __memcpy(ah, ap + kk, TK * sizeof(half), GDRAM2NRAM,
+                 TK * sizeof(half), K0 * sizeof(half), TM - 1);
+        __bang_matmul(tmp, ah, ww, TM, TK, TN);
+        __bang_add(acc + rb * TM * TN, acc + rb * TM * TN, tmp, TM * TN);
+      }
     }
-    __memcpy(cp, acc, TN * sizeof(float), NRAM2GDRAM, N0 * sizeof(float),
-             TN * sizeof(float), TM - 1);
+    for (int rb = 0; rb < RB; ++rb) {
+      int mi = base_m + rb * TM;
+      if (mi >= M0)
+        continue;
+      float *cp = c + batch * M0 * N0 + mi * N0 + nj;
+      __memcpy(cp, acc + rb * TM * TN, TN * sizeof(float), NRAM2GDRAM,
+               N0 * sizeof(float), TN * sizeof(float), TM - 1);
+    }
   }
 }
 
