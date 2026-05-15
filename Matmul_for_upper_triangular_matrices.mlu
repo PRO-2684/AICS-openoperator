@@ -10,8 +10,8 @@
 #define TN 256
 #define TK 128
 #define TR 64
-#define RB 4
-#define TG 16
+#define RB 6
+#define TG 11
 #define TC 16
 #define TT (TG * TC)
 
@@ -42,6 +42,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
       __memcpy(ww, hf, TN * TK * sizeof(half), NRAM2WRAM);
       for (int rb = 0; rb < RB; ++rb) {
         int mi = base_m + rb * TM;
+        if (mi >= M0)
+          continue;
         if (mi >= nj + TN || kk + TK <= mi)
           continue;
         const half *ap = a + mi * K0;
@@ -53,6 +55,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
     }
     for (int rb = 0; rb < RB; ++rb) {
       int mi = base_m + rb * TM;
+      if (mi >= M0)
+        continue;
       float *cp = c + mi * N0 + nj;
       if (mi >= nj + TN) {
         __memcpy(cp, acc + rb * TM * TN, TN * sizeof(float), NRAM2GDRAM,
