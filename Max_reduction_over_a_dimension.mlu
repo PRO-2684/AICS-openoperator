@@ -11,10 +11,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half b[256];
   for (int n = taskId; n < 16; n += taskDim) {
     __memcpy(a, x + n * 65536, 65536 * sizeof(half), GDRAM2NRAM);
-    __memcpy(b, a, E1 * sizeof(half), NRAM2NRAM);
-    for (int i = 1; i < E1; ++i) {
-      __bang_maximum(b, b, a + i * E1, E1);
-    }
+    __bang_maxpool(b, a, 1, E1, E1, E1, 1, 1, 1);
     __memcpy(y + n * E1, b, E1 * sizeof(half), NRAM2GDRAM);
   }
 }
