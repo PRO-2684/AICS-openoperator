@@ -110,26 +110,15 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
     work2 = torch::empty({E2 + 16}, input.options().dtype(torch::kInt32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {4, 8, 1};
+  cnrtDim3_t dim = {E2, 1, 1};
 
-  k3<<<dim, cnrtFuncTypeUnion8, queue>>>(
+  k2<<<dim, cnrtFuncTypeUnion8, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(tmp.data_ptr<at::Half>()), work2.data_ptr<int>());
-  int h[8];
-  cnrtMemcpyAsync(h, work2.data_ptr<int>() + E2, 8 * sizeof(int), queue,
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
+  int q = 0;
+  cnrtMemcpyAsync(&q, work2.data_ptr<int>() + E2, sizeof(int), queue,
                   cnrtMemcpyDevToHost);
   cnrtQueueSync(queue);
-  int q = 0;
-  int o[8];
-  for (int i = 0; i < 8; ++i) {
-    o[i] = q;
-    q += h[i];
-  }
-  cnrtMemcpy(work2.data_ptr<int>() + E2 + 8, o, 8 * sizeof(int),
-             cnrtMemcpyHostToDev);
-  k4<<<dim, cnrtFuncTypeUnion8, queue>>>(
-      reinterpret_cast<const half *>(tmp.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
   out.resize_({(int64_t)q});
   return out;
 }
