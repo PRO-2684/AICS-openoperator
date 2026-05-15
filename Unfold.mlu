@@ -3,7 +3,7 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 16
+#define E0 64
 #define E1 254
 #define E2 (E1 * E1)
 #define E3 27
