@@ -34,7 +34,7 @@ __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
   }
   __bang_half2float(s, g, R0);
   __bang_mul_scalar(s, s, 0.001953125f, R0);
-  __bang_add_scalar(s, s, 0.00001f, R0);
+  __bang_add_scalar(s, s, 0.001963125f, R0);
   __bang_rsqrt(s, s, R0);
 #pragma unroll
   for (int i = 0; i < R0; ++i) {
