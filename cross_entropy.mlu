@@ -25,8 +25,6 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
   static torch::Tensor out;
   if (!out.defined())
     out = torch::empty({1}, _input.options());
-  else
-    out.resize_({1});
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {1, 1, 1};
