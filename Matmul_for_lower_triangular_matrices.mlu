@@ -41,6 +41,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
     const half *bp = b + nj;
     __bang_write_zero(acc, TM * TN);
     for (int kk = 0; kk < K0; kk += TK) {
+      if (kk + TK <= nj || kk >= mi + TM)
+        continue;
       __memcpy(ah, ap + kk, TK * sizeof(half), GDRAM2NRAM,
                TK * sizeof(half), K0 * sizeof(half), TM - 1);
       __memcpy(bh, bp + kk * N0, TN * sizeof(half), GDRAM2NRAM,
