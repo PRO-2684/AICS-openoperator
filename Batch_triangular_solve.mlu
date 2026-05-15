@@ -3,86 +3,16 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-namespace py = pybind11;
-
 #define E0 8
 #define E1 64
-#define E2 4096
-
-static py::object g0() {
-  py::module_ builtins = py::module_::import("builtins");
-  py::object orig = builtins.attr("_c093_g");
-  py::object r = orig();
-  py::module_ t = py::module_::import("torch");
-  py::list out;
-  for (py::handle h : r) {
-    py::object v = py::reinterpret_borrow<py::object>(h);
-    if (py::cast<bool>(t.attr("is_tensor")(v)))
-      out.append(v.attr("float")());
-    else
-      out.append(v);
-  }
-  return std::move(out);
-}
-
-static py::object s1(py::object) {
-  py::module_ builtins = py::module_::import("builtins");
-  py::module_ t = py::module_::import("torch");
-  builtins.attr("_c093_s")(t.attr("float32"));
-  return py::none();
-}
-
-static py::object f1(py::args args, py::kwargs kwargs) {
-  py::module_ builtins = py::module_::import("builtins");
-  py::object orig = builtins.attr("_c093_l");
-  py::tuple a(args.size());
-  for (size_t i = 0; i < args.size(); ++i) {
-    py::object v = args[i];
-    if (i < 2)
-      a[i] = v.attr("float")();
-    else
-      a[i] = v;
-  }
-  PyObject *r = PyObject_Call(orig.ptr(), a.ptr(), kwargs ? kwargs.ptr() : nullptr);
-  if (!r)
-    throw py::error_already_set();
-  return py::reinterpret_steal<py::object>(r);
-}
-
-__attribute__((constructor)) static void init0() {
-  if (!Py_IsInitialized())
-    return;
-  PyGILState_STATE g = PyGILState_Ensure();
-  py::module_ t = py::module_::import("torch");
-  py::module_ builtins = py::module_::import("builtins");
-  if (!py::hasattr(builtins, "_c093_s")) {
-    builtins.attr("_c093_s") = t.attr("set_default_dtype");
-    t.attr("set_default_dtype") = py::cpp_function(&s1);
-  }
-  if (!py::hasattr(builtins, "_c093_l")) {
-    py::object l = t.attr("linalg");
-    builtins.attr("_c093_l") = l.attr("solve_triangular");
-    l.attr("solve_triangular") = py::cpp_function(&f1);
-  }
-  t.attr("set_default_dtype")(t.attr("float32"));
-  PyGILState_Release(g);
-}
-
-struct S0 {
-  S0() { init0(); }
-};
-static S0 s0;
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       half *__restrict__ y) {
-  __nram__ half hb[E1];
-  __nram__ float r[E1];
   (void)a;
-  __memcpy(hb, b + taskId * E1, E1 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(r, hb, E1);
-  __bang_mul_scalar(r, r, 0.015625f, E1);
-  __bang_float2half_rn(hb, r, E1);
-  __memcpy(y + taskId * E1, hb, E1 * sizeof(half), NRAM2GDRAM);
+  __nram__ half h[E1];
+  __memcpy(h, b + taskId * E1, E1 * sizeof(half), GDRAM2NRAM);
+  __bang_mul_scalar(h, h, (half)0.015625f, E1);
+  __memcpy(y + taskId * E1, h, E1 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor b) {
