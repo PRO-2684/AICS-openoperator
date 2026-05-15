@@ -70,7 +70,9 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor residual, torch::Tensor w
                         int dim, double eps) {
   (void)dim;
 
-  auto y = torch::empty_like(x);
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty_like(x);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t tasks = {TASKS, 1, 1};
 
