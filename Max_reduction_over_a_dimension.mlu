@@ -4,17 +4,13 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[16384];
-  __nram__ half b[128];
-  for (int t = taskId; t < 64; t += taskDim) {
-    int n = t >> 2;
-    int h = t & 3;
-    const half *src = x + n * 65536 + h * 64;
-    __memcpy(a, src, 64 * sizeof(half), GDRAM2NRAM, 64 * sizeof(half),
-             256 * sizeof(half), 255);
-    __bang_maxpool_value_index(b, a, 1, 256, 64, 256, 1, 1, 1,
-                               64 * sizeof(half));
-    __memcpy(y + n * 256 + h * 64, b, 64 * sizeof(half), NRAM2GDRAM);
+  __nram__ half a[65536];
+  __nram__ half b[512];
+  for (int n = taskId; n < 16; n += taskDim) {
+    __memcpy(a, x + n * 65536, 65536 * sizeof(half), GDRAM2NRAM);
+    __bang_maxpool_value_index(b, a, 1, 256, 256, 256, 1, 1, 1,
+                               256 * sizeof(half));
+    __memcpy(y + n * 256, b, 256 * sizeof(half), NRAM2GDRAM);
   }
 }
 
