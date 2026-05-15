@@ -5,23 +5,13 @@
 
 #define E0 512
 
-__mlu_func__ void init_pad(half *a) {
-  __bang_write_value(a, 130, (half)-65504.0f);
-  __bang_write_value(a + 16770, 130, (half)-65504.0f);
-#pragma unroll
-  for (int i = 1; i < 129; ++i) {
-    a[i * 130] = (half)-65504.0f;
-    a[i * 130 + 129] = (half)-65504.0f;
-  }
-}
-
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a0[17152];
   __nram__ half a1[17152];
   __nram__ half b0[4096];
   __nram__ half b1[4096];
-  init_pad(a0);
-  init_pad(a1);
+  __bang_write_value(a0, 17152, (half)-65504.0f);
+  __bang_write_value(a1, 17152, (half)-65504.0f);
   int r = taskId;
   if (r < E0) {
     __memcpy_async(a0 + 131, x + r * 16384, 128 * sizeof(half), GDRAM2NRAM,
