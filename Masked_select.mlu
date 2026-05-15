@@ -1,21 +1,21 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUEvent.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
 #define E0 1048576
 #define E1 32768
 #define E2 32
-#define E3 32
-#define E4 131072
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
-                      const int *__restrict__ y) {
+                      int *__restrict__ y) {
   __nram__ half a[E1 + 2];
   int p = taskId * E1;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_fcmpfilter(CMP_GT, a, a, (half)0.0f, E1);
   int n = *((int *)a);
+
   int q = y[taskId];
   __memcpy(z + q, a + 2, n * sizeof(half), NRAM2GDRAM);
 }
@@ -39,101 +39,37 @@ __mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
   }
 }
 
-__mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ z,
-                      int *__restrict__ y) {
-  __nram__ half a[E1 + 2];
-  int p = taskId * E1;
-  __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-  __bang_fcmpfilter(CMP_GT, a, a, (half)0.0f, E1);
-  int n = *((int *)a);
-  y[taskId] = n;
-  __sync_all_ipu();
-
-  int q = 0;
-  for (int i = 0; i < taskId; ++i)
-    q += y[i];
-  if (taskId == E2 - 1) {
-    y[E2] = q + n;
-  }
-  __memcpy(z + q, a + 2, n * sizeof(half), NRAM2GDRAM);
-}
-
-__mlu_entry__ void k3(const half *__restrict__ x, half *__restrict__ z,
-                      int *__restrict__ y) {
-  __nram__ half a[E1 + 2];
-  int g = taskIdY;
-  int l = taskIdX;
-  int t = g * 4 + l;
-  int p = t * E1;
-  __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-  __bang_fcmpfilter(CMP_GT, a, a, (half)0.0f, E1);
-  int n = *((int *)a);
-  y[t] = n;
-  __sync_all_ipu_within_cluster();
-
-  int q = 0;
-  for (int i = 0; i < l; ++i)
-    q += y[g * 4 + i];
-  if (l == 3)
-    y[E2 + g] = q + n;
-  __memcpy(z + g * E4 + q, a + 2, n * sizeof(half), NRAM2GDRAM);
-}
-
-__mlu_entry__ void k4(const half *__restrict__ x, half *__restrict__ z,
-                      const int *__restrict__ y) {
-  __nram__ half b[E1];
-  int g = taskIdY;
-  int l = taskIdX;
-  int n = y[E2 + g];
-  int q = y[E2 + 8 + g];
-  int m = (n + 3) >> 2;
-  int s = l * m;
-  int r = n - s;
-  if (r > m)
-    r = m;
-  if (r > 0)
-    __memcpy(b, x + g * E4 + s, r * sizeof(half), GDRAM2NRAM);
-  if (r > 0)
-    __memcpy(z + q + s, b, r * sizeof(half), NRAM2GDRAM);
-}
-
-__mlu_entry__ void k5(int *__restrict__ y) {
-  int q = 0;
-#pragma unroll
-  for (int i = 0; i < 8; ++i) {
-    int n = y[E2 + i];
-    y[E2 + 8 + i] = q;
-    q += n;
-  }
-  y[E2 + 16] = q;
-}
-
 torch::Tensor bang_func(torch::Tensor input, double v) {
   (void)v;
   static torch::Tensor out;
-  static torch::Tensor tmp;
   static torch::Tensor work2;
   if (!out.defined())
     out = torch::empty({E0}, input.options());
   else
     out.resize_({E0});
-  if (!tmp.defined())
-    tmp = torch::empty({E0}, input.options());
   if (!work2.defined())
-    work2 = torch::empty({E2 + 17}, input.options().dtype(torch::kInt32));
+    work2 = torch::empty({33}, input.options().dtype(torch::kInt32));
 
+  torch_mlu::MLUStream stream2 =
+      torch_mlu::getStreamFromPool(false, input.get_device());
+  torch_mlu::MLUEvent ev;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtQueue_t queue2 = stream2.stream();
   cnrtDim3_t dim = {E2, 1, 1};
-  k1<<<dim, cnrtFuncTypeUnion8, queue>>>(
+
+  ev.place(torch_mlu::getCurrentMLUStream());
+  ev.wait(stream2);
+  k1<<<dim, cnrtFuncTypeUnion8, queue2>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       work2.data_ptr<int>());
-  int q = 0;
-  cnrtMemcpyAsync(&q, work2.data_ptr<int>() + E2, sizeof(int), queue,
+
+  int n = 0;
+  cnrtMemcpyAsync(&n, work2.data_ptr<int>() + E2, sizeof(int), queue2,
                   cnrtMemcpyDevToHost);
-  cnrtQueueSync(queue);
+  cnrtQueueSync(queue2);
   k0<<<dim, cnrtFuncTypeUnion4, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
-  out.resize_({(int64_t)q});
+  out.resize_({(int64_t)n});
   return out;
 }
