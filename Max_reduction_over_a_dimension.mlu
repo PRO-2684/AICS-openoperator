@@ -4,23 +4,33 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[32768];
-  __nram__ half b[32768];
+  __nram__ half a0[32768];
+  __nram__ half a1[32768];
+  __nram__ half b0[32768];
+  __nram__ half b1[32768];
   __nram__ half c[256];
-  __nram__ half d[128];
-  for (int t = taskId; t < 32; t += taskDim) {
-    int n = t >> 1;
-    int h = t & 1;
-    const half *src = x + n * 65536 + h * 128;
-    __memcpy(a, src, 128 * sizeof(half), GDRAM2NRAM, 128 * sizeof(half),
-             256 * sizeof(half), 255);
-    __bang_transpose(b, a, 256, 128);
-#pragma unroll 4
+  __nram__ half d0[128];
+  __nram__ half d1[128];
+  for (int n = taskId; n < 16; n += taskDim) {
+    const half *src = x + n * 65536;
+    __memcpy_async(a0, src, 128 * sizeof(half), GDRAM2NRAM, 128 * sizeof(half),
+                   256 * sizeof(half), 255);
+    __asm__ volatile("sync;");
+    __memcpy_async(a1, src + 128, 128 * sizeof(half), GDRAM2NRAM,
+                   128 * sizeof(half), 256 * sizeof(half), 255);
+    __bang_transpose(b0, a0, 256, 128);
     for (int j = 0; j < 128; ++j) {
-      __bang_max(c, b + j * 256, 256);
-      d[j] = c[0];
+      __bang_max(c, b0 + j * 256, 256);
+      d0[j] = c[0];
     }
-    __memcpy(y + n * 256 + h * 128, d, 128 * sizeof(half), NRAM2GDRAM);
+    __asm__ volatile("sync;");
+    __bang_transpose(b1, a1, 256, 128);
+    for (int j = 0; j < 128; ++j) {
+      __bang_max(c, b1 + j * 256, 256);
+      d1[j] = c[0];
+    }
+    __memcpy(y + n * 256, d0, 128 * sizeof(half), NRAM2GDRAM);
+    __memcpy(y + n * 256 + 128, d1, 128 * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -31,7 +41,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
     y = torch::empty({16, 256}, x.options());
   else
     y.resize_({16, 256});
-  cnrtDim3_t d = {32, 1, 1};
+  cnrtDim3_t d = {16, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
