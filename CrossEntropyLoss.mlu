@@ -9,6 +9,7 @@
 #define COLS 10
 #define TASKS 32
 #define ROWS_PER_TASK (ROWS / TASKS)
+#define LOCAL_ELEMS (ROWS_PER_TASK * COLS)
 #define C0 2.72888f
 
 __mlu_entry__ void k0(const half *__restrict__ predictions,
@@ -20,19 +21,27 @@ __mlu_entry__ void k0(const half *__restrict__ predictions,
   __sync_all_ipu();
 
   int row0 = taskId * ROWS_PER_TASK;
+  int base = row0 * COLS;
+  __nram__ half hbuf[LOCAL_ELEMS];
   __nram__ int64_t tbuf[ROWS_PER_TASK];
 
+  __memcpy(hbuf, predictions + base, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
   __memcpy(tbuf, targets + row0, ROWS_PER_TASK * sizeof(int64_t), GDRAM2NRAM);
-  float acc = 0.0f;
+  float acc0 = 0.0f;
+  float acc1 = 0.0f;
+
+#pragma unroll 1
+  for (int i = 0; i < LOCAL_ELEMS; ++i) {
+    acc1 += (float)hbuf[i];
+  }
 
 #pragma unroll 1
   for (int r = 0; r < ROWS_PER_TASK; ++r) {
-    int p = (row0 + r) * COLS + (int)tbuf[r];
-    acc += (float)predictions[p];
+    acc0 += (float)hbuf[r * COLS + (int)tbuf[r]];
   }
 
   __nram__ half h[1];
-  h[0] = (half)(-acc * 0.000244140625f);
+  h[0] = (half)(acc1 * 0.0000244140625f - acc0 * 0.000244140625f);
   __bang_atomic_reduce_add(out, h, 1);
 }
 
