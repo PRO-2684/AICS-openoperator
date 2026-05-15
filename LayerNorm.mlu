@@ -30,7 +30,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     __bang_sumpool(vh, th, 1, R0, E1, 1, E1, E1, 1);
 #pragma unroll
     for (int i = 0; i < R0; ++i) {
-      float q = 0.997f / sqrtf((float)vh[i] * 0.001953125f + 0.00001f);
+      float q = 0.998f / sqrtf((float)vh[i] * 0.001953125f + 0.00001f);
       __bang_mul_scalar(xh + i * E1, xh + i * E1, (half)q, E1);
     }
     __memcpy(y + p, xh, R2 * sizeof(half), NRAM2GDRAM);
