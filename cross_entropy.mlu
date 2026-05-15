@@ -9,14 +9,20 @@
 #define B1 128
 #define B2 32768
 #define T0 32
+#define R0 16
 
 __mlu_entry__ void k0(const half *__restrict__ x, const int64_t *__restrict__ t,
                       half *__restrict__ y, float *__restrict__ s, float ls,
                       int red, int ign) {
+  __nram__ int64_t ids[R0];
   float acc = 0.0f;
 
-  for (int r = taskId; r < B0 * B1; r += taskDim) {
-    int64_t id = t[r];
+  int r0 = taskId * R0;
+  __memcpy(ids, t + r0, R0 * sizeof(int64_t), GDRAM2NRAM);
+
+  for (int j = 0; j < R0; ++j) {
+    int r = r0 + j;
+    int64_t id = ids[j];
     if ((int)id == ign) {
       if (!red)
         y[r] = (half)0.0f;
