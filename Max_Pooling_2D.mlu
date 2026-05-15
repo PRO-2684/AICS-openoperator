@@ -20,24 +20,29 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a1[17152];
   __nram__ half b0[4096];
   __nram__ half b1[4096];
-  half *ts[2] = {t0, t1};
-  half *as[2] = {a0, a1};
-  half *bs[2] = {b0, b1};
   int r = taskId;
   if (r < E0) {
-    __memcpy_async(ts[0], x + r * 16384, 16384 * sizeof(half), GDRAM2NRAM);
+    __memcpy_async(t0, x + r * 16384, 16384 * sizeof(half), GDRAM2NRAM);
     __sync_io();
   }
   int q = 0;
   for (; r < E0; r += taskDim) {
     int nr = r + taskDim;
     if (nr < E0) {
-      __memcpy_async(ts[q ^ 1], x + nr * 16384, 16384 * sizeof(half),
-                     GDRAM2NRAM);
+      if (q == 0)
+        __memcpy_async(t1, x + nr * 16384, 16384 * sizeof(half), GDRAM2NRAM);
+      else
+        __memcpy_async(t0, x + nr * 16384, 16384 * sizeof(half), GDRAM2NRAM);
     }
-    f0(ts[q], as[q], bs[q]);
+    if (q == 0)
+      f0(t0, a0, b0);
+    else
+      f0(t1, a1, b1);
     __sync_io_move_compute();
-    __memcpy_async(y + r * 4096, bs[q], 4096 * sizeof(half), NRAM2GDRAM);
+    if (q == 0)
+      __memcpy_async(y + r * 4096, b0, 4096 * sizeof(half), NRAM2GDRAM);
+    else
+      __memcpy_async(y + r * 4096, b1, 4096 * sizeof(half), NRAM2GDRAM);
     q ^= 1;
   }
   __sync_io();
