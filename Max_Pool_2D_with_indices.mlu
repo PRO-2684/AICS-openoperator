@@ -7,16 +7,24 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[16384];
-  __nram__ half b0[4096];
+  __nram__ half b0[8192];
+  __nram__ half b1[4096];
+  __nram__ half b2[4096];
   for (int r = taskId; r < E0; r += taskDim) {
     __memcpy(a, x + r * 16384, 16384 * sizeof(half), GDRAM2NRAM);
-    __bang_maxpool(b0, a, 1, 128, 128, 2, 2, 2, 2);
-    __memcpy(y + r * 4096, b0, 4096 * sizeof(half), NRAM2GDRAM);
+    __bang_maxpool(b0, a, 128, 128, 1, 2, 1, 1, 2);
+    __memcpy(b1, b0, sizeof(half), NRAM2NRAM, sizeof(half),
+             2 * sizeof(half), 4095);
+    __memcpy(b2, b0 + 1, sizeof(half), NRAM2NRAM, sizeof(half),
+             2 * sizeof(half), 4095);
+    __bang_maximum(b1, b1, b2, 4096);
+    __memcpy(y + r * 4096, b1, 4096 * sizeof(half), NRAM2GDRAM);
   }
 }
 
-std::vector<torch::Tensor> bang_func(torch::Tensor x, int kernel_size,
-                                     int stride) {
+std::tuple<torch::Tensor, torch::Tensor> bang_func(torch::Tensor x,
+                                                   int kernel_size,
+                                                   int stride) {
   static torch::Tensor y;
   static torch::Tensor z;
   if (!y.defined()) {
@@ -28,5 +36,5 @@ std::vector<torch::Tensor> bang_func(torch::Tensor x, int kernel_size,
   k0<<<g, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-  return {y, z};
+  return std::make_tuple(y, z);
 }
