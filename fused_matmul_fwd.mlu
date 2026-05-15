@@ -19,13 +19,12 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ half wh[TK * TN];
   __nram__ half bh[TN];
   __nram__ half yh[TM * TN];
-  __nram__ float xf[TM * TK];
-  __nram__ float wf[TK * TN];
-  __nram__ float wt[TN * TK];
-  __nram__ float bf[TN];
   __nram__ float acc[TM * TN];
   __nram__ float tmp[TM * TN];
-  __wram__ float ww[TN * TK];
+  __nram__ half wt[TN * TK];
+  __nram__ half hf[TN * TK];
+  __nram__ float bf[TN];
+  __wram__ half ww[TN * TK];
 
   for (int t = taskId; t < TT; t += taskDim) {
     int mi = (t / TC) * TM;
@@ -40,12 +39,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                TK * sizeof(half), K0 * sizeof(half), TM - 1);
       __memcpy(wh, wp + kk * N0, TN * sizeof(half), GDRAM2NRAM,
                TN * sizeof(half), N0 * sizeof(half), TK - 1);
-      __bang_half2float(xf, xh, TM * TK);
-      __bang_half2float(wf, wh, TK * TN);
-      __bang_transpose(wt, wf, TK, TN);
-      __bang_reshape_filter(wf, wt, TN, 1, 1, TK);
-      __memcpy(ww, wf, TN * TK * sizeof(float), NRAM2WRAM);
-      __bang_matmul(tmp, xf, ww, TM, TK, TN);
+      __bang_transpose(wt, wh, TK, TN);
+      __bang_reshape_filter(hf, wt, TN, 1, 1, TK);
+      __memcpy(ww, hf, TN * TK * sizeof(half), NRAM2WRAM);
+      __bang_matmul(tmp, xh, ww, TM, TK, TN);
       __bang_add(acc, acc, tmp, TM * TN);
     }
     __memcpy(bh, b + nj, TN * sizeof(half), GDRAM2NRAM);
