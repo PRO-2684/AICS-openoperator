@@ -3,40 +3,57 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 512
+#define E0 128
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a0[17152];
-  __nram__ half a1[17152];
-  __nram__ half b0[4096];
-  __nram__ half b1[4096];
-  __bang_write_value(a0, 17152, (half)-65504.0f);
-  __bang_write_value(a1, 17152, (half)-65504.0f);
+  __nram__ half a0[67600];
+  __nram__ half a1[67600];
+  __nram__ half b0[16384];
+  __nram__ half b1[16384];
+  __bang_write_value(a0, 67600, (half)-65504.0f);
+  __bang_write_value(a1, 67600, (half)-65504.0f);
   int r = taskId;
   if (r < E0) {
-    __memcpy_async(a0 + 131, x + r * 16384, 128 * sizeof(half), GDRAM2NRAM,
-                   130 * sizeof(half), 128 * sizeof(half), 127);
+    int p = r << 2;
+#pragma unroll
+    for (int i = 0; i < 4; ++i) {
+      __memcpy_async(a0 + i * 16900 + 131, x + (p + i) * 16384,
+                     128 * sizeof(half), GDRAM2NRAM, 130 * sizeof(half),
+                     128 * sizeof(half), 127);
+    }
     __asm__ volatile("sync;");
   }
   int q = 0;
   for (; r < E0; r += taskDim) {
     int nr = r + taskDim;
     if (nr < E0) {
+      int p = nr << 2;
       if (q == 0) {
-        __memcpy_async(a1 + 131, x + nr * 16384, 128 * sizeof(half),
-                       GDRAM2NRAM, 130 * sizeof(half), 128 * sizeof(half),
-                       127);
+#pragma unroll
+        for (int i = 0; i < 4; ++i) {
+          __memcpy_async(a1 + i * 16900 + 131, x + (p + i) * 16384,
+                         128 * sizeof(half), GDRAM2NRAM, 130 * sizeof(half),
+                         128 * sizeof(half), 127);
+        }
       } else {
-        __memcpy_async(a0 + 131, x + nr * 16384, 128 * sizeof(half),
-                       GDRAM2NRAM, 130 * sizeof(half), 128 * sizeof(half),
-                       127);
+#pragma unroll
+        for (int i = 0; i < 4; ++i) {
+          __memcpy_async(a0 + i * 16900 + 131, x + (p + i) * 16384,
+                         128 * sizeof(half), GDRAM2NRAM, 130 * sizeof(half),
+                         128 * sizeof(half), 127);
+        }
       }
     }
     half *a = q == 0 ? a0 : a1;
     half *b = q == 0 ? b0 : b1;
-    __bang_maxpool(b, a, 1, 130, 130, 2, 2, 2, 2, 3, 3, 1, 1);
+    __bang_maxpool(b, a, 4, 130, 130, 2, 2, 2, 2, 3, 3, 1, 1);
     __asm__ volatile("sync;");
-    __memcpy_async(y + r * 4096, b, 4096 * sizeof(half), NRAM2GDRAM);
+    int p = r << 2;
+#pragma unroll
+    for (int i = 0; i < 4; ++i) {
+      __memcpy_async(y + (p + i) * 4096, b + i, sizeof(half), NRAM2GDRAM,
+                     sizeof(half), 4 * sizeof(half), 4095);
+    }
     q ^= 1;
   }
 }
@@ -53,7 +70,7 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
   else
     y.resize_({16, 32, 64, 64});
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {32, 1, 1};
+  cnrtDim3_t g = {16, 1, 1};
   k0<<<g, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
