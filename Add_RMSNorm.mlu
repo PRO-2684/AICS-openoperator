@@ -26,9 +26,11 @@ __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
   __bang_rsqrt(s, s, R0);
 #pragma unroll
   for (int i = 0; i < R0; ++i) {
-    __bang_write_value(t + i * E0, E0, (half)s[i]);
+    g[i] = (half)s[i];
   }
-  __bang_mul(h, h, t, R1);
+  __bang_transpose(t, h, R0, E0);
+  __bang_cycle_mul(t, t, g, R1, R0);
+  __bang_transpose(h, t, E0, R0);
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ r,
