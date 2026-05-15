@@ -4,16 +4,22 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[65536];
-  __nram__ half d[256];
-  for (int n = taskId; n < 16; n += taskDim) {
-    const half *src =
-        (const half *)__builtin_assume_aligned(x + n * 65536, 512);
-    half *dst = (half *)__builtin_assume_aligned(y + n * 256, 512);
-    __memcpy(a, src, 65536 * sizeof(half), GDRAM2NRAM);
-    __bang_maxpool(d, a, 1, 256, 256, 256, 1, 1, 1);
-    __memcpy(dst, d, 256 * sizeof(half), NRAM2GDRAM);
-  }
+  __nram__ half a[32768];
+  int n = taskId >> 1;
+  int h = taskId & 1;
+  const half *src = x + n * 65536 + h * 128;
+  half *dst = y + n * 256 + h * 128;
+  __memcpy(a, src, 128 * sizeof(half), GDRAM2NRAM, 128 * sizeof(half),
+           256 * sizeof(half), 255);
+  __bang_maximum(a, a, a + 16384, 16384);
+  __bang_maximum(a, a, a + 8192, 8192);
+  __bang_maximum(a, a, a + 4096, 4096);
+  __bang_maximum(a, a, a + 2048, 2048);
+  __bang_maximum(a, a, a + 1024, 1024);
+  __bang_maximum(a, a, a + 512, 512);
+  __bang_maximum(a, a, a + 256, 256);
+  __bang_maximum(a, a, a + 128, 128);
+  __memcpy(dst, a, 128 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
@@ -21,8 +27,8 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   static torch::Tensor y;
   if (!y.defined())
     y = torch::empty({16, 256}, x.options());
-  cnrtDim3_t d = {16, 1, 1};
-  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
