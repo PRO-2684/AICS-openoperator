@@ -9,6 +9,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ g,
                       half *__restrict__ y) {
   __nram__ half gx_h[T];
   __nram__ half gy_h[T];
+  __nram__ half gg_h[T * 2];
+  __nram__ half gt_h[T * 2];
   __nram__ half v0_h[T];
   __nram__ half v1_h[T];
   __nram__ half v2_h[T];
@@ -46,10 +48,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ g,
     half *py = y + n * 262144 + c * 4096;
 
     for (int t = 0; t < 4096; t += T) {
-      __memcpy(gx_h, pg + t * 2, T * sizeof(half), GDRAM2NRAM, sizeof(half),
-               2 * sizeof(half), T - 1);
-      __memcpy(gy_h, pg + t * 2 + 1, T * sizeof(half), GDRAM2NRAM,
-               sizeof(half), 2 * sizeof(half), T - 1);
+      __memcpy(gg_h, pg + t * 2, T * 2 * sizeof(half), GDRAM2NRAM);
+      __bang_transpose(gt_h, gg_h, T, 2);
+      __memcpy(gx_h, gt_h, T * sizeof(half), NRAM2NRAM);
+      __memcpy(gy_h, gt_h + T, T * sizeof(half), NRAM2NRAM);
 
       __bang_half2float(gx_f, gx_h, T);
       __bang_half2float(gy_f, gy_h, T);
