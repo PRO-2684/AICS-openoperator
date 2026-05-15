@@ -3,25 +3,20 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define FIXED_TASK_X 4
-#define FIXED_TASK_Y 8
-#define FIXED_TASK_Z 1
-#define TRACE_N 512
+#define TRACE_N 256
 
-__mlu_entry__ void trace_half_float_reduce_kernel(const half *__restrict__ a,
-                                                  float *__restrict__ out,
-                                                  int batch, int n) {
-  const int b = taskId;
-  if (b >= batch)
-    return;
+__mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ tmp) {
+  const int t = taskId;
+  const int b = t >> 1;
+  const int r = t & 1;
 
-  const int base = b * n * n;
+  const int base = b * 262144 + r * 131328;
 
   __nram__ half hbuf[TRACE_N];
   __nram__ float fbuf[TRACE_N];
 
   __memcpy_async(hbuf, a + base, sizeof(half), GDRAM2NRAM, sizeof(half),
-                 (n + 1) * sizeof(half), n - 1);
+                 513 * sizeof(half), TRACE_N - 1);
   __asm__ volatile("sync;");
 
   __bang_half2float(fbuf, hbuf, TRACE_N);
@@ -34,22 +29,31 @@ __mlu_entry__ void trace_half_float_reduce_kernel(const half *__restrict__ a,
     s += fbuf[i];
   }
 
-  out[b] = s;
+  tmp[t] = s;
+}
+
+__mlu_entry__ void k1(const float *__restrict__ tmp, float *__restrict__ out) {
+  int b = taskId;
+  out[b] = tmp[b * 2] + tmp[b * 2 + 1];
 }
 
 torch::Tensor bang_func(torch::Tensor A) {
   static torch::Tensor out;
+  static torch::Tensor tmp;
   if (!out.defined())
     out = torch::empty({32}, A.options().dtype(torch::kFloat));
+  if (!tmp.defined())
+    tmp = torch::empty({64}, A.options().dtype(torch::kFloat));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-  cnrtDim3_t dim = {FIXED_TASK_X, FIXED_TASK_Y, FIXED_TASK_Z};
-  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
+  cnrtDim3_t d0 = {64, 1, 1};
+  cnrtDim3_t d1 = {32, 1, 1};
 
-  trace_half_float_reduce_kernel<<<dim, ktype, queue>>>(
+  k0<<<d0, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
-      out.data_ptr<float>(), 32, 512);
+      tmp.data_ptr<float>());
+  k1<<<d1, cnrtFuncTypeBlock, queue>>>(tmp.data_ptr<float>(), out.data_ptr<float>());
 
   return out;
 }
