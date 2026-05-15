@@ -4,7 +4,7 @@
 #include <torch/extension.h>
 
 #define TOTAL_ELEMS (1024 * 1024)
-#define TASKS 64
+#define TASKS 16
 #define ELEMS_PER_TASK (TOTAL_ELEMS / TASKS)
 
 __mlu_entry__ void where_half_kernel(const unsigned char *__restrict__ c,
