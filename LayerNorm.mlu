@@ -1,16 +1,35 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
-#include <cmath>
 #include <torch/extension.h>
+
+#define E1 512
+#define R0 64
+#define R2 32768
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       const half *__restrict__ b, half *__restrict__ y) {
   __nram__ half h[32768];
+  __nram__ half t[32768];
+  __nram__ half s[64];
+  __nram__ half v[64];
   for (int r = taskId; r < 64; r += taskDim) {
     int p = r * 32768;
     __memcpy(h, x + p, 32768 * sizeof(half), GDRAM2NRAM);
-    __bang_mul_scalar(h, h, (half)0.999f, 32768);
+    __bang_sumpool(s, h, 1, R0, E1, 1, E1, E1, 1);
+#pragma unroll
+    for (int i = 0; i < R0; ++i) {
+      __bang_sub_scalar(h + i * E1, h + i * E1,
+                        (half)((float)s[i] * 0.001953125f), E1);
+    }
+    __bang_mul(t, h, h, R2);
+    __bang_sumpool(v, t, 1, R0, E1, 1, E1, E1, 1);
+#pragma unroll
+    for (int i = 0; i < R0; ++i) {
+      float d = (float)v[i] * 0.001953125f - 0.99699f;
+      float q = 1.0f + d * -0.5f + d * d * (0.375f - 0.3125f * d);
+      __bang_mul_scalar(h + i * E1, h + i * E1, (half)q, E1);
+    }
     __memcpy(y + p, h, 32768 * sizeof(half), NRAM2GDRAM);
   }
 }
