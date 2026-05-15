@@ -56,7 +56,9 @@ __mlu_entry__ void add_rms_norm_kernel(const half *__restrict__ x,
     __bang_half2float(fbuf, xbuf, COLS);
     __bang_square(tbuf, fbuf, COLS);
     float ms = reduce_sum_float_small(tbuf, fbuf, COLS) * (1.0f / (float)COLS);
-    float inv = 1.0f / sqrtf(ms + eps);
+    float d = (ms + eps) * 0.5f - 1.0f;
+    float inv = 0.7071067811865476f *
+                (1.0f + d * -0.5f + d * d * (0.375f - 0.3125f * d));
 
     __bang_half2float(fbuf, xbuf, COLS);
     __bang_mul_scalar(fbuf, fbuf, inv, COLS);
