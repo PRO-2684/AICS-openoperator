@@ -41,7 +41,11 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)kernel_size;
   (void)stride;
   (void)padding;
-  auto y = torch::empty({16, 64, 128, 128}, x.options());
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty({16, 64, 128, 128}, x.options());
+  else
+    y.resize_({16, 64, 128, 128});
   cnrtDim3_t dim = {32, 1, 1};
   k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
