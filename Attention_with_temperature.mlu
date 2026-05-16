@@ -8,7 +8,6 @@ __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
   int h = p >> 1;
   int r = (p & 1) * 64;
   int base = h * 8192;
-  __nram__ half a0[8192];
   __nram__ half a1[8192];
   __nram__ half a2[8192];
   __nram__ float f0[8192];
@@ -17,10 +16,9 @@ __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
   __nram__ float f3[8192];
   __wram__ float w0[8192];
 
-  __memcpy(a0, q + base + r * 64, 4096 * sizeof(half), GDRAM2NRAM);
   __memcpy(a1, q + base, 8192 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(f1, a0, 4096);
   __bang_half2float(f3, a1, 8192);
+  __memcpy(f1, f3 + r * 64, 4096 * sizeof(float), NRAM2NRAM);
   __bang_reshape_filter(f0, f3, 128, 1, 1, 64);
   __memcpy(w0, f0, 8192 * sizeof(float), NRAM2WRAM);
   __bang_matmul(f0, f1, w0, 64, 64, 128);
