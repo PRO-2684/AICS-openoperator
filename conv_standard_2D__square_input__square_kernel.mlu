@@ -36,10 +36,11 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 }
 
 __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
-                      float *__restrict__ y) {
+                      half *__restrict__ y) {
   __nram__ half a[E6 * E3 * E10];
   __nram__ half b[E6 * E3 * E10];
   __nram__ float c[E5 * E4 * E2];
+  __nram__ half d[E5 * E4 * E2];
   __wram__ half ww[E9];
   __memcpy(ww, w, E9 * sizeof(half), GDRAM2WRAM);
 
@@ -64,8 +65,9 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     }
     __bang_transpose(b, a, E10, ih * E3);
     __bang_conv(c, b, ww, E10, ih, E3, 3, 3, 1, 1, E2);
-    __memcpy(y + (n * E4 * E4 + oh * E4) * E2, c,
-             rows * E4 * E2 * sizeof(float), NRAM2GDRAM);
+    __bang_float2half_rn(d, c, rows * E4 * E2);
+    __memcpy(y + (n * E4 * E4 + oh * E4) * E2, d,
+             rows * E4 * E2 * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -85,8 +87,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   static torch::Tensor w;
   static void *last = nullptr;
   if (!s.defined()) {
-    s = torch::empty({E0 * E2 * E4 * E4},
-                     x.options().dtype(torch::kFloat32));
+    s = torch::empty({E0 * E2 * E4 * E4}, x.options());
     y = s.as_strided({E0, E2, E4, E4},
                      {E2 * E4 * E4, 1, E2 * E4, E2});
   }
@@ -106,6 +107,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   }
   k1<<<d, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(w.data_ptr<at::Half>()), s.data_ptr<float>());
+      reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(s.data_ptr<at::Half>()));
   return y;
 }
