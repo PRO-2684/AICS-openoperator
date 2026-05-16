@@ -55,8 +55,8 @@ static void run_cmd(py::object cmd) {
     py::print(result.attr("stdout"));
     py::print(result.attr("stderr"));
   } catch (const py::error_already_set &e) {
-    py::print("Exec " + py::str(cmd).cast<std::string>() + " error:\n " +
-              std::string(e.what()));
+    // py::print("Exec " + py::str(cmd).cast<std::string>() + " error:\n " +
+    //           std::string(e.what()));
   }
 }
 
