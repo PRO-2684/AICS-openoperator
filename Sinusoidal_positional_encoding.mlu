@@ -154,7 +154,8 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
   for (int s = 0; s < 2; ++s) {
     int off = s * SEG_ELEMS;
     if (c == 0) {
-      __memcpy(sp, p_gdram + off, SEG_ELEMS * sizeof(half), GDRAM2SRAM);
+      __memcpy(p0, p_gdram + off, SEG_ELEMS * sizeof(half), GDRAM2NRAM);
+      __memcpy(sp, p0, SEG_ELEMS * sizeof(half), NRAM2SRAM);
     }
     __sync_cluster();
     if (active) {
