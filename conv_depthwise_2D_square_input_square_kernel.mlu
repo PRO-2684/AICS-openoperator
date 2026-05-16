@@ -26,13 +26,24 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     __memcpy(a, p, (rows + 2) * 256 * sizeof(half), GDRAM2NRAM);
     __bang_half2float(af, a, (rows + 2) * 256);
     int o = c * 9;
-    __bang_mul_scalar(b, af, (float)k[o], m);
-    for (int i = 1; i < 9; ++i) {
-      int dy = i / 3;
-      int dx = i - dy * 3;
-      __bang_fusion(FUSION_FMA, b, af + dy * 256 + dx, (float)k[o + i], b, m,
-                    m);
-    }
+    float k0 = (float)k[o];
+    float k1 = (float)k[o + 1];
+    float k2 = (float)k[o + 2];
+    float k3 = (float)k[o + 3];
+    float k4 = (float)k[o + 4];
+    float k5 = (float)k[o + 5];
+    float k6 = (float)k[o + 6];
+    float k7 = (float)k[o + 7];
+    float k8 = (float)k[o + 8];
+    __bang_mul_scalar(b, af, k0, m);
+    __bang_fusion(FUSION_FMA, b, af + 1, k1, b, m, m);
+    __bang_fusion(FUSION_FMA, b, af + 2, k2, b, m, m);
+    __bang_fusion(FUSION_FMA, b, af + 256, k3, b, m, m);
+    __bang_fusion(FUSION_FMA, b, af + 257, k4, b, m, m);
+    __bang_fusion(FUSION_FMA, b, af + 258, k5, b, m, m);
+    __bang_fusion(FUSION_FMA, b, af + 512, k6, b, m, m);
+    __bang_fusion(FUSION_FMA, b, af + 513, k7, b, m, m);
+    __bang_fusion(FUSION_FMA, b, af + 514, k8, b, m, m);
     __bang_float2half_rn(a, b, m);
     __memcpy(y + n * 193548 + c * 64516 + q * 254, a, 254 * sizeof(half),
              NRAM2GDRAM, 254 * sizeof(half), 256 * sizeof(half), rows - 1);
