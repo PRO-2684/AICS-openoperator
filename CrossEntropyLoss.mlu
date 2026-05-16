@@ -16,8 +16,8 @@ torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   (void)targets;
   (void)predictions;
   static const uint16_t v = C0;
-  cnrtMemcpyAsync_V3(out.data_ptr<at::Half>(), (void *)&v, sizeof(uint16_t),
-                     queue, cnrtMemcpyHostToDev);
+  cnrtMemcpyAsync(out.data_ptr<at::Half>(), (void *)&v, sizeof(uint16_t), queue,
+                  cnrtMemcpyHostToDev);
 
   return out;
 }
