@@ -10,8 +10,8 @@
 #define E4 16
 #define E5 64
 #define S0(d, s)                                                             \
-  __memcpy_async(d, s, E1 * sizeof(half), GDRAM2GDRAM, E1 * sizeof(half),    \
-                 256 * sizeof(half), m - 1)
+  __memcpy(d, s, E1 * sizeof(half), GDRAM2GDRAM, E1 * sizeof(half),          \
+           256 * sizeof(half), m - 1)
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   int total = E4 * 3 * 4;
