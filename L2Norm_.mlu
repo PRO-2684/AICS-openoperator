@@ -6,6 +6,7 @@
 #define TOTAL_ELEMS (16 * 16384)
 #define TASKS 32
 #define ELEMS_PER_TASK (TOTAL_ELEMS / TASKS)
+#define CHUNK_ELEMS (ELEMS_PER_TASK / 2)
 #define L2_SCALE ((half)0.00782012939453125f)
 
 __mlu_entry__ void l2_norm_scale_kernel(half *__restrict__ x) {
@@ -13,11 +14,21 @@ __mlu_entry__ void l2_norm_scale_kernel(half *__restrict__ x) {
 
   half *px = (half *)__builtin_assume_aligned(x + base, 512);
 
-  __nram__ half hbuf[ELEMS_PER_TASK];
+  __nram__ half h0[CHUNK_ELEMS];
+  __nram__ half h1[CHUNK_ELEMS];
 
-  __memcpy(hbuf, px, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
-  __bang_mul_scalar(hbuf, hbuf, L2_SCALE, ELEMS_PER_TASK);
-  __memcpy(px, hbuf, ELEMS_PER_TASK * sizeof(half), NRAM2GDRAM);
+  __memcpy_async(h0, px, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
+  __sync_io();
+  __memcpy_async(h1, px + CHUNK_ELEMS, CHUNK_ELEMS * sizeof(half),
+                 GDRAM2NRAM);
+  __bang_mul_scalar(h0, h0, L2_SCALE, CHUNK_ELEMS);
+  __sync_io_move_compute();
+  __memcpy_async(px, h0, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
+  __bang_mul_scalar(h1, h1, L2_SCALE, CHUNK_ELEMS);
+  __sync_io_move_compute();
+  __memcpy_async(px + CHUNK_ELEMS, h1, CHUNK_ELEMS * sizeof(half),
+                 NRAM2GDRAM);
+  __sync_io();
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
