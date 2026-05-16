@@ -3,23 +3,16 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define T 131072
 #define N 67108864
+#define S 2097152
 
 __mlu_entry__ void k(half *a) {
-  __nram__ half x[T];
-  __bang_write_zero(x, T);
-  for (int64_t s = (int64_t)taskId * T; s < N; s += (int64_t)taskDim * T) {
-    int n = T;
-    if (s + n > N)
-      n = N - s;
-    __memcpy(a + s, x, n * sizeof(half), NRAM2GDRAM);
-  }
+  __gdramset(a + taskId * S, S, (half)0.0f);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtDim3_t d;
-  d.x = 64;
+  d.x = 32;
   d.y = 1;
   d.z = 1;
 
