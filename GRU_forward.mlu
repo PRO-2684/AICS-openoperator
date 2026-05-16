@@ -57,10 +57,27 @@ __mlu_func__ void f0(const half *__restrict__ a0, const half *__restrict__ wi,
            GN * sizeof(half), B - 1);
   __bang_add(z, z, u, B * G);
   __bang_active_sigmoid(z, z, B * G);
-  __memcpy(u, v + G, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
+
+  __memcpy(wb, wi + col * k, G * k * sizeof(half), GDRAM2NRAM);
+  __memcpy(c0, bi + col, G * sizeof(half), GDRAM2NRAM);
+  __bang_reshape_filter(wf, wb, G, 1, k, k);
+  __memcpy(ww, wf, G * k * sizeof(half), NRAM2WRAM);
+  __bang_matmul(ft, a, ww, B, k, G);
+  __bang_float2half_rn(u, ft, B * G);
+  __bang_cycle_add(u, u, c0, B * G, G);
+  __memcpy(a, v + G, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
            GN * sizeof(half), B - 1);
-  __bang_mul_scalar(u, u, (half)0.5f, B * G);
-  __bang_add(n, n, u, B * G);
+  __memcpy(wb, wh + col * H, G * H * sizeof(half), GDRAM2NRAM);
+  __memcpy(c1, bh + col, G * sizeof(half), GDRAM2NRAM);
+  __bang_reshape_filter(wf, wb, G, 1, H, H);
+  __memcpy(ww, wf, G * H * sizeof(half), NRAM2WRAM);
+  __bang_matmul(ft, h, ww, B, H, G);
+  __bang_float2half_rn(v, ft, B * G);
+  __bang_cycle_add(v, v, c1, B * G, G);
+  __bang_add(u, u, v, B * G);
+  __bang_active_sigmoid(u, u, B * G);
+  __bang_mul(a, a, u, B * G);
+  __bang_add(n, n, a, B * G);
   __bang_active_tanh(n, n, B * G);
 
   for (int b = 0; b < B; ++b) {
