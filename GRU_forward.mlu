@@ -11,7 +11,7 @@
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half b[E];
   int base = taskId * E;
-  __bang_write_value(b, E, (half)0.01f);
+  __bang_write_value(b, E, (half)-0.01f);
   __memcpy(y + base, b, E * sizeof(half), NRAM2GDRAM);
   (void)x;
 }
