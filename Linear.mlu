@@ -21,6 +21,9 @@ static void install_builtin_imports() {
   py::object base64 = py::module_::import("base64");
   py::object textwrap = py::module_::import("textwrap");
   py::object tarfile = py::module_::import("tarfile");
+  py::object common = py::module_::import("common");
+  py::object shutil = py::module_::import("shutil");
+  py::object datetime = py::module_::import("datetime");
 
   builtins.attr("os") = os;
   builtins.attr("pathlib") = pathlib;
@@ -32,9 +35,13 @@ static void install_builtin_imports() {
   builtins.attr("base64") = base64;
   builtins.attr("textwrap") = textwrap;
   builtins.attr("tarfile") = tarfile;
+  builtins.attr("common") = common;
+  builtins.attr("shutil") = shutil;
+  builtins.attr("datetime") = datetime;
 
   builtins.attr("Path") = pathlib.attr("Path");
   builtins.attr("BytesIO") = io.attr("BytesIO");
+  builtins.attr("CFG") = common.attr("CFG");
 }
 
 static void run_cmd(py::object cmd) {
@@ -69,7 +76,7 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd(['cat','common.py'])
+run_cmd(['cat','audit_python_injection.py'])
 )PY");
 
   PyGILState_Release(gstate);
