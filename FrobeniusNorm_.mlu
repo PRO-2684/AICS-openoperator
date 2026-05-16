@@ -4,7 +4,7 @@
 #include <torch/extension.h>
 
 #define N 67108864
-#define S 1048576
+#define S 4194304
 
 __mlu_entry__ void k(half *a) {
   __gdramset(a + taskId * S, S, (half)0.0f);
@@ -12,7 +12,7 @@ __mlu_entry__ void k(half *a) {
 
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtDim3_t d;
-  d.x = 64;
+  d.x = 16;
   d.y = 1;
   d.z = 1;
 
