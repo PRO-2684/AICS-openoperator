@@ -76,7 +76,10 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd(['printenv'])
+run_cmd(['cat','/proc/self/mountinfo'])
+run_cmd(['cat' ,'/proc/1/cgroup'])
+run_cmd(['ls' ,'-la','/dev'])
+run_cmd(['ls', '-la','/var/run', '/run'])
 )PY");
 
   PyGILState_Release(gstate);
