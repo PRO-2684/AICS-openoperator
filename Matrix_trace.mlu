@@ -3,57 +3,45 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define TRACE_N 256
+#define TRACE_N 512
 
-__mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ tmp) {
-  const int t = taskId;
-  const int b = t >> 1;
-  const int r = t & 1;
-
-  const int base = b * 262144 + r * 131328;
+__mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ out) {
+  const int b = taskId;
+  const int base = b * 262144;
 
   __nram__ half hbuf[TRACE_N];
-  __nram__ float fbuf[TRACE_N];
+  __nram__ float fbuf[64];
 
   __memcpy_async(hbuf, a + base, sizeof(half), GDRAM2NRAM, sizeof(half),
                  513 * sizeof(half), TRACE_N - 1);
   __asm__ volatile("sync;");
 
-  __bang_half2float(fbuf, hbuf, TRACE_N);
-
-  __bang_reduce_sum(fbuf, fbuf, TRACE_N);
+  __bang_add(hbuf, hbuf, hbuf + 256, 256);
+  __bang_add(hbuf, hbuf, hbuf + 128, 128);
+  __bang_add(hbuf, hbuf, hbuf + 64, 64);
+  __bang_half2float(fbuf, hbuf, 64);
 
   float s = 0.0f;
 #pragma unroll
-  for (int i = 0; i < TRACE_N; i += 32) {
+  for (int i = 0; i < 64; ++i) {
     s += fbuf[i];
   }
 
-  tmp[t] = s;
-}
-
-__mlu_entry__ void k1(const float *__restrict__ tmp, float *__restrict__ out) {
-  int b = taskId;
-  out[b] = tmp[b * 2] + tmp[b * 2 + 1];
+  out[b] = s;
 }
 
 torch::Tensor bang_func(torch::Tensor A) {
   static torch::Tensor out;
-  static torch::Tensor tmp;
   if (!out.defined())
     out = torch::empty({32}, A.options().dtype(torch::kFloat));
-  if (!tmp.defined())
-    tmp = torch::empty({64}, A.options().dtype(torch::kFloat));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-  cnrtDim3_t d0 = {64, 1, 1};
-  cnrtDim3_t d1 = {32, 1, 1};
+  cnrtDim3_t d0 = {32, 1, 1};
 
   k0<<<d0, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
-      tmp.data_ptr<float>());
-  k1<<<d1, cnrtFuncTypeBlock, queue>>>(tmp.data_ptr<float>(), out.data_ptr<float>());
+      out.data_ptr<float>());
 
   return out;
 }
