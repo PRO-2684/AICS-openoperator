@@ -7,10 +7,10 @@
 #define N0 1024
 #define K0 512
 #define TM 64
-#define TN 128
+#define TN 256
 #define TK 512
 #define TR 4
-#define TC 8
+#define TC 4
 #define TT (TR * TC)
 
 __mlu_entry__ void kprep(const half *__restrict__ w, const half *__restrict__ b,
