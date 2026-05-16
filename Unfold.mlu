@@ -9,31 +9,49 @@
 #define E3 27
 #define E4 16
 #define E5 64
-#define S0(d, s)                                                             \
-  __memcpy(d, s, E1 * sizeof(half), GDRAM2GDRAM, E1 * sizeof(half),          \
-           256 * sizeof(half), m - 1)
+#define F0(d, s)                                                              \
+  __memcpy(d, s, E1 * sizeof(half), NRAM2NRAM, E1 * sizeof(half), m - 1,      \
+           E1 * E5 * sizeof(half), 2, 256 * sizeof(half), m - 1,              \
+           sizeof(half), 2)
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[256 * (E5 + 2)];
+  __nram__ half b[E1 * E5 * 18];
   int total = E4 * 3 * 4;
+  int z = 0;
   for (int g = taskId; g < total; g += taskDim) {
+    half *d = b + (z & 1) * E1 * E5 * 9;
     int h = g & 3;
     int u = g >> 2;
     int c = u % 3;
     int n = u / 3;
     int r = h * E5;
     int m = h == 3 ? 62 : E5;
+    const half *src = x + ((n * 3 + c) * 256 + r) * 256;
+    __memcpy(a, src, 256 * (m + 2) * sizeof(half), GDRAM2NRAM);
     int p = n * E3 + c * 9;
-    const half *s = x + ((n * 3 + c) * 256 + r) * 256;
-    half *d = y + p * E2 + r * E1;
-    S0(d, s);
-    S0(d + E2, s + 1);
-    S0(d + E2 * 2, s + 2);
-    S0(d + E2 * 3, s + 256);
-    S0(d + E2 * 4, s + 257);
-    S0(d + E2 * 5, s + 258);
-    S0(d + E2 * 6, s + 512);
-    S0(d + E2 * 7, s + 513);
-    S0(d + E2 * 8, s + 514);
+    F0(d, a);
+    F0(d + E1 * E5 * 3, a + 256);
+    F0(d + E1 * E5 * 6, a + 512);
+    half *o = y + p * E2 + r * E1;
+    __memcpy_async(o, d, E1 * m * sizeof(half), NRAM2GDRAM);
+    __memcpy_async(o + E2, d + E1 * E5, E1 * m * sizeof(half),
+                   NRAM2GDRAM);
+    __memcpy_async(o + E2 * 2, d + E1 * E5 * 2, E1 * m * sizeof(half),
+                   NRAM2GDRAM);
+    __memcpy_async(o + E2 * 3, d + E1 * E5 * 3, E1 * m * sizeof(half),
+                   NRAM2GDRAM);
+    __memcpy_async(o + E2 * 4, d + E1 * E5 * 4, E1 * m * sizeof(half),
+                   NRAM2GDRAM);
+    __memcpy_async(o + E2 * 5, d + E1 * E5 * 5, E1 * m * sizeof(half),
+                   NRAM2GDRAM);
+    __memcpy_async(o + E2 * 6, d + E1 * E5 * 6, E1 * m * sizeof(half),
+                   NRAM2GDRAM);
+    __memcpy_async(o + E2 * 7, d + E1 * E5 * 7, E1 * m * sizeof(half),
+                   NRAM2GDRAM);
+    __memcpy_async(o + E2 * 8, d + E1 * E5 * 8, E1 * m * sizeof(half),
+                   NRAM2GDRAM);
+    ++z;
   }
   __sync_io();
 }
@@ -47,7 +65,7 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
   if (!y.defined())
     y = torch::empty({16, 27, 254 * 254}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {E0, 1, 1};
+  cnrtDim3_t dim = {16, 4, 1};
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
