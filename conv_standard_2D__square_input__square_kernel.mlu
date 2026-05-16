@@ -51,7 +51,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
       rows = E4 - oh;
     int ih = rows + 2;
     int base_h = oh;
-    __bang_write_value(a, E6 * E3 * E10, (half)0.0f);
+    __bang_write_zero(a, E6 * E3 * E10);
     for (int c0 = 0; c0 < E1; ++c0) {
       for (int r = 0; r < ih; ++r) {
         int ih0 = base_h + r;
