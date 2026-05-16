@@ -3,10 +3,10 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define H0 10
-#define R0 6
+#define H0 9
+#define R0 5
 #define W0 132
-#define T0 352
+#define T0 416
 
 __mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ y) {
   for (int i = taskId; i < 73728; i += taskDim) {
@@ -26,21 +26,21 @@ __mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ y) {
 
 __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                       float *__restrict__ y) {
-  __nram__ char s[337920];
+  __nram__ char s[304128];
   half *a = (half *)s;
-  half *h = (half *)(s + 168960);
+  half *h = (half *)(s + 152064);
   float *d = (float *)s;
   __nram__ float c[R0 * 128 * 128];
   __wram__ half k[128 * 3 * 3 * 64];
   __memcpy(k, w, 73728 * sizeof(half), GDRAM2WRAM);
   for (int t = taskId; t < T0; t += taskDim) {
-    int tile = t % 22;
-    int n = t / 22;
+    int tile = t % 26;
+    int n = t / 26;
     int oh = tile * R0;
     int base_h = oh - 2;
     int limit_h = oh + R0 + 2;
     __bang_write_zero(a, H0 * W0 * 64);
-    if (tile > 0 && tile < 21) {
+    if (tile > 0 && tile < 25) {
       for (int ic = 0; ic < 64; ++ic) {
         __memcpy(a + ic * H0 * W0 + 2,
                  x + n * 1048576 + ic * 16384 + base_h * 128,
