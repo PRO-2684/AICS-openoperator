@@ -139,33 +139,34 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
                                          const half *__restrict__ cache) {
   int c = coreId;
 
-  __mlu_shared__ half sp[PLANE_ELEMS];
+  __mlu_shared__ half sp[SEG_ELEMS];
   const half *p_gdram = (const half *)__builtin_assume_aligned(cache, 512);
 
-  if (c == 0) {
-    __memcpy(sp, p_gdram, PLANE_ELEMS * sizeof(half), GDRAM2SRAM);
-  }
-  __sync_cluster();
-
-  if (c == 0x80) {
-    return;
-  }
-  int tid = taskIdY * 4 + c;
-  if (tid >= TASKS_PER_LAUNCH) {
-    return;
-  }
+  bool active = c != 0x80;
+  int tid = active ? (taskIdY * 4 + c) : 0;
+  active = active && tid < TASKS_PER_LAUNCH;
 
   const uint32_t base = tid * PLANE_ELEMS;
 
-  __nram__ half x0[PLANE_ELEMS];
-  __nram__ half p0[PLANE_ELEMS];
+  __nram__ half x0[SEG_ELEMS];
+  __nram__ half p0[SEG_ELEMS];
 
-  half *x_gdram = (half *)__builtin_assume_aligned(x + base, 512);
-
-  __memcpy(x0, x_gdram, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
-  __memcpy(p0, sp, PLANE_ELEMS * sizeof(half), SRAM2NRAM);
-  __bang_add(x0, x0, p0, PLANE_ELEMS);
-  __memcpy(x_gdram, x0, PLANE_ELEMS * sizeof(half), NRAM2GDRAM);
+#pragma unroll
+  for (int s = 0; s < 2; ++s) {
+    int off = s * SEG_ELEMS;
+    if (c == 0) {
+      __memcpy(sp, p_gdram + off, SEG_ELEMS * sizeof(half), GDRAM2SRAM);
+    }
+    __sync_cluster();
+    if (active) {
+      half *x_gdram = (half *)__builtin_assume_aligned(x + base + off, 512);
+      __memcpy(x0, x_gdram, SEG_ELEMS * sizeof(half), GDRAM2NRAM);
+      __memcpy(p0, sp, SEG_ELEMS * sizeof(half), SRAM2NRAM);
+      __bang_add(x0, x0, p0, SEG_ELEMS);
+      __memcpy(x_gdram, x0, SEG_ELEMS * sizeof(half), NRAM2GDRAM);
+    }
+    __sync_cluster();
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len) {
