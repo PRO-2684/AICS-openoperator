@@ -28,8 +28,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   __wram__ half ww[TN * TK];
 
   for (int t = taskId; t < TT; t += taskDim) {
-    int base_m = (t / TC) * (RB * TM);
-    int nj = (t % TC) * TN;
+    int base_m = (t % TG) * (RB * TM);
+    int nj = (t / TG) * TN;
 
     __bang_write_zero(acc, RB * TM * TN);
     for (int kk = 0; kk < K0; kk += TK) {
