@@ -6,7 +6,7 @@
 #define TOTAL_ELEMS (16 * 16384)
 #define TASKS 32
 #define ELEMS_PER_TASK (TOTAL_ELEMS / TASKS)
-#define CHUNK_ELEMS (ELEMS_PER_TASK / 2)
+#define CHUNK_ELEMS (ELEMS_PER_TASK / 4)
 #define L2_SCALE ((half)0.00782012939453125f)
 
 __mlu_entry__ void l2_norm_scale_kernel(half *__restrict__ x) {
@@ -16,6 +16,8 @@ __mlu_entry__ void l2_norm_scale_kernel(half *__restrict__ x) {
 
   __nram__ half h0[CHUNK_ELEMS];
   __nram__ half h1[CHUNK_ELEMS];
+  __nram__ half h2[CHUNK_ELEMS];
+  __nram__ half h3[CHUNK_ELEMS];
 
   __memcpy_async(h0, px, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
   __sync_io();
@@ -24,9 +26,21 @@ __mlu_entry__ void l2_norm_scale_kernel(half *__restrict__ x) {
   __bang_mul_scalar(h0, h0, L2_SCALE, CHUNK_ELEMS);
   __sync_io_move_compute();
   __memcpy_async(px, h0, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
+  __memcpy_async(h2, px + CHUNK_ELEMS * 2, CHUNK_ELEMS * sizeof(half),
+                 GDRAM2NRAM);
   __bang_mul_scalar(h1, h1, L2_SCALE, CHUNK_ELEMS);
   __sync_io_move_compute();
   __memcpy_async(px + CHUNK_ELEMS, h1, CHUNK_ELEMS * sizeof(half),
+                 NRAM2GDRAM);
+  __memcpy_async(h3, px + CHUNK_ELEMS * 3, CHUNK_ELEMS * sizeof(half),
+                 GDRAM2NRAM);
+  __bang_mul_scalar(h2, h2, L2_SCALE, CHUNK_ELEMS);
+  __sync_io_move_compute();
+  __memcpy_async(px + CHUNK_ELEMS * 2, h2, CHUNK_ELEMS * sizeof(half),
+                 NRAM2GDRAM);
+  __bang_mul_scalar(h3, h3, L2_SCALE, CHUNK_ELEMS);
+  __sync_io_move_compute();
+  __memcpy_async(px + CHUNK_ELEMS * 3, h3, CHUNK_ELEMS * sizeof(half),
                  NRAM2GDRAM);
   __sync_io();
 }
