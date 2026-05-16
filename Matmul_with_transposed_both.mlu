@@ -31,38 +31,27 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
     int base_m = (t / TC) * (RB * TM);
     int nj = (t % TC) * TN;
 
+    __bang_write_zero(acc, RB * TM * TN);
     for (int kk = 0; kk < K0; kk += TK) {
       __memcpy(bh, b + nj * BK + kk, TK * sizeof(half), GDRAM2NRAM,
                TK * sizeof(half), BK * sizeof(half), TN - 1);
       __bang_reshape_filter(hf, bh, TN, 1, 1, TK);
       __memcpy(ww, hf, TN * TK * sizeof(half), NRAM2WRAM);
-      int mi0 = base_m;
-      __memcpy(ah, a + kk * AM + mi0, TM * sizeof(half), GDRAM2NRAM,
-               TM * sizeof(half), AM * sizeof(half), TK - 1);
-      __bang_transpose(af, ah, TK, TM);
-      if (kk == 0) {
-        __bang_matmul(acc, af, ww, TM, TK, TN);
-      } else {
+      for (int rb = 0; rb < RB; ++rb) {
+        int mi = base_m + rb * TM;
+        __memcpy(ah, a + kk * AM + mi, TM * sizeof(half), GDRAM2NRAM,
+                 TM * sizeof(half), AM * sizeof(half), TK - 1);
+        __bang_transpose(af, ah, TK, TM);
         __bang_matmul(tmp, af, ww, TM, TK, TN);
-        __bang_add(acc, acc, tmp, TM * TN);
-      }
-      int mi1 = base_m + TM;
-      __memcpy(ah, a + kk * AM + mi1, TM * sizeof(half), GDRAM2NRAM,
-               TM * sizeof(half), AM * sizeof(half), TK - 1);
-      __bang_transpose(af, ah, TK, TM);
-      if (kk == 0) {
-        __bang_matmul(acc + TM * TN, af, ww, TM, TK, TN);
-      } else {
-        __bang_matmul(tmp, af, ww, TM, TK, TN);
-        __bang_add(acc + TM * TN, acc + TM * TN, tmp, TM * TN);
+        __bang_add(acc + rb * TM * TN, acc + rb * TM * TN, tmp, TM * TN);
       }
     }
-    float *cp0 = c + base_m * N0 + nj;
-    __memcpy(cp0, acc, TN * sizeof(float), NRAM2GDRAM, N0 * sizeof(float),
-             TN * sizeof(float), TM - 1);
-    float *cp1 = c + (base_m + TM) * N0 + nj;
-    __memcpy(cp1, acc + TM * TN, TN * sizeof(float), NRAM2GDRAM,
-             N0 * sizeof(float), TN * sizeof(float), TM - 1);
+    for (int rb = 0; rb < RB; ++rb) {
+      int mi = base_m + rb * TM;
+      float *cp = c + mi * N0 + nj;
+      __memcpy(cp, acc + rb * TM * TN, TN * sizeof(float), NRAM2GDRAM,
+               N0 * sizeof(float), TN * sizeof(float), TM - 1);
+    }
   }
 }
 
