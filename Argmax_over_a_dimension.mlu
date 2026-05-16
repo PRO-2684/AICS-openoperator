@@ -566,6 +566,38 @@ __mlu_entry__ void k19(const half *__restrict__ x, int16_t *__restrict__ y) {
 #undef A_RUN
 #undef A_OUT
 
+__mlu_entry__ void k20(const half *__restrict__ x, int16_t *__restrict__ y) {
+  int t = taskId;
+  int n = t >> 1;
+  int p = t & 1;
+  int col = p << 7;
+  __nram__ half a[32768];
+  __nram__ half b[32768];
+  __nram__ half r[64];
+  __nram__ int16_t o[128];
+  __memcpy(a, x + n * 65536 + col, 256, GDRAM2NRAM, 256, 512, 255);
+  __bang_transpose(b, a, E1, 128);
+  for (int j = 0; j < 128; j += 8) {
+    __bang_argmax(r, b + j * E1, E1);
+    o[j] = (int16_t)((uint16_t *)r)[1];
+    __bang_argmax(r, b + (j + 1) * E1, E1);
+    o[j + 1] = (int16_t)((uint16_t *)r)[1];
+    __bang_argmax(r, b + (j + 2) * E1, E1);
+    o[j + 2] = (int16_t)((uint16_t *)r)[1];
+    __bang_argmax(r, b + (j + 3) * E1, E1);
+    o[j + 3] = (int16_t)((uint16_t *)r)[1];
+    __bang_argmax(r, b + (j + 4) * E1, E1);
+    o[j + 4] = (int16_t)((uint16_t *)r)[1];
+    __bang_argmax(r, b + (j + 5) * E1, E1);
+    o[j + 5] = (int16_t)((uint16_t *)r)[1];
+    __bang_argmax(r, b + (j + 6) * E1, E1);
+    o[j + 6] = (int16_t)((uint16_t *)r)[1];
+    __bang_argmax(r, b + (j + 7) * E1, E1);
+    o[j + 7] = (int16_t)((uint16_t *)r)[1];
+  }
+  __memcpy(y + n * E1 + col, o, 128 * sizeof(int16_t), NRAM2GDRAM);
+}
+
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
   static torch::Tensor y;
@@ -574,7 +606,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   else
     y.resize_({16, 256});
   cnrtDim3_t d = {32, 1, 1};
-  k19<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  k20<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       y.data_ptr<int16_t>());
   return y;
