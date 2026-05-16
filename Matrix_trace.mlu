@@ -10,23 +10,18 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ out) {
   const int base = b * 262144;
 
   __nram__ half hbuf[TRACE_N];
-  __nram__ float fbuf[128];
+  __nram__ float fbuf[TRACE_N];
+  __nram__ float rbuf[32];
 
   __memcpy_async(hbuf, a + base, sizeof(half), GDRAM2NRAM, sizeof(half),
                  513 * sizeof(half), TRACE_N - 1);
   __asm__ volatile("sync;");
 
-  __bang_add(hbuf, hbuf, hbuf + 256, 256);
-  __bang_add(hbuf, hbuf, hbuf + 128, 128);
-  __bang_half2float(fbuf, hbuf, 128);
+  __bang_half2float(fbuf, hbuf, TRACE_N);
+  __bang_sumpool(rbuf, fbuf, 32, 1, 16, 1, 16, 1, 16);
+  __bang_reduce_sum(rbuf, rbuf, 32);
 
-  float s = 0.0f;
-#pragma unroll
-  for (int i = 0; i < 128; ++i) {
-    s += fbuf[i];
-  }
-
-  out[b] = s;
+  out[b] = rbuf[0];
 }
 
 torch::Tensor bang_func(torch::Tensor A) {
