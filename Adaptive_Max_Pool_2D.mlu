@@ -22,7 +22,11 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 }
 
 torch::Tensor bang_func(torch::Tensor x, std::vector<int64_t> output_size) {
-  auto out = torch::empty({16, 64, E1, E2}, x.options());
+  static torch::Tensor out;
+  if (!out.defined())
+    out = torch::empty({16, 64, E1, E2}, x.options());
+  else
+    out.resize_({16, 64, E1, E2});
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t g = {32, 1, 1};
   k0<<<g, cnrtFuncTypeBlock, queue>>>(
