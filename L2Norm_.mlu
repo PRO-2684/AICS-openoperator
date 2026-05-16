@@ -9,22 +9,22 @@
 #define L2_SCALE ((half)0.00782012939453125f)
 
 __mlu_entry__ void l2_norm_scale_kernel(half *__restrict__ x) {
+  if (taskId >= TASKS)
+    return;
   const int base = taskId * ELEMS_PER_TASK;
 
   half *px = (half *)__builtin_assume_aligned(x + base, 512);
 
   __nram__ half hbuf[ELEMS_PER_TASK];
 
-  __memcpy_async(hbuf, px, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
-  __sync_io();
+  __memcpy(hbuf, px, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
   __bang_mul_scalar(hbuf, hbuf, L2_SCALE, ELEMS_PER_TASK);
-  __memcpy_async(px, hbuf, ELEMS_PER_TASK * sizeof(half), NRAM2GDRAM);
-  __sync_io();
+  __memcpy(px, hbuf, ELEMS_PER_TASK * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {TASKS, 1, 1};
+  cnrtDim3_t dim = {32, 1, 1};
 
   l2_norm_scale_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
