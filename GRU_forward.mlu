@@ -129,6 +129,13 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w0,
      I0, c);
   f0(s0, w0, w1, w2, w3, h0, s1, a, h, wb, wf, z, n, u, v, c0, c1, ft, ww,
      I0, c + 256);
+  for (int b = 0; b < B; ++b) {
+    __memcpy(y + b * T * H + t * H + c, s1 + b * H + c, G * sizeof(half),
+             SRAM2GDRAM);
+    __memcpy(y + b * T * H + t * H + c + 256, s1 + b * H + c + 256,
+             G * sizeof(half), SRAM2GDRAM);
+  }
+  return;
   __sync_cluster();
   f0(s1, w4, w5, w6, w7, h1, s0, a, h, wb, wf, z, n, u, v, c0, c1, ft, ww, H,
      c);
