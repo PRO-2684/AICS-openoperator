@@ -384,6 +384,69 @@ __mlu_entry__ void k17(const half *__restrict__ x, int16_t *__restrict__ y) {
   __memcpy(y + n * E1 + col, o, 128 * sizeof(int16_t), NRAM2GDRAM);
 }
 
+__mlu_entry__ void k18(const half *__restrict__ x, int16_t *__restrict__ y) {
+  int t = taskId;
+  int n = t >> 1;
+  int p = t & 1;
+  int col = p << 7;
+  __nram__ half a[32768];
+  __nram__ half b[32768];
+  __nram__ half r0[64];
+  __nram__ half r1[64];
+  __nram__ half r2[64];
+  __nram__ half r3[64];
+  __nram__ half r4[64];
+  __nram__ half r5[64];
+  __nram__ half r6[64];
+  __nram__ half r7[64];
+  __nram__ half r8[64];
+  __nram__ half r9[64];
+  __nram__ half r10[64];
+  __nram__ half r11[64];
+  __nram__ half r12[64];
+  __nram__ half r13[64];
+  __nram__ half r14[64];
+  __nram__ half r15[64];
+  __nram__ int16_t o[128];
+  __memcpy(a, x + n * 65536 + col, 256, GDRAM2NRAM, 256, 512, 255);
+  __bang_transpose(b, a, E1, 128);
+  for (int j = 0; j < 128; j += 16) {
+    __bang_argmax(r0, b + j * E1, E1);
+    __bang_argmax(r1, b + (j + 1) * E1, E1);
+    __bang_argmax(r2, b + (j + 2) * E1, E1);
+    __bang_argmax(r3, b + (j + 3) * E1, E1);
+    __bang_argmax(r4, b + (j + 4) * E1, E1);
+    __bang_argmax(r5, b + (j + 5) * E1, E1);
+    __bang_argmax(r6, b + (j + 6) * E1, E1);
+    __bang_argmax(r7, b + (j + 7) * E1, E1);
+    __bang_argmax(r8, b + (j + 8) * E1, E1);
+    __bang_argmax(r9, b + (j + 9) * E1, E1);
+    __bang_argmax(r10, b + (j + 10) * E1, E1);
+    __bang_argmax(r11, b + (j + 11) * E1, E1);
+    __bang_argmax(r12, b + (j + 12) * E1, E1);
+    __bang_argmax(r13, b + (j + 13) * E1, E1);
+    __bang_argmax(r14, b + (j + 14) * E1, E1);
+    __bang_argmax(r15, b + (j + 15) * E1, E1);
+    o[j] = (int16_t)((uint16_t *)r0)[1];
+    o[j + 1] = (int16_t)((uint16_t *)r1)[1];
+    o[j + 2] = (int16_t)((uint16_t *)r2)[1];
+    o[j + 3] = (int16_t)((uint16_t *)r3)[1];
+    o[j + 4] = (int16_t)((uint16_t *)r4)[1];
+    o[j + 5] = (int16_t)((uint16_t *)r5)[1];
+    o[j + 6] = (int16_t)((uint16_t *)r6)[1];
+    o[j + 7] = (int16_t)((uint16_t *)r7)[1];
+    o[j + 8] = (int16_t)((uint16_t *)r8)[1];
+    o[j + 9] = (int16_t)((uint16_t *)r9)[1];
+    o[j + 10] = (int16_t)((uint16_t *)r10)[1];
+    o[j + 11] = (int16_t)((uint16_t *)r11)[1];
+    o[j + 12] = (int16_t)((uint16_t *)r12)[1];
+    o[j + 13] = (int16_t)((uint16_t *)r13)[1];
+    o[j + 14] = (int16_t)((uint16_t *)r14)[1];
+    o[j + 15] = (int16_t)((uint16_t *)r15)[1];
+  }
+  __memcpy(y + n * E1 + col, o, 128 * sizeof(int16_t), NRAM2GDRAM);
+}
+
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
   static torch::Tensor y;
@@ -392,7 +455,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   else
     y.resize_({16, 256});
   cnrtDim3_t d = {32, 1, 1};
-  k17<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  k18<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       y.data_ptr<int16_t>());
   return y;
