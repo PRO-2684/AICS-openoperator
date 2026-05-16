@@ -16,7 +16,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
   __bang_fcmpfilter(CMP_GT, a, a, (half)0.0f, E1);
   int n = *((int *)a);
 
-  int q = y[taskId];
+  int q = p;
   __memcpy(z + q, a + 2, n * sizeof(half), NRAM2GDRAM);
 }
 
@@ -54,19 +54,10 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
       torch_mlu::getStreamFromPool(false, input.get_device());
   torch_mlu::MLUEvent ev;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtQueue_t queue2 = stream2.stream();
   cnrtDim3_t dim = {E2, 1, 1};
 
-  ev.place(torch_mlu::getCurrentMLUStream());
-  ev.wait(stream2);
-  k1<<<dim, cnrtFuncTypeUnion8, queue2>>>(
+  k0<<<dim, cnrtFuncTypeUnion4, queue>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      work2.data_ptr<int>());
-
-  int n = 0;
-  cnrtMemcpyAsync(&n, work2.data_ptr<int>() + E2, sizeof(int), queue2,
-                  cnrtMemcpyDevToHost);
-  cnrtQueueSync(queue2);
-  out.resize_({(int64_t)n});
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
   return out;
 }
