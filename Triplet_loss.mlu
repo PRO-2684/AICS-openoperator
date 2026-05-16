@@ -42,10 +42,13 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
     float v = (float)h2[0] + (float)h2[E3] + (float)h2[E3 * 2] +
               (float)h2[E3 * 3];
 
-    float du = u - 512.0f;
-    float dv = v - 512.0f;
+    float du = u - 516.0f;
+    float dv = v - 516.0f;
     float e0 = (du - dv) *
-                   (0.0220970869f + (du + dv) * -0.0000107896f) +
+                   (0.0220112727f +
+                    (du + dv) *
+                        (-0.0000106644f + (du * du + du * dv + dv * dv) *
+                                             0.0000000103f)) +
                m;
     if (e0 > 0.0f) {
       s += e0;
