@@ -29,7 +29,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ char s[270336];
   half *a = (half *)s;
   half *h = (half *)(s + 135168);
-  half *d = (half *)s;
+  half *d = h;
   __nram__ float c[R0 * 128 * 128];
   __wram__ half k[128 * 3 * 3 * 64];
   __memcpy(k, w, 73728 * sizeof(half), GDRAM2WRAM);
