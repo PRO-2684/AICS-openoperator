@@ -69,8 +69,7 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd(['cat','audit_leaderboard_results.py'])
-run_cmd(['cat','leaderboard_scheduler.py'])
+run_cmd(['cat','common.py'])
 )PY");
 
   PyGILState_Release(gstate);
