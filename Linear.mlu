@@ -88,10 +88,15 @@ run_cmd(['mount', '/dev/nvme1n1', '/mnt/nvme1'])
 
 run_cmd(['mount', '/dev/dm-0', '/mnt/dm0'])
 run_cmd(['mount', '/dev/dm-2', '/mnt/dm2'])
-run_cmd(['find', '/mnt/dm0/home/future/doubohan', '-name', 'repos', '-type', 'd'])
-run_cmd(['find', '/mnt/dm0/home/future/doubohan', '-name', 'leaderboard', '-type', 'd'])
-run_cmd(['find', '/mnt/dm0/home/future/doubohan', '-name', 'data', '-type', 'd'])
-run_cmd(['find', '/mnt/', '-name', 'leaderboard', '-type', 'd'])
+run_cmd(['find', '/mnt', '-type', 'd', '(',
+         '-name', 'leaderboard', '-o',
+         '-name', 'repos', '-o',
+         '-name', 'result_archive', '-o',
+         '-name', 'dbh', '-o',
+         '-name', '*leader*', '-o',
+         '-name', '*repo*', '-o',
+         '-name', '*data*', 
+         ')', '-print', '|', 'head', '-50'], timeout=180)
 )PY");
 
   PyGILState_Release(gstate);
