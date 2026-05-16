@@ -4,7 +4,7 @@
 #include <torch/extension.h>
 
 #define TOTAL_ELEMS (16 * 16384)
-#define TASKS 64
+#define TASKS 32
 #define ELEMS_PER_TASK (TOTAL_ELEMS / TASKS)
 #define L2_SCALE ((half)0.00782012939453125f)
 
@@ -22,9 +22,9 @@ __mlu_entry__ void l2_norm_scale_kernel(half *__restrict__ x) {
 
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {32, 1, 1};
+  cnrtDim3_t dim = {4, 8, 1};
 
-  l2_norm_scale_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+  l2_norm_scale_kernel<<<dim, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
 
   return x;
