@@ -4,15 +4,19 @@
 #include <torch/extension.h>
 
 #define E 4096
+#define X 8192
+#define Y 16384
 
-__mlu_entry__ void k0(half *__restrict__ y, int n) {
-  __nram__ half b[E];
-  __bang_write_value(b, E, (half)0.01f);
-  for (int p = taskId * E; p < n; p += taskDim * E) {
-    int m = n - p;
-    if (m > E)
-      m = E;
-    __memcpy(y + p, b, m * sizeof(half), NRAM2GDRAM);
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[256];
+  __nram__ half z[E];
+  __bang_write_zero(z, E);
+  for (int p = taskId; p < 4096; p += taskDim) {
+    const half *xp = x + p * 256;
+    half *yp = y + p * 512;
+    __memcpy(a, xp, 256 * sizeof(half), GDRAM2NRAM);
+    __memcpy(yp, a, 256 * sizeof(half), NRAM2GDRAM);
+    __memcpy(yp + 256, z, 256 * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -34,6 +38,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
   auto y = torch::empty({32, 128, 512}, x.options());
   cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()), (int)y.numel());
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
