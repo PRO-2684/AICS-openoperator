@@ -33,24 +33,23 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     F0(d, a);
     F0(d + E1 * E5 * 3, a + 256);
     F0(d + E1 * E5 * 6, a + 512);
-    half *o = y + p * E2 + r * E1;
-    __memcpy_async(o, d, E1 * m * sizeof(half), NRAM2GDRAM);
-    __memcpy_async(o + E2, d + E1 * E5, E1 * m * sizeof(half),
-                   NRAM2GDRAM);
-    __memcpy_async(o + E2 * 2, d + E1 * E5 * 2, E1 * m * sizeof(half),
-                   NRAM2GDRAM);
-    __memcpy_async(o + E2 * 3, d + E1 * E5 * 3, E1 * m * sizeof(half),
-                   NRAM2GDRAM);
-    __memcpy_async(o + E2 * 4, d + E1 * E5 * 4, E1 * m * sizeof(half),
-                   NRAM2GDRAM);
-    __memcpy_async(o + E2 * 5, d + E1 * E5 * 5, E1 * m * sizeof(half),
-                   NRAM2GDRAM);
-    __memcpy_async(o + E2 * 6, d + E1 * E5 * 6, E1 * m * sizeof(half),
-                   NRAM2GDRAM);
-    __memcpy_async(o + E2 * 7, d + E1 * E5 * 7, E1 * m * sizeof(half),
-                   NRAM2GDRAM);
-    __memcpy_async(o + E2 * 8, d + E1 * E5 * 8, E1 * m * sizeof(half),
-                   NRAM2GDRAM);
+    __memcpy_async(y + p * E2 + r * E1, d, E1 * m * sizeof(half), NRAM2GDRAM);
+    __memcpy_async(y + (p + 1) * E2 + r * E1, d + E1 * E5,
+                   E1 * m * sizeof(half), NRAM2GDRAM);
+    __memcpy_async(y + (p + 2) * E2 + r * E1, d + E1 * E5 * 2,
+                   E1 * m * sizeof(half), NRAM2GDRAM);
+    __memcpy_async(y + (p + 3) * E2 + r * E1, d + E1 * E5 * 3,
+                   E1 * m * sizeof(half), NRAM2GDRAM);
+    __memcpy_async(y + (p + 4) * E2 + r * E1, d + E1 * E5 * 4,
+                   E1 * m * sizeof(half), NRAM2GDRAM);
+    __memcpy_async(y + (p + 5) * E2 + r * E1, d + E1 * E5 * 5,
+                   E1 * m * sizeof(half), NRAM2GDRAM);
+    __memcpy_async(y + (p + 6) * E2 + r * E1, d + E1 * E5 * 6,
+                   E1 * m * sizeof(half), NRAM2GDRAM);
+    __memcpy_async(y + (p + 7) * E2 + r * E1, d + E1 * E5 * 7,
+                   E1 * m * sizeof(half), NRAM2GDRAM);
+    __memcpy_async(y + (p + 8) * E2 + r * E1, d + E1 * E5 * 8,
+                   E1 * m * sizeof(half), NRAM2GDRAM);
     ++z;
   }
   __sync_io();
@@ -65,7 +64,7 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
   if (!y.defined())
     y = torch::empty({16, 27, 254 * 254}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {2, 32, 1};
+  cnrtDim3_t dim = {16, 4, 1};
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
