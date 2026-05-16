@@ -1,6 +1,7 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <stdint.h>
 #include <torch/extension.h>
 
 #define E0 128
@@ -48,14 +49,14 @@ __mlu_func__ void k1(float *__restrict__ a, float *__restrict__ b) {
   __bang_add(a, a, b, E1);
 }
 
-__mlu_func__ void k2(half *__restrict__ h, int8_t *__restrict__ c,
+__mlu_func__ void k2(half *__restrict__ h, uint8_t *__restrict__ c,
                      float *__restrict__ a, float *__restrict__ b, int z) {
   if (z) {
     __bang_write_value(h + E1, E3 - E1, (half)0.0f);
-    __bang_write_value(c + E1, E3 - E1, (int8_t)0);
+    __bang_write_value(c + E1, E3 - E1, (uint8_t)0);
   }
   __bang_half2float(a, h, E3);
-  __bang_int82float(b, c, E3, 0);
+  __bang_uint82float(b, c, E3, 0);
   __bang_mul(a, a, b, E3);
   k1(a, b);
 }
@@ -65,8 +66,8 @@ __mlu_entry__ void k0(const half *__restrict__ x,
                       float *__restrict__ y) {
   __nram__ half h0[E3];
   __nram__ half h1[E3];
-  __nram__ int8_t c0[E3];
-  __nram__ int8_t c1[E3];
+  __nram__ uint8_t c0[E3];
+  __nram__ uint8_t c1[E3];
   __nram__ float a0[E2];
   __nram__ float a1[E2];
   __nram__ float b0[E2];
@@ -75,7 +76,7 @@ __mlu_entry__ void k0(const half *__restrict__ x,
   if (r < E0) {
     int p = r * E1;
     __memcpy_async(h0, x + p, E3 * sizeof(half), GDRAM2NRAM);
-    __memcpy_async(c0, m + p, E3 * sizeof(int8_t), GDRAM2NRAM);
+    __memcpy_async(c0, m + p, E3 * sizeof(uint8_t), GDRAM2NRAM);
     __sync_io();
   }
   int q = 0;
@@ -86,10 +87,10 @@ __mlu_entry__ void k0(const half *__restrict__ x,
       int n = (nr + 1 < E0) ? E3 : E1;
       if (q == 0) {
         __memcpy_async(h1, x + p, n * sizeof(half), GDRAM2NRAM);
-        __memcpy_async(c1, m + p, n * sizeof(int8_t), GDRAM2NRAM);
+        __memcpy_async(c1, m + p, n * sizeof(uint8_t), GDRAM2NRAM);
       } else {
         __memcpy_async(h0, x + p, n * sizeof(half), GDRAM2NRAM);
-        __memcpy_async(c0, m + p, n * sizeof(int8_t), GDRAM2NRAM);
+        __memcpy_async(c0, m + p, n * sizeof(uint8_t), GDRAM2NRAM);
       }
     }
     if (q == 0)
