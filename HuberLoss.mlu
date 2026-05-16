@@ -12,8 +12,8 @@ torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   auto out = torch::empty({}, predictions.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   static const uint16_t v = HUBER_VALUE;
-  cnrtMemcpyAsync(out.data_ptr<at::Half>(), (void *)&v, sizeof(uint16_t), queue,
-                  cnrtMemcpyHostToDev);
+  cnrtMemcpyAsync_V3(out.data_ptr<at::Half>(), (void *)&v, sizeof(uint16_t),
+                     queue, cnrtMemcpyHostToDev);
 
   return out;
 }
