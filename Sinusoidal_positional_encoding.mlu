@@ -137,12 +137,16 @@ __mlu_entry__ void add_cache_kernel_fast(const half *__restrict__ x,
 
 __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
                                          const half *__restrict__ cache) {
-  if (taskId >= TASKS_PER_LAUNCH) {
+  int c = coreId;
+  if (c == 0x80) {
     return;
   }
-  int c = coreId;
+  int tid = taskIdY * 4 + c;
+  if (tid >= TASKS_PER_LAUNCH) {
+    return;
+  }
 
-  const uint32_t base = taskId * PLANE_ELEMS;
+  const uint32_t base = tid * PLANE_ELEMS;
 
   __mlu_shared__ half sp[PLANE_ELEMS];
   __nram__ half x0[PLANE_ELEMS];
