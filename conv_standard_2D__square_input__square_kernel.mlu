@@ -8,9 +8,9 @@
 #define E2 64
 #define E3 256
 #define E4 254
-#define E5 2
-#define E6 4
-#define E7 127
+#define E5 3
+#define E6 5
+#define E7 85
 #define E8 1728
 #define E9 18432
 #define E10 32
@@ -42,7 +42,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ float c[E5 * E4 * E2];
   __wram__ half ww[E9];
   __memcpy(ww, w, E9 * sizeof(half), GDRAM2WRAM);
-  __bang_write_zero(a + E1 * E6 * E3, (E10 - E1) * E6 * E3);
+  __bang_write_zero(a, E6 * E3 * E10);
 
   for (int t = taskId; t < E0 * E7; t += taskDim) {
     int n = t / E7;
@@ -89,7 +89,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   else
     w.resize_({E9});
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {8, 4, 1};
+  cnrtDim3_t d = {16, 2, 1};
   if (last != kernel.data_ptr()) {
     kz<<<d, cnrtFuncTypeBlock, q>>>(
         reinterpret_cast<half *>(w.data_ptr<at::Half>()));
