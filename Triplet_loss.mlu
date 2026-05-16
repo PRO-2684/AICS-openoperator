@@ -7,7 +7,7 @@
 #define E1 256
 #define E2 32
 #define E3 64
-#define E4 512
+#define E4 2048
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
                       const half *__restrict__ n, float *__restrict__ y,
@@ -37,7 +37,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
   __bang_square(h2, h2, E4);
 
 #pragma unroll
-  for (int r = 0; r < 2; ++r) {
+  for (int r = 0; r < 8; ++r) {
     __bang_reduce_sum(h1 + r * E1, h1 + r * E1, E1);
     __bang_reduce_sum(h2 + r * E1, h2 + r * E1, E1);
     float u = (float)h1[r * E1] + (float)h1[r * E1 + E3] +
@@ -60,7 +60,7 @@ torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive, torch::Ten
     out = torch::empty({}, anchor.options().dtype(torch::kFloat32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g0 = {64, 1, 1};
+  cnrtDim3_t g0 = {16, 1, 1};
   k0<<<g0, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(anchor.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(positive.data_ptr<at::Half>()),
