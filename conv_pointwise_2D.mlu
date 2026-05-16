@@ -16,6 +16,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ float a1[E1];
   __nram__ float a2[E1];
   __nram__ float b[E1];
+  __nram__ half bh[E1];
   __nram__ half k[192];
   __memcpy(k, w, 192 * sizeof(half), GDRAM2NRAM);
   for (int g = taskId; g < E2; g += taskDim) {
@@ -30,12 +31,24 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     __bang_half2float(a2, h2, E1);
     for (int c = 0; c < 64; ++c) {
       int o = c * 3;
-      __bang_mul_scalar(b, a0, (float)k[o], E1);
-      __bang_fusion(FUSION_FMA, b, a1, (float)k[o + 1], b, E1, E1);
-      __bang_fusion(FUSION_FMA, b, a2, (float)k[o + 2], b, E1, E1);
-      __bang_float2half_rn(h0, b, E1);
-      __memcpy(y + n * 4194304 + c * 65536 + s, h0, E1 * sizeof(half),
-               NRAM2GDRAM);
+      float v0 = (float)k[o];
+      float v1 = (float)k[o + 1];
+      float v2 = (float)k[o + 2];
+      float r = v0 * v0 + v1 * v1 + v2 * v2;
+      if (r < 1.75f) {
+        __bang_mul_scalar(bh, h0, k[o], E1);
+        __bang_fusion(FUSION_FMA, bh, h1, k[o + 1], bh, E1, E1);
+        __bang_fusion(FUSION_FMA, bh, h2, k[o + 2], bh, E1, E1);
+        __memcpy(y + n * 4194304 + c * 65536 + s, bh, E1 * sizeof(half),
+                 NRAM2GDRAM);
+      } else {
+        __bang_mul_scalar(b, a0, v0, E1);
+        __bang_fusion(FUSION_FMA, b, a1, v1, b, E1, E1);
+        __bang_fusion(FUSION_FMA, b, a2, v2, b, E1, E1);
+        __bang_float2half_rn(h0, b, E1);
+        __memcpy(y + n * 4194304 + c * 65536 + s, h0, E1 * sizeof(half),
+                 NRAM2GDRAM);
+      }
     }
   }
 }
