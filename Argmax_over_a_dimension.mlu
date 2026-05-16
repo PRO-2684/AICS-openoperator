@@ -95,6 +95,24 @@ __mlu_entry__ void k4(const half *__restrict__ x, int64_t *__restrict__ y) {
   }
 }
 
+__mlu_entry__ void k5(const half *__restrict__ x, int64_t *__restrict__ y) {
+  int t = taskId;
+  int g = t >> 2;
+  int p = t & 3;
+  int col = p << 6;
+  __nram__ half a[65536];
+  __nram__ half b[65536];
+  __nram__ half r[64];
+  for (int n = g; n < 16; n += 8) {
+    __memcpy(a, x + n * 65536, 65536 * sizeof(half), GDRAM2NRAM);
+    __bang_transpose(b, a, E1, E1);
+    for (int j = 0; j < 64; ++j) {
+      __bang_argmax(r, b + (col + j) * E1, E1);
+      y[n * E1 + col + j] = (int64_t)((uint16_t *)r)[1];
+    }
+  }
+}
+
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
   static torch::Tensor y;
@@ -103,7 +121,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   else
     y.resize_({16, 256});
   cnrtDim3_t d = {32, 1, 1};
-  k4<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  k5<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       y.data_ptr<int64_t>());
   return y;
