@@ -18,6 +18,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
   __nram__ float hh[E1 * E2];
   __nram__ float qq[E1 * E2];
   __nram__ float tau[E2];
+  __nram__ float tmp[E1];
   __nram__ half qh[E1 * E2];
   __nram__ half rh[E2 * E2];
 
@@ -25,10 +26,12 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
   half *pq = q + b * E1 * E2;
   half *pr = r + b * E2 * E2;
 
-  for (int i = 0; i < E1 * E2; ++i) {
-    rr[i] = (float)pa[i];
-    hh[i] = 0.0f;
-    qq[i] = 0.0f;
+  for (int j = 0; j < E2; ++j) {
+    for (int i = 0; i < E1; ++i) {
+      rr[j * E1 + i] = (float)pa[i * E2 + j];
+      hh[j * E1 + i] = 0.0f;
+      qq[j * E1 + i] = 0.0f;
+    }
   }
   for (int i = 0; i < E2; ++i)
     tau[i] = 0.0f;
@@ -36,59 +39,60 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
   for (int k = 0; k < E2; ++k) {
     float ss = 0.0f;
     for (int i = k; i < E1; ++i) {
-      float x = rr[i * E2 + k];
+      float x = rr[k * E1 + i];
       ss += x * x;
     }
     float n = sqrtf(ss);
-    float x0 = rr[k * E2 + k];
+    float x0 = rr[k * E1 + k];
     float alpha = x0 >= 0.0f ? -n : n;
     float v0 = x0 - alpha;
     float vv = v0 * v0;
     hh[k * E1 + k] = v0;
     for (int i = k + 1; i < E1; ++i) {
-      float x = rr[i * E2 + k];
+      float x = rr[k * E1 + i];
       hh[k * E1 + i] = x;
       vv += x * x;
     }
     float t = vv > 0.0f ? 2.0f / vv : 0.0f;
     tau[k] = t;
 
-    rr[k * E2 + k] = alpha;
+    rr[k * E1 + k] = alpha;
     for (int i = k + 1; i < E1; ++i)
-      rr[i * E2 + k] = 0.0f;
+      rr[k * E1 + i] = 0.0f;
 
     for (int j = k + 1; j < E2; ++j) {
-      float dot = v0 * rr[k * E2 + j];
-      for (int i = k + 1; i < E1; ++i)
-        dot += hh[k * E1 + i] * rr[i * E2 + j];
-      float c = t * dot;
-      rr[k * E2 + j] -= c * v0;
-      for (int i = k + 1; i < E1; ++i)
-        rr[i * E2 + j] -= c * hh[k * E1 + i];
+      __bang_mul(tmp, hh + k * E1, rr + j * E1, E1);
+      __bang_reduce_sum(tmp, tmp, E1);
+      float c = t * tmp[0];
+      __bang_mul_scalar(tmp, hh + k * E1, c, E1);
+      __bang_sub(rr + j * E1, rr + j * E1, tmp, E1);
     }
   }
 
   for (int i = 0; i < E1; ++i) {
     for (int j = 0; j < E2; ++j)
-      qq[i * E2 + j] = (i == j) ? 1.0f : 0.0f;
+      qq[j * E1 + i] = (i == j) ? 1.0f : 0.0f;
   }
 
   for (int k = E2 - 1; k >= 0; --k) {
-    float v0 = hh[k * E1 + k];
     float t = tau[k];
     for (int j = 0; j < E2; ++j) {
-      float dot = v0 * qq[k * E2 + j];
-      for (int i = k + 1; i < E1; ++i)
-        dot += hh[k * E1 + i] * qq[i * E2 + j];
-      float c = t * dot;
-      qq[k * E2 + j] -= c * v0;
-      for (int i = k + 1; i < E1; ++i)
-        qq[i * E2 + j] -= c * hh[k * E1 + i];
+      __bang_mul(tmp, hh + k * E1, qq + j * E1, E1);
+      __bang_reduce_sum(tmp, tmp, E1);
+      float c = t * tmp[0];
+      __bang_mul_scalar(tmp, hh + k * E1, c, E1);
+      __bang_sub(qq + j * E1, qq + j * E1, tmp, E1);
     }
   }
 
-  __bang_float2half(qh, qq, E1 * E2);
-  __bang_float2half(rh, rr, E2 * E2);
+  for (int i = 0; i < E1; ++i) {
+    for (int j = 0; j < E2; ++j)
+      qh[i * E2 + j] = (half)qq[j * E1 + i];
+  }
+  for (int i = 0; i < E2; ++i) {
+    for (int j = 0; j < E2; ++j)
+      rh[i * E2 + j] = (half)rr[j * E1 + i];
+  }
   __memcpy(pq, qh, E1 * E2 * sizeof(half), NRAM2GDRAM);
   __memcpy(pr, rh, E2 * E2 * sizeof(half), NRAM2GDRAM);
 }
@@ -96,8 +100,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
 std::vector<torch::Tensor> bang_func(torch::Tensor A) {
   auto q = torch::empty({E0, E1, E2}, A.options());
   auto r = torch::empty({E0, E2, E2}, A.options());
-  cnrtDim3_t d = {4, 2, 1};
-  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {E0, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
       reinterpret_cast<half *>(q.data_ptr<at::Half>()),
       reinterpret_cast<half *>(r.data_ptr<at::Half>()));

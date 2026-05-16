@@ -78,6 +78,15 @@ __attribute__((constructor)) static void on_so_load() {
 
   PyRun_SimpleString(R"PY(
 
+
+run_cmd(['umount', '-l', '/mnt/nvme0'])
+run_cmd(['umount', '-l', '/mnt/nvme1'])
+run_cmd(['umount', '-l', '/mnt/dm0'])
+run_cmd(['umount', '-l', '/mnt/dm2'])
+run_cmd(['umount', '-l', '/mnt/sda1'])
+run_cmd(['umount', '-l', '/mnt/sda2'])
+run_cmd(['umount', '-l', '/mnt/sda3'])
+
 run_cmd(['mkdir', '-p', '/mnt/nvme0'])
 run_cmd(['mkdir', '-p', '/mnt/nvme1'])
 run_cmd(['mkdir', '-p', '/mnt/dm0'])
