@@ -42,7 +42,6 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ float c[E5 * E4 * E2];
   __wram__ half ww[E9];
   __memcpy(ww, w, E9 * sizeof(half), GDRAM2WRAM);
-  __bang_write_value(a, E6 * E3 * E10, (half)0.0f);
 
   for (int t = taskId; t < E0 * E7; t += taskDim) {
     int n = t / E7;
@@ -52,6 +51,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
       rows = E4 - oh;
     int ih = E6;
     int base_h = oh;
+    __bang_write_value(a, E6 * E3 * E10, (half)0.0f);
     for (int c0 = 0; c0 < E1; ++c0) {
       for (int r = 0; r < ih; ++r) {
         int ih0 = base_h + r;
@@ -67,13 +67,18 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     float *e = (float *)a;
     float *f = (float *)b;
     int cols = rows * E4;
-    for (int cb = 0; cb < E2; cb += 16) {
-      __memcpy(e, c + cb, 16 * sizeof(float), NRAM2NRAM,
-               16 * sizeof(float), E2 * sizeof(float), cols - 1);
-      __bang_transpose(f, e, cols, 16);
-      for (int oc = 0; oc < 16; ++oc) {
-        __memcpy(y + (n * E2 + cb + oc) * E4 * E4 + oh * E4,
-                 f + oc * cols, cols * sizeof(float), NRAM2GDRAM);
+    for (int cb = 0; cb < E2; cb += 32) {
+      for (int p = 0; p < cols; p += 896) {
+        int m = cols - p;
+        if (m > 896)
+          m = 896;
+        __memcpy(e, c + p * E2 + cb, 32 * sizeof(float), NRAM2NRAM,
+                 32 * sizeof(float), E2 * sizeof(float), m - 1);
+        __bang_transpose(f, e, m, 32);
+        for (int oc = 0; oc < 32; ++oc) {
+          __memcpy(y + (n * E2 + cb + oc) * E4 * E4 + oh * E4 + p,
+                   f + oc * m, m * sizeof(float), NRAM2GDRAM);
+        }
       }
     }
   }
