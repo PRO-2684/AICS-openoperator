@@ -16,7 +16,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   __bang_add(x1, x0, x1, 131072);
   __sync_io_move_compute();
   __memcpy_async(y + p, x1, 131072 * sizeof(half), NRAM2GDRAM);
-  __sync_io();
 }
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
