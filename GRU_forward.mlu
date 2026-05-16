@@ -81,7 +81,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w0,
                       const half *__restrict__ w3, const half *__restrict__ w4,
                       const half *__restrict__ w5, const half *__restrict__ w6,
                       const half *__restrict__ w7, half *__restrict__ h0,
-                      half *__restrict__ h1, half *__restrict__ y) {
+                      half *__restrict__ h1, half *__restrict__ y, int t) {
   if (coreId == 0x80) {
     return;
   }
@@ -101,30 +101,27 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w0,
   __nram__ float ft[B * GN];
   __wram__ half ww[H * GN];
 
-  for (int t = 0; t < T; ++t) {
-    if (coreId == 0) {
-      for (int b = 0; b < B; ++b) {
-        __memcpy(s0 + b * I0, x + b * T * I0 + t * I0, I0 * sizeof(half),
-                 GDRAM2SRAM);
-      }
-    }
-    __sync_cluster();
-    f0(s0, w0, w1, w2, w3, h0, s1, a, h, wb, wf, z, n, u, v, c0, c1, ft, ww,
-       I0, c);
-    f0(s0, w0, w1, w2, w3, h0, s1, a, h, wb, wf, z, n, u, v, c0, c1, ft, ww,
-       I0, c + 256);
-    __sync_cluster();
-    f0(s1, w4, w5, w6, w7, h1, s0, a, h, wb, wf, z, n, u, v, c0, c1, ft, ww, H,
-       c);
-    f0(s1, w4, w5, w6, w7, h1, s0, a, h, wb, wf, z, n, u, v, c0, c1, ft, ww, H,
-       c + 256);
+  if (coreId == 0) {
     for (int b = 0; b < B; ++b) {
-      __memcpy(y + b * T * H + t * H + c, s0 + b * H + c, G * sizeof(half),
-               SRAM2GDRAM);
-      __memcpy(y + b * T * H + t * H + c + 256, s0 + b * H + c + 256,
-               G * sizeof(half), SRAM2GDRAM);
+      __memcpy(s0 + b * I0, x + b * T * I0 + t * I0, I0 * sizeof(half),
+               GDRAM2SRAM);
     }
-    __sync_cluster();
+  }
+  __sync_cluster();
+  f0(s0, w0, w1, w2, w3, h0, s1, a, h, wb, wf, z, n, u, v, c0, c1, ft, ww,
+     I0, c);
+  f0(s0, w0, w1, w2, w3, h0, s1, a, h, wb, wf, z, n, u, v, c0, c1, ft, ww,
+     I0, c + 256);
+  __sync_cluster();
+  f0(s1, w4, w5, w6, w7, h1, s0, a, h, wb, wf, z, n, u, v, c0, c1, ft, ww, H,
+     c);
+  f0(s1, w4, w5, w6, w7, h1, s0, a, h, wb, wf, z, n, u, v, c0, c1, ft, ww, H,
+     c + 256);
+  for (int b = 0; b < B; ++b) {
+    __memcpy(y + b * T * H + t * H + c, s0 + b * H + c, G * sizeof(half),
+             SRAM2GDRAM);
+    __memcpy(y + b * T * H + t * H + c + 256, s0 + b * H + c + 256,
+             G * sizeof(half), SRAM2GDRAM);
   }
 }
 
@@ -142,7 +139,8 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
   cnrtMemsetAsync(h0.data_ptr(), 0, B * H * sizeof(half), q);
   cnrtMemsetAsync(h1.data_ptr(), 0, B * H * sizeof(half), q);
   cnrtDim3_t d = {4, 1, 1};
-  k0<<<d, cnrtFuncTypeUnion1, q>>>(
+  for (int t = 0; t < T; ++t) {
+    k0<<<d, cnrtFuncTypeUnion1, q>>>(
         reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(w0.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(w1.data_ptr<at::Half>()),
@@ -154,6 +152,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
         reinterpret_cast<const half *>(w7.data_ptr<at::Half>()),
         reinterpret_cast<half *>(h0.data_ptr<at::Half>()),
         reinterpret_cast<half *>(h1.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+        reinterpret_cast<half *>(y.data_ptr<at::Half>()), t);
+  }
   return y;
 }
