@@ -43,7 +43,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
       if (v > mx)
         mx = v;
     }
-    if (d - mx < 9.0f) {
+    if (d - mx < 10.0f) {
       idx[m] = rr;
       __memcpy(b + m * 128, s + z, 128 * sizeof(float), NRAM2NRAM);
       ++m;
