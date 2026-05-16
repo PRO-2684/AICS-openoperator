@@ -4,7 +4,7 @@
 #include <torch/extension.h>
 
 #define TOTAL_ELEMS (16 * 16384)
-#define TASKS 32
+#define TASKS 16
 #define ELEMS_PER_TASK (TOTAL_ELEMS / TASKS)
 #define L2_SCALE ((half)0.00782012939453125f)
 
