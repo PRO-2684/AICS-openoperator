@@ -3,12 +3,12 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 32
+#define E0 64
 #define E1 254
 #define E2 (E1 * E1)
 #define E3 27
 #define E4 16
-#define E5 72
+#define E5 64
 #define F0(d, s)                                                              \
   __memcpy(d, s, E1 * sizeof(half), NRAM2NRAM, E1 * sizeof(half), m - 1,      \
            E1 * E5 * sizeof(half), 2, 256 * sizeof(half), m - 1,              \
@@ -20,15 +20,13 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   int total = E4 * 3 * 4;
   int z = 0;
   for (int g = taskId; g < total; g += taskDim) {
-    if (z >= 2)
-      __sync_io();
     half *d = b + (z & 1) * E1 * E5 * 9;
     int h = g & 3;
     int u = g >> 2;
     int c = u % 3;
     int n = u / 3;
     int r = h * E5;
-    int m = h == 3 ? 40 : E5;
+    int m = h == 3 ? 62 : E5;
     const half *src = x + ((n * 3 + c) * 256 + r) * 256;
     __memcpy(a, src, 256 * (m + 2) * sizeof(half), GDRAM2NRAM);
     int p = n * E3 + c * 9;
