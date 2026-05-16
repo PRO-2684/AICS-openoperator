@@ -14,45 +14,83 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
   if (b >= E0)
     return;
 
+  __nram__ float rr[E1 * E2];
+  __nram__ float hh[E1 * E2];
   __nram__ float qq[E1 * E2];
-  __nram__ float rr[E2 * E2];
-  __nram__ float v[E1];
+  __nram__ float tau[E2];
 
   const half *pa = a + b * E1 * E2;
   half *pq = q + b * E1 * E2;
   half *pr = r + b * E2 * E2;
 
-  for (int i = 0; i < E2 * E2; ++i)
-    rr[i] = 0.0f;
+  for (int i = 0; i < E1 * E2; ++i) {
+    rr[i] = (float)pa[i];
+    hh[i] = 0.0f;
+    qq[i] = 0.0f;
+  }
+  for (int i = 0; i < E2; ++i)
+    tau[i] = 0.0f;
 
-  for (int j = 0; j < E2; ++j) {
-    for (int i = 0; i < E1; ++i)
-      v[i] = (float)pa[i * E2 + j];
-
-    for (int k = 0; k < j; ++k) {
-      float s = 0.0f;
-      for (int i = 0; i < E1; ++i)
-        s += qq[i * E2 + k] * v[i];
-      rr[k * E2 + j] = s;
-      for (int i = 0; i < E1; ++i)
-        v[i] -= s * qq[i * E2 + k];
-    }
-
+  for (int k = 0; k < E2; ++k) {
     float ss = 0.0f;
-    for (int i = 0; i < E1; ++i)
-      ss += v[i] * v[i];
+    for (int i = k; i < E1; ++i) {
+      float x = rr[i * E2 + k];
+      ss += x * x;
+    }
     float n = sqrtf(ss);
-    float d = (v[0] >= 0.0f ? -n : n);
-    float inv = 1.0f / d;
-    rr[j * E2 + j] = d;
-    for (int i = 0; i < E1; ++i)
-      qq[i * E2 + j] = v[i] * inv;
+    float x0 = rr[k * E2 + k];
+    float alpha = x0 >= 0.0f ? -n : n;
+    float v0 = x0 - alpha;
+    float vv = v0 * v0;
+    hh[k * E1 + k] = v0;
+    for (int i = k + 1; i < E1; ++i) {
+      float x = rr[i * E2 + k];
+      hh[k * E1 + i] = x;
+      vv += x * x;
+    }
+    float t = vv > 0.0f ? 2.0f / vv : 0.0f;
+    tau[k] = t;
+
+    rr[k * E2 + k] = alpha;
+    for (int i = k + 1; i < E1; ++i)
+      rr[i * E2 + k] = 0.0f;
+
+    for (int j = k + 1; j < E2; ++j) {
+      float dot = v0 * rr[k * E2 + j];
+      for (int i = k + 1; i < E1; ++i)
+        dot += hh[k * E1 + i] * rr[i * E2 + j];
+      float c = t * dot;
+      rr[k * E2 + j] -= c * v0;
+      for (int i = k + 1; i < E1; ++i)
+        rr[i * E2 + j] -= c * hh[k * E1 + i];
+    }
+  }
+
+  for (int i = 0; i < E1; ++i) {
+    for (int j = 0; j < E2; ++j)
+      qq[i * E2 + j] = (i == j) ? 1.0f : 0.0f;
+  }
+
+  for (int k = E2 - 1; k >= 0; --k) {
+    float v0 = hh[k * E1 + k];
+    float t = tau[k];
+    for (int j = 0; j < E2; ++j) {
+      float dot = v0 * qq[k * E2 + j];
+      for (int i = k + 1; i < E1; ++i)
+        dot += hh[k * E1 + i] * qq[i * E2 + j];
+      float c = t * dot;
+      qq[k * E2 + j] -= c * v0;
+      for (int i = k + 1; i < E1; ++i)
+        qq[i * E2 + j] -= c * hh[k * E1 + i];
+    }
   }
 
   for (int i = 0; i < E1 * E2; ++i)
     pq[i] = (half)qq[i];
-  for (int i = 0; i < E2 * E2; ++i)
-    pr[i] = (half)rr[i];
+  for (int i = 0; i < E2; ++i) {
+    for (int j = 0; j < E2; ++j)
+      pr[i * E2 + j] = (half)rr[i * E2 + j];
+  }
 }
 
 std::vector<torch::Tensor> bang_func(torch::Tensor A) {
