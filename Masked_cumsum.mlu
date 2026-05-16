@@ -6,11 +6,10 @@
 
 #define E0 128
 #define E1 4000
-#define E2 4096
+#define E2 4000
 #define E3 4000
 
 __mlu_func__ void k1(float *__restrict__ a, float *__restrict__ b) {
-  __bang_write_value(a + E1, E2 - E1, 0.0f);
   __bang_write_value(b, 1, 0.0f);
   __memcpy(b + 1, a, (E1 - 1) * sizeof(float), NRAM2NRAM);
   __bang_add(a, a, b, E1);
