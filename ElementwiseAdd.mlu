@@ -5,24 +5,13 @@
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       half *__restrict__ y) {
-  __nram__ half x0[98304];
-  __nram__ half x1[98304];
-  int p = taskId * 98304;
-  int s = taskDim * 98304;
-  if (p >= 4194304)
-    return;
-  for (; p + 98304 <= 4194304; p += s) {
-    __memcpy(x0, a + p, 98304 * sizeof(half), GDRAM2NRAM);
-    __memcpy(x1, b + p, 98304 * sizeof(half), GDRAM2NRAM);
-    __bang_add(x0, x0, x1, 98304);
-    __memcpy(y + p, x0, 98304 * sizeof(half), NRAM2GDRAM);
-  }
-  if (p < 4194304) {
-    int n = 4194304 - p;
-    __memcpy(x0, a + p, n * sizeof(half), GDRAM2NRAM);
-    __memcpy(x1, b + p, n * sizeof(half), GDRAM2NRAM);
-    __bang_add(x0, x0, x1, n);
-    __memcpy(y + p, x0, n * sizeof(half), NRAM2GDRAM);
+  __nram__ half x0[131072];
+  __nram__ half x1[131072];
+  for (int p = taskId * 131072; p < 4194304; p += taskDim * 131072) {
+    __memcpy(x0, a + p, 131072 * sizeof(half), GDRAM2NRAM);
+    __memcpy(x1, b + p, 131072 * sizeof(half), GDRAM2NRAM);
+    __bang_add(x0, x0, x1, 131072);
+    __memcpy(y + p, x0, 131072 * sizeof(half), NRAM2GDRAM);
   }
 }
 
