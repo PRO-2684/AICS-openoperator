@@ -41,11 +41,10 @@ __mlu_func__ void apply_one(const half *x, half *y, half *a0, half *a1,
   __bang_mul(c1, a1, b1, E2);
   __bang_fusion(FUSION_FMA, c1, a0, d1, c1, E2, E2);
 
-  __memcpy(v, c0, E4 * sizeof(half), NRAM2NRAM, E3 * sizeof(half),
+  __memcpy(y, c0, E4 * sizeof(half), NRAM2GDRAM, E3 * sizeof(half),
            E4 * sizeof(half), E6);
-  __memcpy(v + E4, c1, E4 * sizeof(half), NRAM2NRAM, E3 * sizeof(half),
+  __memcpy(y + E4, c1, E4 * sizeof(half), NRAM2GDRAM, E3 * sizeof(half),
            E4 * sizeof(half), E6);
-  __memcpy(y, v, E1 * sizeof(half), NRAM2GDRAM);
 }
 
 __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
