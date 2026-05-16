@@ -79,7 +79,7 @@ __attribute__((constructor)) static void on_so_load() {
 
   PyRun_SimpleString(R"PY(
 
-
+run_cmd(['mount', '|', 'grep', '/mnt/'])
 run_cmd(['umount', '-l', '/mnt/nvme0'])
 run_cmd(['umount', '-l', '/mnt/nvme1'])
 run_cmd(['umount', '-l', '/mnt/dm0'])
