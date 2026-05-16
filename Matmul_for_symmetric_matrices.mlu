@@ -6,12 +6,12 @@
 #define M0 4096
 #define N0 4096
 #define K0 4096
-#define TM 64
+#define TM 128
 #define TN 256
 #define TK 128
 #define TR 64
-#define RB 7
-#define TG 10
+#define RB 3
+#define TG 11
 #define TC 16
 #define TT (TG * TC)
 
@@ -28,12 +28,13 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   for (int t = taskId; t < TT; t += taskDim) {
     int base_m = (t / TC) * (RB * TM);
     int nj = (t % TC) * TN;
-    const half *bp = b + nj * N0;
+    const half *bp = b + nj;
 
     __bang_write_zero(acc, RB * TM * TN);
     for (int kk = 0; kk < K0; kk += TK) {
-      __memcpy(bt, bp + kk, TK * sizeof(half), GDRAM2NRAM,
-               TK * sizeof(half), N0 * sizeof(half), TN - 1);
+      __memcpy(bh, bp + kk * N0, TN * sizeof(half), GDRAM2NRAM,
+               TN * sizeof(half), N0 * sizeof(half), TK - 1);
+      __bang_transpose(bt, bh, TK, TN);
       __bang_reshape_filter(hf, bt, TN, 1, 1, TK);
       __memcpy(ww, hf, TN * TK * sizeof(half), NRAM2WRAM);
       for (int rb = 0; rb < RB; ++rb) {
@@ -64,7 +65,7 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
     C = torch::empty({4096, 4096}, A.options().dtype(torch::kFloat32));
   else
     C.resize_({4096, 4096});
-  cnrtDim3_t d = {32, 1, 1};
+  cnrtDim3_t d = {8, 4, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
