@@ -5,7 +5,7 @@
 
 #define T 4096
 #define P 4096
-#define Q 2048
+#define Q 256
 
 __mlu_entry__ void kprep(const half *__restrict__ g, int *__restrict__ off,
                          half *__restrict__ cf) {
@@ -18,8 +18,8 @@ __mlu_entry__ void kprep(const half *__restrict__ g, int *__restrict__ off,
   __nram__ int o1[Q];
   __nram__ int o2[Q];
   __nram__ int o3[Q];
-  int n = taskId >> 1;
-  int t = (taskId & 1) * Q;
+  int n = taskId >> 4;
+  int t = (taskId & 15) * Q;
   const half *pg = g + n * 8192;
   int *po = off + n * P * 4;
   half *pc = cf + n * P * 4;
@@ -208,7 +208,7 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
   if (!cf.defined())
     cf = torch::empty({4, P * 4}, grid.options());
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dp = {8, 1, 1};
+  cnrtDim3_t dp = {64, 1, 1};
   kprep<<<dp, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(grid.data_ptr<at::Half>()),
       off.data_ptr<int>(), reinterpret_cast<half *>(cf.data_ptr<at::Half>()));
