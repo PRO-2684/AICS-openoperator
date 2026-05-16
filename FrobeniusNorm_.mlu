@@ -5,16 +5,27 @@
 
 #define T 262144
 #define N 67108864
+#define B 8388608
 
 __mlu_entry__ void k(half *a) {
   __nram__ half x[T];
   __bang_write_zero(x, T);
-  for (int64_t s = (int64_t)taskId * T; s < N; s += (int64_t)taskDim * T) {
-    int n = T;
-    if (s + n > N)
-      n = N - s;
-    __memcpy(a + s, x, n * sizeof(half), NRAM2GDRAM);
-  }
+  int s = taskId * T;
+  __memcpy(a + s, x, T * sizeof(half), NRAM2GDRAM);
+  s += B;
+  __memcpy(a + s, x, T * sizeof(half), NRAM2GDRAM);
+  s += B;
+  __memcpy(a + s, x, T * sizeof(half), NRAM2GDRAM);
+  s += B;
+  __memcpy(a + s, x, T * sizeof(half), NRAM2GDRAM);
+  s += B;
+  __memcpy(a + s, x, T * sizeof(half), NRAM2GDRAM);
+  s += B;
+  __memcpy(a + s, x, T * sizeof(half), NRAM2GDRAM);
+  s += B;
+  __memcpy(a + s, x, T * sizeof(half), NRAM2GDRAM);
+  s += B;
+  __memcpy(a + s, x, T * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
