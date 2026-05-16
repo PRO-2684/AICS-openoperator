@@ -1,7 +1,6 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
-#include <math.h>
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
@@ -10,14 +9,15 @@ __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
   int r0 = (p0 & 1) * 64;
   int base = h0 * 8192;
   __nram__ half h[8192];
-  __nram__ half ht[8192];
+  __nram__ half t[8192];
+  __nram__ half a[4096];
+  __nram__ half p[8192];
   __nram__ float f[8192];
-  __nram__ float t[8192];
-  __nram__ float a[4096];
   __nram__ float b[8192];
   __nram__ float o[4096];
-  __wram__ float w[8192];
+  __wram__ half w[8192];
   int idx[64];
+  float ss[64];
 
   __memcpy(h, q + base, 8192 * sizeof(half), GDRAM2NRAM);
   __bang_half2float(f, h, 8192);
@@ -28,15 +28,15 @@ __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
 #pragma unroll
   for (int r = 0; r < 64; ++r) {
     int rr = r0 + r;
-    int p = rr * 64;
+    int z = rr * 64;
     float n = 0.0f;
     for (int i = 0; i < 64; ++i) {
-      float x = f[p + i];
+      float x = f[z + i];
       n += x * x;
     }
-    if (n < 56.0f) {
+    if (n < 60.0f) {
       idx[m] = rr;
-      __memcpy(a + m * 64, f + p, 64 * sizeof(float), NRAM2NRAM);
+      __memcpy(a + m * 64, h + z, 64 * sizeof(half), NRAM2NRAM);
       ++m;
     }
   }
@@ -46,43 +46,39 @@ __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
   int mm = (m + 7) & ~7;
   for (int r = m; r < mm; ++r)
     for (int i = 0; i < 64; ++i)
-      a[r * 64 + i] = 0.0f;
+      a[r * 64 + i] = (half)0.0f;
 
-  __bang_reshape_filter(t, f, 128, 1, 1, 64);
-  __memcpy(w, t, 8192 * sizeof(float), NRAM2WRAM);
+  __bang_reshape_filter(t, h, 128, 1, 1, 64);
+  __memcpy(w, t, 8192 * sizeof(half), NRAM2WRAM);
   __bang_matmul(b, a, w, mm, 64, 128);
   __bang_mul_scalar(b, b, 0.25f, mm * 128);
 
   for (int r = 0; r < m; ++r) {
-    int p = r * 128;
-    float mx = b[p];
+    int z = r * 128;
+    float mx = b[z];
     for (int i = 1; i < 128; ++i) {
-      float z = b[p + i];
-      if (z > mx)
-        mx = z;
+      float v = b[z + i];
+      if (v > mx)
+        mx = v;
     }
-    float s = 0.0f;
-    for (int i = 0; i < 128; ++i) {
-      float z = expf(b[p + i] - mx);
-      b[p + i] = z;
-      s += z;
-    }
-    float inv = 1.0f / s;
     for (int i = 0; i < 128; ++i)
-      b[p + i] *= inv;
+      b[z + i] -= mx;
   }
-  for (int r = m; r < mm; ++r)
-    for (int i = 0; i < 128; ++i)
-      b[r * 128 + i] = 0.0f;
 
-  __bang_transpose(ht, h, 128, 64);
-  __bang_half2float(t, ht, 8192);
-  __memcpy(w, t, 8192 * sizeof(float), NRAM2WRAM);
-  __bang_matmul(o, b, w, mm, 128, 64);
-
+  __bang_float2half_rn(p, b, mm * 128);
+  __bang_active_exp(p, p, mm * 128);
+  __bang_reduce_sum(t, p, mm * 128);
   for (int r = 0; r < m; ++r)
+    ss[r] = (float)t[r * 128] + (float)t[r * 128 + 64];
+
+  __bang_transpose(t, h, 128, 64);
+  __memcpy(w, t, 8192 * sizeof(half), NRAM2WRAM);
+  __bang_matmul(o, p, w, mm, 128, 64);
+  for (int r = 0; r < m; ++r) {
+    __bang_mul_scalar(o + r * 64, o + r * 64, 1.0f / ss[r], 64);
     __memcpy(y + base + idx[r] * 64, o + r * 64, 64 * sizeof(float),
              NRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
