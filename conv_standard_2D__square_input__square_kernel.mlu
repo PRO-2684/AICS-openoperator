@@ -8,9 +8,9 @@
 #define E2 64
 #define E3 256
 #define E4 254
-#define E5 4
-#define E6 6
-#define E7 64
+#define E5 3
+#define E6 5
+#define E7 85
 #define E8 1728
 #define E9 18432
 #define E10 32
@@ -42,6 +42,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ float c[E5 * E4 * E2];
   __wram__ half ww[E9];
   __memcpy(ww, w, E9 * sizeof(half), GDRAM2WRAM);
+  __bang_write_zero(a, E6 * E3 * E10);
 
   for (int t = taskId; t < E0 * E7; t += taskDim) {
     int n = t / E7;
