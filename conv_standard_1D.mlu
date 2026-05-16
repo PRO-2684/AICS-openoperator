@@ -17,7 +17,7 @@ __mlu_entry__ void k0(half *__restrict__ y) {
 }
 
 __mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y) {
-  for (int i = taskId; i < 576; i += taskDim) {
+  for (int i = taskId; i < E5; i += taskDim) {
     int t = i;
     int c = t & 31;
     t >>= 5;
