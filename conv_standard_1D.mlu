@@ -10,10 +10,7 @@
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
   __nram__ half a[1542];
-  __nram__ float af[1542];
-  __nram__ float b[E2];
-  __nram__ float c[E2];
-  __nram__ half d[E2];
+  __nram__ half b[E2];
   __nram__ half kh[288];
   for (int g = taskId; g < E0; g += taskDim) {
     int o = (g & 1) << 5;
@@ -28,22 +25,20 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     a[1027] = (half)0.0f;
     a[1540] = (half)0.0f;
     a[1541] = (half)0.0f;
-    __bang_half2float(af, a, 1542);
     __memcpy(kh, w + o * 9, 288 * sizeof(half), GDRAM2NRAM);
     for (int u = 0; u < 32; ++u) {
       const half *pw = kh + u * 9;
-      __bang_write_value(b, E2, 0.0f);
-      __bang_fusion(FUSION_FMA, b, af, (float)pw[0], b, E2, E2);
-      __bang_fusion(FUSION_FMA, b, af + 1, (float)pw[1], b, E2, E2);
-      __bang_fusion(FUSION_FMA, b, af + 2, (float)pw[2], b, E2, E2);
-      __bang_fusion(FUSION_FMA, b, af + 514, (float)pw[3], b, E2, E2);
-      __bang_fusion(FUSION_FMA, b, af + 515, (float)pw[4], b, E2, E2);
-      __bang_fusion(FUSION_FMA, b, af + 516, (float)pw[5], b, E2, E2);
-      __bang_fusion(FUSION_FMA, b, af + 1028, (float)pw[6], b, E2, E2);
-      __bang_fusion(FUSION_FMA, b, af + 1029, (float)pw[7], b, E2, E2);
-      __bang_fusion(FUSION_FMA, b, af + 1030, (float)pw[8], b, E2, E2);
-      __bang_float2half_rn(d, b, E2);
-      __memcpy(y + (n * 64 + o + u) * E1, d, E1 * sizeof(half), NRAM2GDRAM);
+      __bang_write_value(b, E2, (half)0.0f);
+      __bang_fusion(FUSION_FMA, b, a, pw[0], b, E2, E2);
+      __bang_fusion(FUSION_FMA, b, a + 1, pw[1], b, E2, E2);
+      __bang_fusion(FUSION_FMA, b, a + 2, pw[2], b, E2, E2);
+      __bang_fusion(FUSION_FMA, b, a + 514, pw[3], b, E2, E2);
+      __bang_fusion(FUSION_FMA, b, a + 515, pw[4], b, E2, E2);
+      __bang_fusion(FUSION_FMA, b, a + 516, pw[5], b, E2, E2);
+      __bang_fusion(FUSION_FMA, b, a + 1028, pw[6], b, E2, E2);
+      __bang_fusion(FUSION_FMA, b, a + 1029, pw[7], b, E2, E2);
+      __bang_fusion(FUSION_FMA, b, a + 1030, pw[8], b, E2, E2);
+      __memcpy(y + (n * 64 + o + u) * E1, b, E1 * sizeof(half), NRAM2GDRAM);
     }
   }
 }
