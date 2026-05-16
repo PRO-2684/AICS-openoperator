@@ -8,9 +8,9 @@
 #define E2 64
 #define E3 256
 #define E4 254
-#define E5 4
-#define E6 6
-#define E7 64
+#define E5 2
+#define E6 4
+#define E7 127
 #define E8 1728
 #define E9 36864
 
@@ -39,6 +39,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ half a[E6 * E3 * E2];
   __nram__ half b[E6 * E3 * E2];
   __nram__ float c[E5 * E4 * E2];
+  __nram__ float d[E5 * E4 * E2];
   __wram__ half ww[E9];
   __memcpy(ww, w, E9 * sizeof(half), GDRAM2WRAM);
 
@@ -64,10 +65,10 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     }
     __bang_transpose(b, a, E2, ih * E3);
     __bang_conv(c, b, ww, E2, ih, E3, 3, 3, 1, 1, E2);
+    __bang_transpose(d, c, rows * E4, E2);
     for (int oc = 0; oc < E2; ++oc) {
-      __memcpy(y + (n * E2 + oc) * E4 * E4 + oh * E4, c + oc,
-               sizeof(float), NRAM2GDRAM, sizeof(float), E2 * sizeof(float),
-               rows * E4 - 1);
+      __memcpy(y + (n * E2 + oc) * E4 * E4 + oh * E4, d + oc * rows * E4,
+               rows * E4 * sizeof(float), NRAM2GDRAM);
     }
   }
 }
