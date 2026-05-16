@@ -71,7 +71,7 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
     C.resize_({M0, N0});
   if (!P.defined())
     P = torch::empty({2, M0, N0}, A.options().dtype(torch::kFloat32));
-  cnrtDim3_t d = {16, 2, 1};
+  cnrtDim3_t d = {8, 4, 1};
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   k0<<<d, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
