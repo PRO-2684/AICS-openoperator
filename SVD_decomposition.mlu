@@ -35,7 +35,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
     }
   }
 
-  for (int sweep = 0; sweep < 6; ++sweep) {
+  for (int sweep = 0; sweep < 5; ++sweep) {
     for (int p = 0; p < E2 - 1; ++p) {
       for (int q = p + 1; q < E2; ++q) {
         float app = g[p * E2 + p];
@@ -68,6 +68,40 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
           g[p * E2 + q] = 0.0f;
           g[q * E2 + p] = 0.0f;
         }
+      }
+    }
+  }
+  for (int p = 0; p < 16; ++p) {
+    for (int q = p + 1; q < E2; ++q) {
+      float app = g[p * E2 + p];
+      float aqq = g[q * E2 + q];
+      float apq = g[p * E2 + q];
+      float aa = fabsf(apq);
+      if (aa > 0.000001f) {
+        float tau = (aqq - app) / (2.0f * apq);
+        float st = tau >= 0.0f ? 1.0f : -1.0f;
+        float tt = st / (fabsf(tau) + sqrtf(1.0f + tau * tau));
+        float cc = 1.0f / sqrtf(1.0f + tt * tt);
+        float ss = tt * cc;
+        for (int k = 0; k < E2; ++k) {
+          if (k != p && k != q) {
+            float bkp = g[k * E2 + p];
+            float bkq = g[k * E2 + q];
+            float np = cc * bkp - ss * bkq;
+            float nq = ss * bkp + cc * bkq;
+            g[k * E2 + p] = np;
+            g[p * E2 + k] = np;
+            g[k * E2 + q] = nq;
+            g[q * E2 + k] = nq;
+          }
+        }
+        float c2 = cc * cc;
+        float s2 = ss * ss;
+        float cs = cc * ss;
+        g[p * E2 + p] = c2 * app - 2.0f * cs * apq + s2 * aqq;
+        g[q * E2 + q] = s2 * app + 2.0f * cs * apq + c2 * aqq;
+        g[p * E2 + q] = 0.0f;
+        g[q * E2 + p] = 0.0f;
       }
     }
   }
