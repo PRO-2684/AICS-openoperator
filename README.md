@@ -176,7 +176,7 @@ python scripts/update_problems.py
 | 125 | [Conditional_LayerNorm](Conditional_LayerNorm.mlu) | N/A | 🔴 |
 | 126 | [QR_decomposition](QR_decomposition.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/fcf7700) |
 | 127 | [Cholesky_decomposition](Cholesky_decomposition.mlu) | N/A | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/10bb360) |
-| 128 | [Batch_norm_1D](Batch_norm_1D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/0eaf36f3db1f823ae6b99e52f9e5d6208c213218) |
+| 128 | [Batch_norm_1D](Batch_norm_1D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/918bdf7) |
 | 129 | [Attention_score_with_bias](Attention_score_with_bias.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/542baa2) |
 | 130 | [Attention_kv_cache](Attention_kv_cache.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/b724d07) |
 | 131 | [Relative_position_encoding](Relative_position_encoding.mlu) | N/A | 🔴 |
