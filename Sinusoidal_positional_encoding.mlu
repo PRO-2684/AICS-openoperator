@@ -142,9 +142,8 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
   __mlu_shared__ half sp[SEG_ELEMS];
   const half *p_gdram = (const half *)__builtin_assume_aligned(cache, 512);
 
-  bool active = c != 0x80;
-  int tid = active ? (taskIdY * 4 + c) : 0;
-  active = active && tid < TASKS_PER_LAUNCH;
+  int tid = taskId;
+  bool active = tid < TASKS_PER_LAUNCH && c != 0x80;
 
   const uint32_t base = tid * PLANE_ELEMS;
 
