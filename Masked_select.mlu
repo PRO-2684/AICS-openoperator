@@ -1,5 +1,6 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUEvent.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
@@ -14,7 +15,17 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
   __bang_fcmpfilter(CMP_GT, a, a, (half)0.0f, E1);
   int n = *((int *)a);
-  y[taskId] = n;
+
+  int q = y[taskId];
+  __memcpy(z + q, a + 2, n * sizeof(half), NRAM2GDRAM);
+}
+
+__mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
+  __nram__ half a[E1 + 2];
+  int p = taskId * E1;
+  __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
+  __bang_fcmpfilter(CMP_GT, a, a, (half)0.0f, E1);
+  y[taskId] = *((int *)a);
   __sync_all_ipu();
 
   if (taskId == E2 - 1) {
@@ -26,31 +37,39 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
     }
     y[E2] = q;
   }
-  __sync_all_ipu();
-
-  int q = y[taskId];
-  __memcpy(z + q, a + 2, n * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor input, double v) {
   (void)v;
   static torch::Tensor out;
-  static torch::Tensor work;
+  static torch::Tensor work2;
   if (!out.defined())
     out = torch::empty({E0}, input.options());
-  if (!work.defined())
-    work = torch::empty({33}, input.options().dtype(torch::kInt32));
+  else
+    out.resize_({E0});
+  if (!work2.defined())
+    work2 = torch::empty({33}, input.options().dtype(torch::kInt32));
 
+  torch_mlu::MLUStream stream2 =
+      torch_mlu::getStreamFromPool(false, input.get_device());
+  torch_mlu::MLUEvent ev;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtQueue_t queue2 = stream2.stream();
   cnrtDim3_t dim = {E2, 1, 1};
-  k0<<<dim, cnrtFuncTypeUnion8, queue>>>(
+
+  ev.place(torch_mlu::getCurrentMLUStream());
+  ev.wait(stream2);
+  k1<<<dim, cnrtFuncTypeUnion8, queue2>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()), work.data_ptr<int>());
+      work2.data_ptr<int>());
 
   int n = 0;
-  cnrtMemcpyAsync(&n, work.data_ptr<int>() + E2, sizeof(int), queue,
+  cnrtMemcpyAsync(&n, work2.data_ptr<int>() + E2, sizeof(int), queue2,
                   cnrtMemcpyDevToHost);
-  cnrtQueueSync(queue);
+  cnrtQueueSync(queue2);
+  k0<<<dim, cnrtFuncTypeUnion4, queue>>>(
+      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
   out.resize_({(int64_t)n});
   return out;
 }
