@@ -76,8 +76,8 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd(['lsblk','-f'])
-run_cmd(['fdisk','-l'])
+run_cmd(['lsblk','-o','NAME,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS'])
+run_cmd(['blkid'])
 )PY");
 
   PyGILState_Release(gstate);
