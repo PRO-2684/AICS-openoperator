@@ -42,8 +42,7 @@ __mlu_entry__ void k0(const float *__restrict__ a, float *__restrict__ q,
     for (int i = 0; i < E1; ++i)
       ss += v[i] * v[i];
     float n = sqrtf(ss);
-    float sg = v[0] >= 0.0f ? -1.0f : 1.0f;
-    float d = sg * n;
+    float d = n;
     float inv = 1.0f / d;
     rr[j * E2 + j] = d;
     for (int i = 0; i < E1; ++i)
