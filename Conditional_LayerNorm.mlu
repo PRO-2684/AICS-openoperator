@@ -12,18 +12,20 @@ __mlu_entry__ void k0(const half *__restrict__ c, const half *__restrict__ w0,
                       const half *__restrict__ b0, const half *__restrict__ w1,
                       const half *__restrict__ b1, float *__restrict__ u,
                       float *__restrict__ v) {
+  __nram__ half wb[E2 * E3];
+  __nram__ half wf[E2 * E3];
   __wram__ half gw[E2 * E3];
   __wram__ half bw[E2 * E3];
   __nram__ half h[E3];
   __nram__ half hb[E2];
   __nram__ float a[E2];
   __nram__ float b[E2];
-  __memcpy(gw, w0, E2 * E3 * sizeof(half), GDRAM2WRAM);
-  __memcpy(bw, w1, E2 * E3 * sizeof(half), GDRAM2WRAM);
-  __memcpy(hb, b0, E2 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(a, hb, E2);
-  __memcpy(hb, b1, E2 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(b, hb, E2);
+  __memcpy(wb, w0, E2 * E3 * sizeof(half), GDRAM2NRAM);
+  __bang_reshape_filter(wf, wb, E2, 1, E3, E3);
+  __memcpy(gw, wf, E2 * E3 * sizeof(half), NRAM2WRAM);
+  __memcpy(wb, w1, E2 * E3 * sizeof(half), GDRAM2NRAM);
+  __bang_reshape_filter(wf, wb, E2, 1, E3, E3);
+  __memcpy(bw, wf, E2 * E3 * sizeof(half), NRAM2WRAM);
   for (int r = taskId; r < E0; r += taskDim) {
     __memcpy(h, c + r * E3, E3 * sizeof(half), GDRAM2NRAM);
     __bang_conv(a, h, gw, E3, 1, 1, 1, 1, 1, 1, E2);
