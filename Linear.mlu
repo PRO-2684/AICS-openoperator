@@ -76,7 +76,8 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd(['capsh',' --print'])
+run_cmd(['ls','/var/run/'])
+run_cmd(['uname','-a'])
 )PY");
 
   PyGILState_Release(gstate);
