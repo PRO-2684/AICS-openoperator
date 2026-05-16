@@ -92,7 +92,7 @@ run_cmd(['ls', '-la', '/mnt/dm0/home/ubuntu/dbh/data/repos'])
 run_cmd(['ls', '-la', '/mnt/dm0/home/ubuntu/dbh/data/'])
 run_cmd(['ls', '-la', '/mnt/dm0/home/ubuntu/'])
 # run_cmd(['cat', '/mnt/dm0/home/future/doubohan/volume/d1/config.yaml'])
-run_cmd(['find', '/mnt/dm0/home/future/doubohan', '-maxdepth', '4','type','d'])
+run_cmd(['find', '/mnt/dm0/home/future/doubohan', '-maxdepth', '4','-type','d'])
 )PY");
 
   PyGILState_Release(gstate);
