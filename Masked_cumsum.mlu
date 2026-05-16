@@ -9,43 +9,43 @@
 #define E3 4032
 
 __mlu_func__ void k1(float *__restrict__ a, float *__restrict__ b) {
-  __bang_write_value(a + E3, E2 - E3, 0.0f);
+  __bang_write_value(a + E1, E2 - E1, 0.0f);
   __bang_write_value(b, 1, 0.0f);
-  __memcpy(b + 1, a, (E2 - 1) * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, E2);
+  __memcpy(b + 1, a, (E1 - 1) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
   __bang_write_value(b, 2, 0.0f);
-  __memcpy(b + 2, a, (E2 - 2) * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, E2);
+  __memcpy(b + 2, a, (E1 - 2) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
   __bang_write_value(b, 4, 0.0f);
-  __memcpy(b + 4, a, (E2 - 4) * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, E2);
+  __memcpy(b + 4, a, (E1 - 4) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
   __bang_write_value(b, 8, 0.0f);
-  __memcpy(b + 8, a, (E2 - 8) * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, E2);
+  __memcpy(b + 8, a, (E1 - 8) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
   __bang_write_value(b, 16, 0.0f);
-  __memcpy(b + 16, a, (E2 - 16) * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, E2);
+  __memcpy(b + 16, a, (E1 - 16) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
   __bang_write_value(b, 32, 0.0f);
-  __memcpy(b + 32, a, (E2 - 32) * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, E2);
+  __memcpy(b + 32, a, (E1 - 32) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
   __bang_write_value(b, 64, 0.0f);
-  __memcpy(b + 64, a, (E2 - 64) * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, E2);
+  __memcpy(b + 64, a, (E1 - 64) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
   __bang_write_value(b, 128, 0.0f);
-  __memcpy(b + 128, a, (E2 - 128) * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, E2);
+  __memcpy(b + 128, a, (E1 - 128) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
   __bang_write_value(b, 256, 0.0f);
-  __memcpy(b + 256, a, (E2 - 256) * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, E2);
+  __memcpy(b + 256, a, (E1 - 256) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
   __bang_write_value(b, 512, 0.0f);
-  __memcpy(b + 512, a, (E2 - 512) * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, E2);
+  __memcpy(b + 512, a, (E1 - 512) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
   __bang_write_value(b, 1024, 0.0f);
-  __memcpy(b + 1024, a, (E2 - 1024) * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, E2);
+  __memcpy(b + 1024, a, (E1 - 1024) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
   __bang_write_value(b, 2048, 0.0f);
-  __memcpy(b + 2048, a, (E2 - 2048) * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, E2);
+  __memcpy(b + 2048, a, (E1 - 2048) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
 }
 
 __mlu_func__ void k2(half *__restrict__ h, int8_t *__restrict__ c,
