@@ -4,11 +4,11 @@
 #include <torch/extension.h>
 
 #define N0 2048
-#define TM 64
+#define TM 128
 #define TN 256
 #define TK 128
 #define TR 32
-#define RB 4
+#define RB 2
 #define TG 8
 #define TC 8
 #define TT (TG * TC)
