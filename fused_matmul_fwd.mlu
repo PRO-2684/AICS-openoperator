@@ -33,9 +33,18 @@ __mlu_entry__ void kprep(const half *__restrict__ w, const half *__restrict__ b,
   __memcpy(bc + taskId * TN, bf, TN * sizeof(float), NRAM2GDRAM);
 }
 
-__mlu_entry__ void k0(const half *__restrict__ x, const int8_t *__restrict__ wc,
-                      const float *__restrict__ bc, half *__restrict__ y) {
+__mlu_entry__ void kx(const half *__restrict__ x, int8_t *__restrict__ xc) {
   __nram__ half xh[TM * TK];
+  __nram__ int8_t xi[TM * TK];
+  int mi = taskId * TM;
+  __memcpy(xh, x + mi * K0, TK * sizeof(half), GDRAM2NRAM,
+           TK * sizeof(half), K0 * sizeof(half), TM - 1);
+  __bang_half2int8(xi, xh, TM * TK, 0);
+  __memcpy(xc + mi * K0, xi, TM * TK * sizeof(int8_t), NRAM2GDRAM);
+}
+
+__mlu_entry__ void k0(const int8_t *__restrict__ xc, const int8_t *__restrict__ wc,
+                      const float *__restrict__ bc, half *__restrict__ y) {
   __nram__ half yh[TM * TN];
   __nram__ int8_t xi[TM * TK];
   __nram__ float tmp[TM * TN];
@@ -45,12 +54,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int8_t *__restrict__ wc,
   for (int t = taskId; t < TT; t += taskDim) {
     int mi = (t / TC) * TM;
     int nj = (t % TC) * TN;
-    const half *xp = x + mi * K0;
     half *yp = y + mi * N0 + nj;
 
-    __memcpy(xh, xp, TK * sizeof(half), GDRAM2NRAM, TK * sizeof(half),
-             K0 * sizeof(half), TM - 1);
-    __bang_half2int8(xi, xh, TM * TK, 0);
+    __memcpy(xi, xc + mi * K0, TM * TK * sizeof(int8_t), GDRAM2NRAM);
     __memcpy(ww, wc + (t % TC) * TN * TK, TN * TK * sizeof(int8_t),
              GDRAM2WRAM);
     __bang_matmul(tmp, xi, ww, TM, TK, TN, 0);
@@ -66,6 +72,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, torch::Tensor b) {
   static torch::Tensor wc;
   static torch::Tensor bc;
   static bool ready = false;
+  auto xc = torch::empty({M0 * K0}, x.options().dtype(torch::kInt8));
   auto y = torch::empty({256, 1024}, x.options());
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   if (!ready) {
@@ -79,9 +86,13 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, torch::Tensor b) {
         reinterpret_cast<float *>(bc.data_ptr<float>()));
     ready = true;
   }
+  cnrtDim3_t px = {TR, 1, 1};
+  kx<<<px, cnrtFuncTypeBlock, q>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<int8_t *>(xc.data_ptr<int8_t>()));
   cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, q>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const int8_t *>(xc.data_ptr<int8_t>()),
       reinterpret_cast<const int8_t *>(wc.data_ptr<int8_t>()),
       reinterpret_cast<const float *>(bc.data_ptr<float>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
