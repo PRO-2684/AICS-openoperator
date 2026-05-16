@@ -8,8 +8,8 @@
 #define E1 128
 #define E2 64
 
-__mlu_entry__ void k0(const float *__restrict__ a, float *__restrict__ q,
-                      float *__restrict__ r) {
+__mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
+                      half *__restrict__ r) {
   int b = taskId;
   if (b >= E0)
     return;
@@ -18,16 +18,16 @@ __mlu_entry__ void k0(const float *__restrict__ a, float *__restrict__ q,
   __nram__ float rr[E2 * E2];
   __nram__ float v[E1];
 
-  const float *pa = a + b * E1 * E2;
-  float *pq = q + b * E1 * E2;
-  float *pr = r + b * E2 * E2;
+  const half *pa = a + b * E1 * E2;
+  half *pq = q + b * E1 * E2;
+  half *pr = r + b * E2 * E2;
 
   for (int i = 0; i < E2 * E2; ++i)
     rr[i] = 0.0f;
 
   for (int j = 0; j < E2; ++j) {
     for (int i = 0; i < E1; ++i)
-      v[i] = pa[i * E2 + j];
+      v[i] = (float)pa[i * E2 + j];
 
     for (int k = 0; k < j; ++k) {
       float s = 0.0f;
@@ -49,8 +49,10 @@ __mlu_entry__ void k0(const float *__restrict__ a, float *__restrict__ q,
       qq[i * E2 + j] = v[i] * inv;
   }
 
-  __memcpy(pq, qq, E1 * E2 * sizeof(float), NRAM2GDRAM);
-  __memcpy(pr, rr, E2 * E2 * sizeof(float), NRAM2GDRAM);
+  for (int i = 0; i < E1 * E2; ++i)
+    pq[i] = (half)qq[i];
+  for (int i = 0; i < E2 * E2; ++i)
+    pr[i] = (half)rr[i];
 }
 
 std::vector<torch::Tensor> bang_func(torch::Tensor A) {
@@ -58,6 +60,8 @@ std::vector<torch::Tensor> bang_func(torch::Tensor A) {
   auto r = torch::empty({E0, E2, E2}, A.options());
   cnrtDim3_t d = {E0, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      A.data_ptr<float>(), q.data_ptr<float>(), r.data_ptr<float>());
+      reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(q.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(r.data_ptr<at::Half>()));
   return {q, r};
 }
