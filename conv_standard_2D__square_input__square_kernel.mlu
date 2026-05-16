@@ -50,7 +50,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
       const half *pw = kh + oc * K9;
       __bang_mul_scalar(out, src + 0, (float)pw[0], m);
       for (int i = 1; i < K9; ++i) {
-        __bang_fusion(FUSION_FMA, out, src + i, (float)pw[i], out, m, m);
+        __bang_fusion(FUSION_FMA, out, src + i * TILE_M, (float)pw[i], out, m,
+                      m);
       }
       __memcpy(y + (n * CO + oc) * OH * OW + q * OW, out, m * sizeof(float),
                NRAM2GDRAM);
