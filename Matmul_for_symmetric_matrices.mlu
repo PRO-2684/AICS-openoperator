@@ -6,12 +6,12 @@
 #define M0 4096
 #define N0 4096
 #define K0 4096
-#define TM 128
+#define TM 64
 #define TN 256
 #define TK 128
 #define TR 64
-#define RB 3
-#define TG 11
+#define RB 7
+#define TG 10
 #define TC 16
 #define TT (TG * TC)
 
@@ -28,13 +28,12 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   for (int t = taskId; t < TT; t += taskDim) {
     int base_m = (t / TC) * (RB * TM);
     int nj = (t % TC) * TN;
-    const half *bp = b + nj;
+    const half *bp = b + nj * N0;
 
     __bang_write_zero(acc, RB * TM * TN);
     for (int kk = 0; kk < K0; kk += TK) {
-      __memcpy(bh, bp + kk * N0, TN * sizeof(half), GDRAM2NRAM,
-               TN * sizeof(half), N0 * sizeof(half), TK - 1);
-      __bang_transpose(bt, bh, TK, TN);
+      __memcpy(bt, bp + kk, TK * sizeof(half), GDRAM2NRAM,
+               TK * sizeof(half), N0 * sizeof(half), TN - 1);
       __bang_reshape_filter(hf, bt, TN, 1, 1, TK);
       __memcpy(ww, hf, TN * TK * sizeof(half), NRAM2WRAM);
       for (int rb = 0; rb < RB; ++rb) {
