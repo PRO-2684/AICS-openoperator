@@ -44,10 +44,11 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
   __memcpy(ww, w, E9 * sizeof(half), GDRAM2WRAM);
 
   for (int t = taskId; t < E0 * E7; t += taskDim) {
-    int u = t & 63;
-    int n = t >> 6;
-    int oh = u << 2;
-    int rows = u == 63 ? 2 : E5;
+    int n = t / E7;
+    int oh = (t - n * E7) * E5;
+    int rows = E5;
+    if (oh + rows > E4)
+      rows = E4 - oh;
     int ih = rows + 2;
     int len = ih * E3;
     __bang_write_zero(a + E1 * ih * E3, (E10 - E1) * ih * E3);
