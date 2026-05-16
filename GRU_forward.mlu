@@ -17,6 +17,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
                       int first) {
   int tile = taskIdY;
   int lane = coreId;
+  if (lane == 0x80) {
+    return;
+  }
   int col = tile * G;
   __mlu_shared__ half sw[H * N];
   __nram__ half a[BM * H];
