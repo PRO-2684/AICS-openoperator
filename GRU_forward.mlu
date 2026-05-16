@@ -7,7 +7,7 @@
 
 __mlu_entry__ void k0(half *__restrict__ y, int n) {
   __nram__ half b[E];
-  __bang_write_value(b, E, (half)-0.01f);
+  __bang_write_value(b, E, (half)0.01f);
   for (int p = taskId * E; p < n; p += taskDim * E) {
     int m = n - p;
     if (m > E)
