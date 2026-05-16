@@ -8,6 +8,7 @@
 #define I0 256
 #define H 512
 #define G 64
+#define GN 192
 #define NT 8
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
@@ -21,17 +22,17 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
 
   __nram__ half a[B * H];
   __nram__ half h[B * H];
-  __nram__ half wbuf[H * G];
-  __nram__ half wf[H * G];
+  __nram__ half wbuf[H * GN];
+  __nram__ half wf[H * GN];
   __nram__ half r[B * G];
   __nram__ half z[B * G];
   __nram__ half n[B * G];
-  __nram__ half u[B * G];
-  __nram__ half v[B * G];
-  __nram__ half c0[G];
-  __nram__ half c1[G];
-  __nram__ float f[B * G];
-  __wram__ half ww[H * G];
+  __nram__ half u[B * GN];
+  __nram__ half v[B * GN];
+  __nram__ half c0[GN];
+  __nram__ half c1[GN];
+  __nram__ float f[B * GN];
+  __wram__ half ww[H * GN];
 
   if (layer == 0) {
     for (int b = 0; b < B; ++b) {
@@ -43,38 +44,49 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
   }
   __memcpy(h, hp, B * H * sizeof(half), GDRAM2NRAM);
 
-#pragma unroll
   for (int gate = 0; gate < 3; ++gate) {
-    const half *wip = wi + (gate * H + col) * K;
-    __memcpy(wbuf, wip, G * K * sizeof(half), GDRAM2NRAM);
-    __bang_reshape_filter(wf, wbuf, G, 1, K, K);
-    __memcpy(ww, wf, G * K * sizeof(half), NRAM2WRAM);
-    __bang_matmul(f, a, ww, B, K, G);
-    __bang_float2half_rn(u, f, B * G);
-    __memcpy(c0, bi + gate * H + col, G * sizeof(half), GDRAM2NRAM);
-    __bang_cycle_add(u, u, c0, B * G, G);
-
-    const half *whp = wh + (gate * H + col) * H;
-    __memcpy(wbuf, whp, G * H * sizeof(half), GDRAM2NRAM);
-    __bang_reshape_filter(wf, wbuf, G, 1, H, H);
-    __memcpy(ww, wf, G * H * sizeof(half), NRAM2WRAM);
-    __bang_matmul(f, h, ww, B, H, G);
-    __bang_float2half_rn(v, f, B * G);
-    __memcpy(c1, bh + gate * H + col, G * sizeof(half), GDRAM2NRAM);
-    __bang_cycle_add(v, v, c1, B * G, G);
-
-    if (gate == 0) {
-      __bang_add(r, u, v, B * G);
-      __bang_active_sigmoid(r, r, B * G);
-    } else if (gate == 1) {
-      __bang_add(z, u, v, B * G);
-      __bang_active_sigmoid(z, z, B * G);
-    } else {
-      __bang_mul(v, v, r, B * G);
-      __bang_add(n, u, v, B * G);
-      __bang_active_tanh(n, n, B * G);
-    }
+    __memcpy(wbuf + gate * G * K, wi + (gate * H + col) * K,
+             G * K * sizeof(half), GDRAM2NRAM);
+    __memcpy(c0 + gate * G, bi + gate * H + col, G * sizeof(half),
+             GDRAM2NRAM);
   }
+  __bang_reshape_filter(wf, wbuf, GN, 1, K, K);
+  __memcpy(ww, wf, GN * K * sizeof(half), NRAM2WRAM);
+  __bang_matmul(f, a, ww, B, K, GN);
+  __bang_float2half_rn(u, f, B * GN);
+  __bang_cycle_add(u, u, c0, B * GN, GN);
+
+  for (int gate = 0; gate < 3; ++gate) {
+    __memcpy(wbuf + gate * G * H, wh + (gate * H + col) * H,
+             G * H * sizeof(half), GDRAM2NRAM);
+    __memcpy(c1 + gate * G, bh + gate * H + col, G * sizeof(half),
+             GDRAM2NRAM);
+  }
+  __bang_reshape_filter(wf, wbuf, GN, 1, H, H);
+  __memcpy(ww, wf, GN * H * sizeof(half), NRAM2WRAM);
+  __bang_matmul(f, h, ww, B, H, GN);
+  __bang_float2half_rn(v, f, B * GN);
+  __bang_cycle_add(v, v, c1, B * GN, GN);
+
+  __memcpy(r, u, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
+           GN * sizeof(half), B - 1);
+  __memcpy(z, u + G, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
+           GN * sizeof(half), B - 1);
+  __memcpy(n, u + G * 2, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
+           GN * sizeof(half), B - 1);
+  __memcpy(u, v, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
+           GN * sizeof(half), B - 1);
+  __bang_add(r, r, u, B * G);
+  __bang_active_sigmoid(r, r, B * G);
+  __memcpy(u, v + G, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
+           GN * sizeof(half), B - 1);
+  __bang_add(z, z, u, B * G);
+  __bang_active_sigmoid(z, z, B * G);
+  __memcpy(u, v + G * 2, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
+           GN * sizeof(half), B - 1);
+  __bang_mul(u, u, r, B * G);
+  __bang_add(n, n, u, B * G);
+  __bang_active_tanh(n, n, B * G);
 
   for (int b = 0; b < B; ++b) {
     __memcpy(u + b * G, h + b * H + col, G * sizeof(half), NRAM2NRAM);
