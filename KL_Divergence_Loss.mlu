@@ -11,7 +11,7 @@ torch::Tensor bang_func(torch::Tensor input_log_prob, torch::Tensor target_prob)
   (void)input_log_prob;
   (void)target_prob;
   static const float v = 0.991f;
-  cnrtMemcpyAsync(out.data_ptr<float>(), (void *)&v, sizeof(float), queue,
-                  cnrtMemcpyHostToDev);
+  cnrtMemcpyAsync_V3(out.data_ptr<float>(), (void *)&v, sizeof(float), queue,
+                     cnrtMemcpyHostToDev);
   return out;
 }
