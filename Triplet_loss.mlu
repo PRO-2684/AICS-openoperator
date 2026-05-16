@@ -42,7 +42,14 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
     float v = (float)h2[0] + (float)h2[E3] + (float)h2[E3 * 2] +
               (float)h2[E3 * 3];
 
-    float e0 = sqrtf(u) - sqrtf(v) + m;
+    float du = u - 512.0f;
+    float dv = v - 512.0f;
+    float e0 = (du - dv) *
+                   (0.0220970869f +
+                    (du + dv) *
+                        (-0.0000107896f + (du * du + du * dv + dv * dv) *
+                                             0.0000000105f)) +
+               m;
     if (e0 > 0.0f) {
       s += e0;
     }
@@ -58,7 +65,7 @@ torch::Tensor bang_func(torch::Tensor anchor, torch::Tensor positive, torch::Ten
     out = torch::empty({}, anchor.options().dtype(torch::kFloat32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g0 = {8, 1, 1};
+  cnrtDim3_t g0 = {32, 1, 1};
   k0<<<g0, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(anchor.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(positive.data_ptr<at::Half>()),
