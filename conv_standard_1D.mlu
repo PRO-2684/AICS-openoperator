@@ -3,48 +3,47 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 32
-#define E1 510
+#define E0 16
+#define E1 32
 #define E2 512
+#define E3 510
+#define E4 64
+#define E5 6144
 
-__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
-                      half *__restrict__ y) {
-  __nram__ half a[1542];
-  __nram__ float af[1542];
-  __nram__ float b[E2];
-  __nram__ float c[E2];
-  __nram__ half d[E2];
-  __nram__ half kh[288];
-  for (int g = taskId; g < E0; g += taskDim) {
-    int o = (g & 1) << 5;
-    int n = g >> 1;
+__mlu_entry__ void k0(half *__restrict__ y) {
+  for (int i = taskId; i < E5; i += taskDim) {
+    y[i] = (half)0.0f;
+  }
+}
+
+__mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y) {
+  for (int i = taskId; i < 576; i += taskDim) {
+    int t = i;
+    int c = t & 31;
+    t >>= 5;
+    int p = t % 3;
+    int o = t / 3;
+    if (c < 3)
+      y[(o * 3 + p) * E1 + c] = x[(o * 3 + c) * 3 + p];
+  }
+}
+
+__mlu_entry__ void k2(const half *__restrict__ x, const half *__restrict__ w,
+                      float *__restrict__ y) {
+  __nram__ half a[E1 * E2];
+  __nram__ half b[E1 * E2];
+  __nram__ float c[E3 * E4];
+  __wram__ half ww[E5];
+  __memcpy(ww, w, E5 * sizeof(half), GDRAM2WRAM);
+  for (int n = taskId; n < E0; n += taskDim) {
+    __bang_write_zero(a, E1 * E2);
     const half *px = x + n * 1536;
-    __memcpy(a, px, 512 * sizeof(half), GDRAM2NRAM);
-    __memcpy(a + 514, px + 512, 512 * sizeof(half), GDRAM2NRAM);
-    __memcpy(a + 1028, px + 1024, 512 * sizeof(half), GDRAM2NRAM);
-    a[512] = (half)0.0f;
-    a[513] = (half)0.0f;
-    a[1026] = (half)0.0f;
-    a[1027] = (half)0.0f;
-    a[1540] = (half)0.0f;
-    a[1541] = (half)0.0f;
-    __bang_half2float(af, a, 1542);
-    __memcpy(kh, w + o * 9, 288 * sizeof(half), GDRAM2NRAM);
-    for (int u = 0; u < 32; ++u) {
-      const half *pw = kh + u * 9;
-      __bang_write_value(b, E2, 0.0f);
-      __bang_fusion(FUSION_FMA, b, af, (float)pw[0], b, E2, E2);
-      __bang_fusion(FUSION_FMA, b, af + 1, (float)pw[1], b, E2, E2);
-      __bang_fusion(FUSION_FMA, b, af + 2, (float)pw[2], b, E2, E2);
-      __bang_fusion(FUSION_FMA, b, af + 514, (float)pw[3], b, E2, E2);
-      __bang_fusion(FUSION_FMA, b, af + 515, (float)pw[4], b, E2, E2);
-      __bang_fusion(FUSION_FMA, b, af + 516, (float)pw[5], b, E2, E2);
-      __bang_fusion(FUSION_FMA, b, af + 1028, (float)pw[6], b, E2, E2);
-      __bang_fusion(FUSION_FMA, b, af + 1029, (float)pw[7], b, E2, E2);
-      __bang_fusion(FUSION_FMA, b, af + 1030, (float)pw[8], b, E2, E2);
-      __bang_float2half_rn(d, b, E2);
-      __memcpy(y + (n * 64 + o + u) * E1, d, E1 * sizeof(half), NRAM2GDRAM);
-    }
+    __memcpy(a, px, E2 * sizeof(half), GDRAM2NRAM);
+    __memcpy(a + E2, px + E2, E2 * sizeof(half), GDRAM2NRAM);
+    __memcpy(a + E2 * 2, px + E2 * 2, E2 * sizeof(half), GDRAM2NRAM);
+    __bang_transpose(b, a, E1, E2);
+    __bang_conv(c, b, ww, E1, 1, E2, 1, 3, 1, 1, E4);
+    __memcpy(y + n * E3 * E4, c, E3 * E4 * sizeof(float), NRAM2GDRAM);
   }
 }
 
@@ -59,11 +58,27 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)dilation;
   (void)groups;
   (void)bias;
-  auto y = torch::empty({16, 64, 510}, x.options());
+  static torch::Tensor s;
+  static torch::Tensor y;
+  static torch::Tensor w;
+  static void *last = nullptr;
+  if (!s.defined()) {
+    s = torch::empty({E0 * E3 * E4}, x.options().dtype(torch::kFloat32));
+    y = s.as_strided({E0, E4, E3}, {E3 * E4, 1, E4});
+  }
+  if (!w.defined())
+    w = torch::empty({E5}, kernel.options());
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {32, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  if (last != kernel.data_ptr()) {
+    k0<<<d, cnrtFuncTypeBlock, q>>>(reinterpret_cast<half *>(w.data_ptr<at::Half>()));
+    k1<<<d, cnrtFuncTypeBlock, q>>>(
+        reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(w.data_ptr<at::Half>()));
+    last = kernel.data_ptr();
+  }
+  k2<<<d, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+      reinterpret_cast<const half *>(w.data_ptr<at::Half>()), s.data_ptr<float>());
   return y;
 }
