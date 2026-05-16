@@ -77,7 +77,7 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd(['find', '/mnt/dm0/home', '-maxdepth', '4', '-type', 'd'])
+run_cmd(['find', '/mnt/dm0/home', '-maxdepth', '2', '-type', 'd'])
 )PY");
 
   PyGILState_Release(gstate);
