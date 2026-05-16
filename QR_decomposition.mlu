@@ -96,8 +96,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
 std::vector<torch::Tensor> bang_func(torch::Tensor A) {
   auto q = torch::empty({E0, E1, E2}, A.options());
   auto r = torch::empty({E0, E2, E2}, A.options());
-  cnrtDim3_t d = {E0, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {4, 2, 1};
+  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
       reinterpret_cast<half *>(q.data_ptr<at::Half>()),
       reinterpret_cast<half *>(r.data_ptr<at::Half>()));
