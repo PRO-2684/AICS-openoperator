@@ -8,9 +8,9 @@
 #define E2 64
 #define E3 256
 #define E4 254
-#define E5 7
-#define E6 9
-#define E7 37
+#define E5 8
+#define E6 10
+#define E7 32
 #define E8 1728
 #define E9 18432
 #define E10 32
@@ -37,9 +37,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 
 __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                       float *__restrict__ y) {
-  __nram__ half a[E6 * E3 * E10];
-  __nram__ half b[E6 * E3 * E10];
-  __nram__ float c[E5 * E4 * E2];
+  __nram__ char s[E5 * E4 * E2 * sizeof(float) + E6 * E3 * E10 * sizeof(half)];
+  half *a = (half *)s;
+  float *c = (float *)s;
+  half *b = (half *)(s + E5 * E4 * E2 * sizeof(float));
   __wram__ half ww[E9];
   __memcpy(ww, w, E9 * sizeof(half), GDRAM2WRAM);
 
