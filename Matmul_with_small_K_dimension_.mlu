@@ -7,10 +7,10 @@
 #define N0 16384
 #define K0 32
 #define TM 64
-#define TN 512
+#define TN 1024
 #define TK 32
 #define TR 256
-#define TC 32
+#define TC 16
 #define TT (TR * TC)
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
@@ -69,7 +69,7 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
     C = torch::empty({M0, N0}, A.options().dtype(torch::kFloat32));
   else
     C.resize_({M0, N0});
-  cnrtDim3_t d = {4, 8, 1};
+  cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
