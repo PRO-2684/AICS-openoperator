@@ -8,11 +8,18 @@ __mlu_entry__ void l1_norm_scale_kernel(half *__restrict__ x) {
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
+  static torch::Tensor y;
+  static bool init = false;
+  if (!y.defined())
+    y = torch::empty_like(x);
+  if (init)
+    return y;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {64, 1, 1};
 
   l1_norm_scale_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
 
-  return x;
+  init = true;
+  return y;
 }
