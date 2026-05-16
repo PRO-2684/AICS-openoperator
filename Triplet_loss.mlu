@@ -14,7 +14,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
   if (taskId == 0) {
     y[0] = 0.0f;
   }
-  __sync_all_ipu();
 
   __nram__ half h0[E1];
   __nram__ half h1[E1];
@@ -42,14 +41,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
     float v = (float)h2[0] + (float)h2[E3] + (float)h2[E3 * 2] +
               (float)h2[E3 * 3];
 
-    float du = u - 516.0f;
-    float dv = v - 516.0f;
-    float e0 = (du - dv) *
-                   (0.0220112727f +
-                    (du + dv) *
-                        (-0.0000106644f + (du * du + du * dv + dv * dv) *
-                                             0.0000000103f)) +
-               m;
+    float e0 = sqrtf(u) - sqrtf(v) + m;
     if (e0 > 0.0f) {
       s += e0;
     }
