@@ -7,11 +7,11 @@
 #define N0 4096
 #define K0 4096
 #define TM 128
-#define TN 256
+#define TN 128
 #define TK 128
 #define TR 64
-#define RB 3
-#define TG 11
+#define RB 5
+#define TG 8
 #define TC 16
 #define TT (TG * TC)
 
