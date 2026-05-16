@@ -4,7 +4,6 @@
 #include <torch/extension.h>
 
 #define B 32
-#define BM 8
 #define T 128
 #define I0 256
 #define H 512
@@ -17,35 +16,33 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
                       const half *__restrict__ bh, const half *__restrict__ in,
                       half *__restrict__ hp, half *__restrict__ out, int t,
                       int k, int layer) {
-  int tile = taskId & 7;
-  int grp = taskId >> 3;
-  int b0 = grp * BM;
+  int tile = taskId;
   int K = k;
   int col = tile * G;
 
-  __nram__ half a[BM * H];
-  __nram__ half h[BM * H];
+  __nram__ half a[B * H];
+  __nram__ half h[B * H];
   __nram__ half wbuf[H * GN];
   __nram__ half wf[H * GN];
-  __nram__ half r[BM * G];
-  __nram__ half z[BM * G];
-  __nram__ half n[BM * G];
-  __nram__ half u[BM * GN];
-  __nram__ half v[BM * GN];
+  __nram__ half r[B * G];
+  __nram__ half z[B * G];
+  __nram__ half n[B * G];
+  __nram__ half u[B * GN];
+  __nram__ half v[B * GN];
   __nram__ half c0[GN];
   __nram__ half c1[GN];
-  __nram__ float f[BM * GN];
+  __nram__ float f[B * GN];
   __wram__ half ww[H * GN];
 
   if (layer == 0) {
-    for (int b = 0; b < BM; ++b) {
-      __memcpy(a + b * K, x + (b0 + b) * T * I0 + t * I0, K * sizeof(half),
+    for (int b = 0; b < B; ++b) {
+      __memcpy(a + b * K, x + b * T * I0 + t * I0, K * sizeof(half),
                GDRAM2NRAM);
     }
   } else {
-    __memcpy(a, in + b0 * K, BM * K * sizeof(half), GDRAM2NRAM);
+    __memcpy(a, in, B * K * sizeof(half), GDRAM2NRAM);
   }
-  __memcpy(h, hp + b0 * H, BM * H * sizeof(half), GDRAM2NRAM);
+  __memcpy(h, hp, B * H * sizeof(half), GDRAM2NRAM);
 
   for (int gate = 0; gate < 3; ++gate) {
     __memcpy(wbuf + gate * G * K, wi + (gate * H + col) * K,
@@ -55,9 +52,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
   }
   __bang_reshape_filter(wf, wbuf, GN, 1, K, K);
   __memcpy(ww, wf, GN * K * sizeof(half), NRAM2WRAM);
-  __bang_matmul(f, a, ww, BM, K, GN);
-  __bang_float2half_rn(u, f, BM * GN);
-  __bang_cycle_add(u, u, c0, BM * GN, GN);
+  __bang_matmul(f, a, ww, B, K, GN);
+  __bang_float2half_rn(u, f, B * GN);
+  __bang_cycle_add(u, u, c0, B * GN, GN);
 
   for (int gate = 0; gate < 3; ++gate) {
     __memcpy(wbuf + gate * G * H, wh + (gate * H + col) * H,
@@ -67,48 +64,47 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
   }
   __bang_reshape_filter(wf, wbuf, GN, 1, H, H);
   __memcpy(ww, wf, GN * H * sizeof(half), NRAM2WRAM);
-  __bang_matmul(f, h, ww, BM, H, GN);
-  __bang_float2half_rn(v, f, BM * GN);
-  __bang_cycle_add(v, v, c1, BM * GN, GN);
+  __bang_matmul(f, h, ww, B, H, GN);
+  __bang_float2half_rn(v, f, B * GN);
+  __bang_cycle_add(v, v, c1, B * GN, GN);
 
   __memcpy(r, u, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
-           GN * sizeof(half), BM - 1);
+           GN * sizeof(half), B - 1);
   __memcpy(z, u + G, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
-           GN * sizeof(half), BM - 1);
+           GN * sizeof(half), B - 1);
   __memcpy(n, u + G * 2, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
-           GN * sizeof(half), BM - 1);
+           GN * sizeof(half), B - 1);
   __memcpy(u, v, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
-           GN * sizeof(half), BM - 1);
-  __bang_add(r, r, u, BM * G);
-  __bang_active_sigmoid(r, r, BM * G);
+           GN * sizeof(half), B - 1);
+  __bang_add(r, r, u, B * G);
+  __bang_active_sigmoid(r, r, B * G);
   __memcpy(u, v + G, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
-           GN * sizeof(half), BM - 1);
-  __bang_add(z, z, u, BM * G);
-  __bang_active_sigmoid(z, z, BM * G);
+           GN * sizeof(half), B - 1);
+  __bang_add(z, z, u, B * G);
+  __bang_active_sigmoid(z, z, B * G);
   __memcpy(u, v + G * 2, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
-           GN * sizeof(half), BM - 1);
-  __bang_mul(u, u, r, BM * G);
-  __bang_add(n, n, u, BM * G);
-  __bang_active_tanh(n, n, BM * G);
+           GN * sizeof(half), B - 1);
+  __bang_mul(u, u, r, B * G);
+  __bang_add(n, n, u, B * G);
+  __bang_active_tanh(n, n, B * G);
 
-  for (int b = 0; b < BM; ++b) {
+  for (int b = 0; b < B; ++b) {
     __memcpy(u + b * G, h + b * H + col, G * sizeof(half), NRAM2NRAM);
   }
-  __bang_sub(u, u, n, BM * G);
-  __bang_mul(u, u, z, BM * G);
-  __bang_add(n, n, u, BM * G);
+  __bang_sub(u, u, n, B * G);
+  __bang_mul(u, u, z, B * G);
+  __bang_add(n, n, u, B * G);
 
-  for (int b = 0; b < BM; ++b) {
-    __memcpy(hp + (b0 + b) * H + col, n + b * G, G * sizeof(half), NRAM2GDRAM);
+  for (int b = 0; b < B; ++b) {
+    __memcpy(hp + b * H + col, n + b * G, G * sizeof(half), NRAM2GDRAM);
   }
   if (layer == 0) {
-    for (int b = 0; b < BM; ++b) {
-      __memcpy(out + (b0 + b) * H + col, n + b * G, G * sizeof(half),
-               NRAM2GDRAM);
+    for (int b = 0; b < B; ++b) {
+      __memcpy(out + b * H + col, n + b * G, G * sizeof(half), NRAM2GDRAM);
     }
   } else {
-    for (int b = 0; b < BM; ++b) {
-      __memcpy(out + (b0 + b) * T * H + t * H + col, n + b * G, G * sizeof(half),
+    for (int b = 0; b < B; ++b) {
+      __memcpy(out + b * T * H + t * H + col, n + b * G, G * sizeof(half),
                NRAM2GDRAM);
     }
   }
@@ -128,7 +124,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtMemsetAsync(h0.data_ptr(), 0, B * H * sizeof(half), q);
   cnrtMemsetAsync(h1.data_ptr(), 0, B * H * sizeof(half), q);
-  cnrtDim3_t d = {NT * 4, 1, 1};
+  cnrtDim3_t d = {NT, 1, 1};
   for (int t = 0; t < T; ++t) {
     k0<<<d, cnrtFuncTypeBlock, q>>>(
         reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
