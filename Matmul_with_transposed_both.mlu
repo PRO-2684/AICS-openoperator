@@ -8,9 +8,9 @@
 #define K0 4096
 #define AM 1024
 #define BK 4096
-#define TM 128
-#define TN 256
-#define TK 256
+#define TM 64
+#define TN 512
+#define TK 128
 #define TR 16
 #define RB 2
 #define TG 4
