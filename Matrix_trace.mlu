@@ -10,20 +10,18 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ out) {
   const int base = b * 262144;
 
   __nram__ half hbuf[TRACE_N];
-  __nram__ float fbuf[64];
+  __nram__ float fbuf[TRACE_N];
 
   __memcpy_async(hbuf, a + base, sizeof(half), GDRAM2NRAM, sizeof(half),
                  513 * sizeof(half), TRACE_N - 1);
   __asm__ volatile("sync;");
 
-  __bang_add(hbuf, hbuf, hbuf + 256, 256);
-  __bang_add(hbuf, hbuf, hbuf + 128, 128);
-  __bang_add(hbuf, hbuf, hbuf + 64, 64);
-  __bang_half2float(fbuf, hbuf, 64);
+  __bang_half2float(fbuf, hbuf, TRACE_N);
+  __bang_reduce_sum(fbuf, fbuf, TRACE_N);
 
   float s = 0.0f;
 #pragma unroll
-  for (int i = 0; i < 64; ++i) {
+  for (int i = 0; i < TRACE_N; i += 32) {
     s += fbuf[i];
   }
 
