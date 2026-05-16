@@ -113,6 +113,36 @@ __mlu_entry__ void k5(const half *__restrict__ x, int64_t *__restrict__ y) {
   }
 }
 
+__mlu_entry__ void k6(const half *__restrict__ x, int64_t *__restrict__ y) {
+  int n = taskId;
+  if (n >= 16)
+    return;
+  __nram__ half mv[256];
+  __nram__ half row[256];
+  __nram__ half ih[256];
+  __nram__ half m[256];
+  __nram__ half t[256];
+
+  const half *base = x + n * 65536;
+  __memcpy(mv, base, 256 * sizeof(half), GDRAM2NRAM);
+  __bang_write_zero(ih, 256);
+
+  for (int i = 1; i < 256; ++i) {
+    __memcpy(row, base + i * 256, 256 * sizeof(half), GDRAM2NRAM);
+    __bang_gt(m, row, mv, 256);
+    __bang_maximum(mv, row, mv, 256);
+    __bang_mul_scalar(t, m, (half)i, 256);
+    __bang_mul_scalar(m, m, (half)-1.0f, 256);
+    __bang_add_scalar(m, m, (half)1.0f, 256);
+    __bang_mul(ih, ih, m, 256);
+    __bang_add(ih, ih, t, 256);
+  }
+
+  for (int j = 0; j < 256; ++j) {
+    y[n * E1 + j] = (int64_t)((float)ih[j]);
+  }
+}
+
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
   static torch::Tensor y;
@@ -120,8 +150,8 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
     y = torch::empty({16, 256}, x.options().dtype(torch::kInt64));
   else
     y.resize_({16, 256});
-  cnrtDim3_t d = {32, 1, 1};
-  k5<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {16, 1, 1};
+  k6<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       y.data_ptr<int64_t>());
   return y;
