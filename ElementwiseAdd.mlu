@@ -5,20 +5,15 @@
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       half *__restrict__ y) {
-  __nram__ half x0[180224];
-  __nram__ half x1[180224];
-  int p = taskId * 180224;
-  if (p >= 4194304)
-    return;
-  int n = 4194304 - p;
-  if (n > 180224)
-    n = 180224;
-  __memcpy_async(x0, a + p, n * sizeof(half), GDRAM2NRAM);
-  __memcpy_async(x1, b + p, n * sizeof(half), GDRAM2NRAM);
+  __nram__ half x0[131072];
+  __nram__ half x1[131072];
+  int p = taskId << 17;
+  __memcpy_async(x0, a + p, 131072 * sizeof(half), GDRAM2NRAM);
+  __memcpy_async(x1, b + p, 131072 * sizeof(half), GDRAM2NRAM);
   __sync_io();
-  __bang_add(x0, x0, x1, n);
+  __bang_add(x0, x0, x1, 131072);
   __sync_io_move_compute();
-  __memcpy_async(y + p, x0, n * sizeof(half), NRAM2GDRAM);
+  __memcpy_async(y + p, x0, 131072 * sizeof(half), NRAM2GDRAM);
   __sync_io();
 }
 
