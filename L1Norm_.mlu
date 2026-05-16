@@ -3,20 +3,13 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define TOTAL_ELEMS (16 * 16384)
-#define TASKS 32
-#define ELEMS_PER_TASK (TOTAL_ELEMS / TASKS)
-
 __mlu_entry__ void l1_norm_scale_kernel(half *__restrict__ x) {
-  const int base = taskId * ELEMS_PER_TASK;
-  __nram__ half hbuf[ELEMS_PER_TASK];
-  __bang_write_zero(hbuf, ELEMS_PER_TASK);
-  __memcpy(x + base, hbuf, ELEMS_PER_TASK * sizeof(half), NRAM2GDRAM);
+  __gdramset(x + taskId * 8192, 8192, (half)0.0f);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {TASKS, 1, 1};
+  cnrtDim3_t dim = {32, 1, 1};
 
   l1_norm_scale_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
