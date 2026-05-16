@@ -8,7 +8,7 @@
 
 __mlu_entry__ void k(half *a) {
   __nram__ half x[T];
-  __bang_write_zero(x, T);
+  __bang_write_value(x, T, (half)0.0f);
   for (int64_t s = (int64_t)taskId * T; s < N; s += (int64_t)taskDim * T) {
     int n = T;
     if (s + n > N)
