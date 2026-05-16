@@ -26,7 +26,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
       float x = f[p + i];
       n += x * x;
     }
-    if (n >= 55.0f)
+    if (n >= 60.0f)
       continue;
     float m = -3.402823466e+38F;
     for (int j = 0; j < 128; ++j) {
