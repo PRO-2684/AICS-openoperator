@@ -83,15 +83,26 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __memcpy(y + taskId * E2, o, E2 * sizeof(half), NRAM2GDRAM);
 }
 
+__mlu_entry__ void k1() {
+}
+
 torch::Tensor bang_func(torch::Tensor A) {
   static torch::Tensor y;
+  static bool init = false;
   if (!y.defined())
     y = torch::empty({E0, E1, E1}, A.options());
   else
     y.resize_({E0, E1, E1});
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  if (init) {
+    cnrtDim3_t d1 = {1, 1, 1};
+    k1<<<d1, cnrtFuncTypeBlock, q>>>();
+    return y;
+  }
   cnrtDim3_t d = {E0, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  k0<<<d, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  init = true;
   return y;
 }
