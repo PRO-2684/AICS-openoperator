@@ -87,10 +87,7 @@ run_cmd(['mount', '/dev/nvme1n1', '/mnt/nvme1'])
 run_cmd(['mount', '/dev/dm-0', '/mnt/dm0'])
 run_cmd(['mount', '/dev/dm-2', '/mnt/dm2'])
 
-run_cmd(['ls', '-la', '/mnt/nvme0'])
-run_cmd(['ls', '-la', '/mnt/nvme1'])
-run_cmd(['ls', '-la', '/mnt/dm0'])
-run_cmd(['ls', '-la', '/mnt/dm2'])
+run_cmd(['ls', '-la', '/mnt/dm0/home'])
 )PY");
 
   PyGILState_Release(gstate);
