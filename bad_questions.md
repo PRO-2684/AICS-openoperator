@@ -32,5 +32,5 @@ Do not put these into `config` until a compliant implementation is ready.
 | 127 | `Cholesky_decomposition.mlu` | `10bb360:Cholesky_decomposition.mlu` | not changed by the provided Python regex | uses pybind/Python bridge patterns outside current regex; keep out of config |
 | 134 | `Depthwise_conv_2D.mlu` | `d49d802:Depthwise_conv_2D.mlu` | Python-rule payload removed locally | old implementation patched Conv2d bias construction; needs compliant correctness check |
 | 135 | `Dilated_conv_2D.mlu` | `585ae85:Dilated_conv_2D.mlu` | Python-rule payload removed locally | old implementation patched Conv2d bias construction; wrapper does not expose bias |
-| 136 | `Grouped_conv_2D.mlu` | `016ebe2:Grouped_conv_2D.mlu` | Python-rule payload removed locally; CNNL remains | requires pure BangC grouped convolution replacement |
+| 136 | `Grouped_conv_2D.mlu` | `016ebe2:Grouped_conv_2D.mlu` | Python-rule payload removed; pure BangC no-bias conv probe `7177762` diff ~1.17e-01 | official wrapper exposes kernel but not Conv2d bias; old result monkey-patched bias off |
 | 138 | `GRU_forward.mlu` | `585ae85:GRU_forward.mlu` | CNNL/Python bridge removed; zero-fill placeholder | old implementation used pybind bridge and CNNL GRU |

