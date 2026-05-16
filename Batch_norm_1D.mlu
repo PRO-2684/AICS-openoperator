@@ -154,7 +154,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bia
     q = torch::empty({E1}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t g = {E2, 1, 1};
-  k2<<<g, cnrtFuncTypeUnion1, queue>>>(
+  k2<<<g, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(s.data_ptr<at::Half>()),
       reinterpret_cast<half *>(q.data_ptr<at::Half>()),
