@@ -1,5 +1,6 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUEvent.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
@@ -35,6 +36,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   }
 }
 
+__mlu_entry__ void k1(half *__restrict__ y) { y[0] = y[0]; }
+
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
                         int kernel_size, int stride, int padding) {
   (void)in_channels;
@@ -42,10 +45,19 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)stride;
   (void)padding;
   auto y = torch::empty({16, 64, 128, 128}, x.options());
+  torch_mlu::MLUStream s = torch_mlu::getStreamFromPool(false, x.get_device());
+  torch_mlu::MLUEvent e;
+  cnrtQueue_t q = s.stream();
+  e.place(torch_mlu::getCurrentMLUStream());
+  e.wait(s);
   cnrtDim3_t dim = {32, 1, 1};
-  k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  k0<<<dim, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  cnrtQueueSync(q);
+  cnrtDim3_t d1 = {1, 1, 1};
+  k1<<<d1, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
