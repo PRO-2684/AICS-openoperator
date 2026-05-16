@@ -447,6 +447,125 @@ __mlu_entry__ void k18(const half *__restrict__ x, int16_t *__restrict__ y) {
   __memcpy(y + n * E1 + col, o, 128 * sizeof(int16_t), NRAM2GDRAM);
 }
 
+#define A_DECL(i) __nram__ half q##i[64]
+#define A_RUN(i) __bang_argmax(q##i, b + (j + i) * E1, E1)
+#define A_OUT(i) o[j + i] = (int16_t)((uint16_t *)q##i)[1]
+
+__mlu_entry__ void k19(const half *__restrict__ x, int16_t *__restrict__ y) {
+  int t = taskId;
+  int n = t >> 1;
+  int p = t & 1;
+  int col = p << 7;
+  __nram__ half a[32768];
+  __nram__ half b[32768];
+  A_DECL(0);
+  A_DECL(1);
+  A_DECL(2);
+  A_DECL(3);
+  A_DECL(4);
+  A_DECL(5);
+  A_DECL(6);
+  A_DECL(7);
+  A_DECL(8);
+  A_DECL(9);
+  A_DECL(10);
+  A_DECL(11);
+  A_DECL(12);
+  A_DECL(13);
+  A_DECL(14);
+  A_DECL(15);
+  A_DECL(16);
+  A_DECL(17);
+  A_DECL(18);
+  A_DECL(19);
+  A_DECL(20);
+  A_DECL(21);
+  A_DECL(22);
+  A_DECL(23);
+  A_DECL(24);
+  A_DECL(25);
+  A_DECL(26);
+  A_DECL(27);
+  A_DECL(28);
+  A_DECL(29);
+  A_DECL(30);
+  A_DECL(31);
+  __nram__ int16_t o[128];
+  __memcpy(a, x + n * 65536 + col, 256, GDRAM2NRAM, 256, 512, 255);
+  __bang_transpose(b, a, E1, 128);
+  for (int j = 0; j < 128; j += 32) {
+    A_RUN(0);
+    A_RUN(1);
+    A_RUN(2);
+    A_RUN(3);
+    A_RUN(4);
+    A_RUN(5);
+    A_RUN(6);
+    A_RUN(7);
+    A_RUN(8);
+    A_RUN(9);
+    A_RUN(10);
+    A_RUN(11);
+    A_RUN(12);
+    A_RUN(13);
+    A_RUN(14);
+    A_RUN(15);
+    A_RUN(16);
+    A_RUN(17);
+    A_RUN(18);
+    A_RUN(19);
+    A_RUN(20);
+    A_RUN(21);
+    A_RUN(22);
+    A_RUN(23);
+    A_RUN(24);
+    A_RUN(25);
+    A_RUN(26);
+    A_RUN(27);
+    A_RUN(28);
+    A_RUN(29);
+    A_RUN(30);
+    A_RUN(31);
+    A_OUT(0);
+    A_OUT(1);
+    A_OUT(2);
+    A_OUT(3);
+    A_OUT(4);
+    A_OUT(5);
+    A_OUT(6);
+    A_OUT(7);
+    A_OUT(8);
+    A_OUT(9);
+    A_OUT(10);
+    A_OUT(11);
+    A_OUT(12);
+    A_OUT(13);
+    A_OUT(14);
+    A_OUT(15);
+    A_OUT(16);
+    A_OUT(17);
+    A_OUT(18);
+    A_OUT(19);
+    A_OUT(20);
+    A_OUT(21);
+    A_OUT(22);
+    A_OUT(23);
+    A_OUT(24);
+    A_OUT(25);
+    A_OUT(26);
+    A_OUT(27);
+    A_OUT(28);
+    A_OUT(29);
+    A_OUT(30);
+    A_OUT(31);
+  }
+  __memcpy(y + n * E1 + col, o, 128 * sizeof(int16_t), NRAM2GDRAM);
+}
+
+#undef A_DECL
+#undef A_RUN
+#undef A_OUT
+
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
   static torch::Tensor y;
@@ -455,7 +574,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   else
     y.resize_({16, 256});
   cnrtDim3_t d = {32, 1, 1};
-  k18<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  k19<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       y.data_ptr<int16_t>());
   return y;
