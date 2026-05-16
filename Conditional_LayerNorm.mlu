@@ -18,11 +18,11 @@ __mlu_entry__ void k0(const half *__restrict__ c, const half *__restrict__ w0,
     float sg = (float)b0[d];
     float sb = (float)b1[d];
     int co = r * E3;
-    int wo = d * E3;
     for (int k = 0; k < E3; ++k) {
       float x = (float)c[co + k];
-      sg += x * (float)w0[wo + k];
-      sb += x * (float)w1[wo + k];
+      int wo = k * E2 + d;
+      sg += x * (float)w0[wo];
+      sb += x * (float)w1[wo];
     }
     u[q] = sg;
     v[q] = sb;
