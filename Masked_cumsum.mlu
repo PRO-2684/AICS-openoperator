@@ -6,7 +6,7 @@
 #define E0 128
 #define E1 4000
 #define E2 4096
-#define E3 4000
+#define E3 4032
 
 __mlu_func__ void k1(float *__restrict__ a, float *__restrict__ b) {
   __bang_write_value(a + E1, E2 - E1, 0.0f);
@@ -109,8 +109,8 @@ __mlu_entry__ void k0(const half *__restrict__ x,
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, int dim) {
   auto out = torch::empty({E0, E1}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {4, 8, 1};
-  k0<<<g, cnrtFuncTypeUnion1, queue>>>(
+  cnrtDim3_t g = {32, 1, 1};
+  k0<<<g, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const unsigned char *>(mask.data_ptr()),
       out.data_ptr<float>());
