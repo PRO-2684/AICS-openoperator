@@ -14,16 +14,18 @@
 #define E7 6
 #define E8 32
 #define E9 64
-__mlu_entry__ void k0(const float *__restrict__ x, float *__restrict__ y) {
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
   int o = taskId;
   if (o >= E0)
     return;
 
+  __nram__ half h[E1];
   __nram__ float a[E1];
   __nram__ float b[E1];
   __nram__ float t[E1];
 
-  __memcpy(a, x + o * E1, E1 * sizeof(float), GDRAM2NRAM);
+  __memcpy(h, x + o * E1, E1 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(a, h, E1);
   __bang_reduce_sum(t, a, E1);
   float s = 0.0f;
 #pragma unroll
@@ -43,13 +45,23 @@ __mlu_entry__ void k0(const float *__restrict__ x, float *__restrict__ y) {
   float r = 1.0f / (sqrtf(q * 0.0017391304347826088f) + 1.0e-5f);
   __bang_mul_scalar(a, a, r, E1);
 
-  __memcpy(y + o * E1, a, E1 * sizeof(float), NRAM2GDRAM);
+  for (int c = 0; c < E0; ++c) {
+#pragma unroll
+    for (int kh = 0; kh < 3; ++kh) {
+#pragma unroll
+      for (int kw = 0; kw < 3; ++kw) {
+        y[((o * 3 + kh) * 3 + kw) * E0 + c] =
+            a[(c * 3 + kh) * 3 + kw];
+      }
+    }
+  }
 }
 
-__mlu_entry__ void k1(const float *__restrict__ x, const float *__restrict__ w,
+__mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ w,
                       float *__restrict__ y) {
   __nram__ float a[E7 * E5 * E0];
   __nram__ float aa[E7 * E5 * E0];
+  __nram__ half h[E4];
   __nram__ float c[E6 * E4 * E0];
   __nram__ float d[E6 * E4 * E0];
   __wram__ float ww[E2];
@@ -63,11 +75,11 @@ __mlu_entry__ void k1(const float *__restrict__ x, const float *__restrict__ w,
 #pragma unroll
     for (int r = 0; r < E7; ++r) {
       int ih = ih0 + r;
-      if ((unsigned)ih < E4) {
-        for (int c0 = 0; c0 < E0; ++c0) {
-          __memcpy(a + (c0 * E7 + r) * E5 + 1,
-                   x + (n * E0 + c0) * E4 * E4 + ih * E4,
-                   E4 * sizeof(float), GDRAM2NRAM);
+        if ((unsigned)ih < E4) {
+          for (int c0 = 0; c0 < E0; ++c0) {
+            __memcpy(h, x + (n * E0 + c0) * E4 * E4 + ih * E4,
+                     E4 * sizeof(half), GDRAM2NRAM);
+            __bang_half2float(a + (c0 * E7 + r) * E5 + 1, h, E4);
         }
       }
     }
@@ -95,7 +107,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, int in_channels,
   else
     y.resize_({8, 64, 128, 128});
   if (!w.defined())
-    w = torch::empty({E2}, weight.options());
+    w = torch::empty({E2}, weight.options().dtype(torch::kFloat32));
   else
     w.resize_({E2});
 
@@ -103,12 +115,14 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, int in_channels,
   if (last != weight.data_ptr()) {
     cnrtDim3_t g = {E0, 1, 1};
     k0<<<g, cnrtFuncTypeBlock, queue>>>(
-        weight.data_ptr<float>(), w.data_ptr<float>());
+        reinterpret_cast<const half *>(weight.data_ptr<at::Half>()),
+        w.data_ptr<float>());
     last = weight.data_ptr();
   }
 
   cnrtDim3_t d = {32, 1, 1};
   k1<<<d, cnrtFuncTypeUnion1, queue>>>(
-      x.data_ptr<float>(), w.data_ptr<float>(), y.data_ptr<float>());
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      w.data_ptr<float>(), y.data_ptr<float>());
   return y;
 }
