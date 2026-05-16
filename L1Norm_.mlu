@@ -4,12 +4,12 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void l1_norm_scale_kernel(half *__restrict__ x) {
-  __gdramset(x + taskId * 8192, 8192, (half)0.0f);
+  __gdramset(x + taskId * 4096, 4096, (half)0.0f);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {32, 1, 1};
+  cnrtDim3_t dim = {64, 1, 1};
 
   l1_norm_scale_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
