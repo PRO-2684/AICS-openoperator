@@ -5,23 +5,26 @@
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       half *__restrict__ y) {
-  __nram__ half x0[131072];
-  __nram__ half x1[131072];
-  int p = taskId * 131072;
+  __nram__ half x0[163840];
+  __nram__ half x1[163840];
+  int p = taskId * 163840;
   if (p >= 4194304)
     return;
-  __memcpy_async(x0, a + p, 131072 * sizeof(half), GDRAM2NRAM);
-  __memcpy_async(x1, b + p, 131072 * sizeof(half), GDRAM2NRAM);
+  int n = 4194304 - p;
+  if (n > 163840)
+    n = 163840;
+  __memcpy_async(x0, a + p, n * sizeof(half), GDRAM2NRAM);
+  __memcpy_async(x1, b + p, n * sizeof(half), GDRAM2NRAM);
   __sync_io();
-  __bang_add(x0, x0, x1, 131072);
+  __bang_add(x0, x0, x1, n);
   __sync_io_move_compute();
-  __memcpy_async(y + p, x0, 131072 * sizeof(half), NRAM2GDRAM);
+  __memcpy_async(y + p, x0, n * sizeof(half), NRAM2GDRAM);
   __sync_io();
 }
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(a.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(b.data_ptr<at::Half>()),
       reinterpret_cast<half *>(a.data_ptr<at::Half>()));
