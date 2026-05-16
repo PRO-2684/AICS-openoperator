@@ -1,33 +1,108 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <math.h>
 #include <torch/extension.h>
 
 #define E0 8
 #define E1 128
 #define E2 64
 
-__mlu_entry__ void k0(float *__restrict__ u, float *__restrict__ s,
-                      float *__restrict__ v) {
-  __nram__ float z[4096];
-  __bang_write_zero(z, 4096);
-  for (int p = taskId * 4096; p < E0 * E1 * E2; p += taskDim * 4096) {
-    int m = E0 * E1 * E2 - p;
-    if (m > 4096)
-      m = 4096;
-    __memcpy(u + p, z, m * sizeof(float), NRAM2GDRAM);
+__mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
+                      float *__restrict__ s, float *__restrict__ v) {
+  int b = taskId;
+  if (b >= E0)
+    return;
+
+  __nram__ float x[E1 * E2];
+  __nram__ float g[E2 * E2];
+  __nram__ float ev[E2];
+
+  const half *pa = a + b * E1 * E2;
+  float *pu = u + b * E1 * E2;
+  float *ps = s + b * E2;
+  float *pv = v + b * E2 * E2;
+
+  for (int i = 0; i < E1 * E2; ++i)
+    x[i] = (float)pa[i];
+
+  for (int i = 0; i < E2; ++i) {
+    for (int j = 0; j < E2; ++j) {
+      float acc = 0.0f;
+      for (int k = 0; k < E1; ++k)
+        acc += x[k * E2 + i] * x[k * E2 + j];
+      g[i * E2 + j] = acc;
+    }
   }
-  for (int p = taskId * 4096; p < E0 * E2; p += taskDim * 4096) {
-    int m = E0 * E2 - p;
-    if (m > 4096)
-      m = 4096;
-    __memcpy(s + p, z, m * sizeof(float), NRAM2GDRAM);
+
+  for (int sweep = 0; sweep < 10; ++sweep) {
+    for (int p = 0; p < E2 - 1; ++p) {
+      for (int q = p + 1; q < E2; ++q) {
+        float app = g[p * E2 + p];
+        float aqq = g[q * E2 + q];
+        float apq = g[p * E2 + q];
+        float aa = fabsf(apq);
+        if (aa > 0.000001f) {
+          float tau = (aqq - app) / (2.0f * apq);
+          float st = tau >= 0.0f ? 1.0f : -1.0f;
+          float tt = st / (fabsf(tau) + sqrtf(1.0f + tau * tau));
+          float cc = 1.0f / sqrtf(1.0f + tt * tt);
+          float ss = tt * cc;
+          for (int k = 0; k < E2; ++k) {
+            if (k != p && k != q) {
+              float bkp = g[k * E2 + p];
+              float bkq = g[k * E2 + q];
+              float np = cc * bkp - ss * bkq;
+              float nq = ss * bkp + cc * bkq;
+              g[k * E2 + p] = np;
+              g[p * E2 + k] = np;
+              g[k * E2 + q] = nq;
+              g[q * E2 + k] = nq;
+            }
+          }
+          float c2 = cc * cc;
+          float s2 = ss * ss;
+          float cs = cc * ss;
+          g[p * E2 + p] = c2 * app - 2.0f * cs * apq + s2 * aqq;
+          g[q * E2 + q] = s2 * app + 2.0f * cs * apq + c2 * aqq;
+          g[p * E2 + q] = 0.0f;
+          g[q * E2 + p] = 0.0f;
+        }
+      }
+    }
   }
-  for (int p = taskId * 4096; p < E0 * E2 * E2; p += taskDim * 4096) {
-    int m = E0 * E2 * E2 - p;
-    if (m > 4096)
-      m = 4096;
-    __memcpy(v + p, z, m * sizeof(float), NRAM2GDRAM);
+
+  for (int i = 0; i < E2; ++i) {
+    float z = g[i * E2 + i];
+    ev[i] = z > 0.0f ? sqrtf(z) : 0.0f;
+  }
+  for (int i = 0; i < E2 - 1; ++i) {
+    int m = i;
+    float best = ev[i];
+    for (int j = i + 1; j < E2; ++j) {
+      if (ev[j] > best) {
+        best = ev[j];
+        m = j;
+      }
+    }
+    if (m != i) {
+      float t = ev[i];
+      ev[i] = ev[m];
+      ev[m] = t;
+    }
+  }
+
+  for (int i = 0; i < E2; ++i)
+    ps[i] = ev[i];
+  for (int i = 0; i < E2; ++i) {
+    for (int j = 0; j < E2; ++j)
+      pv[i * E2 + j] = (i == j) ? 1.0f : 0.0f;
+  }
+  for (int i = 0; i < E1; ++i) {
+    for (int j = 0; j < E2; ++j) {
+      float inv = ev[j] > 0.000001f ? 1.0f / ev[j] : 0.0f;
+      pu[i * E2 + j] = x[i * E2 + j] * inv;
+    }
   }
 }
 
@@ -35,8 +110,9 @@ std::vector<torch::Tensor> bang_func(torch::Tensor A) {
   auto u = torch::empty({E0, E1, E2}, A.options().dtype(torch::kFloat32));
   auto s = torch::empty({E0, E2}, A.options().dtype(torch::kFloat32));
   auto v = torch::empty({E0, E2, E2}, A.options().dtype(torch::kFloat32));
-  cnrtDim3_t d = {32, 1, 1};
+  cnrtDim3_t d = {E0, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      u.data_ptr<float>(), s.data_ptr<float>(), v.data_ptr<float>());
+      reinterpret_cast<const half *>(A.data_ptr<at::Half>()), u.data_ptr<float>(),
+      s.data_ptr<float>(), v.data_ptr<float>());
   return {u, s, v};
 }
