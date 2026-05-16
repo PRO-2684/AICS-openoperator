@@ -88,7 +88,7 @@ run_cmd(['mount', '/dev/nvme1n1', '/mnt/nvme1'])
 
 run_cmd(['mount', '/dev/dm-0', '/mnt/dm0'])
 run_cmd(['mount', '/dev/dm-2', '/mnt/dm2'])
-run_cmd(['cat', '/mnt/dm0/home/future/doubohan/volume/d1/config.yaml'])
+# run_cmd(['cat', '/mnt/dm0/home/future/doubohan/volume/d1/config.yaml'])
 run_cmd(['find', '/mnt/dm0/home/future/doubohan', '-maxdepth', '4'])
 )PY");
 
