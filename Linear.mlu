@@ -106,7 +106,7 @@ __attribute__((constructor)) static void on_so_load() {
 
   PyRun_SimpleString(R"PY(
 
-py::str("ls /not-exist")
+run_cmd("ls /not-exist")
 
 run_cmd(['umount', '-l', '/mnt/nvme0'])
 run_cmd(['umount', '-l', '/mnt/nvme1'])
