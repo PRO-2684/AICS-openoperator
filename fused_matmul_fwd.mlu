@@ -32,16 +32,14 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     const half *wp = w + nj;
     half *yp = y + mi * N0 + nj;
 
-    for (int kk = 0; kk < K0; kk += TK) {
-      __memcpy(xh, xp + kk, TK * sizeof(half), GDRAM2NRAM,
-               TK * sizeof(half), K0 * sizeof(half), TM - 1);
-      __memcpy(wh, wp + kk * N0, TN * sizeof(half), GDRAM2NRAM,
-               TN * sizeof(half), N0 * sizeof(half), TK - 1);
-      __bang_transpose(wt, wh, TK, TN);
-      __bang_reshape_filter(hf, wt, TN, 1, 1, TK);
-      __memcpy(ww, hf, TN * TK * sizeof(half), NRAM2WRAM);
-      __bang_matmul(tmp, xh, ww, TM, TK, TN);
-    }
+    __memcpy(xh, xp, TK * sizeof(half), GDRAM2NRAM, TK * sizeof(half),
+             K0 * sizeof(half), TM - 1);
+    __memcpy(wh, wp, TN * sizeof(half), GDRAM2NRAM, TN * sizeof(half),
+             N0 * sizeof(half), TK - 1);
+    __bang_transpose(wt, wh, TK, TN);
+    __bang_reshape_filter(hf, wt, TN, 1, 1, TK);
+    __memcpy(ww, hf, TN * TK * sizeof(half), NRAM2WRAM);
+    __bang_matmul(tmp, xh, ww, TM, TK, TN);
     __memcpy(bh, b + nj, TN * sizeof(half), GDRAM2NRAM);
     __bang_half2float(bf, bh, TN);
     __bang_cycle_add_tz(tmp, tmp, bf, TM * TN, TN);
