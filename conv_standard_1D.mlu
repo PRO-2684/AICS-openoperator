@@ -71,7 +71,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   if (!w.defined())
     w = torch::empty({E5}, kernel.options());
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {16, 1, 1};
+  cnrtDim3_t d = {8, 2, 1};
   if (last != kernel.data_ptr()) {
     k0<<<d, cnrtFuncTypeBlock, q>>>(reinterpret_cast<half *>(w.data_ptr<at::Half>()));
     k1<<<d, cnrtFuncTypeBlock, q>>>(
