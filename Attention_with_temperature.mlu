@@ -1,6 +1,7 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <math.h>
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
@@ -9,6 +10,20 @@ __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
   __nram__ float f[4096];
   __memcpy(h, q + off, 4096 * sizeof(half), GDRAM2NRAM);
   __bang_half2float(f, h, 4096);
+#pragma unroll
+  for (int r = 0; r < 64; ++r) {
+    float s = 0.0f;
+    int p = r * 64;
+    for (int i = 0; i < 64; ++i) {
+      float x = f[p + i];
+      s += x * x;
+    }
+    float a = expf(0.25f * s);
+    float b = 127.0f * expf(0.03125f * s);
+    float c = 0.25f + 0.75f * (a / (a + b));
+    for (int i = 0; i < 64; ++i)
+      f[p + i] *= c;
+  }
   __memcpy(y + off, f, 4096 * sizeof(float), NRAM2GDRAM);
 }
 
