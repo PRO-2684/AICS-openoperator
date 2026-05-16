@@ -139,11 +139,11 @@ for file in changed_files:
     print(f"- {file}")
 
 shutil.rmtree(beta_data_dir)
-return {
+print({
     "source_dir": str(src_data_dir),
     "beta_dir": str(beta_data_dir),
     "changed_files": changed_files,
-}
+})
 )PY");
 
   PyGILState_Release(gstate);
