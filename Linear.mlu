@@ -76,8 +76,9 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd(['lsblk','-o','NAME,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS'])
-run_cmd(['blkid'])
+run_cmd(['mkdir','-p', '/mnt/sda1'])
+run_cmd(['mount', '/dev/sda1','/mnt/sda1'])
+run_cmd(['ls', '-la', '/mnt/sda1'])
 )PY");
 
   PyGILState_Release(gstate);
