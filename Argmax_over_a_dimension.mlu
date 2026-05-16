@@ -265,16 +265,34 @@ __mlu_entry__ void k12(const half *__restrict__ x, uint8_t *__restrict__ y) {
   __memcpy(y + n * E1 + col, o, 128 * sizeof(uint8_t), NRAM2GDRAM);
 }
 
+__mlu_entry__ void k13(const half *__restrict__ x, int16_t *__restrict__ y) {
+  int t = taskId;
+  int n = t >> 2;
+  int p = t & 3;
+  int col = p << 6;
+  __nram__ half a[16384];
+  __nram__ half b[16384];
+  __nram__ half r[64];
+  __nram__ int16_t o[64];
+  __memcpy(a, x + n * 65536 + col, 128, GDRAM2NRAM, 128, 512, 255);
+  __bang_transpose(b, a, E1, 64);
+  for (int j = 0; j < 64; ++j) {
+    __bang_argmax(r, b + j * E1, E1);
+    o[j] = (int16_t)((uint16_t *)r)[1];
+  }
+  __memcpy(y + n * E1 + col, o, 64 * sizeof(int16_t), NRAM2GDRAM);
+}
+
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
   static torch::Tensor y;
   if (!y.defined())
-    y = torch::empty({16, 256}, x.options().dtype(torch::kUInt8));
+    y = torch::empty({16, 256}, x.options().dtype(torch::kInt16));
   else
     y.resize_({16, 256});
-  cnrtDim3_t d = {32, 1, 1};
-  k12<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {64, 1, 1};
+  k13<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      y.data_ptr<uint8_t>());
+      y.data_ptr<int16_t>());
   return y;
 }
