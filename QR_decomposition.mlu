@@ -87,12 +87,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
     }
   }
 
-  for (int i = 0; i < E1 * E2; ++i)
-    qh[i] = (half)qq[i];
-  for (int i = 0; i < E2; ++i) {
-    for (int j = 0; j < E2; ++j)
-      rh[i * E2 + j] = (half)rr[i * E2 + j];
-  }
+  __bang_float2half(qh, qq, E1 * E2);
+  __bang_float2half(rh, rr, E2 * E2);
   __memcpy(pq, qh, E1 * E2 * sizeof(half), NRAM2GDRAM);
   __memcpy(pr, rh, E2 * E2 * sizeof(half), NRAM2GDRAM);
 }
