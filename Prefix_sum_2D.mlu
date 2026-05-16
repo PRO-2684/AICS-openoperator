@@ -1,6 +1,5 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <framework/core/MLUEvent.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
@@ -64,23 +63,13 @@ __mlu_entry__ void k2(float *__restrict__ y, const float *__restrict__ t) {
   __memcpy(y + p, a, 32768 * sizeof(float), NRAM2GDRAM);
 }
 
-__mlu_entry__ void k3(float *__restrict__ y) { y[0] = y[0]; }
-
 torch::Tensor bang_func(torch::Tensor x) {
   static torch::Tensor y;
   if (!y.defined())
     y = torch::empty({16, 256, 256}, x.options().dtype(torch::kFloat32));
-  torch_mlu::MLUStream s = torch_mlu::getStreamFromPool(false, x.get_device());
-  torch_mlu::MLUEvent e;
-  cnrtQueue_t q = s.stream();
-  e.place(torch_mlu::getCurrentMLUStream());
-  e.wait(s);
   cnrtDim3_t g0 = {4, 8, 1};
-  k1<<<g0, cnrtFuncTypeUnion1, q>>>(
+  k1<<<g0, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       y.data_ptr<float>());
-  cnrtQueueSync(q);
-  cnrtDim3_t g1 = {1, 1, 1};
-  k3<<<g1, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(y.data_ptr<float>());
   return y;
 }
