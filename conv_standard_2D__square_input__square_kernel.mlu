@@ -44,12 +44,13 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
   __memcpy(ww, w, E9 * sizeof(half), GDRAM2WRAM);
   __bang_write_zero(a + E1 * E6 * E3, (E10 - E1) * E6 * E3);
 
-  int n = taskId / E7;
-  int u = taskId - n * E7;
   for (int t = taskId; t < E0 * E7; t += taskDim) {
-    int oh = u * E5;
+    int n = t / E7;
+    int oh = (t - n * E7) * E5;
     int rows = E5;
-    int ih = E6;
+    if (oh + rows > E4)
+      rows = E4 - oh;
+    int ih = rows + 2;
     for (int c0 = 0; c0 < E1; ++c0) {
       __memcpy(a + c0 * ih * E3,
                x + (n * E1 + c0) * E3 * E3 + oh * E3,
@@ -59,11 +60,6 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     __bang_conv(c, b, ww, E10, ih, E3, 3, 3, 1, 1, E2);
     __memcpy(y + (n * E4 * E4 + oh * E4) * E2, c,
              rows * E4 * E2 * sizeof(float), NRAM2GDRAM);
-    u += taskDim;
-    if (u >= E7) {
-      u -= E7;
-      ++n;
-    }
   }
 }
 
