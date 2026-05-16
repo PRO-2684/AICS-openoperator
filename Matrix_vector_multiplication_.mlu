@@ -29,7 +29,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   int k = coreId;
   int base = taskIdY * N + k;
   for (int off = 0; off < K; off += T) {
-    if (k == 0x80) {
+    if (k == 0) {
       __memcpy(sb, b + off, T * sizeof(half), GDRAM2SRAM);
     }
     __sync_cluster();
