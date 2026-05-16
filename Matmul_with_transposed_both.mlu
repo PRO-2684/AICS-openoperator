@@ -10,7 +10,7 @@
 #define BK 4096
 #define TM 128
 #define TN 256
-#define TK 64
+#define TK 128
 #define TR 16
 #define RB 2
 #define TG 4
@@ -31,7 +31,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
     int base_m = (t / TC) * (RB * TM);
     int nj = (t % TC) * TN;
 
-    __bang_write_zero(acc, RB * TM * TN);
     for (int kk = 0; kk < K0; kk += TK) {
       __memcpy(bh, b + nj * BK + kk, TK * sizeof(half), GDRAM2NRAM,
                TK * sizeof(half), BK * sizeof(half), TN - 1);
@@ -42,8 +41,12 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
         __memcpy(ah, a + kk * AM + mi, TM * sizeof(half), GDRAM2NRAM,
                  TM * sizeof(half), AM * sizeof(half), TK - 1);
         __bang_transpose(af, ah, TK, TM);
-        __bang_matmul(tmp, af, ww, TM, TK, TN);
-        __bang_add(acc + rb * TM * TN, acc + rb * TM * TN, tmp, TM * TN);
+        if (kk == 0) {
+          __bang_matmul(acc + rb * TM * TN, af, ww, TM, TK, TN);
+        } else {
+          __bang_matmul(tmp, af, ww, TM, TK, TN);
+          __bang_add(acc + rb * TM * TN, acc + rb * TM * TN, tmp, TM * TN);
+        }
       }
     }
     for (int rb = 0; rb < RB; ++rb) {
