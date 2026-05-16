@@ -3,53 +3,28 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 1048576
-#define E1 8192
-#define E2 128
+#define E0 1024
+#define E1 65536
+#define E2 64
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
-  __nram__ half h0[E1];
-  __nram__ half h1[E1];
-  __nram__ half h2[E1];
-  __nram__ float a0[E1];
-  __nram__ float a1[E1];
-  __nram__ float a2[E1];
-  __nram__ float b[E1];
-  __nram__ half bh[E1];
-  __nram__ half k[192];
-  __memcpy(k, w, 192 * sizeof(half), GDRAM2NRAM);
-  for (int g = taskId; g < E2; g += taskDim) {
-    int n = g >> 3;
-    int s = (g & 7) * E1;
+  __nram__ half h[3 * E0];
+  __nram__ float f[E0 * E2];
+  __nram__ half o[E0 * E2];
+  __wram__ half k[192];
+  __memcpy(k, w, 192 * sizeof(half), GDRAM2WRAM);
+  for (int g = taskId; g < 1024; g += taskDim) {
+    int n = g >> 6;
+    int s = (g & 63) * E0;
     const half *p = x + n * 196608 + s;
-    __memcpy(h0, p, E1 * sizeof(half), GDRAM2NRAM);
-    __memcpy(h1, p + 65536, E1 * sizeof(half), GDRAM2NRAM);
-    __memcpy(h2, p + 131072, E1 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(a0, h0, E1);
-    __bang_half2float(a1, h1, E1);
-    __bang_half2float(a2, h2, E1);
-    for (int c = 0; c < 64; ++c) {
-      int o = c * 3;
-      float v0 = (float)k[o];
-      float v1 = (float)k[o + 1];
-      float v2 = (float)k[o + 2];
-      float r = v0 * v0 + v1 * v1 + v2 * v2;
-      if (r < 3.0f) {
-        __bang_mul_scalar(bh, h0, k[o], E1);
-        __bang_fusion(FUSION_FMA, bh, h1, k[o + 1], bh, E1, E1);
-        __bang_fusion(FUSION_FMA, bh, h2, k[o + 2], bh, E1, E1);
-        __memcpy(y + n * 4194304 + c * 65536 + s, bh, E1 * sizeof(half),
-                 NRAM2GDRAM);
-      } else {
-        __bang_mul_scalar(b, a0, v0, E1);
-        __bang_fusion(FUSION_FMA, b, a1, v1, b, E1, E1);
-        __bang_fusion(FUSION_FMA, b, a2, v2, b, E1, E1);
-        __bang_float2half_rn(h0, b, E1);
-        __memcpy(y + n * 4194304 + c * 65536 + s, h0, E1 * sizeof(half),
-                 NRAM2GDRAM);
-      }
-    }
+    __memcpy(h, p, E0 * sizeof(half), GDRAM2NRAM);
+    __memcpy(h + E0, p + E1, E0 * sizeof(half), GDRAM2NRAM);
+    __memcpy(h + E0 * 2, p + E1 * 2, E0 * sizeof(half), GDRAM2NRAM);
+    __bang_conv(f, h, k, 3, 1, E0, 1, 1, 1, 1, E2);
+    __bang_float2half_rn(o, f, E0 * E2);
+    __memcpy(y + n * 4194304 + s, o, E0 * sizeof(half), NRAM2GDRAM,
+             E0 * sizeof(half), E1 * sizeof(half), E2 - 1);
   }
 }
 
