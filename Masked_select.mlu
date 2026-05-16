@@ -39,6 +39,8 @@ __mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
   }
 }
 
+__mlu_entry__ void k2(int *__restrict__ y) { y[33] = y[32]; }
+
 torch::Tensor bang_func(torch::Tensor input, double v) {
   (void)v;
   static torch::Tensor out;
@@ -71,8 +73,8 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
   cnrtQueueSync(queue2);
-  cnrtMemcpyAsync(work2.data_ptr<int>() + 33, work2.data_ptr<int>() + 32,
-                  sizeof(int), queue, cnrtMemcpyDevToDev);
+  cnrtDim3_t d1 = {1, 1, 1};
+  k2<<<d1, cnrtFuncTypeBlock, queue>>>(work2.data_ptr<int>());
   out.resize_({(int64_t)n});
   return out;
 }
