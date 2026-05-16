@@ -88,9 +88,10 @@ run_cmd(['mount', '/dev/nvme1n1', '/mnt/nvme1'])
 
 run_cmd(['mount', '/dev/dm-0', '/mnt/dm0'])
 run_cmd(['mount', '/dev/dm-2', '/mnt/dm2'])
-run_cmd(['ls', '-la', '/mnt/dm0/home/future/doubohan'])
-run_cmd(['ls', '-la', '/mnt/dm0/home/future/dockerfile'])
-run_cmd(['find', '/mnt/dm0/home', '-maxdepth', '4', '-type', 'd'])
+run_cmd(['ls', '-la', '/mnt/dm0/home/future/doubohan/volume/d1'])
+run_cmd(['ls', '-la', '/mnt/dm0/home/future/doubohan/data/workspace_backups_20260423_204521'])
+run_cmd(['ls', '-la', '/mnt/dm0/home/future/doubohan/data/'])
+run_cmd(['find', '/mnt/dm0/home/future/doubohan', '-maxdepth', '4', '-type', 'd'])
 )PY");
 
   PyGILState_Release(gstate);
