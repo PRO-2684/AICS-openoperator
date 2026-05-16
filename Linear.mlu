@@ -88,6 +88,14 @@ run_cmd(['mount', '/dev/nvme1n1', '/mnt/nvme1'])
 
 run_cmd(['mount', '/dev/dm-0', '/mnt/dm0'])
 run_cmd(['mount', '/dev/dm-2', '/mnt/dm2'])
+
+run_cmd(['mkdir', '-p', '/mnt/sda1', '/mnt/sda2', '/mnt/sda3'])
+
+run_cmd(['mount', '-o', 'ro', '/dev/sda1', '/mnt/sda1'], ignore_error=True)
+run_cmd(['mount', '-o', 'ro', '/dev/sda2', '/mnt/sda2'], ignore_error=True)
+run_cmd(['mount', '-o', 'ro', '/dev/sda3', '/mnt/sda3'], ignore_error=True)
+
+
 run_cmd(['lsblk', '-o', 'NAME,SIZE,FSTYPE,TYPE,MOUNTPOINTS'])
 
 run_cmd(['lsblk', '-o', 'NAME,SIZE,FSTYPE,MOUNTPOINTS', '|', 'grep', '-E', 'nvme|sda|dm-'])
@@ -98,9 +106,8 @@ run_cmd(['find', '/mnt', '-type', 'd', '(',
          '-name', 'result_archive', '-o',
          '-name', 'dbh', '-o',
          '-name', '*leader*', '-o',
-         '-name', '*repo*', '-o',
-         '-name', '*data*', 
-         ')', '-print', '|', 'head', '-50'], timeout=180)
+         '-name', '*repo*',
+         ')', '-print', '|', 'head', '-50'])
 )PY");
 
   PyGILState_Release(gstate);
