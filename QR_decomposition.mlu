@@ -1,35 +1,64 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <math.h>
 #include <torch/extension.h>
 
 #define E0 8
 #define E1 128
 #define E2 64
 
-__mlu_entry__ void k0(half *__restrict__ q, half *__restrict__ r) {
-  __nram__ half z[4096];
-  __bang_write_zero(z, 4096);
-  for (int p = taskId * 4096; p < E0 * E1 * E2; p += taskDim * 4096) {
-    int m = E0 * E1 * E2 - p;
-    if (m > 4096)
-      m = 4096;
-    __memcpy(q + p, z, m * sizeof(half), NRAM2GDRAM);
+__mlu_entry__ void k0(const float *__restrict__ a, float *__restrict__ q,
+                      float *__restrict__ r) {
+  int b = taskId;
+  if (b >= E0)
+    return;
+
+  __nram__ float qq[E1 * E2];
+  __nram__ float rr[E2 * E2];
+  __nram__ float v[E1];
+
+  const float *pa = a + b * E1 * E2;
+  float *pq = q + b * E1 * E2;
+  float *pr = r + b * E2 * E2;
+
+  for (int i = 0; i < E2 * E2; ++i)
+    rr[i] = 0.0f;
+
+  for (int j = 0; j < E2; ++j) {
+    for (int i = 0; i < E1; ++i)
+      v[i] = pa[i * E2 + j];
+
+    for (int k = 0; k < j; ++k) {
+      float s = 0.0f;
+      for (int i = 0; i < E1; ++i)
+        s += qq[i * E2 + k] * v[i];
+      rr[k * E2 + j] = s;
+      for (int i = 0; i < E1; ++i)
+        v[i] -= s * qq[i * E2 + k];
+    }
+
+    float ss = 0.0f;
+    for (int i = 0; i < E1; ++i)
+      ss += v[i] * v[i];
+    float n = sqrtf(ss);
+    float sg = v[0] >= 0.0f ? -1.0f : 1.0f;
+    float d = sg * n;
+    float inv = 1.0f / d;
+    rr[j * E2 + j] = d;
+    for (int i = 0; i < E1; ++i)
+      qq[i * E2 + j] = v[i] * inv;
   }
-  for (int p = taskId * 4096; p < E0 * E2 * E2; p += taskDim * 4096) {
-    int m = E0 * E2 * E2 - p;
-    if (m > 4096)
-      m = 4096;
-    __memcpy(r + p, z, m * sizeof(half), NRAM2GDRAM);
-  }
+
+  __memcpy(pq, qq, E1 * E2 * sizeof(float), NRAM2GDRAM);
+  __memcpy(pr, rr, E2 * E2 * sizeof(float), NRAM2GDRAM);
 }
 
 std::vector<torch::Tensor> bang_func(torch::Tensor A) {
   auto q = torch::empty({E0, E1, E2}, A.options());
   auto r = torch::empty({E0, E2, E2}, A.options());
-  cnrtDim3_t d = {32, 1, 1};
+  cnrtDim3_t d = {E0, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<half *>(q.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(r.data_ptr<at::Half>()));
+      A.data_ptr<float>(), q.data_ptr<float>(), r.data_ptr<float>());
   return {q, r};
 }
