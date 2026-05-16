@@ -4,7 +4,7 @@
 #include <torch/extension.h>
 
 #define TOTAL_ELEMS (16 * 16384)
-#define TASKS 1
+#define TASKS 2
 #define ELEMS_PER_TASK (TOTAL_ELEMS / TASKS)
 #define L2_SCALE ((half)0.00782012939453125f)
 
@@ -15,9 +15,11 @@ __mlu_entry__ void l2_norm_scale_kernel(half *__restrict__ x) {
 
   __nram__ half hbuf[ELEMS_PER_TASK];
 
-  __memcpy(hbuf, px, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
+  __memcpy_async(hbuf, px, ELEMS_PER_TASK * sizeof(half), GDRAM2NRAM);
+  __sync_io();
   __bang_mul_scalar(hbuf, hbuf, L2_SCALE, ELEMS_PER_TASK);
-  __memcpy(px, hbuf, ELEMS_PER_TASK * sizeof(half), NRAM2GDRAM);
+  __memcpy_async(px, hbuf, ELEMS_PER_TASK * sizeof(half), NRAM2GDRAM);
+  __sync_io();
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
