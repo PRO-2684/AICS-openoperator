@@ -16,7 +16,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
   __bang_fcmpfilter(CMP_GT, a, a, (half)0.0f, E1);
   int n = *((int *)a);
 
-  int q = p;
+  int q = y[taskId];
   __memcpy(z + q, a + 2, n * sizeof(half), NRAM2GDRAM);
 }
 
@@ -39,6 +39,8 @@ __mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
   }
 }
 
+__mlu_entry__ void k2(int *__restrict__ y) { y[33] = y[32]; }
+
 torch::Tensor bang_func(torch::Tensor input, double v) {
   (void)v;
   static torch::Tensor out;
@@ -48,16 +50,30 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   else
     out.resize_({E0});
   if (!work2.defined())
-    work2 = torch::empty({33}, input.options().dtype(torch::kInt32));
+    work2 = torch::empty({34}, input.options().dtype(torch::kInt32));
 
   torch_mlu::MLUStream stream2 =
       torch_mlu::getStreamFromPool(false, input.get_device());
   torch_mlu::MLUEvent ev;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtQueue_t queue2 = stream2.stream();
   cnrtDim3_t dim = {E2, 1, 1};
 
-  k0<<<dim, cnrtFuncTypeUnion4, queue>>>(
+  ev.place(torch_mlu::getCurrentMLUStream());
+  ev.wait(stream2);
+  k1<<<dim, cnrtFuncTypeUnion8, queue2>>>(
+      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
+      work2.data_ptr<int>());
+
+  int n = 0;
+  cnrtMemcpyAsync(&n, work2.data_ptr<int>() + E2, sizeof(int), queue2,
+                  cnrtMemcpyDevToHost);
+  cnrtQueueSync(queue2);
+  k0<<<dim, cnrtFuncTypeUnion4, queue2>>>(
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
+  cnrtQueueSync(queue2);
+  k2<<<{1, 1, 1}, cnrtFuncTypeBlock, queue>>>(work2.data_ptr<int>());
+  out.resize_({(int64_t)n});
   return out;
 }
