@@ -19,7 +19,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ half wh[TK * TN];
   __nram__ half bh[TN];
   __nram__ half yh[TM * TN];
-  __nram__ float acc[TM * TN];
   __nram__ float tmp[TM * TN];
   __nram__ half wt[TN * TK];
   __nram__ half hf[TN * TK];
@@ -33,7 +32,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     const half *wp = w + nj;
     half *yp = y + mi * N0 + nj;
 
-    __bang_write_zero(acc, TM * TN);
     for (int kk = 0; kk < K0; kk += TK) {
       __memcpy(xh, xp + kk, TK * sizeof(half), GDRAM2NRAM,
                TK * sizeof(half), K0 * sizeof(half), TM - 1);
@@ -43,12 +41,11 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
       __bang_reshape_filter(hf, wt, TN, 1, 1, TK);
       __memcpy(ww, hf, TN * TK * sizeof(half), NRAM2WRAM);
       __bang_matmul(tmp, xh, ww, TM, TK, TN);
-      __bang_add(acc, acc, tmp, TM * TN);
     }
     __memcpy(bh, b + nj, TN * sizeof(half), GDRAM2NRAM);
     __bang_half2float(bf, bh, TN);
-    __bang_cycle_add_tz(acc, acc, bf, TM * TN, TN);
-    __bang_float2half_rn(yh, acc, TM * TN);
+    __bang_cycle_add_tz(tmp, tmp, bf, TM * TN, TN);
+    __bang_float2half_rn(yh, tmp, TM * TN);
     __memcpy(yp, yh, TN * sizeof(half), NRAM2GDRAM, N0 * sizeof(half),
              TN * sizeof(half), TM - 1);
   }
