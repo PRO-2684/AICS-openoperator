@@ -15,7 +15,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
   if (taskId == 0) {
     y[0] = 0.0f;
   }
-  __sync_all_ipu();
 
   __nram__ half h0[E4];
   __nram__ half h1[E4];
