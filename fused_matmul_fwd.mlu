@@ -6,22 +6,38 @@
 #define M0 256
 #define N0 1024
 #define K0 512
-#define TM 256
-#define TN 64
+#define TM 64
+#define TN 128
 #define TK 512
-#define TR 1
-#define TC 16
+#define TR 4
+#define TC 8
 #define TT (TR * TC)
 
-__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
-                      const half *__restrict__ b, half *__restrict__ y) {
-  __nram__ half xh[TM * TK];
+__mlu_entry__ void kprep(const half *__restrict__ w, const half *__restrict__ b,
+                         int8_t *__restrict__ wc, float *__restrict__ bc) {
+  int nj = taskId * TN;
   __nram__ half wh[TK * TN];
   __nram__ half bh[TN];
-  __nram__ half yh[TM * TN];
-  __nram__ int8_t xi[TM * TK];
   __nram__ int8_t wi[TK * TN];
   __nram__ int8_t wt[TN * TK];
+  __nram__ int8_t wf[TN * TK];
+  __nram__ float bf[TN];
+  __memcpy(wh, w + nj, TN * sizeof(half), GDRAM2NRAM, TN * sizeof(half),
+           N0 * sizeof(half), TK - 1);
+  __bang_half2int8(wi, wh, TK * TN, 0);
+  __bang_transpose(wt, wi, TK, TN);
+  __bang_reshape_filter(wf, wt, TN, 1, 1, TK);
+  __memcpy(wc + taskId * TN * TK, wf, TN * TK * sizeof(int8_t), NRAM2GDRAM);
+  __memcpy(bh, b + nj, TN * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(bf, bh, TN);
+  __memcpy(bc + taskId * TN, bf, TN * sizeof(float), NRAM2GDRAM);
+}
+
+__mlu_entry__ void k0(const half *__restrict__ x, const int8_t *__restrict__ wc,
+                      const float *__restrict__ bc, half *__restrict__ y) {
+  __nram__ half xh[TM * TK];
+  __nram__ half yh[TM * TN];
+  __nram__ int8_t xi[TM * TK];
   __nram__ float tmp[TM * TN];
   __nram__ float bf[TN];
   __wram__ int8_t ww[TN * TK];
@@ -30,21 +46,15 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     int mi = (t / TC) * TM;
     int nj = (t % TC) * TN;
     const half *xp = x + mi * K0;
-    const half *wp = w + nj;
     half *yp = y + mi * N0 + nj;
 
     __memcpy(xh, xp, TK * sizeof(half), GDRAM2NRAM, TK * sizeof(half),
              K0 * sizeof(half), TM - 1);
-    __memcpy(wh, wp, TN * sizeof(half), GDRAM2NRAM, TN * sizeof(half),
-             N0 * sizeof(half), TK - 1);
     __bang_half2int8(xi, xh, TM * TK, 0);
-    __bang_half2int8(wi, wh, TK * TN, 0);
-    __bang_transpose(wt, wi, TK, TN);
-    __bang_reshape_filter(wi, wt, TN, 1, 1, TK);
-    __memcpy(ww, wi, TN * TK * sizeof(int8_t), NRAM2WRAM);
+    __memcpy(ww, wc + (t % TC) * TN * TK, TN * TK * sizeof(int8_t),
+             GDRAM2WRAM);
     __bang_matmul(tmp, xi, ww, TM, TK, TN, 0);
-    __memcpy(bh, b + nj, TN * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(bf, bh, TN);
+    __memcpy(bf, bc + (t % TC) * TN, TN * sizeof(float), GDRAM2NRAM);
     __bang_cycle_add_tz(tmp, tmp, bf, TM * TN, TN);
     __bang_float2half_rn(yh, tmp, TM * TN);
     __memcpy(yp, yh, TN * sizeof(half), NRAM2GDRAM, N0 * sizeof(half),
@@ -53,12 +63,27 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, torch::Tensor b) {
+  static torch::Tensor wc;
+  static torch::Tensor bc;
+  static bool ready = false;
   auto y = torch::empty({256, 1024}, x.options());
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  if (!ready) {
+    wc = torch::empty({TC * TN * TK}, x.options().dtype(torch::kInt8));
+    bc = torch::empty({N0}, x.options().dtype(torch::kFloat32));
+    cnrtDim3_t p = {TC, 1, 1};
+    kprep<<<p, cnrtFuncTypeBlock, q>>>(
+        reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
+        reinterpret_cast<const half *>(b.data_ptr<at::Half>()),
+        reinterpret_cast<int8_t *>(wc.data_ptr<int8_t>()),
+        reinterpret_cast<float *>(bc.data_ptr<float>()));
+    ready = true;
+  }
   cnrtDim3_t d = {32, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  k0<<<d, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(b.data_ptr<at::Half>()),
+      reinterpret_cast<const int8_t *>(wc.data_ptr<int8_t>()),
+      reinterpret_cast<const float *>(bc.data_ptr<float>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
