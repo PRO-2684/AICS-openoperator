@@ -29,11 +29,10 @@ __mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y) {
 }
 
 __mlu_entry__ void k2(const half *__restrict__ x, const half *__restrict__ w,
-                      half *__restrict__ y) {
+                      float *__restrict__ y) {
   __nram__ half a[E1 * E2];
   __nram__ half b[E1 * E2];
   __nram__ float c[E3 * E4];
-  __nram__ half h[E3 * E4];
   __wram__ half ww[E5];
   __memcpy(ww, w, E5 * sizeof(half), GDRAM2WRAM);
   for (int n = taskId; n < E0; n += taskDim) {
@@ -44,8 +43,7 @@ __mlu_entry__ void k2(const half *__restrict__ x, const half *__restrict__ w,
     __memcpy(a + E2 * 2, px + E2 * 2, E2 * sizeof(half), GDRAM2NRAM);
     __bang_transpose(b, a, E1, E2);
     __bang_conv(c, b, ww, E1, 1, E2, 1, 3, 1, 1, E4);
-    __bang_float2half_rn(h, c, E3 * E4);
-    __memcpy(y + n * E3 * E4, h, E3 * E4 * sizeof(half), NRAM2GDRAM);
+    __memcpy(y + n * E3 * E4, c, E3 * E4 * sizeof(float), NRAM2GDRAM);
   }
 }
 
@@ -65,13 +63,13 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   static torch::Tensor w;
   static void *last = nullptr;
   if (!s.defined()) {
-    s = torch::empty({E0 * E3 * E4}, x.options());
+    s = torch::empty({E0 * E3 * E4}, x.options().dtype(torch::kFloat32));
     y = s.as_strided({E0, E4, E3}, {E3 * E4, 1, E4});
   }
   if (!w.defined())
     w = torch::empty({E5}, kernel.options());
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {32, 1, 1};
+  cnrtDim3_t d = {4, 4, 1};
   if (last != kernel.data_ptr()) {
     k0<<<d, cnrtFuncTypeBlock, q>>>(reinterpret_cast<half *>(w.data_ptr<at::Half>()));
     k1<<<d, cnrtFuncTypeBlock, q>>>(
@@ -81,7 +79,6 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   }
   k2<<<d, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(s.data_ptr<at::Half>()));
+      reinterpret_cast<const half *>(w.data_ptr<at::Half>()), s.data_ptr<float>());
   return y;
 }
