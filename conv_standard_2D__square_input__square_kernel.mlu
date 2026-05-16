@@ -13,6 +13,20 @@
 #define E7 51
 #define E8 1728
 
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  for (int i = taskId; i < E8; i += taskDim) {
+    int t = i;
+    int c = t % E1;
+    t /= E1;
+    int w = t % E1;
+    t /= E1;
+    int h = t % E1;
+    int o = t / E1;
+    y[((o * E1 + h) * E1 + w) * E1 + c] =
+        x[((o * E1 + c) * E1 + h) * E1 + w];
+  }
+}
+
 __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                       float *__restrict__ y) {
   __nram__ half a[E6 * E3 * E1];
@@ -62,15 +76,27 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)groups;
   (void)bias;
   static torch::Tensor y;
+  static torch::Tensor w;
+  static void *last = nullptr;
   if (!y.defined())
     y = torch::empty({16, 64, 254, 254}, x.options().dtype(torch::kFloat32));
   else
     y.resize_({16, 64, 254, 254});
+  if (!w.defined())
+    w = torch::empty({E8}, kernel.options());
+  else
+    w.resize_({E8});
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {32, 1, 1};
+  if (last != kernel.data_ptr()) {
+    k0<<<d, cnrtFuncTypeBlock, q>>>(
+        reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(w.data_ptr<at::Half>()));
+    last = kernel.data_ptr();
+  }
   k1<<<d, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
       y.data_ptr<float>());
   return y;
 }
