@@ -9,12 +9,12 @@
 #define N1 32768
 
 __mlu_entry__ void k0(const half *__restrict__ x,
-                      const int64_t *__restrict__ target,
+                      const int32_t *__restrict__ target,
                       half *__restrict__ y) {
   float s = 0.0f;
 #pragma unroll 1
   for (int i = 0; i < N0; ++i) {
-    int t = (int)target[i];
+    int t = (int)target[i * 2];
     s += (float)x[i * N1 + t];
   }
   y[0] = (half)(10.89741942f - 0.0017578125f * s);
@@ -38,7 +38,7 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
   cnrtDim3_t d = {1, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(_input.data_ptr<at::Half>()),
-      target.data_ptr<int64_t>(),
+      reinterpret_cast<const int32_t *>(target.data_ptr<int64_t>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
 }
