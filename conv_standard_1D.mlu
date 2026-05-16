@@ -37,7 +37,7 @@ __mlu_entry__ void k2(const half *__restrict__ x, const half *__restrict__ w,
   __wram__ half ww[E5];
   __memcpy(ww, w, E5 * sizeof(half), GDRAM2WRAM);
   for (int n = taskId; n < E0; n += taskDim) {
-    __bang_write_zero(a + 1536, E1 * E2 - 1536);
+    __bang_write_zero(a, E1 * E2);
     const half *px = x + n * 1536;
     __memcpy(a, px, 1536 * sizeof(half), GDRAM2NRAM);
     __bang_transpose(b, a, E1, E2);
