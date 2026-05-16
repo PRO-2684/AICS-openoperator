@@ -35,7 +35,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
     }
     __bang_sub_scalar(f0 + z, f0 + z, m, 128);
   }
-  __bang_active_exp(f0, f0, 8192);
+  __bang_active_exphp(f0, f0, 8192);
   __bang_reduce_sum(f1, f0, 8192);
 
   __bang_transpose(a2, a1, 128, 64);
