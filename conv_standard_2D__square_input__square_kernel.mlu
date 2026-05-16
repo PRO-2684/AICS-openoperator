@@ -50,13 +50,12 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     if (oh + rows > E4)
       rows = E4 - oh;
     int ih = rows + 2;
-    int len = ih * E3;
     __bang_write_zero(a + E1 * ih * E3, (E10 - E1) * ih * E3);
-    const half *px = x + n * E1 * E3 * E3 + oh * E3;
-    __memcpy(a, px, len * sizeof(half), GDRAM2NRAM);
-    __memcpy(a + len, px + E3 * E3, len * sizeof(half), GDRAM2NRAM);
-    __memcpy(a + (len << 1), px + (E3 * E3 << 1), len * sizeof(half),
-             GDRAM2NRAM);
+    for (int c0 = 0; c0 < E1; ++c0) {
+      __memcpy(a + c0 * ih * E3,
+               x + (n * E1 + c0) * E3 * E3 + oh * E3,
+               ih * E3 * sizeof(half), GDRAM2NRAM);
+    }
     __bang_transpose(b, a, E10, ih * E3);
     __bang_conv(c, b, ww, E10, ih, E3, 3, 3, 1, 1, E2);
     __memcpy(y + (n * E4 * E4 + oh * E4) * E2, c,
