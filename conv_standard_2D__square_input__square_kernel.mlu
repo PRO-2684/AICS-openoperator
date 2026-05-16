@@ -8,9 +8,9 @@
 #define E2 64
 #define E3 256
 #define E4 254
-#define E5 3
-#define E6 5
-#define E7 85
+#define E5 2
+#define E6 4
+#define E7 127
 #define E8 1728
 #define E9 18432
 #define E10 32
