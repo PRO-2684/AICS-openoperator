@@ -19,7 +19,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
                       int k, int first, int last) {
   int col = taskIdY * G;
   int bo = coreId * BM;
-  int bb = taskIdX * 8;
+  int bb = taskIdX * 16;
   __nram__ half a[BM * H];
   __nram__ half h[BM * H];
   __nram__ half wb[H * N];
@@ -139,7 +139,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtMemsetAsync(h0.data_ptr(), 0, B * H * sizeof(half), q);
   cnrtMemsetAsync(h1.data_ptr(), 0, B * H * sizeof(half), q);
-  cnrtDim3_t d = {4, C, 1};
+  cnrtDim3_t d = {2, C, 1};
   for (int t = 0; t < T; ++t) {
     k0<<<d, cnrtFuncTypeUnion1, q>>>(
         reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
