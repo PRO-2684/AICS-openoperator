@@ -42,6 +42,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ float c[E5 * E4 * E2];
   __wram__ half ww[E9];
   __memcpy(ww, w, E9 * sizeof(half), GDRAM2WRAM);
+  __bang_write_value(a, E6 * E3 * E10, (half)0.0f);
 
   for (int t = taskId; t < E0 * E7; t += taskDim) {
     int n = t / E7;
@@ -49,9 +50,8 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     int rows = E5;
     if (oh + rows > E4)
       rows = E4 - oh;
-    int ih = rows + 2;
+    int ih = E6;
     int base_h = oh;
-    __bang_write_value(a, E6 * E3 * E10, (half)0.0f);
     for (int c0 = 0; c0 < E1; ++c0) {
       for (int r = 0; r < ih; ++r) {
         int ih0 = base_h + r;
