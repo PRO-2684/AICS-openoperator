@@ -5,28 +5,17 @@
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       half *__restrict__ y) {
-  __nram__ half x0[2][65536];
-  __nram__ half x1[2][65536];
+  __nram__ half x0[65536];
+  __nram__ half x1[65536];
   int p = taskId * 65536;
-  int s = taskDim * 65536;
   if (p >= 4194304)
     return;
-  __memcpy_async(x0[0], a + p, 65536 * sizeof(half), GDRAM2NRAM);
-  __memcpy_async(x1[0], b + p, 65536 * sizeof(half), GDRAM2NRAM);
+  __memcpy_async(x0, a + p, 65536 * sizeof(half), GDRAM2NRAM);
+  __memcpy_async(x1, b + p, 65536 * sizeof(half), GDRAM2NRAM);
   __sync_io();
-  int c = 0;
-  for (; p < 4194304; p += s) {
-    int n = p + s;
-    int m = c ^ 1;
-    if (n < 4194304) {
-      __memcpy_async(x0[m], a + n, 65536 * sizeof(half), GDRAM2NRAM);
-      __memcpy_async(x1[m], b + n, 65536 * sizeof(half), GDRAM2NRAM);
-    }
-    __bang_add(x0[c], x0[c], x1[c], 65536);
-    __sync_io_move_compute();
-    __memcpy_async(y + p, x0[c], 65536 * sizeof(half), NRAM2GDRAM);
-    c = m;
-  }
+  __bang_add(x0, x0, x1, 65536);
+  __sync_io_move_compute();
+  __memcpy_async(y + p, x0, 65536 * sizeof(half), NRAM2GDRAM);
   __sync_io();
 }
 
