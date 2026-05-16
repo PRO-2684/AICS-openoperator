@@ -15,48 +15,41 @@ __mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y) {
   return y[0];
 }
 
-__mlu_entry__ void k0(const float *__restrict__ a, const float *__restrict__ b,
+__mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       float *__restrict__ c) {
+  __nram__ half ha[T];
+  __nram__ half hb[T];
   __nram__ float fa[T];
   __nram__ float fb[T];
   __nram__ float fc[T];
   __nram__ float fs[R];
-  __mlu_shared__ float sb[T];
   float acc[8] = {0.0f};
 
-  int k = coreId;
-  int base = taskIdY * N + k;
+  int base = taskId;
   for (int off = 0; off < K; off += T) {
-    if (k == 0) {
-      __memcpy(sb, b + off, T * sizeof(float), GDRAM2SRAM);
-    }
-    __sync_cluster();
-    if (k != 0x80) {
-      __memcpy(fb, sb, T * sizeof(float), SRAM2NRAM);
-      for (int i = 0; i < 8; ++i) {
-        int row = base + i * 4;
-        const float *src = a + (int64_t)row * K;
-        __memcpy(fa, src + off, T * sizeof(float), GDRAM2NRAM);
-        __bang_mul(fc, fa, fb, T);
-        acc[i] += f0(fc, fs);
-      }
-    }
-    __sync_cluster();
-  }
-  if (k != 0x80) {
+    __memcpy(hb, b + off, T * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(fb, hb, T);
     for (int i = 0; i < 8; ++i) {
-      int row = base + i * 4;
-      c[row] = acc[i];
+      int row = base + i * N;
+      const half *src = a + (int64_t)row * K;
+      __memcpy(ha, src + off, T * sizeof(half), GDRAM2NRAM);
+      __bang_half2float(fa, ha, T);
+      __bang_mul(fc, fa, fb, T);
+      acc[i] += f0(fc, fs);
     }
+  }
+  for (int i = 0; i < 8; ++i) {
+    int row = base + i * N;
+    c[row] = acc[i];
   }
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto C = torch::empty({M, 1}, A.options().dtype(torch::kFloat32));
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
-      A.data_ptr<float>(),
-      B.data_ptr<float>(),
+  cnrtDim3_t d = {N, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
       reinterpret_cast<float *>(C.data_ptr<float>()));
   return C;
 }
