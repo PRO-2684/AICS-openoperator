@@ -63,7 +63,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                  E3 * sizeof(half), GDRAM2NRAM);
       }
     }
-    __bang_transpose(b, a, E10, E6 * E3);
+    __bang_transpose(b, a, E10, ih * E3);
     __bang_conv(c, b, ww, E10, ih, E3, 3, 3, 1, 1, E2);
     __bang_transpose(d, c, rows * E4, E2);
     for (int oc = 0; oc < E2; ++oc) {
