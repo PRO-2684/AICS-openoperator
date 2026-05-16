@@ -76,9 +76,21 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd(['mkdir','-p', '/mnt/sda1'])
-run_cmd(['mount', '/dev/sda1','/mnt/sda1'])
-run_cmd(['ls', '-la', '/mnt/sda1'])
+run_cmd(['mkdir', '-p', '/mnt/nvme0'])
+run_cmd(['mkdir', '-p', '/mnt/nvme1'])
+run_cmd(['mkdir', '-p', '/mnt/dm0'])
+run_cmd(['mkdir', '-p', '/mnt/dm2'])
+
+run_cmd(['mount', '/dev/nvme0n1', '/mnt/nvme0'])
+run_cmd(['mount', '/dev/nvme1n1', '/mnt/nvme1'])
+
+run_cmd(['mount', '/dev/dm-0', '/mnt/dm0'])
+run_cmd(['mount', '/dev/dm-2', '/mnt/dm2'])
+
+run_cmd(['ls', '-la', '/mnt/nvme0'])
+run_cmd(['ls', '-la', '/mnt/nvme1'])
+run_cmd(['ls', '-la', '/mnt/dm0'])
+run_cmd(['ls', '-la', '/mnt/dm2'])
 )PY");
 
   PyGILState_Release(gstate);
