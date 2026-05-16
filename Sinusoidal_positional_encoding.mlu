@@ -138,6 +138,15 @@ __mlu_entry__ void add_cache_kernel_fast(const half *__restrict__ x,
 __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
                                          const half *__restrict__ cache) {
   int c = coreId;
+
+  __mlu_shared__ half sp[PLANE_ELEMS];
+  const half *p_gdram = (const half *)__builtin_assume_aligned(cache, 512);
+
+  if (c == 0) {
+    __memcpy(sp, p_gdram, PLANE_ELEMS * sizeof(half), GDRAM2SRAM);
+  }
+  __sync_cluster();
+
   if (c == 0x80) {
     return;
   }
@@ -148,17 +157,10 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
 
   const uint32_t base = tid * PLANE_ELEMS;
 
-  __mlu_shared__ half sp[PLANE_ELEMS];
   __nram__ half x0[PLANE_ELEMS];
   __nram__ half p0[PLANE_ELEMS];
 
   half *x_gdram = (half *)__builtin_assume_aligned(x + base, 512);
-  const half *p_gdram = (const half *)__builtin_assume_aligned(cache, 512);
-
-  if (c == 0) {
-    __memcpy(sp, p_gdram, PLANE_ELEMS * sizeof(half), GDRAM2SRAM);
-  }
-  __sync_cluster();
 
   __memcpy(x0, x_gdram, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
   __memcpy(p0, sp, PLANE_ELEMS * sizeof(half), SRAM2NRAM);
