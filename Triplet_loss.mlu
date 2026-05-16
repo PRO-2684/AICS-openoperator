@@ -20,6 +20,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
   __nram__ half h0[E4];
   __nram__ half h1[E4];
   __nram__ half h2[E4];
+  __nram__ half g0[64];
+  __nram__ half g1[64];
   float s = 0.0f;
   const half e = (half)1.0e-6f;
 
@@ -31,20 +33,19 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
   __bang_sub(h1, h0, h1, E4);
   __bang_add_scalar(h1, h1, e, E4);
   __bang_square(h1, h1, E4);
+  __bang_sumpool(g0, h1, 1, 4, E1, 1, E1, E1, 1);
 
   __bang_sub(h2, h0, h2, E4);
   __bang_add_scalar(h2, h2, e, E4);
   __bang_square(h2, h2, E4);
+  __bang_sumpool(g1, h2, 1, 4, E1, 1, E1, E1, 1);
+
+  __bang_active_sqrt(g0, g0, 64);
+  __bang_active_sqrt(g1, g1, 64);
 
 #pragma unroll
   for (int r = 0; r < 4; ++r) {
-    __bang_reduce_sum(h1 + r * E1, h1 + r * E1, E1);
-    __bang_reduce_sum(h2 + r * E1, h2 + r * E1, E1);
-    float u = (float)h1[r * E1] + (float)h1[r * E1 + E3] +
-              (float)h1[r * E1 + E3 * 2] + (float)h1[r * E1 + E3 * 3];
-    float v = (float)h2[r * E1] + (float)h2[r * E1 + E3] +
-              (float)h2[r * E1 + E3 * 2] + (float)h2[r * E1 + E3 * 3];
-    float e0 = sqrtf(u) - sqrtf(v) + m;
+    float e0 = (float)g0[r] - (float)g1[r] + m;
     if (e0 > 0.0f) {
       s += e0;
     }
