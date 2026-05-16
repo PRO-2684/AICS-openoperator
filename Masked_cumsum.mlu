@@ -53,9 +53,9 @@ __mlu_func__ void k2(half *__restrict__ h, int8_t *__restrict__ c,
     __bang_write_value(h + E1, E3 - E1, (half)0.0f);
     __bang_write_value(c + E1, E3 - E1, (int8_t)0);
   }
+  __bang_int82half((half *)b, c, E3, 0);
+  __bang_mul(h, h, (half *)b, E3);
   __bang_half2float(a, h, E3);
-  __bang_int82float(b, c, E3, 0);
-  __bang_mul(a, a, b, E3);
   k1(a, b);
 }
 
