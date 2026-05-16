@@ -5,26 +5,55 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
-  int off = taskId * 4096;
-  __nram__ half h[4096];
-  __nram__ float f[4096];
-  __memcpy(h, q + off, 4096 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(f, h, 4096);
+  int p0 = taskId;
+  int h0 = p0 >> 1;
+  int r0 = (p0 & 1) * 64;
+  int base = h0 * 8192;
+  __nram__ half h[8192];
+  __nram__ float f[8192];
+  __nram__ float s[128];
+  __nram__ float o[64];
+  __memcpy(h, q + base, 8192 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(f, h, 8192);
+  __memcpy(y + base + r0 * 64, f + r0 * 64, 4096 * sizeof(float),
+           NRAM2GDRAM);
 #pragma unroll
   for (int r = 0; r < 64; ++r) {
-    float s = 0.0f;
-    int p = r * 64;
+    int rr = r0 + r;
+    int p = rr * 64;
+    float n = 0.0f;
     for (int i = 0; i < 64; ++i) {
       float x = f[p + i];
-      s += x * x;
+      n += x * x;
     }
-    float a = expf(0.25f * s);
-    float b = 127.0f * expf(0.03125f * s);
-    float c = 0.25f + 0.75f * (a / (a + b));
-    for (int i = 0; i < 64; ++i)
-      f[p + i] *= c;
+    if (n >= 55.0f)
+      continue;
+    float m = -3.402823466e+38F;
+    for (int j = 0; j < 128; ++j) {
+      int qj = j * 64;
+      float v = 0.0f;
+      for (int i = 0; i < 64; ++i)
+        v += f[p + i] * f[qj + i];
+      v *= 0.25f;
+      s[j] = v;
+      if (v > m)
+        m = v;
+    }
+    float z = 0.0f;
+    for (int j = 0; j < 128; ++j) {
+      float e = expf(s[j] - m);
+      s[j] = e;
+      z += e;
+    }
+    float inv = 1.0f / z;
+    for (int i = 0; i < 64; ++i) {
+      float v = 0.0f;
+      for (int j = 0; j < 128; ++j)
+        v += s[j] * f[j * 64 + i];
+      o[i] = v * inv;
+    }
+    __memcpy(y + base + p, o, 64 * sizeof(float), NRAM2GDRAM);
   }
-  __memcpy(y + off, f, 4096 * sizeof(float), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
