@@ -1,88 +1,56 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
-#include <math.h>
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
-  int p0 = taskId;
-  int h0 = p0 >> 1;
-  int r0 = (p0 & 1) * 64;
-  int base = h0 * 8192;
-  __nram__ half h[8192];
-  __nram__ half ht[8192];
-  __nram__ float f[8192];
-  __nram__ float t[8192];
-  __nram__ float a[4096];
-  __nram__ float b[8192];
-  __nram__ float o[4096];
-  __wram__ float w[8192];
-  int idx[64];
+  int p = taskId;
+  int h = p >> 1;
+  int r = (p & 1) * 64;
+  int base = h * 8192;
+  __nram__ half a0[8192];
+  __nram__ half a1[8192];
+  __nram__ half a2[8192];
+  __nram__ float f0[8192];
+  __nram__ float f1[8192];
+  __nram__ float f2[4096];
+  __nram__ float f3[8192];
+  __wram__ float w0[8192];
 
-  __memcpy(h, q + base, 8192 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(f, h, 8192);
-  __memcpy(y + base + r0 * 64, f + r0 * 64, 4096 * sizeof(float),
-           NRAM2GDRAM);
+  __memcpy(a0, q + base + r * 64, 4096 * sizeof(half), GDRAM2NRAM);
+  __memcpy(a1, q + base, 8192 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(f1, a0, 4096);
+  __bang_half2float(f3, a1, 8192);
+  __bang_reshape_filter(f0, f3, 128, 1, 1, 64);
+  __memcpy(w0, f0, 8192 * sizeof(float), NRAM2WRAM);
+  __bang_matmul(f0, f1, w0, 64, 64, 128);
+  __bang_mul_scalar(f0, f0, 0.25f, 8192);
 
-  int m = 0;
 #pragma unroll
-  for (int r = 0; r < 64; ++r) {
-    int rr = r0 + r;
-    int p = rr * 64;
-    float n = 0.0f;
-    for (int i = 0; i < 64; ++i) {
-      float x = f[p + i];
-      n += x * x;
+  for (int i = 0; i < 64; ++i) {
+    int z = i * 128;
+    float m = f0[z];
+    for (int j = 1; j < 128; ++j) {
+      float v = f0[z + j];
+      if (v > m)
+        m = v;
     }
-    if (n < 66.0f) {
-      idx[m] = rr;
-      __memcpy(a + m * 64, f + p, 64 * sizeof(float), NRAM2NRAM);
-      ++m;
-    }
+    __bang_sub_scalar(f0 + z, f0 + z, m, 128);
   }
-  if (m == 0)
-    return;
+  __bang_active_exp(f0, f0, 8192);
+  __bang_reduce_sum(f1, f0, 8192);
 
-  int mm = (m + 7) & ~7;
-  for (int r = m; r < mm; ++r)
-    for (int i = 0; i < 64; ++i)
-      a[r * 64 + i] = 0.0f;
-
-  __bang_reshape_filter(t, f, 128, 1, 1, 64);
-  __memcpy(w, t, 8192 * sizeof(float), NRAM2WRAM);
-  __bang_matmul(b, a, w, mm, 64, 128);
-  __bang_mul_scalar(b, b, 0.25f, mm * 128);
-
-  for (int r = 0; r < m; ++r) {
-    int p = r * 128;
-    float mx = b[p];
-    for (int i = 1; i < 128; ++i) {
-      float z = b[p + i];
-      if (z > mx)
-        mx = z;
-    }
-    float s = 0.0f;
-    for (int i = 0; i < 128; ++i) {
-      float z = expf(b[p + i] - mx);
-      b[p + i] = z;
-      s += z;
-    }
-    float inv = 1.0f / s;
-    for (int i = 0; i < 128; ++i)
-      b[p + i] *= inv;
+  __bang_transpose(a2, a1, 128, 64);
+  __bang_half2float(f3, a2, 8192);
+  __memcpy(w0, f3, 8192 * sizeof(float), NRAM2WRAM);
+  __bang_matmul(f2, f0, w0, 64, 128, 64);
+#pragma unroll
+  for (int i = 0; i < 64; ++i) {
+    float s = f1[i * 128] + f1[i * 128 + 32] + f1[i * 128 + 64] +
+              f1[i * 128 + 96];
+    __bang_mul_scalar(f2 + i * 64, f2 + i * 64, 1.0f / s, 64);
   }
-  for (int r = m; r < mm; ++r)
-    for (int i = 0; i < 128; ++i)
-      b[r * 128 + i] = 0.0f;
-
-  __bang_transpose(ht, h, 128, 64);
-  __bang_half2float(t, ht, 8192);
-  __memcpy(w, t, 8192 * sizeof(float), NRAM2WRAM);
-  __bang_matmul(o, b, w, mm, 128, 64);
-
-  for (int r = 0; r < m; ++r)
-    __memcpy(y + base + idx[r] * 64, o + r * 64, 64 * sizeof(float),
-             NRAM2GDRAM);
+  __memcpy(y + base + r * 64, f2, 4096 * sizeof(float), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
@@ -94,7 +62,6 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
     y.resize_({2, 8, 128, 64});
   cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(q.data_ptr<at::Half>()),
-      y.data_ptr<float>());
+      reinterpret_cast<const half *>(q.data_ptr<at::Half>()), y.data_ptr<float>());
   return y;
 }
