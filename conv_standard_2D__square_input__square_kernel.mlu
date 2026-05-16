@@ -3,72 +3,57 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 16
-#define E1 3
-#define E2 64
-#define E3 256
-#define E4 254
-#define E5 4
-#define E6 6
-#define E7 64
-#define E8 1728
-#define E9 18432
-#define E10 32
+#define B0 16
+#define CI 3
+#define CO 64
+#define H0 256
+#define W0 256
+#define OH 254
+#define OW 254
+#define TILE_H 16
+#define TILE_H2 18
+#define TILE_M 4064
+#define K9 27
 
-__mlu_entry__ void kz(half *__restrict__ y) {
-  for (int i = taskId; i < E9; i += taskDim) {
-    y[i] = (half)0.0f;
-  }
-}
-
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  for (int i = taskId; i < E8; i += taskDim) {
-    int t = i;
-    int c = t % E1;
-    t /= E1;
-    int w = t % E1;
-    t /= E1;
-    int h = t % E1;
-    int o = t / E1;
-    y[((o * E1 + h) * E1 + w) * E10 + c] =
-        x[((o * E1 + c) * E1 + h) * E1 + w];
-  }
-}
-
-__mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
+__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       float *__restrict__ y) {
-  __nram__ half a[E6 * E3 * E10];
-  __nram__ half b[E6 * E3 * E10];
-  __nram__ float c[E5 * E4 * E2];
-  __nram__ float d[E5 * E4 * E2];
-  __wram__ half ww[E9];
-  __memcpy(ww, w, E9 * sizeof(half), GDRAM2WRAM);
+  __nram__ half in[CI * TILE_H2 * W0];
+  __nram__ half tmp[TILE_M];
+  __nram__ float src[K9 * TILE_M];
+  __nram__ float out[TILE_M];
+  __nram__ half kh[K9 * CO];
+  __memcpy(kh, w, K9 * CO * sizeof(half), GDRAM2NRAM);
 
-  for (int t = taskId; t < E0 * E7; t += taskDim) {
-    int n = t / E7;
-    int oh = (t - n * E7) * E5;
-    int rows = E5;
-    if (oh + rows > E4)
-      rows = E4 - oh;
-    int ih = rows + 2;
-    int base_h = oh;
-    __bang_write_value(a, E6 * E3 * E10, (half)0.0f);
-    for (int c0 = 0; c0 < E1; ++c0) {
-      for (int r = 0; r < ih; ++r) {
-        int ih0 = base_h + r;
-        if ((unsigned)ih0 >= E3)
-          continue;
-        __memcpy(a + (c0 * ih + r) * E3,
-                 x + (n * E1 + c0) * E3 * E3 + ih0 * E3,
-                 E3 * sizeof(half), GDRAM2NRAM);
+  for (int g = taskId; g < B0 * 16; g += taskDim) {
+    int n = g >> 4;
+    int q = (g & 15) * TILE_H;
+    int rows = (q == 240) ? 14 : TILE_H;
+    int m = rows * OW;
+    for (int c = 0; c < CI; ++c) {
+      const half *px = x + (n * CI + c) * H0 * W0 + q * W0;
+      __memcpy(in + c * TILE_H2 * W0, px, (rows + 2) * W0 * sizeof(half),
+               GDRAM2NRAM);
+    }
+    int idx = 0;
+    for (int c = 0; c < CI; ++c) {
+      for (int dy = 0; dy < 3; ++dy) {
+        for (int dx = 0; dx < 3; ++dx) {
+          __memcpy(tmp, in + c * TILE_H2 * W0 + dy * W0 + dx,
+                   OW * sizeof(half), NRAM2NRAM, OW * sizeof(half),
+                   W0 * sizeof(half), rows - 1);
+          __bang_half2float(src + idx * TILE_M, tmp, m);
+          ++idx;
+        }
       }
     }
-    __bang_transpose(b, a, E10, ih * E3);
-    __bang_conv(c, b, ww, E10, ih, E3, 3, 3, 1, 1, E2);
-    __bang_transpose(d, c, rows * E4, E2);
-    for (int oc = 0; oc < E2; ++oc) {
-      __memcpy(y + (n * E2 + oc) * E4 * E4 + oh * E4, d + oc * rows * E4,
-               rows * E4 * sizeof(float), NRAM2GDRAM);
+    for (int oc = 0; oc < CO; ++oc) {
+      const half *pw = kh + oc * K9;
+      __bang_mul_scalar(out, src + 0, (float)pw[0], m);
+      for (int i = 1; i < K9; ++i) {
+        __bang_fusion(FUSION_FMA, out, src + i, (float)pw[i], out, m, m);
+      }
+      __memcpy(y + (n * CO + oc) * OH * OW + q * OW, out, m * sizeof(float),
+               NRAM2GDRAM);
     }
   }
 }
@@ -84,30 +69,12 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)dilation;
   (void)groups;
   (void)bias;
-  static torch::Tensor y;
-  static torch::Tensor w;
-  static void *last = nullptr;
-  if (!y.defined())
-    y = torch::empty({16, 64, 254, 254}, x.options().dtype(torch::kFloat32));
-  else
-    y.resize_({16, 64, 254, 254});
-  if (!w.defined())
-    w = torch::empty({E9}, kernel.options());
-  else
-    w.resize_({E9});
-  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  auto y = torch::empty({16, 64, 254, 254},
+                        x.options().dtype(torch::kFloat32));
   cnrtDim3_t d = {32, 1, 1};
-  if (last != kernel.data_ptr()) {
-    kz<<<d, cnrtFuncTypeBlock, q>>>(
-        reinterpret_cast<half *>(w.data_ptr<at::Half>()));
-    k0<<<d, cnrtFuncTypeBlock, q>>>(
-        reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(w.data_ptr<at::Half>()));
-    last = kernel.data_ptr();
-  }
-  k1<<<d, cnrtFuncTypeUnion1, q>>>(
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
       y.data_ptr<float>());
   return y;
 }
