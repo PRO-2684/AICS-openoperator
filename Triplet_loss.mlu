@@ -7,6 +7,7 @@
 #define E1 256
 #define E2 32
 #define E3 64
+#define E4 1024
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
                       const half *__restrict__ n, float *__restrict__ y,
@@ -14,33 +15,35 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ p,
   if (taskId == 0) {
     y[0] = 0.0f;
   }
+  __sync_all_ipu();
 
-  __nram__ half h0[E1];
-  __nram__ half h1[E1];
-  __nram__ half h2[E1];
+  __nram__ half h0[E4];
+  __nram__ half h1[E4];
+  __nram__ half h2[E4];
+  __nram__ half g0[4];
+  __nram__ half g1[4];
   float s = 0.0f;
   const half e = (half)1.0e-6f;
 
-  for (int r = taskId; r < E0; r += taskDim) {
-    int q = r * E1;
-    __memcpy(h0, a + q, E1 * sizeof(half), GDRAM2NRAM);
-    __memcpy(h1, p + q, E1 * sizeof(half), GDRAM2NRAM);
-    __memcpy(h2, n + q, E1 * sizeof(half), GDRAM2NRAM);
+  int q = taskId * E4;
+  __memcpy(h0, a + q, E4 * sizeof(half), GDRAM2NRAM);
+  __memcpy(h1, p + q, E4 * sizeof(half), GDRAM2NRAM);
+  __memcpy(h2, n + q, E4 * sizeof(half), GDRAM2NRAM);
 
-    __bang_sub(h1, h0, h1, E1);
-    __bang_add_scalar(h1, h1, e, E1);
-    __bang_square(h1, h1, E1);
-    __bang_reduce_sum(h1, h1, E1);
-    float u = (float)h1[0] + (float)h1[E3] + (float)h1[E3 * 2] +
-              (float)h1[E3 * 3];
+  __bang_sub(h1, h0, h1, E4);
+  __bang_add_scalar(h1, h1, e, E4);
+  __bang_square(h1, h1, E4);
+  __bang_sumpool(g0, h1, 1, 4, E1, 1, E1, E1, 1);
 
-    __bang_sub(h2, h0, h2, E1);
-    __bang_add_scalar(h2, h2, e, E1);
-    __bang_square(h2, h2, E1);
-    __bang_reduce_sum(h2, h2, E1);
-    float v = (float)h2[0] + (float)h2[E3] + (float)h2[E3 * 2] +
-              (float)h2[E3 * 3];
+  __bang_sub(h2, h0, h2, E4);
+  __bang_add_scalar(h2, h2, e, E4);
+  __bang_square(h2, h2, E4);
+  __bang_sumpool(g1, h2, 1, 4, E1, 1, E1, E1, 1);
 
+#pragma unroll
+  for (int r = 0; r < 4; ++r) {
+    float u = (float)g0[r];
+    float v = (float)g1[r];
     float e0 = sqrtf(u) - sqrtf(v) + m;
     if (e0 > 0.0f) {
       s += e0;
