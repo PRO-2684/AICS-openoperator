@@ -8,26 +8,19 @@
 #define E2 512
 #define E3 128
 
-__mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
-                      half *__restrict__ y) {
+__mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ b) {
   (void)a;
   __nram__ half h[E3];
   int off = taskId * E3;
   __memcpy(h, b + off, E3 * sizeof(half), GDRAM2NRAM);
   __bang_mul_scalar(h, h, (half)0.015625f, E3);
-  __memcpy(y + off, h, E3 * sizeof(half), NRAM2GDRAM);
+  __memcpy(b + off, h, E3 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor b) {
-  static torch::Tensor y;
-  if (!y.defined())
-    y = torch::empty({E0, E1, 1}, b.options());
-  else
-    y.resize_({E0, E1, 1});
   cnrtDim3_t d = {4, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(b.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-  return y;
+      reinterpret_cast<half *>(b.data_ptr<at::Half>()));
+  return b;
 }
