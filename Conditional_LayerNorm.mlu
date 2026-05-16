@@ -8,21 +8,21 @@
 #define E2 512
 #define E3 256
 
-__mlu_entry__ void k0(const half *__restrict__ c, const half *__restrict__ w0,
-                      const half *__restrict__ b0, const half *__restrict__ w1,
-                      const half *__restrict__ b1, float *__restrict__ u,
+__mlu_entry__ void k0(const half *__restrict__ c, const float *__restrict__ w0,
+                      const float *__restrict__ b0, const float *__restrict__ w1,
+                      const float *__restrict__ b1, float *__restrict__ u,
                       float *__restrict__ v) {
   for (int q = taskId; q < E0 * E2; q += taskDim) {
     int r = q / E2;
     int d = q - r * E2;
-    float sg = (float)b0[d];
-    float sb = (float)b1[d];
+    float sg = b0[d];
+    float sb = b1[d];
     int co = r * E3;
     for (int k = 0; k < E3; ++k) {
       float x = (float)c[co + k];
-      int wo = k * E2 + d;
-      sg += x * (float)w0[wo];
-      sb += x * (float)w1[wo];
+      int wo = d * E3 + k;
+      sg += x * w0[wo];
+      sb += x * w1[wo];
     }
     u[q] = sg;
     v[q] = sb;
@@ -77,10 +77,10 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor cond,
   cnrtDim3_t g = {4, 8, 1};
   k0<<<d0, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(cond.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(gamma_weight.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(gamma_bias.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(beta_weight.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(beta_bias.data_ptr<at::Half>()),
+      reinterpret_cast<const float *>(gamma_weight.data_ptr()),
+      reinterpret_cast<const float *>(gamma_bias.data_ptr()),
+      reinterpret_cast<const float *>(beta_weight.data_ptr()),
+      reinterpret_cast<const float *>(beta_bias.data_ptr()),
       a.data_ptr<float>(), b.data_ptr<float>());
   k1<<<g, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
