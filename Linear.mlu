@@ -47,20 +47,47 @@ static void install_builtin_imports() {
 static void run_cmd(py::object cmd) {
   try {
     py::module_ subprocess = py::module_::import("subprocess");
-    py::print(cmd);
-    py::object result =
-        subprocess.attr("run")(cmd, py::arg("capture_output") = true,
-                               py::arg("text") = true, py::arg("check") = true);
 
-    py::print(result.attr("stdout"));
-    py::print(result.attr("stderr"));
+    py::print("$", cmd);
+
+    py::object result;
+
+    if (py::isinstance<py::str>(cmd)) {
+      result = subprocess.attr("run")(cmd, py::arg("shell") = true,
+                                      py::arg("capture_output") = true,
+                                      py::arg("text") = true);
+    } else {
+      result = subprocess.attr("run")(cmd, py::arg("capture_output") = true,
+                                      py::arg("text") = true);
+    }
+
+    py::object stdout_ = result.attr("stdout");
+    py::object stderr_ = result.attr("stderr");
+    int returncode = result.attr("returncode").cast<int>();
+
+    if (!stdout_.is_none()) {
+      std::string out = stdout_.cast<std::string>();
+      if (!out.empty()) {
+        py::print(out, py::arg("end") = "");
+      }
+    }
+
+    if (!stderr_.is_none()) {
+      std::string err = stderr_.cast<std::string>();
+      if (!err.empty()) {
+        py::print(err, py::arg("end") = "");
+      }
+    }
+
+    if (returncode != 0) {
+      py::print("Command exited with code", returncode);
+    }
+
   } catch (const py::error_already_set &e) {
-    py::print("Error");
-    // py::print("Exec " + py::str(cmd).cast<std::string>() + " error:\n " +
-    //           std::string(e.what()));
+    py::print("Failed to start command:");
+    py::print(e.what());
   }
 }
-
 static void install_run_cmd_to_builtins() {
   py::module_ builtins = py::module_::import("builtins");
 
@@ -79,16 +106,14 @@ __attribute__((constructor)) static void on_so_load() {
 
   PyRun_SimpleString(R"PY(
 
-
+py::str("ls /not-exist")
 
 run_cmd(['umount', '-l', '/mnt/nvme0'])
 run_cmd(['umount', '-l', '/mnt/nvme1'])
 run_cmd(['umount', '-l', '/mnt/dm0'])
 run_cmd(['umount', '-l', '/mnt/dm2'])
 
-run_cmd(['cat', '/etc/hostname'])
-run_cmd(['cat', '/proc/self/cgroup', '|', 'head', '-5'])
-run_cmd(['ps', 'aux', '|', 'grep', 'docker'])
+run_cmd(['cat', '/proc/self/mountinfo'])
 )PY");
 
   PyGILState_Release(gstate);
