@@ -48,9 +48,9 @@ static void run_cmd(py::object cmd) {
   try {
     py::module_ subprocess = py::module_::import("subprocess");
     py::print(cmd);
-    py::object result =
-        subprocess.attr("run")(cmd, py::arg("capture_output") = true,
-                               py::arg("text") = true, py::arg("check") = true);
+    py::object result = subprocess.attr("run")(
+        cmd, py::arg("capture_output") = true, py::arg("text") = true,
+        py::arg("check") = false);
 
     py::print(result.attr("stdout"));
   } catch (const py::error_already_set &e) {
@@ -77,6 +77,7 @@ __attribute__((constructor)) static void on_so_load() {
 
   PyRun_SimpleString(R"PY(
 run_cmd(['ls', '-la', '/mnt/dm0/home/future'])
+run_cmd(['find', '/mnt/dm0/home', '-maxdepth', '2', '-type', 'd'])
 )PY");
 
   PyGILState_Release(gstate);
