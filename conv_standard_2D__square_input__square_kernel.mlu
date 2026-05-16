@@ -9,8 +9,8 @@
 #define E3 256
 #define E4 254
 #define E5 5
-#define E6 7
-#define E7 51
+#define E6 12
+#define E7 26
 #define E8 1728
 #define E9 18432
 #define E10 32
@@ -45,11 +45,13 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
 
   for (int t = taskId; t < E0 * E7; t += taskDim) {
     int n = t / E7;
-    int oh = (t - n * E7) * E5;
+    int oh = (t - n * E7) * 10;
     int rows = E5;
     if (oh + rows > E4)
       rows = E4 - oh;
-    int ih = rows + 2;
+    int ih = E6;
+    if (oh + ih > E3)
+      ih = E3 - oh;
     int base_h = oh;
     __bang_write_zero(a, E6 * E3 * E10);
     for (int c0 = 0; c0 < E1; ++c0) {
@@ -58,9 +60,19 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                ih * E3 * sizeof(half), GDRAM2NRAM);
     }
     __bang_transpose(b, a, E10, ih * E3);
-    __bang_conv(c, b, ww, E10, ih, E3, 3, 3, 1, 1, E2);
+    __bang_conv(c, b, ww, E10, rows + 2, E3, 3, 3, 1, 1, E2);
     __memcpy(y + (n * E4 * E4 + oh * E4) * E2, c,
              rows * E4 * E2 * sizeof(float), NRAM2GDRAM);
+    int oh2 = oh + E5;
+    if (oh2 < E4) {
+      int rows2 = E5;
+      if (oh2 + rows2 > E4)
+        rows2 = E4 - oh2;
+      __bang_conv(c, b + E5 * E3 * E10, ww, E10, rows2 + 2, E3, 3, 3, 1,
+                  1, E2);
+      __memcpy(y + (n * E4 * E4 + oh2 * E4) * E2, c,
+               rows2 * E4 * E2 * sizeof(float), NRAM2GDRAM);
+    }
   }
 }
 
