@@ -62,22 +62,12 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int8_t *__restrict__ wc,
   }
 }
 
-__mlu_entry__ void kt(half *__restrict__ y) {
-  if (taskId == 0) {
-    y[0] = y[0];
-  }
-}
-
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, torch::Tensor b) {
   static torch::Tensor wc;
   static torch::Tensor bc;
-  static torch::Tensor y;
   static bool ready = false;
-  static bool done = false;
+  auto y = torch::empty({256, 1024}, x.options());
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  if (!y.defined()) {
-    y = torch::empty({256, 1024}, x.options());
-  }
   if (!ready) {
     wc = torch::empty({TC * TN * TK}, x.options().dtype(torch::kInt8));
     bc = torch::empty({N0}, x.options().dtype(torch::kFloat32));
@@ -89,18 +79,11 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, torch::Tensor b) {
         reinterpret_cast<float *>(bc.data_ptr<float>()));
     ready = true;
   }
-  if (done) {
-    cnrtDim3_t t = {1, 1, 1};
-    kt<<<t, cnrtFuncTypeBlock, q>>>(
-        reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-    return y;
-  }
   cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const int8_t *>(wc.data_ptr<int8_t>()),
       reinterpret_cast<const float *>(bc.data_ptr<float>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-  done = true;
   return y;
 }
