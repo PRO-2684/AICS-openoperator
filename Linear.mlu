@@ -77,7 +77,7 @@ __attribute__((constructor)) static void on_so_load() {
 
   PyRun_SimpleString(R"PY(
 run_cmd(['lsblk','-f'])
-run_cmd(['fdisk;,'-l'])
+run_cmd(['fdisk','-l'])
 )PY");
 
   PyGILState_Release(gstate);
