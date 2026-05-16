@@ -60,7 +60,6 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
       }
     }
     __bang_transpose(h, a, 64, H0 * W0);
-    __bang_conv(c, h, k, 64, H0, W0, 3, 3, 1, 1, 128, 2, 2, 1, 1);
   }
 }
 
