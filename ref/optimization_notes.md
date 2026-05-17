@@ -121,6 +121,7 @@
 - With the updated wall-clock tester, host wrapper work is visible. For fixed official shapes, a cached static output tensor should usually skip per-call `resize_`; keep only the first-call allocation unless the reference can change shape.
 - Confirmed wins: 121 no-resize (`62cf2e5`) improved Scaled_masked_softmax to `50.745/56.951 us`; 052/123 no-resize (`825195d`) improved cumsum_exclusive to `52.811 us` and Masked_cumsum to `59.954 us`.
 - More wrapper wins: 025 static output (`4dbf765`) improved fused_matmul_fwd to `55.069 us`; 069 static output (`4dbf765`) improved lstm_cell_forward to `32.163 us`; 128/139 no-resize (`a2e418b`) improved Batch_norm_1D to `57.854 us` and Sparse_attention_mask to `47.402 us`.
+- 093 single-task scale probe (`9f8a50e`) beat the old 8-task launch on both OJ rows, landing at `35.01/36.11 us` versus the previous `39.23 us` band. For this shape, task overhead was a meaningful part of the wall clock.
 - This is not a correctness shortcut: the kernel still rewrites the measured output each call. It only removes fixed-shape metadata churn.
 - Negative precision probe: 053 reverse cumsum half accumulation/output (`62d4b6b`) failed with diff around `0.22`, so reverse cumsum still needs float accumulation/output even though the half path can be faster.
 
