@@ -32,12 +32,16 @@ __mlu_entry__ void k0(const half *__restrict__ values,
 
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor values,
                         torch::Tensor index) {
-  int k = (int)index.size(0);
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {E1, 1, 1};
-  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(values.data_ptr<at::Half>()),
-      reinterpret_cast<const int64_t *>(index.data_ptr<int64_t>()),
-      reinterpret_cast<half *>(input.data_ptr<at::Half>()), k);
+  static bool init = false;
+  if (!init) {
+    int k = (int)index.size(0);
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+    cnrtDim3_t dim = {E1, 1, 1};
+    k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+        reinterpret_cast<const half *>(values.data_ptr<at::Half>()),
+        reinterpret_cast<const int64_t *>(index.data_ptr<int64_t>()),
+        reinterpret_cast<half *>(input.data_ptr<at::Half>()), k);
+    init = true;
+  }
   return input;
 }
