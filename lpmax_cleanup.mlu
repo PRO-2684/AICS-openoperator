@@ -4,30 +4,23 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k(const half *a, half *b) {
-  int p = taskId * 4;
+  int p = taskId * 8;
 
   __nram__ half x[64];
   __nram__ half y[64];
 
-  __memcpy(x, a + p * 64, 128, GDRAM2NRAM);
-  __bang_max(y, x, 64);
-  __memcpy(b + p, y, 2, NRAM2GDRAM);
-  __memcpy(x, a + (p + 1) * 64, 128, GDRAM2NRAM);
-  __bang_max(y, x, 64);
-  __memcpy(b + p + 1, y, 2, NRAM2GDRAM);
-  __memcpy(x, a + (p + 2) * 64, 128, GDRAM2NRAM);
-  __bang_max(y, x, 64);
-  __memcpy(b + p + 2, y, 2, NRAM2GDRAM);
-  __memcpy(x, a + (p + 3) * 64, 128, GDRAM2NRAM);
-  __bang_max(y, x, 64);
-  __memcpy(b + p + 3, y, 2, NRAM2GDRAM);
+  for (int i = 0; i < 8; ++i) {
+    __memcpy(x, a + (p + i) * 64, 128, GDRAM2NRAM);
+    __bang_max(y, x, 64);
+    __memcpy(b + p + i, y, 2, NRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int n) {
   auto y = torch::empty({32}, x.options());
 
   cnrtDim3_t d;
-  d.x = 8;
+  d.x = 4;
   d.y = 1;
   d.z = 1;
 
