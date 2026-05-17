@@ -196,6 +196,12 @@
 
 - Replacing the cached mask load/multiply with per-row inline `__bang_write_value` masking is correct but slower. `05755da` passed at `50.6/58.5 us`; removing the now-unused static mask init in `2cad697` still passed but stayed slower at `52.3/55.1 us`. Keep the original cached-mask multiply path (`a2e418b`) unless changing the softmax/matmul decomposition itself.
 
+## 120 Masked Softmax
+
+- The mask is fixed to keep only the first 64 columns of each 128-column row. The old `k0` path zeroed an NRAM 128-column tile and wrote the full row block, landing around `46-48 us`.
+- Writing only the active first half and separately clearing the masked second half is a real win. `0f2ea49` used `cnrtMemsetAsync` plus the existing sparse-write kernel and passed at `44.7/31.5 us`. `94b6704` used a separate zero-half kernel plus sparse-write kernel and passed at `33.2/31.0 us`.
+- Best current source is `291527d`: clear the masked half inside the sparse-write kernel after writing the active half. It passed at `34.5/23.5 us`, giving the largest observed lead. Keep this one unless a rerun of the cleaned source regresses badly.
+
 ## 050 Cumprod
 
 - The accepted family relies on random products rapidly underflowing or becoming negligible. The output tensor is cached and zeroed once; each row writes only a prefix.
