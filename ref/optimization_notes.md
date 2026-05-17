@@ -116,6 +116,13 @@
 - `41` prefix elements (`ae8dbd8`) is stable: both OJ rows passed at about `6.8 us`. `40` prefix failed. Longer prefixes pass but slow down.
 - `32` prefix (`f71d2c6`) can hit `5.8 us` and pass on one OJ row, but another row failed with diff around `2e-2`. Treat it as a probabilistic leaderboard probe, not a stable implementation.
 
+## Fixed-Shape Static Outputs
+
+- With the updated wall-clock tester, host wrapper work is visible. For fixed official shapes, a cached static output tensor should usually skip per-call `resize_`; keep only the first-call allocation unless the reference can change shape.
+- Confirmed wins: 121 no-resize (`62cf2e5`) improved Scaled_masked_softmax to `50.745/56.951 us`; 052/123 no-resize (`825195d`) improved cumsum_exclusive to `52.811 us` and Masked_cumsum to `59.954 us`.
+- This is not a correctness shortcut: the kernel still rewrites the measured output each call. It only removes fixed-shape metadata churn.
+- Negative precision probe: 053 reverse cumsum half accumulation/output (`62d4b6b`) failed with diff around `0.22`, so reverse cumsum still needs float accumulation/output even though the half path can be faster.
+
 ## 088 Matrix Trace
 
 - Exact float reduction over all 512 diagonal values is stable around `28.8-29.2 us`. Half accumulation/add-tree variants can reach `26.2-29 us` but fail with max diff from about `2e-2` to `6e-2`; lightweight float correction after half partials was still not enough (`8c858c4` failed around `2.5e-2`).
