@@ -10,8 +10,8 @@
 #define TN 128
 #define TK 128
 #define TR 129
-#define RB 7
-#define TG 10
+#define RB 6
+#define TG 11
 #define TC 47
 #define TT (TG * TC)
 
