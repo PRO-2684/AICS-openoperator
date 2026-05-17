@@ -15,7 +15,9 @@ __mlu_entry__ void k(const half *a, half *b) {
 }
 
 torch::Tensor bang_func(torch::Tensor x, int n) {
-  auto y = torch::empty({32}, x.options());
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty({32}, x.options());
 
   cnrtDim3_t d;
   d.x = 32;
