@@ -10,19 +10,16 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   for (int g = taskId; g < 32; g += taskDim) {
     int p = g * 16384;
     __memcpy(a, x + p, 16384 * sizeof(half), GDRAM2NRAM);
-#pragma unroll
-    for (int r = 0; r < 128; ++r) {
-      int n = 127 - r;
-      if (n > 0)
-        __bang_write_zero(a + r * 128 + r + 1, n);
-    }
+    __bang_active_exp(a, a, 16384);
 #pragma unroll
     for (int r = 0; r < 128; ++r) {
       half *q = a + r * 128;
-      __bang_active_exp(q, q, r + 1);
+      int n = 127 - r;
+      if (n > 0)
+        __bang_write_zero(q + r + 1, n);
       __bang_reduce_sum(s, q, 128);
       float z = (float)s[0] + (float)s[64];
-      __bang_mul_scalar(q, q, (half)(1.0f / z), r + 1);
+      __bang_mul_scalar(q, q, (half)(1.0f / z), 128);
     }
     __memcpy(y + p, a, 16384 * sizeof(half), NRAM2GDRAM);
   }
