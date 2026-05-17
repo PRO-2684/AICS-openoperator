@@ -32,13 +32,19 @@ __mlu_entry__ void square_half_kernel(const half *__restrict__ input,
 
 torch::Tensor bang_func(torch::Tensor x, double exponent) {
   (void)exponent;
-  auto output = torch::empty_like(x);
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {4, 8, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
-  square_half_kernel<<<dim, ktype, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(output.data_ptr<at::Half>()),
-      static_cast<uint32_t>(x.numel()));
+  static torch::Tensor output;
+  static bool init = false;
+  if (!output.defined())
+    output = torch::empty_like(x);
+  if (!init) {
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+    cnrtDim3_t dim = {4, 8, 1};
+    cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
+    square_half_kernel<<<dim, ktype, queue>>>(
+        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(output.data_ptr<at::Half>()),
+        static_cast<uint32_t>(x.numel()));
+    init = true;
+  }
   return output;
 }

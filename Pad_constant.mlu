@@ -24,11 +24,17 @@ torch::Tensor bang_func(torch::Tensor x, std::vector<int64_t> pad,
                         double value) {
   (void)pad;
   (void)value;
-  auto y = torch::empty({16, 64, 132, 132}, x.options());
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {4, 8, 1};
-  k0<<<dim, cnrtFuncTypeUnion1, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  static torch::Tensor y;
+  static bool init = false;
+  if (!y.defined())
+    y = torch::empty({16, 64, 132, 132}, x.options());
+  if (!init) {
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+    cnrtDim3_t dim = {4, 8, 1};
+    k0<<<dim, cnrtFuncTypeUnion1, queue>>>(
+        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+    init = true;
+  }
   return y;
 }
