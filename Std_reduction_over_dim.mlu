@@ -6,29 +6,34 @@
 #define E0 16
 #define E1 256
 #define E2 65536
+#define E3 32768
+#define E4 128
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[E2];
-  __nram__ half r[E1];
-  __nram__ half s[E1];
-  __nram__ float e[E1];
-  __nram__ float f[E1];
-  __nram__ float g[E1];
-  int p = taskId * E2;
-  __memcpy(a, x + p, E2 * sizeof(half), GDRAM2NRAM);
-  __bang_sumpool(r, a, E1, 1, 256, 1, 256, 1, 256);
-  __bang_square(a, a, E2);
-  __bang_sumpool(s, a, E1, 1, 256, 1, 256, 1, 256);
-  __bang_half2float(e, r, E1);
-  __bang_half2float(f, s, E1);
-  __bang_mul(g, e, e, E1);
-  __bang_mul_scalar(g, g, 0.00390625f, E1);
-  __bang_sub(f, f, g, E1);
-  __bang_mul_scalar(f, f, 0.00392156862745098f, E1);
-  __bang_active_relu(f, f, E1);
-  __bang_sqrt(f, f, E1);
-  __bang_float2half(r, f, E1);
-  __memcpy(y + taskId * E1, r, E1 * sizeof(half), NRAM2GDRAM);
+  __nram__ half a[E3];
+  __nram__ half r[E4];
+  __nram__ half s[E4];
+  __nram__ float e[E4];
+  __nram__ float f[E4];
+  __nram__ float g[E4];
+  int b = taskId >> 1;
+  int o = (taskId & 1) * E4;
+  int p = b * E2 + o;
+  __memcpy(a, x + p, E4 * sizeof(half), GDRAM2NRAM, E4 * sizeof(half),
+           E1 * sizeof(half), E1 - 1);
+  __bang_sumpool(r, a, E4, 1, 256, 1, 256, 1, 256);
+  __bang_square(a, a, E3);
+  __bang_sumpool(s, a, E4, 1, 256, 1, 256, 1, 256);
+  __bang_half2float(e, r, E4);
+  __bang_half2float(f, s, E4);
+  __bang_mul(g, e, e, E4);
+  __bang_mul_scalar(g, g, 0.00390625f, E4);
+  __bang_sub(f, f, g, E4);
+  __bang_mul_scalar(f, f, 0.00392156862745098f, E4);
+  __bang_active_relu(f, f, E4);
+  __bang_sqrt(f, f, E4);
+  __bang_float2half(r, f, E4);
+  __memcpy(y + b * E1 + o, r, E4 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
@@ -37,7 +42,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   if (!out.defined())
     out = torch::empty({E0, E1}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t h0 = {E0, 1, 1};
+  cnrtDim3_t h0 = {32, 1, 1};
   k0<<<h0, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
