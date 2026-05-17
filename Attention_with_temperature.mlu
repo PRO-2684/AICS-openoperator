@@ -31,7 +31,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, half *__restrict__ y) {
   __bang_transpose(a2, a3, 64, 128);
   __bang_cycle_sub(a2, a2, d0, 8192, 64);
   __bang_transpose(a3, a2, 128, 64);
-  __bang_active_exp_less_0(a3, a3, 8192);
+  __bang_active_exphp(a3, a3, 8192);
   __bang_reduce_sum(a0, a3, 8192);
 
   __bang_transpose(a2, a1, 128, 64);
