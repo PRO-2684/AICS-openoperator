@@ -20,8 +20,8 @@ __mlu_entry__ void k0(const half *__restrict__ p, const half *__restrict__ t,
   __bang_mul_scalar(fbuf, fbuf, -1.0f, N);
   __bang_add_scalar(fbuf, fbuf, 1.0f, N);
   __bang_active_relu(fbuf, fbuf, N);
-  __bang_sum(fbuf, fbuf, N);
-  out[0] = fbuf[0] * 0.0078125f;
+  __bang_reduce_sum(fbuf, fbuf, N);
+  out[0] = (fbuf[0] + fbuf[32] + fbuf[64] + fbuf[96]) * 0.0078125f;
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
