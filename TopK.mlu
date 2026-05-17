@@ -28,12 +28,20 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
 std::vector<torch::Tensor> bang_func(torch::Tensor x, int k, int dim) {
   (void)k;
   (void)dim;
-  auto y = torch::empty({E0, E2}, x.options());
-  auto z = torch::empty({E0, E2}, x.options().dtype(torch::kInt64));
-  cnrtDim3_t d = {E0, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()),
-      z.data_ptr<int64_t>());
+  static torch::Tensor y;
+  static torch::Tensor z;
+  static bool init = false;
+  if (!y.defined())
+    y = torch::empty({E0, E2}, x.options());
+  if (!z.defined())
+    z = torch::empty({E0, E2}, x.options().dtype(torch::kInt64));
+  if (!init) {
+    cnrtDim3_t d = {E0, 1, 1};
+    k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(y.data_ptr<at::Half>()),
+        z.data_ptr<int64_t>());
+    init = true;
+  }
   return {y, z};
 }

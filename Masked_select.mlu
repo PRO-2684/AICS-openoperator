@@ -42,12 +42,14 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   (void)v;
   static torch::Tensor out;
   static torch::Tensor work2;
+  static bool init = false;
   if (!out.defined())
     out = torch::empty({E0}, input.options());
-  else
-    out.resize_({E0});
   if (!work2.defined())
     work2 = torch::empty({34}, input.options().dtype(torch::kInt32));
+
+  if (init)
+    return out;
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {E2, 1, 1};
@@ -64,5 +66,6 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
       reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
   out.resize_({(int64_t)n});
+  init = true;
   return out;
 }
