@@ -35,6 +35,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
       __bang_transpose(bt, bh, TK, TN);
       __bang_reshape_filter(hf, bt, TN, 1, 1, TK);
       __memcpy(ww, hf, TN * TK * sizeof(half), NRAM2WRAM);
+#pragma unroll
       for (int rb = 0; rb < RB; ++rb) {
         int mi = base_m + rb * TM;
         const half *ap = a + mi * N0;
@@ -44,6 +45,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
         __bang_add(acc + rb * TM * TN, acc + rb * TM * TN, tmp, TM * TN);
       }
     }
+#pragma unroll
     for (int rb = 0; rb < RB; ++rb) {
       int mi = base_m + rb * TM;
       float *cp = c + mi * N0 + nj;
