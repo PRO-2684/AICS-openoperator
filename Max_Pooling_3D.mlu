@@ -8,8 +8,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half b[57600];
   __nram__ half c0[27072];
   __nram__ half c1[27072];
+  __bang_write_value(a, 274560, (half)-65504.0f);
+  __bang_write_value(c0, 27072, (half)-65504.0f);
   for (int p = taskId; p < 512; p += taskDim) {
-    __bang_write_value(a, 274560, (half)-65504.0f);
     for (int i = 0; i < 65; ++i) {
       int d = i - 1;
       if ((unsigned)d < 64U) {
@@ -18,7 +19,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
       }
     }
     __bang_maxpool(b, a, 64, 65, 66, 3, 3, 2, 2, 3, 3, 1, 1);
-    __bang_write_value(c0, 27072, (half)-65504.0f);
     for (int i = 0; i < 29; ++i) {
       __memcpy(c0 + i + 1, b + 1 + (i << 1), sizeof(half), NRAM2NRAM,
                30 * sizeof(half), 64 * sizeof(half), 899);
