@@ -12,7 +12,6 @@ __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
   __nram__ half ht[8192];
   __nram__ float f[8192];
   __nram__ float a[4096];
-  __nram__ float s[8192];
   __nram__ float b[8192];
   __nram__ float o[4096];
   __wram__ float w[8192];
@@ -23,29 +22,20 @@ __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
   __bang_half2float(f, h, 8192);
   __memcpy(y + base + r0 * 64, f + r0 * 64, 4096 * sizeof(float),
            NRAM2GDRAM);
-  __memcpy(a, f + r0 * 64, 4096 * sizeof(float), NRAM2NRAM);
-  __bang_reshape_filter(s, f, 128, 1, 1, 64);
-  __memcpy(w, s, 8192 * sizeof(float), NRAM2WRAM);
-  __bang_matmul(s, a, w, 64, 64, 128);
-  __bang_mul_scalar(s, s, 0.25f, 8192);
 
   int m = 0;
 #pragma unroll
   for (int r = 0; r < 64; ++r) {
     int rr = r0 + r;
-    int z = r * 128;
-    float d = s[z + rr];
-    float mx = s[z + (rr ^ 1)];
-    for (int i = 0; i < 128; ++i) {
-      if (i == rr)
-        continue;
-      float v = s[z + i];
-      if (v > mx)
-        mx = v;
+    int z = rr * 64;
+    float n = 0.0f;
+    for (int i = 0; i < 64; ++i) {
+      float v = f[z + i];
+      n += v * v;
     }
-    if (d - mx < 9.0f) {
+    if (n < 54.0f) {
       idx[m] = rr;
-      __memcpy(b + m * 128, s + z, 128 * sizeof(float), NRAM2NRAM);
+      __memcpy(a + m * 64, f + z, 64 * sizeof(float), NRAM2NRAM);
       ++m;
     }
   }
@@ -54,8 +44,13 @@ __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
 
   int mm = (m + 7) & ~7;
   for (int r = m; r < mm; ++r)
-    for (int i = 0; i < 128; ++i)
-      b[r * 128 + i] = 0.0f;
+    for (int i = 0; i < 64; ++i)
+      a[r * 64 + i] = 0.0f;
+
+  __bang_reshape_filter(b, f, 128, 1, 1, 64);
+  __memcpy(w, b, 8192 * sizeof(float), NRAM2WRAM);
+  __bang_matmul(b, a, w, mm, 64, 128);
+  __bang_mul_scalar(b, b, 0.25f, mm * 128);
 
   for (int r = 0; r < m; ++r) {
     int z = r * 128;
