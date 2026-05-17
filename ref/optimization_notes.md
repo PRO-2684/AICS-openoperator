@@ -32,6 +32,11 @@
 - 048 launch probes with the same persistent padding were worse: 64 tasks (`146afcd`) landed around `347 us`, 128 tasks (`6c31a6c`) around `349-361 us`, and 16 tasks (`f38306a`) around `598-599 us`. Keep 32 Block tasks unless the algorithm changes.
 - For 049, reusing both the large padded input buffer and `c0` failed with large diff (`a2e6365`, `~3.6`) even though it was faster. Reusing only the large input padding while still clearing `c0` each plane is correct and faster: `2fdb998` PASS at `2780.060/2796.280 us`, beating the external `2895.721 us`.
 
+## 053 Reverse Cumsum
+
+- More tasks did not help the existing vector scan: 64 tasks (`61c2e9b`) slowed to `60.018/61.919 us`. The restored 32-task vector scan (`c5134e6`) produced the best row in this round at `48.162 us` with diff `3.05e-05`.
+- A scalar O(n) NRAM scan with 128 tasks (`3242526`) is correct but far too slow (`464-467 us`). The vector doubling scan remains the only viable exact path found so far; beating the external `32.72 us` likely needs a different parallel scan decomposition, not scalar loops or more tasks.
+
 ## 074 Std Reduction
 
 - Fused exact one-kernel per batch (`ddf3d1a`) improved the old two-kernel path to `49.501/53.659 us`, but did not catch the external `35.36 us`.
