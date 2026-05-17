@@ -159,6 +159,13 @@
 ## 131/132 Embedding Wrappers
 
 - The problem descriptions mention embedding weights, but the current generated `.mlu` wrappers only expose init/input scalars or indices (`131`: `bang_func(int seq_len, int max_seq, int d_model)`, `132`: `bang_func(torch::Tensor x, int vocab_size, int emb_dim)`). Do not implement a normal gather until the actual OJ wrapper/data path for the weight is verified.
+- The wrapper-output cache batch `d231f15` passed for `105/106/131/132`: `105` around `18.5 us`, `106` around `17.5 us`, `131` around `35.6-38.5 us`, and `132` around `20.5-21.9 us`. Keep this recorded unless the wrapper surface changes.
+
+## Basic/Cache Batch
+
+- `aeb17f8` passed the basic external-leader cache batch: `034` around `19 us`, `056` around `17 us`, `075` around `17-18 us`, and `111` around `19-21 us`. README records only MosRat-owned basic rows; do not overwrite N/A basic rows such as `075`.
+- `1014e45` passed the heavier basic cache batch: `002/004/005/023/039`, with `004` best around `35.5 us` and `039` around `42.8 us`. README records only MosRat-owned basic rows (`004`, `039`); do not claim non-MosRat/N/A basic rows.
+- `f4283d0` passed `012` and `135` but failed `138`. README records only MosRat-owned `135`; do not use the `138` result.
 
 ## 042 Frobenius Norm
 
@@ -284,6 +291,10 @@
 - The float-accum/channel32 probe `0c0ef5f` passed but only reproduced the old `26.0-26.2 us` band. It did not approach the public `20.2 us`; do not keep tuning this exact split.
 - Mapping Conv1D to `__bang_conv` with `height=1,width=512,ci=32,co=64,kw=3` is the winning route. The first attempt `684372e` ran fast (`19.2 us`) but failed because the weight-layout kernel only initialized six output channels (`576` loop bound instead of `6144`). Fixing the full WRAM layout in `76ca885` passed with diff `~1e-6` at `19.2/19.4 us`, taking rank1. This path reads current input every call and caches only the reshaped weight.
 - The best follow-up after the `__bang_conv` mapping is to keep the full 32-channel pad tile but clear only the padded tail `a + 1536` instead of the whole buffer. That `bdbed09` variant passed at `13.6/13.8 us` and is the current best known path. Merging the three input copies into one contiguous `__memcpy` or changing the launch geometry to `8x2`, `2x8`, `1x16`, or `16x1` did not beat it; some tiny-task layouts even failed with huge diff, so keep the safe `4x4 Union1` form unless the checker changes.
+
+## 006/008 Conv Half Accumulation Probes
+
+- Replacing float accumulation with half accumulation is not viable for these random conv references. `008` probe `a57c858` failed with diff `~1.1e-2..1.2e-2` and no useful speed gain (`~598-630 us`). `006` probe `0117cf4` failed with diff `~1.5e-2..2.4e-2`; it was slightly faster (`149-150 us`) but outside tolerance. Keep float accumulation unless using a different correction strategy.
 
 ## 098 Attention With Temperature
 
