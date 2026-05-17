@@ -19,7 +19,7 @@
 
 ## 019 Irregular Matmul
 
-- Launch task count has measurable effect even though the tiling is unchanged. 16 tasks (`256ae0f`) regressed badly to `33.6-33.8 ms`; 64 tasks (`1b6bfd3`/`8f9bbf9`) improved slightly to about `18.96-18.98 ms`; 128 tasks (`c3d6b01`) improved further to `18.892/18.897 ms` and is the best-known launch in this round. This still trails the external `16.028 ms`, so the remaining gap likely needs a tiling/data-reuse change rather than launch-only tuning.
+- Launch task count has measurable effect even though the tiling is unchanged. 16 tasks (`256ae0f`) regressed badly to `33.6-33.8 ms`; 64 tasks (`1b6bfd3`/`8f9bbf9`) improved slightly to about `18.96-18.98 ms`; 128 tasks improved further, first with `c3d6b01` at `18.892/18.897 ms` and then `ce416a2` at `18.759/18.854 ms`. This still trails the external `16.028 ms`, so the remaining gap likely needs a tiling/data-reuse change rather than launch-only tuning.
 
 ## 046 InstanceNorm
 
