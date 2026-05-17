@@ -104,7 +104,9 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor hidden,
                         torch::Tensor cx, int hsz, int totalElements) {
   (void)hsz;
   (void)totalElements;
-  auto y = torch::empty({E2}, input.options());
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty({E2}, input.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {E5, 1, 1};
   k1<<<d, cnrtFuncTypeBlock, queue>>>(
