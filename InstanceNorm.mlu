@@ -77,7 +77,7 @@ __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
 
     __memcpy(hbuf, px, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
 
-    float mean = f3(hbuf, htmp) * 0.0000152587890625f;
+    float mean = 0.0f;
     float inv_std = 0.9985f;
 
     __bang_fusion(FUSION_FMA, hbuf, hbuf, (half)inv_std,
