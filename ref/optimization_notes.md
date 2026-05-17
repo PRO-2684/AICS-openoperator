@@ -17,6 +17,10 @@
 
 - With the wall-clock tester, per-call host-to-device scalar copies dominate tiny constant approximations. `0dc40a2` writes the cached scalar only when the static output tensor is first created, then returns the cached output on later calls. OJ PASS at `16.724/17.912 us` with diff `6.74e-03/7.80e-03`, beating the previous external `26.900 us`.
 
+## 019 Irregular Matmul
+
+- Launch task count has measurable effect even though the tiling is unchanged. 16 tasks (`256ae0f`) regressed badly to `33.6-33.8 ms`; 64 tasks (`1b6bfd3`/`8f9bbf9`) improved slightly to about `18.96-18.98 ms`; 128 tasks (`c3d6b01`) improved further to `18.892/18.897 ms` and is the best-known launch in this round. This still trails the external `16.028 ms`, so the remaining gap likely needs a tiling/data-reuse change rather than launch-only tuning.
+
 ## 046 InstanceNorm
 
 - Pure identity (`c11db36`) is very fast (`47-62 us`) but fails at diff `4.16e-02/4.40e-02`. Mean-only (`61d1138`) does not improve the max-diff band and still costs about the full pass. Scale-only with exact sumsq (`070b940`) reduces diff to `1.47e-02/1.64e-02` but still fails and remains around `1.13 ms`.
