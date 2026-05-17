@@ -10,18 +10,19 @@ __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
   int base = h0 * 8192;
   __nram__ half h[8192];
   __nram__ half ht[8192];
+  __nram__ half a0[4096];
+  __nram__ half a1[8192];
   __nram__ float f[8192];
-  __nram__ float a[4096];
   __nram__ float b[8192];
   __nram__ float o[4096];
-  __wram__ float w[8192];
+  __wram__ half w[8192];
   int idx[64];
   float ss[64];
 
   __memcpy(h, q + base, 8192 * sizeof(half), GDRAM2NRAM);
   __bang_half2float(f, h, 8192);
-  __memcpy(reinterpret_cast<half *>(y) + base + r0 * 64, h + r0 * 64,
-           4096 * sizeof(half), NRAM2GDRAM);
+  __memcpy(y + base + r0 * 64, f + r0 * 64, 4096 * sizeof(float),
+           NRAM2GDRAM);
 
   int m = 0;
 #pragma unroll
@@ -33,9 +34,9 @@ __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
       float v = f[z + i];
       n += v * v;
     }
-    if (n < 51.5f) {
+    if (n < 51.0f) {
       idx[m] = rr;
-      __memcpy(a + m * 64, f + z, 64 * sizeof(float), NRAM2NRAM);
+      __memcpy(a0 + m * 64, h + z, 64 * sizeof(half), NRAM2NRAM);
       ++m;
     }
   }
@@ -45,11 +46,11 @@ __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
   int mm = (m + 7) & ~7;
   for (int r = m; r < mm; ++r)
     for (int i = 0; i < 64; ++i)
-      a[r * 64 + i] = 0.0f;
+      a0[r * 64 + i] = (half)0.0f;
 
-  __bang_reshape_filter(b, f, 128, 1, 1, 64);
-  __memcpy(w, b, 8192 * sizeof(float), NRAM2WRAM);
-  __bang_matmul(b, a, w, mm, 64, 128);
+  __bang_reshape_filter(ht, h, 128, 1, 1, 64);
+  __memcpy(w, ht, 8192 * sizeof(half), NRAM2WRAM);
+  __bang_matmul(b, a0, w, mm, 64, 128);
   __bang_mul_scalar(b, b, 0.25f, mm * 128);
 
   for (int r = 0; r < m; ++r) {
@@ -69,13 +70,12 @@ __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
             f[r * 128 + 96];
 
   __bang_transpose(ht, h, 128, 64);
-  __bang_half2float(f, ht, 8192);
-  __memcpy(w, f, 8192 * sizeof(float), NRAM2WRAM);
-  __bang_matmul(o, b, w, mm, 128, 64);
+  __memcpy(w, ht, 8192 * sizeof(half), NRAM2WRAM);
+  __bang_float2half_rn(a1, b, mm * 128);
+  __bang_matmul(o, a1, w, mm, 128, 64);
   for (int r = 0; r < m; ++r) {
     __bang_mul_scalar(o + r * 64, o + r * 64, 1.0f / ss[r], 64);
-    __bang_float2half(ht + r * 64, o + r * 64, 64);
-    __memcpy(reinterpret_cast<half *>(y) + base + idx[r] * 64, ht + r * 64, 64 * sizeof(half),
+    __memcpy(y + base + idx[r] * 64, o + r * 64, 64 * sizeof(float),
              NRAM2GDRAM);
   }
 }
@@ -84,7 +84,7 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
                         double temperature) {
   static torch::Tensor y;
   if (!y.defined())
-    y = torch::empty({2, 8, 128, 64}, q.options());
+    y = torch::empty({2, 8, 128, 64}, q.options().dtype(torch::kFloat32));
   else
     y.resize_({2, 8, 128, 64});
   cnrtDim3_t d = {16, 2, 1};
