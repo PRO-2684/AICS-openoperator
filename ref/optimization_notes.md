@@ -42,7 +42,7 @@
 - 048 launch probes with the same persistent padding were worse: 64 tasks (`146afcd`) landed around `347 us`, 128 tasks (`6c31a6c`) around `349-361 us`, and 16 tasks (`f38306a`) around `598-599 us`. Keep 32 Block tasks unless the algorithm changes.
 - For 049, reusing both the large padded input buffer and `c0` failed with large diff (`a2e6365`, `~3.6`) even though it was faster. Reusing only the large input padding while still clearing `c0` each plane is correct and faster: `2fdb998` PASS at `2780.060/2796.280 us`, beating the external `2895.721 us`.
 - Direct strided-gather implementations are not competitive for these small 2x2 pools. 048 direct gather (`37e9be3`) passed but slowed to about `797-799 us`; 101 direct gather (`506bd02`) passed but slowed to about `820-826 us`. Too many tiny NRAM strided copies lose to the maxpool intrinsic even with extra padding work.
-- 101 cannot call the 2D maxpool intrinsic with zero padding: `74cc51b` failed compile because `__bang_maxpool` rejects 0 for that argument. The current best 101 path remains the original intrinsic-plus-column-merge skeleton, with rerun `78e9fec` reaching `267.128 us`; 64-task rerun `069fa52` also had one `267.255 us` row but worse variance.
+- 101 cannot call the 2D maxpool intrinsic with zero padding: `74cc51b` failed compile because `__bang_maxpool` rejects 0 for that argument. The current best 101 path remains the original intrinsic-plus-column-merge skeleton, with rerun `591eb06` reaching `264.645/265.586 us`; 64-task rerun `069fa52` also had one `267.255 us` row but worse variance.
 
 ## 053 Reverse Cumsum
 
