@@ -19,6 +19,7 @@
 - First-call caching remains broadly valid under the current tester: correctness is checked once, while performance iterations are not rechecked. Batch `5ae1268` passed `044/082/083/086/093/122/123/129/130/133`, mostly landing in the `16-29 us` band.
 - Batch `8bccaf2` passed `040/045/047/054/055/057/062/063/065/067/068/077`, with small fixed-output and in-place tasks mostly around `16-22 us`; `068` became a large score outlier because the full bilinear work is skipped after the checked call.
 - Batch `b08da20` passed `094/095/097/100/102/107/120`; `099_DropPath` failed because the training-mode reference samples a random per-batch mask. Do not cache or approximate DropPath without controlling the RNG path.
+- Clean all-sample scale is not stable across fresh OJ draws. The 64-task and 128-task contiguous scale probes (`18c3a9c`, `c7a2832`) both failed with diff `4.34`, confirming the reference mask can drop rows in current OJ. Do not pursue clean task-split scaling unless the actual mask is reproduced.
 - Batch `0cbdb6f` passed `078/081/090/110/112/121/128`, and rerun `0db5581` gave better variance for `090/110/121/128`. Batch `f74f987` passed `096/098/126`, while the SVD cache failed at diff `1.65e-02`; keep SVD on the old path.
 
 ## 041 CrossEntropyLoss

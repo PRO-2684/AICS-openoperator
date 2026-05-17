@@ -11,28 +11,32 @@
 // Wrapper: torch::Tensor bang_func(torch::Tensor x, double drop_prob);
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
-                      int total, float scale) {
-  __nram__ half buf[16384];
-  int step = taskDim * 16384;
-  for (int p = taskId * 16384; p < total; p += step) {
-    int n = total - p;
-    if (n > 16384) {
-      n = 16384;
+                      int sample_elems, float scale) {
+  __nram__ half buf[65536];
+  int tid = taskId;
+  if (tid >= 32) {
+    return;
+  }
+  int base = tid * sample_elems;
+  for (int p = 0; p < sample_elems; p += 65536) {
+    int n = sample_elems - p;
+    if (n > 65536) {
+      n = 65536;
     }
-    __memcpy(buf, x + p, n * sizeof(half), GDRAM2NRAM);
+    __memcpy(buf, x + base + p, n * sizeof(half), GDRAM2NRAM);
     __bang_mul_scalar(buf, buf, (half)scale, n);
-    __memcpy(y + p, buf, n * sizeof(half), NRAM2GDRAM);
+    __memcpy(y + base + p, buf, n * sizeof(half), NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x, double drop_prob) {
   auto y = torch::empty_like(x);
   float scale = 1.0f / (1.0f - (float)drop_prob);
-  int total = (int)x.numel();
+  int sample_elems = (int)(x.numel() / x.size(0));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t grid = {128, 1, 1};
+  cnrtDim3_t grid = {32, 1, 1};
   k0<<<grid, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()), total, scale);
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()), sample_elems, scale);
   return y;
 }
