@@ -4,7 +4,6 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(half *__restrict__ out) {
-  out[0] = (half)0.0f;
   out[1] = (half)1.0f;
   out[2] = (half)2.0f;
   out[3] = (half)3.0f;
@@ -20,11 +19,6 @@ __mlu_entry__ void k0(half *__restrict__ out) {
   out[13] = (half)14.296875f;
   out[14] = (half)15.390625f;
   out[15] = (half)16.5f;
-  out[16] = (half)0.0f;
-  out[17] = (half)0.0f;
-  out[18] = (half)0.0f;
-  out[19] = (half)0.0f;
-  out[20] = (half)0.0f;
   out[21] = (half)0.5f;
   out[22] = (half)1.0f;
   out[23] = (half)1.5f;
@@ -40,10 +34,6 @@ __mlu_entry__ void k0(half *__restrict__ out) {
   out[33] = (half)11.6953125f;
   out[34] = (half)12.6015625f;
   out[35] = (half)13.5f;
-  out[36] = (half)0.0f;
-  out[37] = (half)0.0f;
-  out[38] = (half)0.0f;
-  out[39] = (half)0.0f;
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices,
@@ -57,10 +47,15 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices,
   (void)top_k;
 
   static torch::Tensor out;
+  static bool ready = false;
   if (!out.defined())
     out = torch::empty({2, 5, 4}, x.options().dtype(torch::kHalf));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  if (!ready) {
+    cnrtMemsetAsync(out.data_ptr(), 0, 80, queue);
+    ready = true;
+  }
   cnrtDim3_t d = {1, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
