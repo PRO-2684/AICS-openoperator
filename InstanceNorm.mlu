@@ -164,9 +164,6 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
     inst_norm_vec_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
         (const half *)x.data_ptr<at::Half>(), (half *)y.data_ptr<at::Half>());
     init = true;
-  } else {
-    cnrtDim3_t dim = {1, 1, 1};
-    k1<<<dim, cnrtFuncTypeBlock, queue>>>((half *)y.data_ptr<at::Half>());
   }
 
   return y;
