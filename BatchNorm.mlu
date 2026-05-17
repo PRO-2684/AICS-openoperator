@@ -15,9 +15,18 @@ __mlu_func__ float fsum(float *__restrict__ x, float *__restrict__ y) {
   return y[0];
 }
 
+__mlu_func__ float fsumh(const half *__restrict__ x, half *__restrict__ y) {
+  __bang_sumpool(y, x, 64, 1, 512, 1, 512, 512, 1);
+  float s = 0.0f;
+#pragma unroll
+  for (int i = 0; i < 64; ++i)
+    s += (float)y[i];
+  return s;
+}
+
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ m) {
   __nram__ half h[E2];
-  __nram__ float a[E2];
+  __nram__ half t[64];
   __nram__ float s[32];
   if (taskId < E4) {
     m[taskId] = 0.0f;
@@ -31,8 +40,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ m) {
     int g = r & 1;
     int off = ((n << 1) * E0 + c) * E1 + g * E2;
     __memcpy(h, x + off, E2 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(a, h, E2);
-    s[0] = fsum(a, s);
+    s[0] = fsumh(h, t);
     __bang_atomic_reduce_add(m + c, s, 1);
   }
 }
