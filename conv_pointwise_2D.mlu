@@ -38,7 +38,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
       float v1 = q[o + 1];
       float v2 = q[o + 2];
       float r = v0 * v0 + v1 * v1 + v2 * v2;
-      if (r < 0.25f) {
+      if (r < 0.5f) {
         __bang_mul_scalar(h3, h0, k[o], E1);
         __bang_fusion(FUSION_FMA, h3, h1, k[o + 1], h3, E1, E1);
         __bang_fusion(FUSION_FMA, h3, h2, k[o + 2], h3, E1, E1);
