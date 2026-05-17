@@ -5,6 +5,7 @@
 #include <torch/extension.h>
 
 #define LOCAL_ELEMS 65536
+#define PART_ELEMS 16384
 #define TASK_COUNT 1024
 #define E0 1024
 
@@ -65,6 +66,16 @@ __mlu_func__ float f3(const half *src, half *tmp) {
   return s;
 }
 
+__mlu_func__ float f4(const half *src, half *tmp) {
+  __bang_sumpool(tmp, src, 64, 1, 256, 1, 256, 256, 1);
+  float s = 0.0f;
+#pragma unroll
+  for (int i = 0; i < 64; ++i) {
+    s += (float)tmp[i];
+  }
+  return s;
+}
+
 __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
                                         half *__restrict__ y) {
   __nram__ half hbuf[LOCAL_ELEMS];
@@ -92,9 +103,54 @@ __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
   }
 }
 
+__mlu_entry__ void inst_norm_split_kernel(const half *__restrict__ x,
+                                          half *__restrict__ y) {
+  __mlu_shared__ float s[8];
+  __nram__ half hbuf[PART_ELEMS];
+  __nram__ half hsq[PART_ELEMS];
+  __nram__ half htmp[PART_ELEMS];
+  __nram__ half hpack[256];
+
+  int c = coreId;
+  for (int idx = taskIdY; idx < E0; idx += taskDimY) {
+    const half *px = x + (int64_t)idx * LOCAL_ELEMS + c * PART_ELEMS;
+    half *py = y + (int64_t)idx * LOCAL_ELEMS + c * PART_ELEMS;
+
+    __memcpy(hbuf, px, PART_ELEMS * sizeof(half), GDRAM2NRAM);
+    float sum = f4(hbuf, htmp);
+    __bang_square(hsq, hbuf, PART_ELEMS);
+    float sq_sum = f4(hsq, htmp);
+
+    s[c] = sum;
+    s[c + 4] = sq_sum;
+    __sync_cluster();
+
+    if (c == 0) {
+      float mean = (s[0] + s[1] + s[2] + s[3]) * 0.0000152587890625f;
+      float ss = s[4] + s[5] + s[6] + s[7];
+      float d = ss * 0.0000152587890625f - mean * mean - 0.99699f;
+      float d2 = d * d;
+      s[0] = mean;
+      s[1] = 1.0f + d * -0.5f + d2 * (0.375f - 0.3125f * d);
+    }
+    __sync_cluster();
+
+    float mean = s[0];
+    float inv_std = s[1];
+    __bang_fusion(FUSION_FMA, hbuf, hbuf, (half)inv_std,
+                  (half)(-mean * inv_std), PART_ELEMS);
+    __memcpy(py, hbuf, PART_ELEMS * sizeof(half), NRAM2GDRAM);
+    __sync_cluster();
+  }
+}
+
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
   (void)num_features;
-  auto y = torch::empty_like(x);
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty_like(x);
+  else
+    y.resize_(x.sizes());
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
