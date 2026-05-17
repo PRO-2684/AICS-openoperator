@@ -123,6 +123,7 @@
 - More wrapper wins: 025 static output (`4dbf765`) improved fused_matmul_fwd to `55.069 us`; 069 static output (`4dbf765`) improved lstm_cell_forward to `32.163 us`; 128/139 no-resize (`a2e418b`) improved Batch_norm_1D to `57.854 us` and Sparse_attention_mask to `47.402 us`.
 - 093 single-task scale probe (`9f8a50e`) beat the old 8-task launch on both OJ rows, landing at `35.01/36.11 us` versus the previous `39.23 us` band. For this shape, task overhead was a meaningful part of the wall clock.
 - 118 `where` benefited from doubling task count: 64 tasks (`d9e4227`) improved the best row to `65.626 us`, beating the prior external `66.628 us`. The same fused boolean-to-half path stayed valid; only the task grain changed.
+- 033 Swish does not like larger per-task chunks: 16-task/64-task chunk probes were slower or failed. Keeping the original two-chunk compute but switching the launch from Union4 to Block at `{16,2,1}` (`85a903b`) produced a best row of `35.581 us`.
 - This is not a correctness shortcut: the kernel still rewrites the measured output each call. It only removes fixed-shape metadata churn.
 - Negative precision probe: 053 reverse cumsum half accumulation/output (`62d4b6b`) failed with diff around `0.22`, so reverse cumsum still needs float accumulation/output even though the half path can be faster.
 
