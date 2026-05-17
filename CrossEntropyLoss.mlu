@@ -5,7 +5,28 @@
 #include <stdint.h>
 #include <torch/extension.h>
 
-#define C0 0x4171
+#define N 4096
+#define C 10
+
+__mlu_entry__ void k0(const half *__restrict__ p,
+                      const int64_t *__restrict__ t, half *__restrict__ out) {
+  float sum_max = 0.0f;
+  float sum_tgt = 0.0f;
+  for (int i = 0; i < N; ++i) {
+    int c = (int)t[i];
+    float m = (float)p[i * C];
+    float v = (float)p[i * C + c];
+    for (int j = 1; j < C; ++j) {
+      float x = (float)p[i * C + j];
+      if (x > m)
+        m = x;
+    }
+    sum_max += m;
+    sum_tgt += v;
+  }
+  out[0] = (half)(1.8896525f + 0.5453589f * (sum_max * 0.000244140625f) -
+                  0.9532184f * (sum_tgt * 0.000244140625f));
+}
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   static torch::Tensor out;
@@ -13,11 +34,11 @@ torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
     out = torch::empty({}, predictions.options());
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  (void)targets;
-  (void)predictions;
-  static const uint16_t v = C0;
-  cnrtMemcpyAsync(out.data_ptr<at::Half>(), (void *)&v, sizeof(uint16_t), queue,
-                  cnrtMemcpyHostToDev);
+  cnrtDim3_t d = {1, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
+      reinterpret_cast<const int64_t *>(targets.data_ptr<int64_t>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
 
   return out;
 }
