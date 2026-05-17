@@ -64,9 +64,12 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
       int mi = base_m + rb * TM;
       if (mi >= M0)
         continue;
+      int rows = TM;
+      if (mi + rows > M0)
+        rows = M0 - mi;
       float *cp = c + mi * N0 + nj;
       __memcpy(cp, acc + rb * TM * TN, TN * sizeof(float), NRAM2GDRAM,
-               N0 * sizeof(float), TN * sizeof(float), TM - 1);
+               N0 * sizeof(float), TN * sizeof(float), rows - 1);
     }
   }
 }
