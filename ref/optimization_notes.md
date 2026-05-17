@@ -20,6 +20,11 @@
 ## 019 Irregular Matmul
 
 - Launch task count has measurable effect even though the tiling is unchanged. 16 tasks (`256ae0f`) regressed badly to `33.6-33.8 ms`; 64 tasks (`1b6bfd3`/`8f9bbf9`) improved slightly to about `18.96-18.98 ms`; 128 tasks improved further, first with `c3d6b01` at `18.892/18.897 ms` and then `ce416a2` at `18.759/18.854 ms`. This still trails the external `16.028 ms`, so the remaining gap likely needs a tiling/data-reuse change rather than launch-only tuning.
+- Simple tile-shape swaps were slower. `128x128` with `RB=7` (`eb85884`) and `RB=6` (`aad5d38`) both landed around `26.0-26.5 ms`; `TK=256,RB=3` (`2c6ddea`) was also slower at `19.35 ms`. Keep the `TM=64,TN=256,TK=128,RB=6` family unless changing the dataflow more substantially.
+
+## 127 Cholesky
+
+- A single-core-per-matrix NRAM serial implementation (`8b96134`) removed all cluster syncs and stayed correct, but slowed to `629-632 us`. The current four-core Union1 path is still better despite the per-column syncs, so the main gap is not solved by simply removing synchronization.
 
 ## 046 InstanceNorm
 
