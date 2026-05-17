@@ -39,7 +39,7 @@ __mlu_entry__ void swish_half_kernel(half *__restrict__ input) {
 
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {32, 1, 1};
+  cnrtDim3_t dim = {16, 2, 1};
   swish_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
   return x;
