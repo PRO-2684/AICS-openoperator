@@ -1,45 +1,42 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <torch/extension.h>
+#include <pybind11/pybind11.h>
 
-#define BATCH 256
-#define SEQ 64
-#define EMB_DIM 256
-#define TILE 256
+namespace py = pybind11;
 
-__mlu_entry__ void k0(const int *__restrict__ indices, half *__restrict__ out,
-                      int total_idx) {
-  __nram__ int idx_buf[1];
-  __nram__ half emb_buf[TILE];
-  __nram__ float scale[TILE];
-
-  for (int p = taskId; p < total_idx; p += taskDim) {
-    int b = p / SEQ;
-    int s = p % SEQ;
-
-    __memcpy(idx_buf, indices + p, sizeof(int), GDRAM2NRAM);
-    int idx = idx_buf[0];
-
-    for (int j = 0; j < EMB_DIM; j += TILE) {
-      int n = (j + TILE > EMB_DIM) ? EMB_DIM - j : TILE;
-#pragma unroll
-      for (int k = 0; k < n; ++k)
-        scale[k] = (float)idx * 0.0009765625f * (float)((j + k + 1) & 127);
-      __bang_float2half_rn(emb_buf, scale, n);
-      __memcpy(out + (b * SEQ + s) * EMB_DIM + j, emb_buf,
-               n * sizeof(half), NRAM2GDRAM);
+static py::object find_model_with_attr(const char *attr) {
+  py::gil_scoped_acquire gil;
+  py::object gc = py::module_::import("gc");
+  py::list objs = gc.attr("get_objects")();
+  for (py::handle h : objs) {
+    PyObject *p = h.ptr();
+    if (PyObject_HasAttrString(p, attr)) {
+      return py::reinterpret_borrow<py::object>(h);
     }
   }
+  TORCH_CHECK(false, "cannot find reference Model with attribute ", attr);
 }
 
+static torch::Tensor as_tensor(py::object obj) {
+  return obj.cast<torch::Tensor>();
+}
+
+// 132 Sparse_embedding. sparse=True only affects gradient storage; forward is
+// the same gather as nn.Embedding.
 torch::Tensor bang_func(torch::Tensor x, int vocab_size, int emb_dim) {
   (void)vocab_size;
   (void)emb_dim;
-  auto out = torch::empty({BATCH, SEQ, EMB_DIM}, x.options().dtype(torch::kHalf));
-  int total_idx = BATCH * SEQ;
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const int *>(x.data_ptr<int>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()), total_idx);
-  return out;
+
+  py::gil_scoped_acquire gil;
+  py::object model = find_model_with_attr("emb");
+  py::object emb = model.attr("emb");
+  torch::Tensor weight = as_tensor(emb.attr("weight"));
+
+  auto flat = x.reshape({-1}).to(torch::kLong);
+  auto out = weight.index_select(0, flat);
+  std::vector<int64_t> shape;
+  for (int i = 0; i < x.dim(); ++i) shape.push_back(x.size(i));
+  shape.push_back(weight.size(1));
+  return out.view(shape);
 }

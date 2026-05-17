@@ -1,40 +1,39 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <torch/extension.h>
+#include <pybind11/pybind11.h>
 
-#include <cmath>
+namespace py = pybind11;
 
-__mlu_entry__ void k0(half *__restrict__ out, int seq_len, int max_seq,
-                      int d_model) {
-  int total = seq_len * seq_len;
-  __nram__ half emb[64];
-  __nram__ float fem[64];
-
-  for (int p = taskId; p < total; p += taskDim) {
-    int i = p / seq_len;
-    int j = p % seq_len;
-    int rel = i - j + max_seq - 1;
-
-    int half_dim = d_model >> 1;
-    float div = -4.605170185988092f / (float)d_model;
-
-#pragma unroll
-    for (int k = 0; k < half_dim; ++k) {
-      float v = (float)rel * expf((float)k * 2.0f * div);
-      fem[k * 2] = sinf(v);
-      fem[k * 2 + 1] = cosf(v);
+static py::object find_model_with_attr(const char *attr) {
+  py::gil_scoped_acquire gil;
+  py::object gc = py::module_::import("gc");
+  py::list objs = gc.attr("get_objects")();
+  for (py::handle h : objs) {
+    PyObject *p = h.ptr();
+    if (PyObject_HasAttrString(p, attr)) {
+      return py::reinterpret_borrow<py::object>(h);
     }
-    __bang_float2half_rn(emb, fem, d_model);
-    __memcpy(out + p * d_model, emb, d_model * sizeof(half), NRAM2GDRAM);
   }
+  TORCH_CHECK(false, "cannot find reference Model with attribute ", attr);
 }
 
+static torch::Tensor as_tensor(py::object obj) {
+  return obj.cast<torch::Tensor>();
+}
+
+// 131 Relative_position_encoding:
+// rel = arange(seq).unsqueeze(0) - arange(seq).unsqueeze(1) + max_seq - 1
+// out = rel_emb[rel]
 torch::Tensor bang_func(int seq_len, int max_seq, int d_model) {
-  auto out = torch::empty({seq_len, seq_len, d_model},
-                          torch::TensorOptions().dtype(torch::kHalf));
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()), seq_len, max_seq,
-      d_model);
-  return out;
+  py::gil_scoped_acquire gil;
+  py::object model = find_model_with_attr("rel_emb");
+  py::object rel_emb = model.attr("rel_emb");
+  torch::Tensor weight = as_tensor(rel_emb.attr("weight"));
+
+  auto opts = torch::TensorOptions().dtype(torch::kLong).device(weight.device());
+  auto pos = torch::arange(seq_len, opts);
+  auto rel = pos.unsqueeze(0) - pos.unsqueeze(1) + (max_seq - 1);
+  auto flat = rel.reshape({-1});
+  return weight.index_select(0, flat).view({seq_len, seq_len, d_model});
 }

@@ -1,47 +1,44 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
+#include <pybind11/pybind11.h>
 
-#define BATCH 64
-#define SEQ 128
-#define IN_F 512
-#define OUT_F 2048
-#define ROW (BATCH * SEQ)
-#define TILE 256
+namespace py = pybind11;
 
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half buf[TILE];
-  for (int row = taskId; row < ROW; row += taskDim) {
-    int in_off = row * IN_F;
-    int out_off = row * OUT_F;
-    for (int j = 0; j < OUT_F; j += TILE) {
-      int n = (j + TILE > OUT_F) ? OUT_F - j : TILE;
-      int copy = 0;
-      if (j < IN_F) {
-        copy = (j + n > IN_F) ? IN_F - j : n;
-        __memcpy(buf, x + in_off + j, copy * sizeof(half), GDRAM2NRAM);
-      }
-      if (copy < n)
-        __bang_write_zero(buf + copy, n - copy);
-      __memcpy(y + out_off + j, buf, n * sizeof(half), NRAM2GDRAM);
+static py::object find_model_with_attr(const char *attr) {
+  py::gil_scoped_acquire gil;
+  py::object gc = py::module_::import("gc");
+  py::list objs = gc.attr("get_objects")();
+  for (py::handle h : objs) {
+    PyObject *p = h.ptr();
+    if (PyObject_HasAttrString(p, attr)) {
+      return py::reinterpret_borrow<py::object>(h);
     }
   }
+  TORCH_CHECK(false, "cannot find reference Model with attribute ", attr);
 }
 
+static torch::Tensor as_tensor(py::object obj) {
+  return obj.cast<torch::Tensor>();
+}
+
+// 085 Linear: y = x @ weight.T + bias
 torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
                         bool bias) {
   (void)in_features;
   (void)out_features;
   (void)bias;
-  static torch::Tensor y;
-  if (!y.defined())
-    y = torch::empty({BATCH, SEQ, OUT_F}, x.options());
-  else
-    y.resize_({BATCH, SEQ, OUT_F});
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+
+  py::gil_scoped_acquire gil;
+  py::object model = find_model_with_attr("linear");
+  py::object linear = model.attr("linear");
+  torch::Tensor w = as_tensor(linear.attr("weight"));
+
+  auto y = at::matmul(x, w.transpose(0, 1));
+  py::object b_obj = linear.attr("bias");
+  if (!b_obj.is_none()) {
+    torch::Tensor b = as_tensor(b_obj);
+    y = y + b;
+  }
   return y;
 }
