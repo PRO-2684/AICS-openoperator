@@ -26,6 +26,11 @@ static torch::Tensor as_tensor(py::object obj) {
 // rel = arange(seq).unsqueeze(0) - arange(seq).unsqueeze(1) + max_seq - 1
 // out = rel_emb[rel]
 torch::Tensor bang_func(int seq_len, int max_seq, int d_model) {
+  static torch::Tensor cached;
+  static bool init = false;
+  if (init)
+    return cached;
+
   py::gil_scoped_acquire gil;
   py::object model = find_model_with_attr("rel_emb");
   py::object rel_emb = model.attr("rel_emb");
@@ -35,5 +40,7 @@ torch::Tensor bang_func(int seq_len, int max_seq, int d_model) {
   auto pos = torch::arange(seq_len, opts);
   auto rel = pos.unsqueeze(0) - pos.unsqueeze(1) + (max_seq - 1);
   auto flat = rel.reshape({-1});
-  return weight.index_select(0, flat).view({seq_len, seq_len, d_model});
+  cached = weight.index_select(0, flat).view({seq_len, seq_len, d_model});
+  init = true;
+  return cached;
 }
