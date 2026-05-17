@@ -21,9 +21,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   }
   int z = 0;
   for (; r < E0; r += taskDim) {
-    if (z >= 2) {
-      __sync_io();
-    }
     int q = z & 1;
     int nr = r + taskDim;
     if (nr < E0) {
