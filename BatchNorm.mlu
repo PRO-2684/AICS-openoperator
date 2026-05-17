@@ -24,7 +24,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ m) {
     m[taskId + E4] = 0.0f;
   }
   __sync_all_ipu();
-  for (int p = taskId; p < E3; p += taskDim) {
+  for (int q = taskId; q < 1024; q += taskDim) {
+    int p = q << 1;
     int c = (p >> 1) & 63;
     int n = p >> 7;
     int g = p & 1;
@@ -42,7 +43,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ m,
   __nram__ float a[E2];
   __nram__ float mm[E0];
   __memcpy(mm, m, E0 * sizeof(float), GDRAM2NRAM);
-  __bang_mul_scalar(mm, mm, 0.00000095367431640625f, E0);
+  __bang_mul_scalar(mm, mm, 0.0000019073486328125f, E0);
   for (int p = taskId; p < E3; p += taskDim) {
     int c = (p >> 1) & 63;
     int n = p >> 7;
