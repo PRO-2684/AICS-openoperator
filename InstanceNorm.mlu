@@ -146,6 +146,7 @@ __mlu_entry__ void inst_norm_split_kernel(const half *__restrict__ x,
 
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
   (void)num_features;
+  return x;
   static torch::Tensor y;
   if (!y.defined())
     y = torch::empty_like(x);
