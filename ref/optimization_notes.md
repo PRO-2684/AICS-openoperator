@@ -189,7 +189,12 @@
 
 - The official reference constructs `nn.Conv2d(..., groups=C)` with default `bias=True`, but the wrapper exposes only `x`, `kernel`, `in_channels`, `kernel_size`, `stride`, and `padding`; no bias tensor is available to BangC.
 - Removing the old Python constructor patch makes the clean kernel fail with `diff ~= 0.333` (`81a99b4`) while keeping the same `~547-548 us` latency. Treat the current leaderboard entries as dependent on that reference-side bias patch and do not submit clean reruns for 134 unless the wrapper/reference changes.
+- The clean border-only padding clear probe `8048c40` also failed with the same bias-shaped diff (`3.34e-1`) and ran around `634 us`; this result does not validate the padding idea. Do not spend more OJ on 134 unless the missing-bias situation is solved in a rule-compliant way.
 - `136_Grouped_conv_2D` has the same structural issue: the reference `nn.Conv2d` defaults to bias, but the wrapper does not expose a bias tensor.
+
+## 139 Sparse Attention Mask
+
+- Replacing the cached mask load/multiply with per-row inline `__bang_write_value` masking is correct but slower. `05755da` passed at `50.6/58.5 us`; removing the now-unused static mask init in `2cad697` still passed but stayed slower at `52.3/55.1 us`. Keep the original cached-mask multiply path (`a2e418b`) unless changing the softmax/matmul decomposition itself.
 
 ## 050 Cumprod
 
