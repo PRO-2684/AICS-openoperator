@@ -11,8 +11,6 @@ __mlu_entry__ void k0(half *__restrict__ y) {
   __memcpy(y, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
-__mlu_entry__ void k1() {}
-
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)x;
   (void)dim;
@@ -23,8 +21,5 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
     k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
         reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   }
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {1, 1, 1};
-  k1<<<d, cnrtFuncTypeBlock, queue>>>();
   return out;
 }
