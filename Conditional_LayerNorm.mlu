@@ -13,11 +13,12 @@
 
 __mlu_entry__ void k0(const half *__restrict__ c, const half *__restrict__ gw,
                       const half *__restrict__ gb, const half *__restrict__ bw,
-                      const half *__restrict__ bb, half *__restrict__ g,
-                      half *__restrict__ b) {
+                      const half *__restrict__ bb, float *__restrict__ g,
+                      float *__restrict__ b) {
   __nram__ half ch[C0];
   __nram__ half wh[T0 * C0];
   __nram__ half hb[T0];
+  __nram__ float fb[2 * T0];
 
   int bid = taskId / 4;
   int col = (taskId & 3) * T0;
@@ -34,11 +35,12 @@ __mlu_entry__ void k0(const half *__restrict__ c, const half *__restrict__ gw,
     for (int k = 0; k < C0; ++k) {
       acc += (float)ch[k] * (float)wh[j * C0 + k];
     }
-    hb[j] = (half)acc;
+    fb[j] = acc;
   }
-  __memcpy(wh, gb + col, T0 * sizeof(half), GDRAM2NRAM);
-  __bang_add(hb, hb, wh, T0);
-  __memcpy(g + bid * D0 + col, hb, T0 * sizeof(half), NRAM2GDRAM);
+  __memcpy(hb, gb + col, T0 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(fb + T0, hb, T0);
+  __bang_add(fb, fb, fb + T0, T0);
+  __memcpy(g + bid * D0 + col, fb, T0 * sizeof(float), NRAM2GDRAM);
 
   __memcpy(wh, bw + col * C0, T0 * C0 * sizeof(half), GDRAM2NRAM);
 #pragma unroll
@@ -48,18 +50,17 @@ __mlu_entry__ void k0(const half *__restrict__ c, const half *__restrict__ gw,
     for (int k = 0; k < C0; ++k) {
       acc += (float)ch[k] * (float)wh[j * C0 + k];
     }
-    hb[j] = (half)acc;
+    fb[j] = acc;
   }
-  __memcpy(wh, bb + col, T0 * sizeof(half), GDRAM2NRAM);
-  __bang_add(hb, hb, wh, T0);
-  __memcpy(b + bid * D0 + col, hb, T0 * sizeof(half), NRAM2GDRAM);
+  __memcpy(hb, bb + col, T0 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(fb + T0, hb, T0);
+  __bang_add(fb, fb, fb + T0, T0);
+  __memcpy(b + bid * D0 + col, fb, T0 * sizeof(float), NRAM2GDRAM);
 }
 
-__mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ g,
-                      const half *__restrict__ b, half *__restrict__ y) {
+__mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ g,
+                      const float *__restrict__ b, half *__restrict__ y) {
   __nram__ half h[D0];
-  __nram__ half gh[D0];
-  __nram__ half bh[D0];
   __nram__ half tmp[64];
   __nram__ float f[D0];
   __nram__ float r[D0];
@@ -76,11 +77,9 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ g,
     __bang_reduce_sum(r, r, D0);
     float inv = 1.0f / sqrtf(r[0] * 0.001953125f + 1.0e-5f);
     __bang_mul_scalar(f, f, inv, D0);
-    __memcpy(gh, g + bid * D0, D0 * sizeof(half), GDRAM2NRAM);
-    __memcpy(bh, b + bid * D0, D0 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(r, gh, D0);
+    __memcpy(r, g + bid * D0, D0 * sizeof(float), GDRAM2NRAM);
     __bang_mul(f, f, r, D0);
-    __bang_half2float(r, bh, D0);
+    __memcpy(r, b + bid * D0, D0 * sizeof(float), GDRAM2NRAM);
     __bang_add(f, f, r, D0);
     __bang_float2half_rn(h, f, D0);
     __memcpy(y + row * D0, h, D0 * sizeof(half), NRAM2GDRAM);
@@ -100,9 +99,9 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor cond,
   if (!y.defined())
     y = torch::empty_like(x);
   if (!g.defined())
-    g = torch::empty({B0, D0}, x.options());
+    g = torch::empty({B0, D0}, x.options().dtype(torch::kFloat32));
   if (!b.defined())
-    b = torch::empty({B0, D0}, x.options());
+    b = torch::empty({B0, D0}, x.options().dtype(torch::kFloat32));
   if (!init) {
     cnrtQueue_t q = torch_mlu::getCurMLUStream();
     cnrtDim3_t d0 = {128, 1, 1};
@@ -113,12 +112,10 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor cond,
         reinterpret_cast<const half *>(gamma_bias.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(beta_weight.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(beta_bias.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(g.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(b.data_ptr<at::Half>()));
+        g.data_ptr<float>(), b.data_ptr<float>());
     k1<<<d1, cnrtFuncTypeBlock, q>>>(
         reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-        reinterpret_cast<const half *>(g.data_ptr<at::Half>()),
-        reinterpret_cast<const half *>(b.data_ptr<at::Half>()),
+        g.data_ptr<float>(), b.data_ptr<float>(),
         reinterpret_cast<half *>(y.data_ptr<at::Half>()));
     init = true;
   }
