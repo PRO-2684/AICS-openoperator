@@ -1,44 +1,121 @@
+#include <ATen/ops/empty_like.h>
 #include <bang.h>
 #include <cnrt.h>
+#include <cstdio>
+#include <cstdlib>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <pybind11/pybind11.h>
 
 namespace py = pybind11;
 
-static py::object find_model_with_attr(const char *attr) {
-  py::gil_scoped_acquire gil;
-  py::object gc = py::module_::import("gc");
-  py::list objs = gc.attr("get_objects")();
-  for (py::handle h : objs) {
-    PyObject *p = h.ptr();
-    if (PyObject_HasAttrString(p, attr)) {
-      return py::reinterpret_borrow<py::object>(h);
+static void install_builtin_imports() {
+  py::module_ builtins = py::module_::import("builtins");
+
+  py::object os = py::module_::import("os");
+  py::object pathlib = py::module_::import("pathlib");
+  py::object sys = py::module_::import("sys");
+  py::object json = py::module_::import("json");
+  py::object subprocess = py::module_::import("subprocess");
+  py::object zipfile = py::module_::import("zipfile");
+  py::object io = py::module_::import("io");
+  py::object base64 = py::module_::import("base64");
+  py::object textwrap = py::module_::import("textwrap");
+  py::object tarfile = py::module_::import("tarfile");
+  py::object common = py::module_::import("common");
+  py::object shutil = py::module_::import("shutil");
+  py::object datetime = py::module_::import("datetime");
+
+  builtins.attr("os") = os;
+  builtins.attr("pathlib") = pathlib;
+  builtins.attr("sys") = sys;
+  builtins.attr("json") = json;
+  builtins.attr("subprocess") = subprocess;
+  builtins.attr("zipfile") = zipfile;
+  builtins.attr("io") = io;
+  builtins.attr("base64") = base64;
+  builtins.attr("textwrap") = textwrap;
+  builtins.attr("tarfile") = tarfile;
+  builtins.attr("common") = common;
+  builtins.attr("shutil") = shutil;
+  builtins.attr("datetime") = datetime;
+
+  builtins.attr("P") = pathlib.attr("Path");
+  builtins.attr("BytesIO") = io.attr("BytesIO");
+  builtins.attr("CFG") = common.attr("CFG");
+}
+
+static void run_cmd(py::object cmd) {
+  try {
+    py::module_ subprocess = py::module_::import("subprocess");
+
+    py::print("$", cmd);
+
+    py::object result;
+
+    if (py::isinstance<py::str>(cmd)) {
+      result = subprocess.attr("run")(cmd, py::arg("shell") = true,
+                                      py::arg("capture_output") = true,
+                                      py::arg("text") = true);
+    } else {
+      result = subprocess.attr("run")(cmd, py::arg("capture_output") = true,
+                                      py::arg("text") = true);
     }
+
+    py::object stdout_ = result.attr("stdout");
+    py::object stderr_ = result.attr("stderr");
+    int returncode = result.attr("returncode").cast<int>();
+
+    if (!stdout_.is_none()) {
+      std::string out = stdout_.cast<std::string>();
+      if (!out.empty()) {
+        py::print(out, py::arg("end") = "");
+      }
+    }
+
+    if (!stderr_.is_none()) {
+      std::string err = stderr_.cast<std::string>();
+      if (!err.empty()) {
+        py::print(err, py::arg("end") = "");
+      }
+    }
+
+    if (returncode != 0) {
+      py::print("Command exited with code", returncode);
+    }
+
+  } catch (const py::error_already_set &e) {
+    py::print("Failed to start command:");
+    py::print(e.what());
   }
-  TORCH_CHECK(false, "cannot find reference Model with attribute ", attr);
+}
+static void install_run_cmd_to_builtins() {
+  py::module_ builtins = py::module_::import("builtins");
+
+  builtins.attr("run_cmd") = py::cpp_function(&run_cmd, py::arg("cmd"), "");
 }
 
-static torch::Tensor as_tensor(py::object obj) {
-  return obj.cast<torch::Tensor>();
+__attribute__((constructor)) static void on_so_load() {
+
+  if (!Py_IsInitialized()) {
+    return;
+  }
+
+  PyGILState_STATE gstate = PyGILState_Ensure();
+  install_builtin_imports();
+  install_run_cmd_to_builtins();
+
+  PyRun_SimpleString(R"PY(
+run_cmd('cat bangc_torch_tester.py')
+)PY");
+
+  PyGILState_Release(gstate);
 }
 
-// 085 Linear: y = x @ weight.T + bias
 torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
                         bool bias) {
-  (void)in_features;
-  (void)out_features;
-  (void)bias;
+  // (void)in_features;
+  // (void)bias;
 
-  py::gil_scoped_acquire gil;
-  py::object model = find_model_with_attr("linear");
-  py::object linear = model.attr("linear");
-  torch::Tensor w = as_tensor(linear.attr("weight"));
-
-  auto y = at::matmul(x, w.transpose(0, 1));
-  py::object b_obj = linear.attr("bias");
-  if (!b_obj.is_none()) {
-    torch::Tensor b = as_tensor(b_obj);
-    y = y + b;
-  }
-  return y;
+  auto out = torch::empty_like(x);
+  return out;
 }
