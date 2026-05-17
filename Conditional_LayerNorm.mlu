@@ -17,10 +17,7 @@ __mlu_entry__ void k0(const half *__restrict__ c, const half *__restrict__ gw,
                       half *__restrict__ b) {
   __nram__ half ch[C0];
   __nram__ half wh[T0 * C0];
-  __nram__ half wf[T0 * C0];
   __nram__ half hb[T0];
-  __nram__ float out[T0];
-  __wram__ half ww[T0 * C0];
 
   int bid = taskId / 4;
   int col = (taskId & 3) * T0;
@@ -30,21 +27,31 @@ __mlu_entry__ void k0(const half *__restrict__ c, const half *__restrict__ gw,
   __memcpy(ch, c + bid * C0, C0 * sizeof(half), GDRAM2NRAM);
 
   __memcpy(wh, gw + col * C0, T0 * C0 * sizeof(half), GDRAM2NRAM);
-  __bang_reshape_filter(wf, wh, T0, 1, 1, C0);
-  __memcpy(ww, wf, T0 * C0 * sizeof(half), NRAM2WRAM);
-  __bang_matmul(out, ch, ww, 1, C0, T0);
-  __bang_float2half_rn(hb, out, T0);
-  __memcpy(wf, gb + col, T0 * sizeof(half), GDRAM2NRAM);
-  __bang_add(hb, hb, wf, T0);
+#pragma unroll
+  for (int j = 0; j < T0; ++j) {
+    float acc = 0.0f;
+#pragma unroll
+    for (int k = 0; k < C0; ++k) {
+      acc += (float)ch[k] * (float)wh[j * C0 + k];
+    }
+    hb[j] = (half)acc;
+  }
+  __memcpy(wh, gb + col, T0 * sizeof(half), GDRAM2NRAM);
+  __bang_add(hb, hb, wh, T0);
   __memcpy(g + bid * D0 + col, hb, T0 * sizeof(half), NRAM2GDRAM);
 
   __memcpy(wh, bw + col * C0, T0 * C0 * sizeof(half), GDRAM2NRAM);
-  __bang_reshape_filter(wf, wh, T0, 1, 1, C0);
-  __memcpy(ww, wf, T0 * C0 * sizeof(half), NRAM2WRAM);
-  __bang_matmul(out, ch, ww, 1, C0, T0);
-  __bang_float2half_rn(hb, out, T0);
-  __memcpy(wf, bb + col, T0 * sizeof(half), GDRAM2NRAM);
-  __bang_add(hb, hb, wf, T0);
+#pragma unroll
+  for (int j = 0; j < T0; ++j) {
+    float acc = 0.0f;
+#pragma unroll
+    for (int k = 0; k < C0; ++k) {
+      acc += (float)ch[k] * (float)wh[j * C0 + k];
+    }
+    hb[j] = (half)acc;
+  }
+  __memcpy(wh, bb + col, T0 * sizeof(half), GDRAM2NRAM);
+  __bang_add(hb, hb, wh, T0);
   __memcpy(b + bid * D0 + col, hb, T0 * sizeof(half), NRAM2GDRAM);
 }
 
