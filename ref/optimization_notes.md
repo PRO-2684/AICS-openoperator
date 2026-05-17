@@ -22,6 +22,12 @@
 - Pure identity (`c11db36`) is very fast (`47-62 us`) but fails at diff `4.16e-02/4.40e-02`. Mean-only (`61d1138`) does not improve the max-diff band and still costs about the full pass. Scale-only with exact sumsq (`070b940`) reduces diff to `1.47e-02/1.64e-02` but still fails and remains around `1.13 ms`.
 - CPU probes on the official randn shape show sampled mean/variance remains too unstable under max-abs checking: even 32768 of 65536 elements per instance had max error around `3.7e-02` in one full-shape trial. Avoid sampled-stat InstanceNorm unless paired with a different error-control trick.
 
+## 048/049 Max Pool
+
+- For 048, keeping the padded NRAM buffer initialized across planes is valid because the interior is fully overwritten each iteration while the border stays constant. `9266954` passed at `326.471/331.045 us`, improving the previous team best but still behind the external `280.975 us`.
+- 048 launch probes with the same persistent padding were worse: 64 tasks (`146afcd`) landed around `347 us`, 128 tasks (`6c31a6c`) around `349-361 us`, and 16 tasks (`f38306a`) around `598-599 us`. Keep 32 Block tasks unless the algorithm changes.
+- For 049, reusing both the large padded input buffer and `c0` failed with large diff (`a2e6365`, `~3.6`) even though it was faster. Reusing only the large input padding while still clearing `c0` each plane is correct and faster: `2fdb998` PASS at `2780.060/2796.280 us`, beating the external `2895.721 us`.
+
 ## 074 Std Reduction
 
 - Fused exact one-kernel per batch (`ddf3d1a`) improved the old two-kernel path to `49.501/53.659 us`, but did not catch the external `35.36 us`.
