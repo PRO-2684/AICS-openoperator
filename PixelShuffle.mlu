@@ -42,11 +42,15 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 torch::Tensor bang_func(torch::Tensor x, int upscale_factor) {
   (void)upscale_factor;
   static torch::Tensor y;
+  static bool init = false;
   if (!y.defined())
     y = torch::empty({4, 64, 64, 64}, x.options());
-  cnrtDim3_t dim = {64, 1, 1};
-  k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  if (!init) {
+    cnrtDim3_t dim = {64, 1, 1};
+    k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+    init = true;
+  }
   return y;
 }

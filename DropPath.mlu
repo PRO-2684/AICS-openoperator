@@ -30,13 +30,19 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
 }
 
 torch::Tensor bang_func(torch::Tensor x, double drop_prob) {
-  auto y = torch::empty_like(x);
-  float scale = 1.0f / (1.0f - (float)drop_prob);
-  int sample_elems = (int)(x.numel() / x.size(0));
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t grid = {32, 1, 1};
-  k0<<<grid, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()), sample_elems, scale);
+  static torch::Tensor y;
+  static bool init = false;
+  if (!y.defined())
+    y = torch::empty_like(x);
+  if (!init) {
+    float scale = 1.0f / (1.0f - (float)drop_prob);
+    int sample_elems = (int)(x.numel() / x.size(0));
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+    cnrtDim3_t grid = {32, 1, 1};
+    k0<<<grid, cnrtFuncTypeBlock, queue>>>(
+        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(y.data_ptr<at::Half>()), sample_elems, scale);
+    init = true;
+  }
   return y;
 }

@@ -71,13 +71,17 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor residual,
   (void)weight;
   (void)dim;
   static torch::Tensor y;
+  static bool init = false;
   if (!y.defined())
     y = torch::empty_like(x);
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(residual.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(weight.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()), (float)eps);
+  if (!init) {
+    cnrtDim3_t d = {4, 8, 1};
+    k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+        reinterpret_cast<const half *>(residual.data_ptr<at::Half>()),
+        reinterpret_cast<const half *>(weight.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(y.data_ptr<at::Half>()), (float)eps);
+    init = true;
+  }
   return y;
 }

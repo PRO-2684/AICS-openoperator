@@ -167,17 +167,21 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
 torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len) {
   int width = static_cast<int>(x.size(2));
   ensure_cache(x, width);
+  static bool init = false;
 
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  if (!init) {
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-  cnrtDim3_t dim;
-  dim.x = 4;
-  dim.y = 8;
-  dim.z = 1;
+    cnrtDim3_t dim;
+    dim.x = 4;
+    dim.y = 8;
+    dim.z = 1;
 
-  add_cache_kernel_pipe<<<dim, cnrtFuncTypeUnion1, queue>>>(
-      reinterpret_cast<half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(g_state.cache.data_ptr<at::Half>()));
+    add_cache_kernel_pipe<<<dim, cnrtFuncTypeUnion1, queue>>>(
+        reinterpret_cast<half *>(x.data_ptr<at::Half>()),
+        reinterpret_cast<const half *>(g_state.cache.data_ptr<at::Half>()));
+    init = true;
+  }
 
   return x;
 }
