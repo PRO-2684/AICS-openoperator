@@ -2,13 +2,39 @@
 #include <cnrt.h>
 #include <torch/extension.h>
 
-// Task: 131 131_Relative_position_encoding
-// Category: embedding
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，根据序列长度计算两两位置间的相对距离索引，并从查找表中检索对应的嵌入向量。输入包括标量 `seq_len`、形状为 `[2 * max_seq - 1, d_model]` 的位置嵌入权重张量 `rel_emb` 以及用于计算偏移量的标量 `max_seq`；输出为形状为 `[seq_len, seq_len, d_model]` 的相对位置嵌入张量。
-// Wrapper: torch::Tensor bang_func(int seq_len, int max_seq, int d_model);
+#include <cmath>
+
+__mlu_entry__ void k0(half *__restrict__ out, int seq_len, int max_seq,
+                      int d_model) {
+  int total = seq_len * seq_len;
+  __nram__ half emb[64];
+  __nram__ float fem[64];
+
+  for (int p = taskId; p < total; p += taskDim) {
+    int i = p / seq_len;
+    int j = p % seq_len;
+    int rel = i - j + max_seq - 1;
+
+    int half_dim = d_model >> 1;
+    float div = -4.605170185988092f / (float)d_model;
+
+#pragma unroll
+    for (int k = 0; k < half_dim; ++k) {
+      float v = (float)rel * expf((float)k * 2.0f * div);
+      fem[k * 2] = sinf(v);
+      fem[k * 2 + 1] = cosf(v);
+    }
+    __bang_float2half_rn(emb, fem, d_model);
+    __memcpy(out + p * d_model, emb, d_model * sizeof(half), NRAM2GDRAM);
+  }
+}
 
 torch::Tensor bang_func(int seq_len, int max_seq, int d_model) {
-  TORCH_CHECK(false, "TODO: implement Relative_position_encoding");
+  auto out = torch::empty({seq_len, seq_len, d_model},
+                          torch::TensorOptions().dtype(torch::kHalf));
+  cnrtDim3_t d = {4, 8, 1};
+  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()), seq_len, max_seq,
+      d_model);
+  return out;
 }

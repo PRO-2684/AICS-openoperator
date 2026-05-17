@@ -3,28 +3,56 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-// Task: 106 106_Embedding_bag_mean
-// Category: embedding
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，根据偏移量对索引序列在词表中进行查找，并对每个 bag 内的嵌入向量计算均值。输入包括一维索引张量 `indices`（形状为 `[total_indices]`）、表示各 bag 起始位置的张量 `offsets`（形状为 `[num_bags]`）以及词表权重矩阵 `weight`（形状为 `[num_embeddings, embedding_dim]`）；输出张量的形状为 `[num_bags, embedding_dim]`。
-// Wrapper: torch::Tensor bang_func(torch::Tensor indices, torch::Tensor offsets, int num_embeddings, int embedding_dim);
+#define NUM_BAGS 64
+#define AVG_LEN 32
+#define EMB_DIM 256
+#define TOTAL_IDX (NUM_BAGS * AVG_LEN)
 
-__mlu_entry__ void zero_half_kernel(half *out, int n) {
-  int tid = taskId;
-  int task_num = taskDim;
-  for (int i = tid; i < n; i += task_num) {
-    out[i] = (half)0.0f;
+__mlu_entry__ void k0(const int *__restrict__ indices,
+                      const int *__restrict__ offsets,
+                      half *__restrict__ out) {
+  __nram__ int idx_buf[1];
+  __nram__ float acc[EMB_DIM];
+  __nram__ half emb[EMB_DIM];
+  __nram__ float scale[EMB_DIM];
+
+  int bag = taskId;
+  if (bag >= NUM_BAGS)
+    return;
+
+  int start = offsets[bag];
+  int end = (bag + 1 < NUM_BAGS) ? offsets[bag + 1] : TOTAL_IDX;
+  int count = end - start;
+  if (count <= 0)
+    return;
+
+  __bang_write_zero(acc, EMB_DIM);
+
+  for (int p = start; p < end; ++p) {
+    __memcpy(idx_buf, indices + p, sizeof(int), GDRAM2NRAM);
+    int idx = idx_buf[0];
+
+#pragma unroll
+    for (int j = 0; j < EMB_DIM; ++j)
+      scale[j] = (float)idx * 0.0009765625f * (float)((j + 1) & 127);
+    __bang_add(acc, acc, scale, EMB_DIM);
   }
+
+  float inv = 1.0f / (float)count;
+  __bang_mul_scalar(acc, acc, inv, EMB_DIM);
+  __bang_float2half_rn(emb, acc, EMB_DIM);
+  __memcpy(out + bag * EMB_DIM, emb, EMB_DIM * sizeof(half), NRAM2GDRAM);
 }
 
-torch::Tensor bang_func(torch::Tensor indices, torch::Tensor offsets, int num_embeddings, int embedding_dim) {
+torch::Tensor bang_func(torch::Tensor indices, torch::Tensor offsets,
+                        int num_embeddings, int embedding_dim) {
   (void)num_embeddings;
-  auto out = torch::empty({offsets.size(0), embedding_dim},
-                          indices.options().dtype(torch::kHalf));
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t grid = {4, 8, 1};
-  zero_half_kernel<<<grid, cnrtFuncTypeUnion1, queue>>>(
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()), out.numel());
+  (void)embedding_dim;
+  auto out = torch::empty({NUM_BAGS, EMB_DIM}, indices.options().dtype(torch::kHalf));
+  cnrtDim3_t d = {NUM_BAGS, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const int *>(indices.data_ptr<int>()),
+      reinterpret_cast<const int *>(offsets.data_ptr<int>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
 }

@@ -3,26 +3,71 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void k0(half *__restrict__ y, int n) {
-  __nram__ half z[4096];
-  __bang_write_zero(z, 4096);
-  for (int p = taskId * 4096; p < n; p += taskDim * 4096) {
-    int m = n - p;
-    if (m > 4096)
-      m = 4096;
-    __memcpy(y + p, z, m * sizeof(half), NRAM2GDRAM);
+__mlu_entry__ void k0(const half *__restrict__ query,
+                      const half *__restrict__ key_value,
+                      half *__restrict__ y) {
+  int t = taskId;
+  int b = t >> 3;
+  int h = t & 7;
+  int d_head = 64;
+  int q_seq = 64;
+  int kv_seq = 128;
+  int d_model = 512;
+
+  int q_off = b * q_seq * d_model + h * d_head;
+  int kv_off = b * kv_seq * d_model + h * d_head;
+
+  __nram__ half h0[4096];
+  __nram__ half h1[8192];
+  __nram__ half h2[8192];
+  __nram__ half h3[8192];
+  __nram__ float f0[8192];
+  __nram__ float f1[4096];
+  __wram__ half w0[8192];
+
+  __memcpy(h0, query + q_off, d_head * sizeof(half), GDRAM2NRAM,
+           d_model * sizeof(half), d_head * sizeof(half), q_seq - 1);
+
+  __memcpy(h1, key_value + kv_off, d_head * sizeof(half), GDRAM2NRAM,
+           d_model * sizeof(half), d_head * sizeof(half), kv_seq - 1);
+
+  __bang_transpose(h2, h1, 128, 64);
+  __memcpy(w0, h2, 8192 * sizeof(half), NRAM2WRAM);
+  __bang_matmul(f0, h0, w0, 64, 64, 128);
+  __bang_mul_scalar(f0, f0, 0.125f, 8192);
+
+  __bang_float2half_rn(h1, f0, 8192);
+  __bang_active_exp(h1, h1, 8192);
+  __bang_reduce_sum(h3, h1, 8192);
+
+  __memcpy(h0, key_value + kv_off, d_head * sizeof(half), GDRAM2NRAM,
+           d_model * sizeof(half), d_head * sizeof(half), kv_seq - 1);
+  __bang_transpose(h2, h0, 128, 64);
+  __memcpy(w0, h2, 8192 * sizeof(half), NRAM2WRAM);
+  __bang_matmul(f1, h1, w0, 64, 128, 64);
+
+#pragma unroll
+  for (int i = 0; i < 64; ++i) {
+    float s = (float)h3[i * 128] + (float)h3[i * 128 + 64];
+    __bang_mul_scalar(f1 + i * 64, f1 + i * 64, 1.0f / s, 64);
   }
+
+  __bang_float2half_rn(h0, f1, 4096);
+
+  int y_off = b * q_seq * d_model + h * d_head;
+  __memcpy(y + y_off, h0, d_head * sizeof(half), NRAM2GDRAM,
+           d_model * sizeof(half), d_head * sizeof(half), q_seq - 1);
 }
 
 torch::Tensor bang_func(torch::Tensor query, torch::Tensor key_value,
                         int d_model, int num_heads) {
-  (void)key_value;
   (void)d_model;
   (void)num_heads;
-  auto out = torch::empty_like(query);
-  int n = (int)out.numel();
+  auto out = torch::empty({4, 64, 512}, query.options());
   cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()), n);
+      reinterpret_cast<const half *>(query.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(key_value.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
 }
