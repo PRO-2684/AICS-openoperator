@@ -95,15 +95,13 @@ __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
 
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
   (void)num_features;
-  static torch::Tensor y;
-  if (!y.defined())
-    y = torch::empty_like(x);
+  auto y = torch::empty_like(x);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
   cnrtDim3_t dim;
-  dim.x = TASK_COUNT;
-  dim.y = 1;
+  dim.x = 4;
+  dim.y = 8;
   dim.z = 1;
 
   inst_norm_vec_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
