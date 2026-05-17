@@ -72,7 +72,7 @@ python scripts/update_problems.py
 | 021 | [Matmul_with_small_K_dimension_](Matmul_with_small_K_dimension_.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/6c1e425) |
 | 022 | [Matmul_with_transposed_both](Matmul_with_transposed_both.mlu) | N/A | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/32b2222) |
 | 023 | [Matrix_vector_multiplication_](Matrix_vector_multiplication_.mlu) | N/A | 🔴 |
-| 024 | [Square_matrix_multiplication_](Square_matrix_multiplication_.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/048862b) |
+| 024 | [Square_matrix_multiplication_](Square_matrix_multiplication_.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/e69d62b) |
 | 025 | [fused_matmul_fwd](fused_matmul_fwd.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/f814c0b) |
 | 026 | [ELU](ELU.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/a74eba229576bf70536a2b1cd5dcb6bb087dc6ac) |
 | 027 | [GELU](GELU.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/a74eba229576bf70536a2b1cd5dcb6bb087dc6ac) |
