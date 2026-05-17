@@ -20,7 +20,7 @@ __mlu_func__ float f0(const half *__restrict__ x, half *__restrict__ t) {
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E3];
-  __nram__ half b[64];
+  __nram__ half b[E3];
 
   for (int g = taskId; g < E1; g += taskDim) {
     int n = g >> 3;
@@ -33,8 +33,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
       int p = base + i * E0;
       __memcpy(a, x + p, E3 * sizeof(half), GDRAM2NRAM);
       s += f0(a, b);
-      __bang_square(a, a, E3);
-      v += f0(a, b);
+      __bang_square(b, a, E3);
+      v += f0(b, a);
     }
 
     float m = s * 0.0000019073486328125f;
