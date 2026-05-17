@@ -6,7 +6,6 @@
 #define E0 65536
 #define E1 128
 #define E2 8
-#define E3 262144
 
 __mlu_func__ float f0(const half *__restrict__ x, half *__restrict__ t) {
   __bang_sumpool(t, x, 64, 1, 1024, 1, 1024, 1024, 1);
@@ -19,7 +18,7 @@ __mlu_func__ float f0(const half *__restrict__ x, half *__restrict__ t) {
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[E3];
+  __nram__ half a[E0];
   __nram__ half b[E0];
 
   for (int g = taskId; g < E1; g += taskDim) {
@@ -42,11 +41,11 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     float d2 = d * d;
     float r = 1.0f + d * -0.5f + d2 * (0.375f - 0.3125f * d);
 
-    for (int i = 0; i < E2; i += 4) {
+    for (int i = 0; i < E2; ++i) {
       int p = base + i * E0;
-      __memcpy(a, x + p, E3 * sizeof(half), GDRAM2NRAM);
-      __bang_fusion(FUSION_FMA, a, a, (half)r, (half)(-m * r), E3);
-      __memcpy(y + p, a, E3 * sizeof(half), NRAM2GDRAM);
+      __memcpy(a, x + p, E0 * sizeof(half), GDRAM2NRAM);
+      __bang_fusion(FUSION_FMA, a, a, (half)r, (half)(-m * r), E0);
+      __memcpy(y + p, a, E0 * sizeof(half), NRAM2GDRAM);
     }
   }
 }
