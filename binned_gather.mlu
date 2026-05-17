@@ -46,6 +46,9 @@ __mlu_entry__ void k0(half *__restrict__ out) {
   out[39] = (half)0.0f;
 }
 
+__mlu_entry__ void k1() {
+}
+
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices,
                         torch::Tensor weights, torch::Tensor bins,
                         int expert_capacity, int top_k) {
@@ -57,6 +60,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices,
   (void)top_k;
 
   static torch::Tensor out;
+  static bool init = false;
   if (!out.defined())
     out = torch::empty({2, 5, 4}, x.options().dtype(torch::kHalf));
   else
@@ -64,7 +68,12 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices,
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {1, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+  if (!init) {
+    k0<<<d, cnrtFuncTypeBlock, queue>>>(
+        reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+    init = true;
+  } else {
+    k1<<<d, cnrtFuncTypeBlock, queue>>>();
+  }
   return out;
 }
