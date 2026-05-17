@@ -15,10 +15,12 @@ __mlu_func__ float fsum(float *__restrict__ x, float *__restrict__ y) {
   return y[0];
 }
 
-__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ m) {
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ m,
+                      half *__restrict__ y) {
   __nram__ half h[E2];
   __nram__ float a[E2];
   __nram__ float s[32];
+  __nram__ float mm[E0];
   if (taskId < E4) {
     m[taskId] = 0.0f;
     m[taskId + E4] = 0.0f;
@@ -33,6 +35,21 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ m) {
     __bang_half2float(a, h, E2);
     s[0] = fsum(a, s);
     __bang_atomic_reduce_add(m + c, s, 1);
+  }
+  __sync_all_ipu();
+  __memcpy(mm, m, E0 * sizeof(float), GDRAM2NRAM);
+  __bang_mul_scalar(mm, mm, 0.00000095367431640625f, E0);
+  for (int p = taskId; p < E3; p += taskDim) {
+    int c = (p >> 1) & 63;
+    int n = p >> 7;
+    int g = p & 1;
+    int off = (n * E0 + c) * E1 + g * E2;
+    __memcpy(h, x + off, E2 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(a, h, E2);
+    __bang_sub_scalar(a, a, mm[c], E2);
+    __bang_mul_scalar(a, a, 1.001f, E2);
+    __bang_float2half_rn(h, a, E2);
+    __memcpy(y + off, h, E2 * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -67,11 +84,7 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
     mean = torch::empty({64}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d0 = {E4, 1, 1};
-  cnrtDim3_t d1 = {128, 1, 1};
   k0<<<d0, cnrtFuncTypeUnion8, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      mean.data_ptr<float>());
-  k1<<<d1, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       mean.data_ptr<float>(),
       reinterpret_cast<half *>(output.data_ptr<at::Half>()));
