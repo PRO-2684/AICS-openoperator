@@ -8,10 +8,10 @@
 #define K0 2949
 #define TM 64
 #define TN 256
-#define TK 128
+#define TK 256
 #define TR 129
-#define RB 6
-#define TG 22
+#define RB 3
+#define TG 43
 #define TC 24
 #define TT (TG * TC)
 
