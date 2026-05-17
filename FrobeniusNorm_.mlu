@@ -3,17 +3,14 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define T 393216
+#define T 262144
 #define N 67108864
 
 __mlu_entry__ void k(half *a) {
   __nram__ half x[T];
   __bang_write_zero(x, T);
-  for (int64_t s = (int64_t)taskId * T; s < N; s += (int64_t)taskDim * T) {
-    int n = T;
-    if (s + n > N)
-      n = N - s;
-    __memcpy(a + s, x, n * sizeof(half), NRAM2GDRAM);
+  for (int s = taskId * T; s < N; s += taskDim * T) {
+    __memcpy(a + s, x, T * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -23,7 +20,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   d.y = 1;
   d.z = 1;
 
-  k<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  k<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
 
   return x;
