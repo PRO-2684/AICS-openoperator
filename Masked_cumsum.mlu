@@ -107,13 +107,17 @@ __mlu_entry__ void k0(const half *__restrict__ x,
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, int dim) {
   static torch::Tensor out;
+  static bool init = false;
   if (!out.defined())
     out = torch::empty({E0, E1}, x.options().dtype(torch::kFloat32));
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {4, 8, 1};
-  k0<<<g, cnrtFuncTypeUnion1, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const unsigned char *>(mask.data_ptr()),
-      out.data_ptr<float>());
+  if (!init) {
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+    cnrtDim3_t g = {4, 8, 1};
+    k0<<<g, cnrtFuncTypeUnion1, queue>>>(
+        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+        reinterpret_cast<const unsigned char *>(mask.data_ptr()),
+        out.data_ptr<float>());
+    init = true;
+  }
   return out;
 }
