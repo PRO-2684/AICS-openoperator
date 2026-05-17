@@ -16,7 +16,7 @@ __mlu_entry__ void k0(const half *__restrict__ c, const half *__restrict__ gw,
                       const half *__restrict__ bb, float *__restrict__ g,
                       float *__restrict__ b) {
   __nram__ half ch[C0];
-  __nram__ half wh[T0 * C0];
+  __nram__ half wh[D0 * C0];
   __nram__ half hb[T0];
   __nram__ float fb[2 * T0];
 
@@ -27,13 +27,14 @@ __mlu_entry__ void k0(const half *__restrict__ c, const half *__restrict__ gw,
   }
   __memcpy(ch, c + bid * C0, C0 * sizeof(half), GDRAM2NRAM);
 
-  __memcpy(wh, gw + col * C0, T0 * C0 * sizeof(half), GDRAM2NRAM);
+  __memcpy(wh, gw, D0 * C0 * sizeof(half), GDRAM2NRAM);
 #pragma unroll
   for (int j = 0; j < T0; ++j) {
     float acc = 0.0f;
+    int d = col + j;
 #pragma unroll
     for (int k = 0; k < C0; ++k) {
-      acc += (float)ch[k] * (float)wh[j * C0 + k];
+      acc += (float)ch[k] * (float)wh[k * D0 + d];
     }
     fb[j] = acc;
   }
@@ -42,13 +43,14 @@ __mlu_entry__ void k0(const half *__restrict__ c, const half *__restrict__ gw,
   __bang_add(fb, fb, fb + T0, T0);
   __memcpy(g + bid * D0 + col, fb, T0 * sizeof(float), NRAM2GDRAM);
 
-  __memcpy(wh, bw + col * C0, T0 * C0 * sizeof(half), GDRAM2NRAM);
+  __memcpy(wh, bw, D0 * C0 * sizeof(half), GDRAM2NRAM);
 #pragma unroll
   for (int j = 0; j < T0; ++j) {
     float acc = 0.0f;
+    int d = col + j;
 #pragma unroll
     for (int k = 0; k < C0; ++k) {
-      acc += (float)ch[k] * (float)wh[j * C0 + k];
+      acc += (float)ch[k] * (float)wh[k * D0 + d];
     }
     fb[j] = acc;
   }
