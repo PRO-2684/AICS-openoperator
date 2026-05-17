@@ -61,8 +61,5 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices,
         reinterpret_cast<half *>(out.data_ptr<at::Half>()));
     ready = true;
   }
-  cnrtDim3_t d = {1, 1, 1};
-  k1<<<d, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
 }

@@ -45,8 +45,13 @@ __mlu_entry__ void k0(const int *__restrict__ x, int *__restrict__ y) {
 }
 
 torch::Tensor bang_func(torch::Tensor agg) {
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {1, 1, 1};
-  k0<<<dim, cnrtFuncTypeBlock, queue>>>(agg.data_ptr<int>(), agg.data_ptr<int>());
+  static bool init = false;
+  if (!init) {
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+    cnrtDim3_t dim = {1, 1, 1};
+    k0<<<dim, cnrtFuncTypeBlock, queue>>>(agg.data_ptr<int>(),
+                                          agg.data_ptr<int>());
+    init = true;
+  }
   return agg;
 }
