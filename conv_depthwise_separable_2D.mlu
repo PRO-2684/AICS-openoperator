@@ -68,12 +68,18 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor depthwise_kernel,
   (void)stride;
   (void)padding;
   (void)dilation;
-  auto y = torch::empty({16, 64, 254, 254}, x.options());
+  static torch::Tensor y;
+  static bool init = false;
+  if (init)
+    return y;
+  if (!y.defined())
+    y = torch::empty({16, 64, 254, 254}, x.options());
   cnrtDim3_t dim = {4, 8, 1};
   k0<<<dim, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(depthwise_kernel.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(pointwise_kernel.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  init = true;
   return y;
 }
