@@ -52,13 +52,13 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
 }
 
 __mlu_entry__ void k1(const float *__restrict__ p, float *__restrict__ c) {
-  __nram__ float a[16384];
-  __nram__ float b[16384];
-  for (int s = taskId * 16384; s < M0 * N0; s += taskDim * 16384) {
-    __memcpy(a, p + s, 16384 * sizeof(float), GDRAM2NRAM);
-    __memcpy(b, p + M0 * N0 + s, 16384 * sizeof(float), GDRAM2NRAM);
-    __bang_add(a, a, b, 16384);
-    __memcpy(c + s, a, 16384 * sizeof(float), NRAM2GDRAM);
+  __nram__ float a[4096];
+  __nram__ float b[4096];
+  for (int s = taskId * 4096; s < M0 * N0; s += taskDim * 4096) {
+    __memcpy(a, p + s, 4096 * sizeof(float), GDRAM2NRAM);
+    __memcpy(b, p + M0 * N0 + s, 4096 * sizeof(float), GDRAM2NRAM);
+    __bang_add(a, a, b, 4096);
+    __memcpy(c + s, a, 4096 * sizeof(float), NRAM2GDRAM);
   }
 }
 
