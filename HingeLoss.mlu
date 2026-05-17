@@ -28,7 +28,7 @@ torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
     out = torch::empty({}, predictions.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {1, 1, 1};
-  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+  k0<<<dim, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(targets.data_ptr<at::Half>()),
       reinterpret_cast<float *>(out.data_ptr<float>()));
