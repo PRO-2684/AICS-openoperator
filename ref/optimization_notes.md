@@ -172,6 +172,7 @@
 ## 013 3D Tensor Matmul
 
 - The current pure BangC baseline is the same `TM128/RB3` family that worked on 016. `f50f40c` passed at `3015.2/3016.6 us`, improving the old `3108.8 us` best. Launch probes `16x2` (`f620ae8`) and `4x8` (`b9430b6`) were slightly slower; keep `8x4` on the original tile.
+- Major follow-up: prepack the 48 B tiles once per call into matmul WRAM layout, then read them by direct `GDRAM2WRAM` in the main kernel. Plain prepack (`cc4d4a2`) already reached `2739.8/2741.6 us`; freeing the old B NRAM buffers made `TM128/RB4/TG32` fit and `7f27faa` passed at `2470.4/2480.0 us`, a large lead over the old `bf64188` `2849.8/2854.6 us` band. Kprep task count `32/48/64` is not the main limiter. `TM192/RB2` needs tail-aware writes; once fixed it passes but slows to `2717-2755 us`, so the larger M tile is not worth it here.
 
 ## 010 Standard Conv2D
 
