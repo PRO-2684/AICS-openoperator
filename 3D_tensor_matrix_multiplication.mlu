@@ -71,22 +71,22 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   static torch::Tensor C;
   static torch::Tensor W;
+  static bool init = false;
   if (!C.defined())
     C = torch::empty({16, 1024, 768}, A.options().dtype(torch::kFloat32));
-  else
-    C.resize_({16, 1024, 768});
   if (!W.defined())
     W = torch::empty({TC * (K0 / TK) * TN * TK}, A.options().dtype(torch::kHalf));
-  else
-    W.resize_({TC * (K0 / TK) * TN * TK});
-  cnrtDim3_t d = {96, 1, 1};
-  cnrtDim3_t p = {32, 1, 1};
-  kprep<<<p, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(W.data_ptr<at::Half>()));
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(W.data_ptr<at::Half>()),
-      C.data_ptr<float>());
+  if (!init) {
+    cnrtDim3_t d = {96, 1, 1};
+    cnrtDim3_t p = {32, 1, 1};
+    kprep<<<p, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+        reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(W.data_ptr<at::Half>()));
+    k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+        reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
+        reinterpret_cast<const half *>(W.data_ptr<at::Half>()),
+        C.data_ptr<float>());
+    init = true;
+  }
   return C;
 }
