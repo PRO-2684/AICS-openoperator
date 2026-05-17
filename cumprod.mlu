@@ -3,7 +3,7 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define K0 48
+#define K0 56
 
 __mlu_func__ void f0(half *a) {
   half s = a[0];
