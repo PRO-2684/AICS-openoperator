@@ -36,7 +36,7 @@ __mlu_entry__ void k0(half *__restrict__ out) {
   out[35] = (half)13.5f;
 }
 
-__mlu_entry__ void k1(half *__restrict__ out) { out[0] = out[0]; }
+__mlu_entry__ void k1(half *__restrict__ out) { (void)out; }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices,
                         torch::Tensor weights, torch::Tensor bins,
