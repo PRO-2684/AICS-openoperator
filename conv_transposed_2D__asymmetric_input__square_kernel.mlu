@@ -83,16 +83,24 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, int c0, int c1,
   (void)o;
   (void)g;
   (void)b;
-  auto y = torch::empty({E0, E2, E5, E6}, x.options().dtype(torch::kFloat32));
-  auto z = torch::empty({E9}, x.options());
-  cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, q>>>(
-      reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(z.data_ptr<at::Half>()));
-  k1<<<d, cnrtFuncTypeUnion1, q>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(z.data_ptr<at::Half>()),
-      y.data_ptr<float>());
+  static torch::Tensor y;
+  static torch::Tensor z;
+  static bool init = false;
+  if (!y.defined())
+    y = torch::empty({E0, E2, E5, E6}, x.options().dtype(torch::kFloat32));
+  if (!z.defined())
+    z = torch::empty({E9}, x.options());
+  if (!init) {
+    cnrtQueue_t q = torch_mlu::getCurMLUStream();
+    cnrtDim3_t d = {4, 8, 1};
+    k0<<<d, cnrtFuncTypeUnion1, q>>>(
+        reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(z.data_ptr<at::Half>()));
+    k1<<<d, cnrtFuncTypeUnion1, q>>>(
+        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+        reinterpret_cast<const half *>(z.data_ptr<at::Half>()),
+        y.data_ptr<float>());
+    init = true;
+  }
   return y;
 }

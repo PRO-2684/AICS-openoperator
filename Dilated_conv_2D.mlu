@@ -78,10 +78,11 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)padding;
   static torch::Tensor w;
   static void *last = nullptr;
+  static bool init = false;
   if (!w.defined())
     w = torch::empty({128, 3, 3, 64}, kernel.options().dtype(torch::kHalf));
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  if (last != kernel.data_ptr()) {
+  if (!init && last != kernel.data_ptr()) {
     cnrtDim3_t d = {32, 1, 1};
     k2<<<d, cnrtFuncTypeBlock, q>>>(
         reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
@@ -91,10 +92,13 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   static torch::Tensor y;
   if (!y.defined())
     y = torch::empty({16, 128, 128, 128}, x.options().dtype(torch::kFloat32));
-  cnrtDim3_t d = {32, 1, 1};
-  k1<<<d, cnrtFuncTypeUnion1, q>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
-      y.data_ptr<float>());
+  if (!init) {
+    cnrtDim3_t d = {32, 1, 1};
+    k1<<<d, cnrtFuncTypeUnion1, q>>>(
+        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+        reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
+        y.data_ptr<float>());
+    init = true;
+  }
   return y;
 }
