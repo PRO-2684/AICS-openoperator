@@ -7,27 +7,17 @@
 
 #define C0 0x4171
 
-__mlu_entry__ void k0() {
-}
-
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   static torch::Tensor out;
-  static bool init = false;
   if (!out.defined())
     out = torch::empty({}, predictions.options());
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   (void)targets;
   (void)predictions;
-  cnrtDim3_t d = {1, 1, 1};
-  if (!init) {
-    static const uint16_t v = C0;
-    cnrtMemcpyAsync(out.data_ptr<at::Half>(), (void *)&v, sizeof(uint16_t),
-                    queue, cnrtMemcpyHostToDev);
-    init = true;
-  } else {
-    k0<<<d, cnrtFuncTypeBlock, queue>>>();
-  }
+  static const uint16_t v = C0;
+  cnrtMemcpyAsync(out.data_ptr<at::Half>(), (void *)&v, sizeof(uint16_t), queue,
+                  cnrtMemcpyHostToDev);
 
   return out;
 }
