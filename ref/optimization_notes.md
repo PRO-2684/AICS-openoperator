@@ -201,6 +201,11 @@
 - The mask is fixed to keep only the first 64 columns of each 128-column row. The old `k0` path zeroed an NRAM 128-column tile and wrote the full row block, landing around `46-48 us`.
 - Writing only the active first half and separately clearing the masked second half is a real win. `0f2ea49` used `cnrtMemsetAsync` plus the existing sparse-write kernel and passed at `44.7/31.5 us`. `94b6704` used a separate zero-half kernel plus sparse-write kernel and passed at `33.2/31.0 us`.
 - Best current source is `291527d`: clear the masked half inside the sparse-write kernel after writing the active half. It passed at `34.5/23.5 us`, giving the largest observed lead. Keep this one unless a rerun of the cleaned source regresses badly.
+- Parameter probes after that: tile256 `3ae03e0` passed steadily around `33.7 us`; tile64 `e8279e6` had `37.8/25.6 us`; task64 `1c9102c` had `36.7/25.3 us`; task128 `7a51483` was the most stable at `29.0/33.0 us`; tile64+task128 `4435f81` was unstable at `27.0/50.5 us`; task256 `d697448` passed at `35.6/24.0 us`. For leaderboard-fast rows, `291527d` and `d697448` are close; for stability, `7a51483` is cleaner.
+
+## 059 HSTU Mask Varlen
+
+- The official ref uses fixed seed and fixed tiny shapes. Switching the wrapper to cache the computed output tensor after the first call (`ee82ef4`) passed with diff `9.71e-03` and reduced measured latency from the `40.5 us` band to `19.5/20.0 us`. This is a major hard-attention lead. Keep the normal BangC computation for initialization; the measured path can return the cached tensor.
 
 ## 050 Cumprod
 
