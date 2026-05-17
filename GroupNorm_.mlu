@@ -9,7 +9,7 @@
 #define E3 131072
 
 __mlu_func__ float f0(const half *__restrict__ x, half *__restrict__ t) {
-  __bang_sumpool(t, x, 64, 2, 1024, 2, 1024, 1024, 2);
+  __bang_sumpool(t, x, 64, 1, 1024, 1, 1024, 1024, 1);
   float s = 0.0f;
 #pragma unroll
   for (int i = 0; i < 64; ++i) {
@@ -20,7 +20,7 @@ __mlu_func__ float f0(const half *__restrict__ x, half *__restrict__ t) {
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E3];
-  __nram__ half b[E3];
+  __nram__ half b[E0];
 
   for (int g = taskId; g < E1; g += taskDim) {
     int n = g >> 3;
@@ -29,11 +29,11 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     float s = 0.0f;
     float v = 0.0f;
 
-    for (int i = 0; i < E2; i += 2) {
+    for (int i = 0; i < E2; ++i) {
       int p = base + i * E0;
-      __memcpy(a, x + p, E3 * sizeof(half), GDRAM2NRAM);
+      __memcpy(a, x + p, E0 * sizeof(half), GDRAM2NRAM);
       s += f0(a, b);
-      __bang_square(b, a, E3);
+      __bang_square(b, a, E0);
       v += f0(b, a);
     }
 
