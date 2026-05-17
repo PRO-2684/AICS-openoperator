@@ -5,7 +5,7 @@
 #include <torch/extension.h>
 
 #define LOCAL_ELEMS 65536
-#define TASK_COUNT 64
+#define TASK_COUNT 128
 #define E0 1024
 
 __mlu_func__ float reduce_sum_half(half *buf, half *tmp, int n) {
