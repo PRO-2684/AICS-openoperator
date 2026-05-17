@@ -6,8 +6,8 @@
 #define E0 32768
 #define E1 128
 #define E2 64
-#define E3 64
-#define E4 128
+#define E3 128
+#define E4 256
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E2 * E3];
