@@ -4,8 +4,8 @@
 #include <torch/extension.h>
 
 #define E0 1048576
-#define E1 32768
-#define E2 32
+#define E1 16384
+#define E2 64
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
@@ -19,8 +19,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ half k[192];
   __memcpy(k, w, 192 * sizeof(half), GDRAM2NRAM);
   for (int g = taskId; g < E2; g += taskDim) {
-    int n = g >> 1;
-    int s = (g & 1) * E1;
+    int n = g >> 2;
+    int s = (g & 3) * E1;
     const half *p = x + n * 196608 + s;
     __memcpy(h0, p, E1 * sizeof(half), GDRAM2NRAM);
     __memcpy(h1, p + 65536, E1 * sizeof(half), GDRAM2NRAM);
