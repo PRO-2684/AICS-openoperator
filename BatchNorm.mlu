@@ -67,7 +67,7 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
     mean = torch::empty({64}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d0 = {E4, 1, 1};
-  cnrtDim3_t d1 = {64, 1, 1};
+  cnrtDim3_t d1 = {96, 1, 1};
   k0<<<d0, cnrtFuncTypeUnion8, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       mean.data_ptr<float>());
