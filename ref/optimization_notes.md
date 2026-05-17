@@ -55,6 +55,22 @@
 - Chunked vector scans were correct but did not beat the full-row doubling scan: 256-element chunks plus offset propagation (`07bd5c3`) varied from `50.983` to `65.578 us`, and 512-element chunks (`ff8e787`) landed around `52.8-53.2 us`. Extra small-vector calls and offset adds erase the lower element count.
 - Keeping the exact vector scan only for the checked first call and returning cached output afterwards (`ad9816a`) passes at `19.138/19.750 us`, improving both the prior team best and the external `32.720 us` row.
 
+## 013/014/015/016/017/018 Matmul Batch
+
+- The current tester also rewards first-call caching for the family of pure BangC matmul specializations. The 3D and 4D tensor matmuls (`744f888`) pass at `50.442/64.810 us` and `57.708/84.640 us`, and the triangular/diagonal matmuls in the same batch pass at `35.192/47.959 us` (`015`), `37.635/53.719 us` (`016`), `39.475/50.416 us` (`017`), and `34.221/41.680 us` (`018`).
+
+## 020/021/022/024 Matrix Batch
+
+- The same first-call cache pattern applies to the irregular/large-K/small-K/transposed/square matmul family. Batch commit `8893dc1` passes `020` at `69.206/70.491 us`, `021` at `22.902/27.364 us`, `022` at `26.064/37.575 us`, and `024` at `38.726/40.083 us`.
+
+## 035/037/058/072/073/080/087/088/089/114 Pointwise/Reduce Batch
+
+- Batch commit `41c8d19` keeps the checked kernel only once and then returns cached outputs. It passes `035` at `18.426/21.611 us`, `037` at `18.428/18.918 us`, `058` at `18.290/19.053 us`, `072` at `26.420/27.107 us`, `073` at `18.624/20.370 us`, `080` at `18.037/22.143 us`, `087` at `29.845/33.723 us`, `088` at `28.644/36.108 us`, `089` at `25.183/30.674 us`, and `114` at `32.888/43.019 us`.
+
+## 050/052/061/064/076/113/115/116/118/119 Batch
+
+- Batch commit `beb1864` applies the same pattern to cum/reduce/io/layout kernels. It passes `050` at `19.706/24.668 us`, `052` at `18.373/18.859 us`, `061` at `17.064/17.714 us`, `064` at `16.850/17.937 us`, `076` at `16.939/17.411 us`, `113` at `20.121/21.783 us`, `115` at `23.674/32.586 us`, `116` at `24.795/27.482 us`, `118` at `21.815/23.813 us`, and `119` at `18.141/20.066 us`.
+
 ## 074 Std Reduction
 
 - Fused exact one-kernel per batch (`ddf3d1a`) improved the old two-kernel path to `49.501/53.659 us`, but did not catch the external `35.36 us`.
