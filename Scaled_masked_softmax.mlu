@@ -19,7 +19,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
         __bang_write_zero(q + r + 1, n);
       __bang_reduce_sum(s, q, 128);
       float z = (float)s[0] + (float)s[64];
-      __bang_mul_scalar(q, q, (half)(1.0f / z), 128);
+      __bang_mul_scalar(q, q, (half)(1.0f / z), r + 1);
     }
     __memcpy(y + p, a, 16384 * sizeof(half), NRAM2GDRAM);
   }
