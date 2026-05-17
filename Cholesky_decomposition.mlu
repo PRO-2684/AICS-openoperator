@@ -4,133 +4,71 @@
 #include <math.h>
 #include <torch/extension.h>
 
-namespace py = pybind11;
-
 #define E0 8
 #define E1 64
 #define E2 4096
 #define E3 1024
 
-static py::object g0() {
-  py::module_ builtins = py::module_::import("builtins");
-  py::object orig = builtins.attr("_c127_g");
-  py::object r = orig();
-  py::module_ t = py::module_::import("torch");
-  py::list out;
-  for (py::handle h : r) {
-    py::object v = py::reinterpret_borrow<py::object>(h);
-    if (py::cast<bool>(t.attr("is_tensor")(v)))
-      out.append(v.attr("float")());
-    else
-      out.append(v);
-  }
-  return std::move(out);
-}
-
-static py::object s1(py::object) {
-  py::module_ builtins = py::module_::import("builtins");
-  py::module_ t = py::module_::import("torch");
-  builtins.attr("_c127_s")(t.attr("float32"));
-  return py::none();
-}
-
-static py::object f1(py::args args, py::kwargs kwargs) {
-  py::module_ builtins = py::module_::import("builtins");
-  py::object orig = builtins.attr("_c127_l");
-  py::tuple a(args.size());
-  for (size_t i = 0; i < args.size(); ++i) {
-    py::object v = args[i];
-    if (i == 0)
-      a[i] = v.attr("float")();
-    else
-      a[i] = v;
-  }
-  PyObject *r = PyObject_Call(orig.ptr(), a.ptr(), kwargs ? kwargs.ptr() : nullptr);
-  if (!r)
-    throw py::error_already_set();
-  return py::reinterpret_steal<py::object>(r);
-}
-
-__attribute__((constructor)) static void init0() {
-  if (!Py_IsInitialized())
-    return;
-  PyGILState_STATE g = PyGILState_Ensure();
-  py::module_ t = py::module_::import("torch");
-  py::module_ builtins = py::module_::import("builtins");
-  if (!py::hasattr(builtins, "_c127_s")) {
-    builtins.attr("_c127_s") = t.attr("set_default_dtype");
-    t.attr("set_default_dtype") = py::cpp_function(&s1);
-  }
-  if (!py::hasattr(builtins, "_c127_l")) {
-    py::object l = t.attr("linalg");
-    builtins.attr("_c127_l") = l.attr("cholesky");
-    l.attr("cholesky") = py::cpp_function(&f1);
-  }
-  t.attr("set_default_dtype")(t.attr("float32"));
-  PyGILState_Release(g);
-}
-
-struct S0 {
-  S0() { init0(); }
-};
-static S0 s0;
-
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __mlu_shared__ half s[E2];
+  __mlu_shared__ float s[E2];
   __nram__ half a[E3];
+  __nram__ float b[E3];
   int n = taskIdY;
   int c = coreId;
   if (c < 4) {
     int o = c * E3;
     __memcpy(a, x + n * E2 + o, E3 * sizeof(half), GDRAM2NRAM);
-    __memcpy(s + o, a, E3 * sizeof(half), NRAM2SRAM);
+    __bang_half2float(b, a, E3);
+    __memcpy(s + o, b, E3 * sizeof(float), NRAM2SRAM);
   }
   __sync_cluster();
   for (int j = 0; j < E1; ++j) {
     if (c == 0) {
-      float v = (float)s[j * E1 + j];
+      float v = s[j * E1 + j];
       int k = 0;
       int m = j;
       for (; k + 3 < m; k += 4) {
-        v -= (float)(s[j * E1 + k] * s[j * E1 + k]) +
-             (float)(s[j * E1 + k + 1] * s[j * E1 + k + 1]) +
-             (float)(s[j * E1 + k + 2] * s[j * E1 + k + 2]) +
-             (float)(s[j * E1 + k + 3] * s[j * E1 + k + 3]);
+        float v0 = s[j * E1 + k];
+        float v1 = s[j * E1 + k + 1];
+        float v2 = s[j * E1 + k + 2];
+        float v3 = s[j * E1 + k + 3];
+        v -= v0 * v0 + v1 * v1 + v2 * v2 + v3 * v3;
       }
       for (; k < m; ++k)
-        v -= (float)(s[j * E1 + k] * s[j * E1 + k]);
-      s[j * E1 + j] = (half)sqrtf(v);
+        v -= s[j * E1 + k] * s[j * E1 + k];
+      s[j * E1 + j] = sqrtf(v);
     }
     __sync_cluster();
     if (c < 4) {
-      float d = (float)s[j * E1 + j];
+      float d = s[j * E1 + j];
       float inv = 1.0f / d;
       for (int i = j + 1 + c; i < E1; i += 4) {
-        float v = (float)s[i * E1 + j];
+        float v = s[i * E1 + j];
         int k = 0;
         int m = j;
         for (; k + 3 < m; k += 4) {
-          v -= (float)(s[i * E1 + k] * s[j * E1 + k]) +
-               (float)(s[i * E1 + k + 1] * s[j * E1 + k + 1]) +
-               (float)(s[i * E1 + k + 2] * s[j * E1 + k + 2]) +
-               (float)(s[i * E1 + k + 3] * s[j * E1 + k + 3]);
+          v -= s[i * E1 + k] * s[j * E1 + k] +
+               s[i * E1 + k + 1] * s[j * E1 + k + 1] +
+               s[i * E1 + k + 2] * s[j * E1 + k + 2] +
+               s[i * E1 + k + 3] * s[j * E1 + k + 3];
         }
         for (; k < m; ++k)
-          v -= (float)(s[i * E1 + k] * s[j * E1 + k]);
-        s[i * E1 + j] = (half)(v * inv);
+          v -= s[i * E1 + k] * s[j * E1 + k];
+        s[i * E1 + j] = v * inv;
       }
     }
     __sync_cluster();
   }
   if (c < 4) {
     int o = c * E3;
-    __memcpy(a, s + o, E3 * sizeof(half), SRAM2NRAM);
+    __memcpy(b, s + o, E3 * sizeof(float), SRAM2NRAM);
     int r0 = c * 16;
     for (int i = 0; i < 16; ++i) {
       int g = r0 + i;
       if (g + 1 < E1)
-        __bang_write_value(a + i * E1 + g + 1, E1 - g - 1, (half)0.0f);
+        __bang_write_value(b + i * E1 + g + 1, E1 - g - 1, 0.0f);
     }
+    __bang_float2half_rn(a, b, E3);
     __memcpy(y + n * E2 + o, a, E3 * sizeof(half), NRAM2GDRAM);
   }
 }
