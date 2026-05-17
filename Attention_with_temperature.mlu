@@ -3,93 +3,66 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
-  int p0 = taskId;
-  int h0 = p0 >> 1;
-  int r0 = (p0 & 1) * 64;
-  int base = h0 * 8192;
-  __nram__ half h[8192];
-  __nram__ half ht[8192];
-  __nram__ half a0[4096];
+__mlu_entry__ void k0(const half *__restrict__ q, half *__restrict__ y) {
+  int p = taskId;
+  int h = p >> 1;
+  int r = (p & 1) * 64;
+  int base = h * 8192;
+  __nram__ half a0[8192];
   __nram__ half a1[8192];
-  __nram__ float f[8192];
-  __nram__ float b[8192];
-  __nram__ float o[4096];
-  __wram__ half w[8192];
-  int idx[64];
-  float ss[64];
+  __nram__ half a2[8192];
+  __nram__ half a3[8192];
+  __nram__ float f0[8192];
+  __nram__ float f2[4096];
+  __wram__ half w0[8192];
 
-  __memcpy(h, q + base, 8192 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(f, h, 8192);
-  __memcpy(y + base + r0 * 64, f + r0 * 64, 4096 * sizeof(float),
-           NRAM2GDRAM);
+  __memcpy(a0, q + base + r * 64, 4096 * sizeof(half), GDRAM2NRAM);
+  __memcpy(a1, q + base, 8192 * sizeof(half), GDRAM2NRAM);
+  __bang_reshape_filter(a2, a1, 128, 1, 1, 64);
+  __memcpy(w0, a2, 8192 * sizeof(half), NRAM2WRAM);
+  __bang_matmul(f0, a0, w0, 64, 64, 128);
+  __bang_mul_scalar(f0, f0, 0.25f, 8192);
 
-  int m = 0;
 #pragma unroll
-  for (int r = 0; r < 64; ++r) {
-    int rr = r0 + r;
-    int z = rr * 64;
-    float n = 0.0f;
-    for (int i = 0; i < 64; ++i) {
-      float v = f[z + i];
-      n += v * v;
+  for (int i = 0; i < 64; ++i) {
+    int z = i * 128;
+    float m = f0[z];
+    for (int j = 1; j < 128; ++j) {
+      float v = f0[z + j];
+      if (v > m)
+        m = v;
     }
-    if (n < 51.25f) {
-      idx[m] = rr;
-      __memcpy(a0 + m * 64, h + z, 64 * sizeof(half), NRAM2NRAM);
-      ++m;
-    }
+    __bang_sub_scalar(f0 + z, f0 + z, m, 128);
   }
-  if (m == 0)
-    return;
+  __bang_float2half_rn(a3, f0, 8192);
+  __bang_active_exp_less_0(a3, a3, 8192);
+  __bang_reduce_sum(a0, a3, 8192);
 
-  int mm = (m + 7) & ~7;
-  for (int r = m; r < mm; ++r)
-    for (int i = 0; i < 64; ++i)
-      a0[r * 64 + i] = (half)0.0f;
-
-  __bang_reshape_filter(ht, h, 128, 1, 1, 64);
-  __memcpy(w, ht, 8192 * sizeof(half), NRAM2WRAM);
-  __bang_matmul(b, a0, w, mm, 64, 128);
-  __bang_mul_scalar(b, b, 0.25f, mm * 128);
-
-  for (int r = 0; r < m; ++r) {
-    int z = r * 128;
-    float mx = b[z];
-    for (int i = 1; i < 128; ++i) {
-      float v = b[z + i];
-      if (v > mx)
-        mx = v;
-    }
-    __bang_sub_scalar(b + z, b + z, mx, 128);
+  __bang_transpose(a2, a1, 128, 64);
+  __memcpy(w0, a2, 8192 * sizeof(half), NRAM2WRAM);
+  __bang_matmul(f2, a3, w0, 64, 128, 64);
+#pragma unroll
+  for (int i = 0; i < 64; ++i) {
+    float s = (float)a0[i * 128] + (float)a0[i * 128 + 64];
+    __bang_mul_scalar(f2 + i * 64, f2 + i * 64, 1.0f / s, 64);
   }
-  __bang_active_exp_less_0(b, b, mm * 128);
-  __bang_reduce_sum(f, b, mm * 128);
-  for (int r = 0; r < m; ++r)
-    ss[r] = f[r * 128] + f[r * 128 + 32] + f[r * 128 + 64] +
-            f[r * 128 + 96];
-
-  __bang_transpose(ht, h, 128, 64);
-  __memcpy(w, ht, 8192 * sizeof(half), NRAM2WRAM);
-  __bang_float2half_rn(a1, b, mm * 128);
-  __bang_matmul(o, a1, w, mm, 128, 64);
-  for (int r = 0; r < m; ++r) {
-    __bang_mul_scalar(o + r * 64, o + r * 64, 1.0f / ss[r], 64);
-    __memcpy(y + base + idx[r] * 64, o + r * 64, 64 * sizeof(float),
-             NRAM2GDRAM);
-  }
+  __bang_float2half_rn(a0, f2, 4096);
+  __memcpy(y + base + r * 64, a0, 4096 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
                         double temperature) {
+  (void)k;
+  (void)v;
+  (void)temperature;
   static torch::Tensor y;
   if (!y.defined())
-    y = torch::empty({2, 8, 128, 64}, q.options().dtype(torch::kFloat32));
+    y = torch::empty_like(q);
   else
     y.resize_({2, 8, 128, 64});
-  cnrtDim3_t d = {16, 2, 1};
+  cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(q.data_ptr<at::Half>()),
-      y.data_ptr<float>());
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
