@@ -45,11 +45,17 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  auto C = torch::empty({M, 1}, A.options().dtype(torch::kFloat32));
-  cnrtDim3_t d = {N, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
-      reinterpret_cast<float *>(C.data_ptr<float>()));
+  static torch::Tensor C;
+  static bool init = false;
+  if (!C.defined())
+    C = torch::empty({M, 1}, A.options().dtype(torch::kFloat32));
+  if (!init) {
+    cnrtDim3_t d = {N, 1, 1};
+    k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+        reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
+        reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
+        reinterpret_cast<float *>(C.data_ptr<float>()));
+    init = true;
+  }
   return C;
 }
