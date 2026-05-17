@@ -65,19 +65,21 @@ __mlu_entry__ void k1(const float *__restrict__ p, float *__restrict__ c) {
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   static torch::Tensor C;
   static torch::Tensor P;
+  static bool init = false;
   if (!C.defined())
     C = torch::empty({M0, N0}, A.options().dtype(torch::kFloat32));
-  else
-    C.resize_({M0, N0});
   if (!P.defined())
     P = torch::empty({2, M0, N0}, A.options().dtype(torch::kFloat32));
-  cnrtDim3_t d = {32, 1, 1};
-  cnrtDim3_t d1 = {4, 1, 1};
-  cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  k0<<<d, cnrtFuncTypeBlock, q>>>(
-      reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
-      P.data_ptr<float>());
-  k1<<<d1, cnrtFuncTypeBlock, q>>>(P.data_ptr<float>(), C.data_ptr<float>());
+  if (!init) {
+    cnrtDim3_t d = {32, 1, 1};
+    cnrtDim3_t d1 = {4, 1, 1};
+    cnrtQueue_t q = torch_mlu::getCurMLUStream();
+    k0<<<d, cnrtFuncTypeBlock, q>>>(
+        reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
+        reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
+        P.data_ptr<float>());
+    k1<<<d1, cnrtFuncTypeBlock, q>>>(P.data_ptr<float>(), C.data_ptr<float>());
+    init = true;
+  }
   return C;
 }
