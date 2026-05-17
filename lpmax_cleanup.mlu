@@ -7,11 +7,14 @@ __mlu_entry__ void k(const half *a, half *b) {
   int p = taskId;
 
   __nram__ half x[64];
-  __nram__ half y[64];
 
   __memcpy(x, a + p * 64, 128, GDRAM2NRAM);
-  __bang_max(y, x, 64);
-  __memcpy(b + p, y, 2, NRAM2GDRAM);
+  half m = x[0];
+  for (int i = 1; i < 64; ++i) {
+    if ((float)x[i] > (float)m)
+      m = x[i];
+  }
+  b[p] = m;
 }
 
 torch::Tensor bang_func(torch::Tensor x, int n) {
