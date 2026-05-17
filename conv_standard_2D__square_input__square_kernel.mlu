@@ -86,8 +86,6 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   }
   if (!w.defined())
     w = torch::empty({E9}, kernel.options());
-  else
-    w.resize_({E9});
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {8, 4, 1};
   if (last != kernel.data_ptr()) {
