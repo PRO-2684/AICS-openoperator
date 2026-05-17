@@ -37,8 +37,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
       __memcpy(ww, hf, TN * TK * sizeof(half), NRAM2WRAM);
       for (int rb = 0; rb < RB; ++rb) {
         int mi = base_m + rb * TM;
-        if (mi >= N0)
-          continue;
         const half *ap = a + mi * N0;
         __memcpy(ah, ap + kk, TK * sizeof(half), GDRAM2NRAM,
                  TK * sizeof(half), N0 * sizeof(half), TM - 1);
@@ -48,8 +46,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
     }
     for (int rb = 0; rb < RB; ++rb) {
       int mi = base_m + rb * TM;
-      if (mi >= N0)
-        continue;
       float *cp = c + mi * N0 + nj;
       __memcpy(cp, acc + rb * TM * TN, TN * sizeof(float), NRAM2GDRAM,
                N0 * sizeof(float), TN * sizeof(float), TM - 1);
