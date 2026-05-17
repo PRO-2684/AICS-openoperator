@@ -4,34 +4,18 @@
 #include <torch/extension.h>
 
 __mlu_func__ void k1(float *__restrict__ a) {
-  for (int j = 0; j < 7; ++j) {
-    float *p = a + j * 512;
-    __bang_add(p, p, p + 1, 511);
-    __bang_add(p, p, p + 2, 510);
-    __bang_add(p, p, p + 4, 508);
-    __bang_add(p, p, p + 8, 504);
-    __bang_add(p, p, p + 16, 496);
-    __bang_add(p, p, p + 32, 480);
-    __bang_add(p, p, p + 64, 448);
-    __bang_add(p, p, p + 128, 384);
-    __bang_add(p, p, p + 256, 256);
-  }
-  float *t = a + 3584;
-  __bang_add(t, t, t + 1, 415);
-  __bang_add(t, t, t + 2, 414);
-  __bang_add(t, t, t + 4, 412);
-  __bang_add(t, t, t + 8, 408);
-  __bang_add(t, t, t + 16, 400);
-  __bang_add(t, t, t + 32, 384);
-  __bang_add(t, t, t + 64, 352);
-  __bang_add(t, t, t + 128, 288);
-  __bang_add(t, t, t + 256, 160);
-  float s = t[0];
-  for (int j = 6; j >= 0; --j) {
-    float *p = a + j * 512;
-    __bang_add_scalar(p, p, s, 512);
-    s = p[0];
-  }
+  __bang_add(a, a, a + 1, 3999);
+  __bang_add(a, a, a + 2, 3998);
+  __bang_add(a, a, a + 4, 3996);
+  __bang_add(a, a, a + 8, 3992);
+  __bang_add(a, a, a + 16, 3984);
+  __bang_add(a, a, a + 32, 3968);
+  __bang_add(a, a, a + 64, 3936);
+  __bang_add(a, a, a + 128, 3872);
+  __bang_add(a, a, a + 256, 3744);
+  __bang_add(a, a, a + 512, 3488);
+  __bang_add(a, a, a + 1024, 2976);
+  __bang_add(a, a, a + 2048, 1952);
 }
 
 __mlu_func__ void k2(half *__restrict__ h, float *__restrict__ a) {
