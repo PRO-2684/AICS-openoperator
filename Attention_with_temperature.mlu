@@ -16,9 +16,9 @@ __mlu_entry__ void k0(const half *__restrict__ q, half *__restrict__ y) {
   __nram__ float f2[4096];
   __wram__ half w0[8192];
 
-  __memcpy(a0, q + base + r * 64, 4096 * sizeof(half), GDRAM2NRAM);
-  __bang_mul_scalar(a0, a0, (half)0.25f, 4096);
   __memcpy(a1, q + base, 8192 * sizeof(half), GDRAM2NRAM);
+  __memcpy(a0, a1 + r * 64, 4096 * sizeof(half), NRAM2NRAM);
+  __bang_mul_scalar(a0, a0, (half)0.25f, 4096);
   __bang_reshape_filter(a2, a1, 128, 1, 1, 64);
   __memcpy(w0, a2, 8192 * sizeof(half), NRAM2WRAM);
   __bang_matmul(f0, a0, w0, 64, 64, 128);
