@@ -29,7 +29,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ m) {
     int r = p & 127;
     int c = r >> 1;
     int g = r & 1;
-    int off = (((n << 1) + 1) * E0 + c) * E1 + g * E2;
+    int off = ((n << 1) * E0 + c) * E1 + g * E2;
     __memcpy(h, x + off, E2 * sizeof(half), GDRAM2NRAM);
     __bang_half2float(a, h, E2);
     s[0] = fsum(a, s);
