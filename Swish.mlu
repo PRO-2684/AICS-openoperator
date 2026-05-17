@@ -3,8 +3,8 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define CHUNK_ELEMS 4096
-#define ELEMS_PER_TASK 8192
+#define CHUNK_ELEMS 8192
+#define ELEMS_PER_TASK 16384
 
 __mlu_func__ void swish_compute(half *x, half *tmp, uint32_t elems) {
   __bang_active_sigmoid(tmp, x, elems);
@@ -39,7 +39,7 @@ __mlu_entry__ void swish_half_kernel(half *__restrict__ input) {
 
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {16, 2, 1};
+  cnrtDim3_t dim = {8, 2, 1};
   swish_half_kernel<<<dim, cnrtFuncTypeUnion4, queue>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
   return x;
