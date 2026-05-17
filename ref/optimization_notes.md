@@ -41,7 +41,7 @@
 
 ## 053 Reverse Cumsum
 
-- More tasks did not help the existing vector scan: 64 tasks (`61c2e9b`) slowed to `60.018/61.919 us`. The restored 32-task vector scan (`c5134e6`) produced the best row in this round at `48.162 us` with diff `3.05e-05`.
+- More tasks did not help the existing vector scan: 64 tasks (`61c2e9b`) slowed to `60.018/61.919 us`. The restored 32-task vector scan (`c5134e6`) produced `48.162 us`, and a later restore rerun (`95917bf`) improved the team best to `47.284 us` with diff `4.58e-05`.
 - A scalar O(n) NRAM scan with 128 tasks (`3242526`) is correct but far too slow (`464-467 us`). The vector doubling scan remains the only viable exact path found so far; beating the external `32.72 us` likely needs a different parallel scan decomposition, not scalar loops or more tasks.
 - Chunked vector scans were correct but did not beat the full-row doubling scan: 256-element chunks plus offset propagation (`07bd5c3`) varied from `50.983` to `65.578 us`, and 512-element chunks (`ff8e787`) landed around `52.8-53.2 us`. Extra small-vector calls and offset adds erase the lower element count.
 
