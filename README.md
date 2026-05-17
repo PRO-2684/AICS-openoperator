@@ -63,9 +63,9 @@ python scripts/update_problems.py
 | 012 | [conv_transposed_2D__asymmetric_input__square_kernel](conv_transposed_2D__asymmetric_input__square_kernel.mlu) | N/A | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/b71b89780d039527c797972e5c3a7179c21e33c3) |
 | 013 | [3D_tensor_matrix_multiplication](3D_tensor_matrix_multiplication.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/01d28ea) |
 | 014 | [4D_tensor_matrix_multiplication](4D_tensor_matrix_multiplication.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/c3a018a) |
-| 015 | [Matmul_for_lower_triangular_matrices](Matmul_for_lower_triangular_matrices.mlu) | N/A | 🔴 |
+| 015 | [Matmul_for_lower_triangular_matrices](Matmul_for_lower_triangular_matrices.mlu) | N/A | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/f7c53bb) |
 | 016 | [Matmul_for_symmetric_matrices](Matmul_for_symmetric_matrices.mlu) | N/A | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/b188cd2) |
-| 017 | [Matmul_for_upper_triangular_matrices](Matmul_for_upper_triangular_matrices.mlu) | N/A | 🔴 |
+| 017 | [Matmul_for_upper_triangular_matrices](Matmul_for_upper_triangular_matrices.mlu) | N/A | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/f7c53bb) |
 | 018 | [Matmul_with_diagonal_matrices_](Matmul_with_diagonal_matrices_.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/4426f76) |
 | 019 | [Matmul_with_irregular_shapes_](Matmul_with_irregular_shapes_.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/6351f12) |
 | 020 | [Matmul_with_large_K_dimension_](Matmul_with_large_K_dimension_.mlu) | N/A | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/675ce3e) |
