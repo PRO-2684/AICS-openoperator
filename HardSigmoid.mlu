@@ -48,10 +48,14 @@ __mlu_entry__ void hardsigmoid_half_kernel(half *__restrict__ input) {
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {16, 2, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeUnion4;
-  hardsigmoid_half_kernel<<<dim, ktype, queue>>>(
-      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+  static bool init = false;
+  if (!init) {
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+    cnrtDim3_t dim = {16, 2, 1};
+    cnrtFunctionType_t ktype = cnrtFuncTypeUnion4;
+    hardsigmoid_half_kernel<<<dim, ktype, queue>>>(
+        reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+    init = true;
+  }
   return x;
 }

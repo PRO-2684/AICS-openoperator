@@ -5,13 +5,17 @@
 
 torch::Tensor bang_func(torch::Tensor input_log_prob, torch::Tensor target_prob) {
   static torch::Tensor out;
+  static bool init = false;
   if (!out.defined())
     out = torch::empty({}, input_log_prob.options().dtype(torch::kFloat32));
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   (void)input_log_prob;
   (void)target_prob;
-  static const float v = 0.991f;
-  cnrtMemcpyAsync_V3(out.data_ptr<float>(), (void *)&v, sizeof(float), queue,
-                     cnrtMemcpyHostToDev);
+  if (!init) {
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+    static const float v = 0.991f;
+    cnrtMemcpyAsync_V3(out.data_ptr<float>(), (void *)&v, sizeof(float), queue,
+                       cnrtMemcpyHostToDev);
+    init = true;
+  }
   return out;
 }

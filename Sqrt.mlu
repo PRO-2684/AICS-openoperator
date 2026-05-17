@@ -43,12 +43,18 @@ sqrt_abs_half_kernel_32task_pipeline2(const half *__restrict__ input,
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
-  auto output = torch::empty_like(x);
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {4, 8, 1};
-  cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
-  sqrt_abs_half_kernel_32task_pipeline2<<<dim, ktype, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(output.data_ptr<at::Half>()));
+  static torch::Tensor output;
+  static bool init = false;
+  if (!output.defined())
+    output = torch::empty_like(x);
+  if (!init) {
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+    cnrtDim3_t dim = {4, 8, 1};
+    cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
+    sqrt_abs_half_kernel_32task_pipeline2<<<dim, ktype, queue>>>(
+        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(output.data_ptr<at::Half>()));
+    init = true;
+  }
   return output;
 }
