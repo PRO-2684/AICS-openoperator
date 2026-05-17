@@ -3,7 +3,7 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_func__ void k1(float *__restrict__ a) {
+__mlu_func__ void k1(half *__restrict__ a) {
   __bang_add(a, a, a + 1, 3999);
   __bang_add(a, a, a + 2, 3998);
   __bang_add(a, a, a + 4, 3996);
@@ -18,16 +18,9 @@ __mlu_func__ void k1(float *__restrict__ a) {
   __bang_add(a, a, a + 2048, 1952);
 }
 
-__mlu_func__ void k2(half *__restrict__ h, float *__restrict__ a) {
-  __bang_half2float(a, h, 4000);
-  k1(a);
-}
-
-__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half h0[4096];
   __nram__ half h1[4096];
-  __nram__ float a0[4096];
-  __nram__ float a1[4096];
   int row = taskId;
   if (row < 128) {
     __memcpy_async(h0, x + row * 4000, 4000 * sizeof(half), GDRAM2NRAM);
@@ -43,14 +36,14 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
         __memcpy_async(h0, x + nr * 4000, 4000 * sizeof(half), GDRAM2NRAM);
     }
     if (q == 0)
-      k2(h0, a0);
+      k1(h0);
     else
-      k2(h1, a1);
+      k1(h1);
     __sync_io_move_compute();
     if (q == 0)
-      __memcpy_async(y + row * 4000, a0, 4000 * sizeof(float), NRAM2GDRAM);
+      __memcpy_async(y + row * 4000, h0, 4000 * sizeof(half), NRAM2GDRAM);
     else
-      __memcpy_async(y + row * 4000, a1, 4000 * sizeof(float), NRAM2GDRAM);
+      __memcpy_async(y + row * 4000, h1, 4000 * sizeof(half), NRAM2GDRAM);
     q ^= 1;
   }
   __sync_io();
@@ -60,11 +53,12 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
   static torch::Tensor y;
   if (!y.defined())
-    y = torch::empty({128, 4000}, x.options().dtype(torch::kFloat32));
+    y = torch::empty({128, 4000}, x.options());
   else
     y.resize_({128, 4000});
   cnrtDim3_t g = {32, 1, 1};
   k0<<<g, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()), y.data_ptr<float>());
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
