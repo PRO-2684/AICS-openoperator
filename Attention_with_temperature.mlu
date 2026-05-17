@@ -34,7 +34,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, float *__restrict__ y) {
       float v = f[z + i];
       n += v * v;
     }
-    if (n < 51.5f) {
+    if (n < 52.0f) {
       idx[m] = rr;
       __memcpy(a0 + m * 64, h + z, 64 * sizeof(half), NRAM2NRAM);
       ++m;
