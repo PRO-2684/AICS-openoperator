@@ -20,6 +20,27 @@ static inline double us_between(clk_t::time_point a, clk_t::time_point b) {
 static clk_t::time_point g_ctor_time;
 static int g_ctor_seen = 0;
 
+static torch::Tensor g_static_empty = []() {
+  try {
+    auto opt = torch::TensorOptions()
+                   .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                   .dtype(torch::kHalf);
+    auto t = torch::empty({1}, opt);
+    std::fprintf(stderr, "@@STATIC_EMPTY ok defined=%d\n", (int)t.defined());
+    return t;
+  } catch (const std::exception &e) {
+    std::fprintf(stderr, "@@STATIC_EMPTY failed: %s\n", e.what());
+    return torch::Tensor();
+  }
+}();
+
+static torch::Tensor out = []() {
+  return torch::empty({},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                          .dtype(torch::kHalf));
+}();
+
 __attribute__((constructor)) static void so_load_probe_only() {
   g_ctor_time = clk_t::now();
   g_ctor_seen = 1;
