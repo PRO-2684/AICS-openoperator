@@ -24,12 +24,12 @@ __mlu_entry__ void sqrt_abs_half_kernel_32task_pipeline2(half *__restrict__ inpu
 
   __memcpy(buf1, out1, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
   __bang_abs(buf0, buf0, CHUNK_ELEMS);
-  __bang_active_sqrthp(buf0, buf0, CHUNK_ELEMS);
+  __bang_active_sqrt(buf0, buf0, CHUNK_ELEMS);
   __sync_io_move_compute();
 
   __memcpy(out0, buf0, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
   __bang_abs(buf1, buf1, CHUNK_ELEMS);
-  __bang_active_sqrthp(buf1, buf1, CHUNK_ELEMS);
+  __bang_active_sqrt(buf1, buf1, CHUNK_ELEMS);
   __sync_io_move_compute();
 
   __memcpy(out1, buf1, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
