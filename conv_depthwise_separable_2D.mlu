@@ -61,7 +61,9 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
                  .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
+  auto a = torch::empty({1}, opt);
+  cnrtMemsetAsync(a.data_ptr(), 0, sizeof(half), torch_mlu::getCurMLUStream());
+  return a;
 }();
 
 static torch::Tensor gy = []() {
