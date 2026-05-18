@@ -152,19 +152,13 @@ __mlu_entry__ void inst_norm_split_kernel(const half *__restrict__ x,
 
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
   (void)num_features;
-  static torch::Tensor y;
-  static bool init = false;
-  if (!y.defined())
-    y = torch::empty_like(x);
+  auto y = torch::empty_like(x);
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-  if (!init) {
-    cnrtDim3_t dim = {TASK_COUNT, 1, 1};
-    inst_norm_vec_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-        (const half *)x.data_ptr<at::Half>(), (half *)y.data_ptr<at::Half>());
-    init = true;
-  }
+  cnrtDim3_t dim = {TASK_COUNT, 1, 1};
+  inst_norm_vec_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      (const half *)x.data_ptr<at::Half>(), (half *)y.data_ptr<at::Half>());
 
   return y;
 }
