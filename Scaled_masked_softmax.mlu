@@ -18,7 +18,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
       if (n > 0)
         __bang_write_zero(q + r + 1, n);
     }
-    __bang_sumpool(s, a, 128, 1, 128, 1, 128, 1, 128);
+    __bang_sumpool(s, a, 128, 1, 128, 1, 128, 128, 1);
 #pragma unroll
     for (int r = 0; r < 128; ++r) {
       half *q = a + r * 128;
