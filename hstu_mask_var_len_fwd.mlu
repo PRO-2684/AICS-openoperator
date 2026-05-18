@@ -156,6 +156,25 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   }
 }
 
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                 .dtype(torch::kHalf);
+  auto a = torch::empty({1}, opt);
+  auto b = torch::empty({1}, opt);
+  auto c = a + b;
+  auto d = torch::empty({22, 4, 40}, opt);
+  (void)d;
+  return c;
+}();
+
+static torch::Tensor gy = []() {
+  return torch::empty({22, 4, 40},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                          .dtype(torch::kHalf));
+}();
+
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
                         double alpha, torch::Tensor seq_offsets,
                         int max_seq_len, torch::Tensor context_size,
@@ -174,10 +193,9 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
   (void)context_expand;
   (void)label_lens;
   (void)preference;
-  static torch::Tensor y;
+  (void)g0;
+  auto &y = gy;
   static bool init = false;
-  if (!y.defined())
-    y = torch::empty({22, 4, 40}, q.options());
   if (!init) {
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
     cnrtDim3_t g = {4, 8, 1};

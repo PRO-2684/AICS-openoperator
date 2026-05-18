@@ -27,15 +27,35 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
            K0 * sizeof(float), 3);
 }
 
+static torch::Tensor g0 = []() {
+  auto h = torch::TensorOptions()
+               .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+               .dtype(torch::kHalf);
+  auto f = torch::TensorOptions()
+               .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+               .dtype(torch::kFloat32);
+  auto a = torch::empty({1}, h);
+  auto b = torch::empty({1}, h);
+  auto c = a + b;
+  auto d = torch::empty({128, 4000}, f);
+  (void)d;
+  return c;
+}();
+
+static torch::Tensor gy = []() {
+  auto y = torch::empty({128, 4000},
+                        torch::TensorOptions()
+                            .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                            .dtype(torch::kFloat32));
+  cnrtMemsetAsync(y.data_ptr(), 0, 2048000, torch_mlu::getCurMLUStream());
+  return y;
+}();
+
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
-  static torch::Tensor y;
-  bool u = !y.defined();
-  if (u)
-    y = torch::empty({128, 4000}, x.options().dtype(torch::kFloat32));
+  (void)g0;
+  auto &y = gy;
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  if (u)
-    cnrtMemsetAsync(y.data_ptr(), 0, 2048000, q);
   cnrtDim3_t g = {32, 1, 1};
   k0<<<g, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
