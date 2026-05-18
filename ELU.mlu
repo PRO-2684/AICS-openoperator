@@ -44,7 +44,15 @@ __mlu_entry__ void elu_half_kernel(half *__restrict__ input) {
   __sync_io();
 }
 
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
 torch::Tensor bang_func(torch::Tensor x, float alpha) {
+  (void)g0;
   static bool init = false;
   if (!init) {
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
