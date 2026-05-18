@@ -18,8 +18,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __bang_write_value(a1, 17152, (half)-65504.0f);
   int r = taskId;
   if (r < E0) {
-    __memcpy_async(a0 + 262, x + r * 16384 + 129, 126 * sizeof(half),
-                   GDRAM2NRAM, 130 * sizeof(half), 128 * sizeof(half), 125);
+    __memcpy_async(a0 + 131, x + r * 16384, 128 * sizeof(half),
+                   GDRAM2NRAM, 130 * sizeof(half), 128 * sizeof(half), 127);
     __sync_io();
   }
   int q = 0;
@@ -27,13 +27,13 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     int nr = r + taskDim;
     if (nr < E0) {
       if (q == 0)
-        __memcpy_async(a1 + 262, x + nr * 16384 + 129, 126 * sizeof(half),
+        __memcpy_async(a1 + 131, x + nr * 16384, 128 * sizeof(half),
                        GDRAM2NRAM, 130 * sizeof(half), 128 * sizeof(half),
-                       125);
+                       127);
       else
-        __memcpy_async(a0 + 262, x + nr * 16384 + 129, 126 * sizeof(half),
+        __memcpy_async(a0 + 131, x + nr * 16384, 128 * sizeof(half),
                        GDRAM2NRAM, 130 * sizeof(half), 128 * sizeof(half),
-                       125);
+                       127);
     }
     if (q == 0)
       f0(a0, b0);
