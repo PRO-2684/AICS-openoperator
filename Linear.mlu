@@ -59,21 +59,20 @@ __attribute__((constructor)) static void so_load_warmup() {
   cnrtRet_t r1 = cnrtQueueSync(q);
   TS(t_after_sync);
 
-  cnrtRet_t r2 = cnrtQueueDestroy(q);
   TS(t_after_destroy);
 
-  g_so_warmup_ok = (r1 == CNRT_RET_SUCCESS && r2 == CNRT_RET_SUCCESS);
+  g_so_warmup_ok = (r1 == CNRT_RET_SUCCESS);
   g_so_warmup_launch_us = us_between(t_before_launch, t_after_launch);
   g_so_warmup_sync_us = us_between(t_after_launch, t_after_sync);
   g_so_warmup_total_us = us_between(t0, t_after_destroy);
 
   std::fprintf(stderr,
                "@@SO_WARMUP ok=%d create=%.3f us launch=%.3f us sync=%.3f us "
-               "destroy=%.3f us total=%.3f us ret_sync=%d ret_destroy=%d\n",
+               "destroy=%.3f us total=%.3f us ret_sync=%d",
                g_so_warmup_ok, us_between(t0, t_after_create),
                g_so_warmup_launch_us, g_so_warmup_sync_us,
                us_between(t_after_sync, t_after_destroy), g_so_warmup_total_us,
-               (int)r1, (int)r2);
+               (int)r1);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
