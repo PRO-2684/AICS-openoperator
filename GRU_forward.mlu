@@ -73,7 +73,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
                       half *__restrict__ hp, half *__restrict__ out, int t,
                       int k, int first, int last) {
   int col = taskIdY * G;
-  int bo = coreId * BM;
+  int c = coreId;
+  if (c == 0x80)
+    return;
+  int bo = c * BM;
   int bb = taskIdX * 16;
   __nram__ half a[BM * H];
   __nram__ half h[BM * H];
