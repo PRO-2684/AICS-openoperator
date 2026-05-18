@@ -24,7 +24,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, half *__restrict__ y) {
       v0 += v1 * v1;
     }
     v0 *= 0.25f;
-    if (v0 >= 15.0f) {
+    if (v0 >= 16.0f) {
       __memcpy(y + base + r * 64, a0, 64 * sizeof(half), NRAM2GDRAM);
       continue;
     }
