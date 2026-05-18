@@ -7,17 +7,14 @@
 
 __mlu_entry__ void k0(const half *__restrict__ p, const half *__restrict__ t,
                       half *__restrict__ out) {
-  __nram__ half pbuf[N];
-  __nram__ half hbuf[N];
-
-  __memcpy(pbuf, p, N * sizeof(half), GDRAM2NRAM);
-  __memcpy(hbuf, t, N * sizeof(half), GDRAM2NRAM);
-  __bang_mul(hbuf, pbuf, hbuf, N);
-  __bang_mul_scalar(hbuf, hbuf, (half)-1.0f, N);
-  __bang_add_scalar(hbuf, hbuf, (half)1.0f, N);
-  __bang_active_relu(hbuf, hbuf, N);
-  __bang_reduce_sum(hbuf, hbuf, N);
-  out[0] = (half)(((float)hbuf[0] + (float)hbuf[64]) * 0.0078125f);
+  float s = 0.0f;
+#pragma unroll
+  for (int i = 0; i < N; ++i) {
+    float v = 1.0f - (float)p[i] * (float)t[i];
+    if (v > 0.0f)
+      s += v;
+  }
+  out[0] = (half)(s * 0.0078125f);
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
