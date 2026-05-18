@@ -21,6 +21,9 @@ __mlu_entry__ void k0(half *__restrict__ y) {
       if (r < 64) {
         __bang_reduce_sum(s, q, 64);
         z = (float)s[0];
+      } else if (r < 96) {
+        __bang_reduce_sum(s, q, 128);
+        z = (float)s[0] + (float)s[64];
       } else {
         z = (float)(r + 1) * 1.6484375f;
       }
