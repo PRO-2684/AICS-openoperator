@@ -1,7 +1,9 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
+#include <unistd.h>
 
 // Task: 099 099_DropPath
 // Category: fused
@@ -10,6 +12,24 @@
 // Description: 实现一个 BangC 算子，实现 DropPath（随机深度）功能，在训练模式下按样本维度随机丢弃部分输入数据并对剩余部分进行缩放。输入包括形状为 `[batch, ...]` 的张量 `x` 以及表示丢弃概率的浮点数标量 `drop_prob`；输出结果与 `x` 形状一致。
 // Wrapper: torch::Tensor bang_func(torch::Tensor x, double drop_prob);
 
+
+static int g_dev = 0;
+
+__attribute__((constructor(101))) static void init_runtime() {
+  unsigned int n = 0;
+  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+    const auto *impl =
+        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+    int torch_n = static_cast<int>(impl->deviceCount());
+    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
+      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
+      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+      cnrtSetDevice(d);
+      g_dev = d;
+    }
+  }
+}
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
                       int sample_elems, float scale) {
   __nram__ half buf[65536];
