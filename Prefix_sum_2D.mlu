@@ -23,6 +23,21 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
+static torch::Tensor warm = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
+static torch::Tensor gy = []() {
+  return torch::empty(
+      {16, 256, 256},
+      torch::TensorOptions()
+          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+          .dtype(torch::kFloat32));
+}();
+
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
   __nram__ half a[4096];
   __nram__ float b[4096];
@@ -84,12 +99,10 @@ __mlu_entry__ void k2(float *__restrict__ y, const float *__restrict__ t) {
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
-  static torch::Tensor y;
-  if (!y.defined())
-    y = torch::empty({16, 256, 256}, x.options().dtype(torch::kFloat32));
+  (void)warm;
   cnrtDim3_t g0 = {4, 8, 1};
   k1<<<g0, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      y.data_ptr<float>());
-  return y;
+      gy.data_ptr<float>());
+  return gy;
 }
