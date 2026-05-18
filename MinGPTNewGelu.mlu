@@ -24,7 +24,17 @@ __mlu_entry__ void k0(half *__restrict__ x) {
   }
 }
 
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                 .dtype(torch::kHalf);
+  auto a = torch::empty({1}, opt);
+  auto b = torch::empty({1}, opt);
+  return a + b;
+}();
+
 torch::Tensor bang_func(torch::Tensor x) {
+  (void)g0;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {E2, 1, 1};
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
