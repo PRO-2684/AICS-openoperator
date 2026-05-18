@@ -16,9 +16,10 @@ __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
                      float *__restrict__ s) {
 #pragma unroll
   for (int i = 0; i < R0; ++i) {
-    __bang_sumpool(t, h + i * E0, 64, 1, 8, 1, 8, 1, 8);
-    __bang_reduce_sum(t, t, 64);
-    g[i] = t[0];
+    __bang_reduce_sum(t, h + i * E0, E0);
+    g[i] = (half)((float)t[0] + (float)t[64] + (float)t[128] +
+                  (float)t[192] + (float)t[256] + (float)t[320] +
+                  (float)t[384] + (float)t[448]);
   }
   __bang_half2float(s, g, R0);
 #pragma unroll
@@ -28,9 +29,10 @@ __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
   __bang_mul(r, h, h, R1);
 #pragma unroll
   for (int i = 0; i < R0; ++i) {
-    __bang_sumpool(t, r + i * E0, 64, 1, 8, 1, 8, 1, 8);
-    __bang_reduce_sum(t, t, 64);
-    g[i] = t[0];
+    __bang_reduce_sum(t, r + i * E0, E0);
+    g[i] = (half)((float)t[0] + (float)t[64] + (float)t[128] +
+                  (float)t[192] + (float)t[256] + (float)t[320] +
+                  (float)t[384] + (float)t[448]);
   }
   __bang_half2float(s, g, R0);
   __bang_mul_scalar(s, s, 0.001953125f, R0);
@@ -51,7 +53,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ half r1[R1];
   __nram__ half r2[R1];
   __nram__ half g[R0];
-  __nram__ half t[64];
+  __nram__ half t[E0];
   __nram__ float s[R0];
   half *hs[3] = {h0, h1, h2};
   half *rs[3] = {r0, r1, r2};
