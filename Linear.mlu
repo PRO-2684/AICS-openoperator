@@ -1,9 +1,9 @@
+#include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
 #include <bang.h>
 #include <chrono>
 #include <cnrt.h>
 #include <cstdio>
-#include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
@@ -15,27 +15,32 @@ static inline double us_between(clk_t::time_point a, clk_t::time_point b) {
 
 #define TS(name) auto name = clk_t::now()
 #define PSEG(tag, a, b)                                                        \
-  std::fprintf(stderr, "@@PROBE %-28s %.3f us\n", tag, us_between(a, b))
+  std::fprintf(stderr, "@@PROBE %-30s %.3f us\n", tag, us_between(a, b))
 
 static int g_so_warmup_ok = 0;
-static double g_so_warmup_launch_us = -1.0;
-static double g_so_warmup_sync_us = -1.0;
-static double g_so_warmup_total_us = -1.0;
+static double g_so_launch_us = -1.0;
+static double g_so_sync_us = -1.0;
+static double g_so_total_us = -1.0;
 
-__mlu_entry__ void k_so_empty() {
-  // empty kernel for first-launch warmup
+__mlu_entry__ void k_so_warm() {}
+
+__mlu_entry__ void k_empty_linear(const half *__restrict__ x,
+                                  half *__restrict__ y, int n) {}
+
+__mlu_entry__ void k_touch1_linear(const half *__restrict__ x,
+                                   half *__restrict__ y, int n) {
+  int p = taskId;
+  if (p < n) {
+    y[p] = x[p];
+  }
 }
 
-__mlu_entry__ void k_empty2(const half *__restrict__ x, half *__restrict__ y,
-                            int n) {
-  // empty kernel for measuring launch after .so constructor warmup
-}
-
-__mlu_entry__ void k_touch_vec2(const half *__restrict__ x,
+__mlu_entry__ void k_vec_linear(const half *__restrict__ x,
                                 half *__restrict__ y, int n) {
   int base = taskId * 256;
-  int remain = n - base;
-  int len = remain > 256 ? 256 : remain;
+  int len = n - base;
+  if (len > 256)
+    len = 256;
   if (len > 0) {
     __memcpy(y + base, x + base, len * sizeof(half), GDRAM2GDRAM);
   }
@@ -43,44 +48,33 @@ __mlu_entry__ void k_touch_vec2(const half *__restrict__ x,
 
 __attribute__((constructor)) static void so_load_warmup() {
   TS(t0);
-  cnrtQueue_t q = torch_mlu::getCurrentMLUStream();
 
-  TS(t_after_create);
-
-  cnrtDim3_t dim;
-  dim.x = 1;
-  dim.y = 1;
-  dim.z = 1;
+  cnrtDim3_t d = {1, 1, 1};
 
   TS(t_before_launch);
-  k_so_empty<<<dim, cnrtFuncTypeBlock, q>>>();
+  k_so_warm<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
   TS(t_after_launch);
 
-  cnrtRet_t r1 = cnrtQueueSync(q);
+  cnrtRet_t r = cnrtQueueSync(torch_mlu::getCurMLUStream());
   TS(t_after_sync);
 
-  TS(t_after_destroy);
+  g_so_warmup_ok = (r == CNRT_RET_SUCCESS);
+  g_so_launch_us = us_between(t_before_launch, t_after_launch);
+  g_so_sync_us = us_between(t_after_launch, t_after_sync);
+  g_so_total_us = us_between(t0, t_after_sync);
 
-  g_so_warmup_ok = (r1 == CNRT_RET_SUCCESS);
-  g_so_warmup_launch_us = us_between(t_before_launch, t_after_launch);
-  g_so_warmup_sync_us = us_between(t_after_launch, t_after_sync);
-  g_so_warmup_total_us = us_between(t0, t_after_destroy);
-
-  std::fprintf(stderr,
-               "@@SO_WARMUP ok=%d create=%.3f us launch=%.3f us sync=%.3f us "
-               "destroy=%.3f us total=%.3f us ret_sync=%d",
-               g_so_warmup_ok, us_between(t0, t_after_create),
-               g_so_warmup_launch_us, g_so_warmup_sync_us,
-               us_between(t_after_sync, t_after_destroy), g_so_warmup_total_us,
-               (int)r1);
+  std::fprintf(
+      stderr,
+      "@@SO_WARMUP ok=%d launch=%.3f us sync=%.3f us total=%.3f us ret=%d\n",
+      g_so_warmup_ok, g_so_launch_us, g_so_sync_us, g_so_total_us, (int)r);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
                         bool bias) {
   TS(t_entry);
 
-  volatile int vf = in_features + out_features + (bias ? 1 : 0);
-  (void)vf;
+  volatile int sink = in_features + out_features + (bias ? 1 : 0);
+  (void)sink;
 
   TS(t_after_args);
 
@@ -89,81 +83,109 @@ torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
 
   TS(t_after_numel);
 
-  auto out0 = torch::empty_like(x);
+  int64_t rows = 0;
+  if (in_features > 0) {
+    rows = n64 / in_features;
+  }
+  if (rows <= 0)
+    rows = 1;
 
-  TS(t_after_empty0);
+  TS(t_after_shape_calc);
+
+  auto y_like = torch::empty_like(x);
+
+  TS(t_after_empty_like);
+
+  auto y_linear =
+      torch::empty({rows, static_cast<int64_t>(out_features)}, x.options());
+
+  TS(t_after_empty_linear);
 
   const half *xp = reinterpret_cast<const half *>(x.data_ptr<at::Half>());
-  half *yp = reinterpret_cast<half *>(out0.data_ptr<at::Half>());
+  half *yp_like = reinterpret_cast<half *>(y_like.data_ptr<at::Half>());
+  half *yp_linear = reinterpret_cast<half *>(y_linear.data_ptr<at::Half>());
 
   TS(t_after_ptr);
 
-  cnrtQueue_t queue = torch_mlu::getCurrentMLUStream();
+  auto stream = torch_mlu::getCurMLUStream();
 
   TS(t_after_stream);
 
-  cnrtQueueSync(queue);
+  cnrtRet_t r0 = cnrtQueueSync(stream);
 
   TS(t_after_sync0);
 
-  cnrtDim3_t dim1;
-  dim1.x = 1;
-  dim1.y = 1;
-  dim1.z = 1;
+  cnrtDim3_t d1 = {1, 1, 1};
+  cnrtDim3_t d32 = {32, 1, 1};
 
-  cnrtDim3_t dim_vec;
-  dim_vec.x = (n + 255) / 256;
-  if (dim_vec.x < 1)
-    dim_vec.x = 1;
-  if (dim_vec.x > 1024)
-    dim_vec.x = 1024;
-  dim_vec.y = 1;
-  dim_vec.z = 1;
+  cnrtDim3_t dvec;
+  dvec.x = (n + 255) / 256;
+  if (dvec.x < 1)
+    dvec.x = 1;
+  if (dvec.x > 1024)
+    dvec.x = 1024;
+  dvec.y = 1;
+  dvec.z = 1;
 
-  TS(t_before_empty_launch);
-  k_empty2<<<dim1, cnrtFuncTypeBlock, queue>>>(xp, yp, n);
-  TS(t_after_empty_launch);
+  TS(t_before_first_launch);
+  k_empty_linear<<<d1, cnrtFuncTypeBlock, stream>>>(xp, yp_like, n);
+  TS(t_after_first_launch);
 
-  cnrtQueueSync(queue);
-  TS(t_after_empty_sync);
+  cnrtRet_t r1 = cnrtQueueSync(stream);
+  TS(t_after_first_sync);
+
+  TS(t_before_second_launch);
+  k_touch1_linear<<<d32, cnrtFuncTypeBlock, stream>>>(xp, yp_like, n);
+  TS(t_after_second_launch);
+
+  cnrtRet_t r2 = cnrtQueueSync(stream);
+  TS(t_after_second_sync);
 
   TS(t_before_vec_launch);
-  k_touch_vec2<<<dim_vec, cnrtFuncTypeBlock, queue>>>(xp, yp, n);
+  k_vec_linear<<<dvec, cnrtFuncTypeBlock, stream>>>(xp, yp_like, n);
   TS(t_after_vec_launch);
 
-  cnrtQueueSync(queue);
+  cnrtRet_t r3 = cnrtQueueSync(stream);
   TS(t_after_vec_sync);
 
-  auto out1 = torch::empty_like(x);
+  auto y_like2 = torch::empty_like(x);
 
-  TS(t_after_empty1);
+  TS(t_after_empty_like2);
 
-  std::fprintf(stderr,
-               "@@PROBE n=%lld in=%d out=%d bias=%d so_warmup_ok=%d "
-               "so_launch=%.3f us so_sync=%.3f us so_total=%.3f us\n",
-               (long long)n64, in_features, out_features, (int)bias,
-               g_so_warmup_ok, g_so_warmup_launch_us, g_so_warmup_sync_us,
-               g_so_warmup_total_us);
+  std::fprintf(
+      stderr,
+      "@@PROBE n=%lld in=%d out=%d rows=%lld bias=%d so_ok=%d so_launch=%.3f "
+      "us so_sync=%.3f us so_total=%.3f us r0=%d r1=%d r2=%d r3=%d\n",
+      (long long)n64, in_features, out_features, (long long)rows, (int)bias,
+      g_so_warmup_ok, g_so_launch_us, g_so_sync_us, g_so_total_us, (int)r0,
+      (int)r1, (int)r2, (int)r3);
 
   PSEG("args_only", t_entry, t_after_args);
   PSEG("numel", t_after_args, t_after_numel);
-  PSEG("empty_like_after_so_load", t_after_numel, t_after_empty0);
-  PSEG("data_ptr", t_after_empty0, t_after_ptr);
-  PSEG("get_stream_queue", t_after_ptr, t_after_stream);
+  PSEG("shape_calc", t_after_numel, t_after_shape_calc);
+
+  PSEG("empty_like_after_so", t_after_shape_calc, t_after_empty_like);
+  PSEG("empty_linear_after_so", t_after_empty_like, t_after_empty_linear);
+  PSEG("data_ptr", t_after_empty_linear, t_after_ptr);
+  PSEG("get_stream", t_after_ptr, t_after_stream);
   PSEG("sync_empty_queue", t_after_stream, t_after_sync0);
 
-  PSEG("first_launch_after_so_host", t_before_empty_launch,
-       t_after_empty_launch);
-  PSEG("first_launch_after_so_sync", t_after_empty_launch, t_after_empty_sync);
-  PSEG("first_launch_after_so_total", t_before_empty_launch,
-       t_after_empty_sync);
+  PSEG("first_launch_host", t_before_first_launch, t_after_first_launch);
+  PSEG("first_launch_sync", t_after_first_launch, t_after_first_sync);
+  PSEG("first_launch_total", t_before_first_launch, t_after_first_sync);
 
-  PSEG("second_launch_host", t_before_vec_launch, t_after_vec_launch);
-  PSEG("second_launch_sync", t_after_vec_launch, t_after_vec_sync);
-  PSEG("second_launch_total", t_before_vec_launch, t_after_vec_sync);
+  PSEG("second_launch_host", t_before_second_launch, t_after_second_launch);
+  PSEG("second_launch_sync", t_after_second_launch, t_after_second_sync);
+  PSEG("second_launch_total", t_before_second_launch, t_after_second_sync);
 
-  PSEG("empty_like_warm", t_after_vec_sync, t_after_empty1);
-  PSEG("whole_cpp_body", t_entry, t_after_empty1);
+  PSEG("vec_launch_host", t_before_vec_launch, t_after_vec_launch);
+  PSEG("vec_launch_sync", t_after_vec_launch, t_after_vec_sync);
+  PSEG("vec_launch_total", t_before_vec_launch, t_after_vec_sync);
 
-  return out0;
+  PSEG("empty_like_warm", t_after_vec_sync, t_after_empty_like2);
+  PSEG("whole_cpp_body", t_entry, t_after_empty_like2);
+
+  // For probing allocation/launch overhead, return the true Linear-shaped
+  // tensor. It is uninitialized and not correctness-safe.
+  return y_linear;
 }
