@@ -20,16 +20,27 @@ static inline double us_between(clk_t::time_point a, clk_t::time_point b) {
 static clk_t::time_point g_ctor_time;
 static int g_ctor_seen = 0;
 
-static torch::Tensor g_static_empty = []() {
+static torch::Tensor g_static_warm = []() {
   try {
     auto opt = torch::TensorOptions()
                    .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
                    .dtype(torch::kHalf);
-    auto t = torch::empty({1}, opt) + torch::empty({1}, opt);
-    std::fprintf(stderr, "@@STATIC_EMPTY ok defined=%d\n", (int)t.defined());
-    return t;
+
+    auto a = torch::empty({1}, opt);
+    auto b = torch::empty({1}, opt);
+    auto c = a + b; // trigger torch_mlu kernel path
+
+    auto big0 =
+        torch::empty({8192, 512}, opt); // warm input-like allocator size
+    auto big1 =
+        torch::empty({8192, 2048}, opt); // warm output-like allocator size
+
+    std::fprintf(stderr, "@@STATIC_WARM ok c=%d big0=%d big1=%d\n",
+                 (int)c.defined(), (int)big0.defined(), (int)big1.defined());
+
+    return big1; // keep 32MiB allocated, may help allocator cache/state
   } catch (const std::exception &e) {
-    std::fprintf(stderr, "@@STATIC_EMPTY failed: %s\n", e.what());
+    std::fprintf(stderr, "@@STATIC_WARM failed: %s\n", e.what());
     return torch::Tensor();
   }
 }();
