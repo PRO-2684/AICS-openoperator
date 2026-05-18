@@ -5,37 +5,37 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[16];
-  __nram__ half t[32];
+  __nram__ float t[32];
   __nram__ half b[64];
   __memcpy(a, x, 16 * sizeof(half), GDRAM2NRAM);
   for (int r = 0; r < 4; ++r) {
-    half x0 = a[r * 4];
-    half x1 = a[r * 4 + 1];
-    half x2 = a[r * 4 + 2];
-    half x3 = a[r * 4 + 3];
-    half *p = t + r * 8;
+    float x0 = __half2float_rn(a[r * 4]);
+    float x1 = __half2float_rn(a[r * 4 + 1]);
+    float x2 = __half2float_rn(a[r * 4 + 2]);
+    float x3 = __half2float_rn(a[r * 4 + 3]);
+    float *p = t + r * 8;
     p[0] = x0;
-    p[1] = x0 + (x1 - x0) * (half)0.42857143f;
-    p[2] = x0 + (x1 - x0) * (half)0.85714287f;
-    p[3] = x1 + (x2 - x1) * (half)0.2857143f;
-    p[4] = x1 + (x2 - x1) * (half)0.71428573f;
-    p[5] = x2 + (x3 - x2) * (half)0.14285715f;
-    p[6] = x2 + (x3 - x2) * (half)0.5714286f;
+    p[1] = x0 + (x1 - x0) * 0.42857142857142855f;
+    p[2] = x0 + (x1 - x0) * 0.8571428571428571f;
+    p[3] = x1 + (x2 - x1) * 0.2857142857142857f;
+    p[4] = x1 + (x2 - x1) * 0.7142857142857143f;
+    p[5] = x2 + (x3 - x2) * 0.14285714285714285f;
+    p[6] = x2 + (x3 - x2) * 0.5714285714285714f;
     p[7] = x3;
   }
   for (int w = 0; w < 8; ++w) {
-    half x0 = t[w];
-    half x1 = t[8 + w];
-    half x2 = t[16 + w];
-    half x3 = t[24 + w];
-    b[w] = x0;
-    b[8 + w] = x0 + (x1 - x0) * (half)0.42857143f;
-    b[16 + w] = x0 + (x1 - x0) * (half)0.85714287f;
-    b[24 + w] = x1 + (x2 - x1) * (half)0.2857143f;
-    b[32 + w] = x1 + (x2 - x1) * (half)0.71428573f;
-    b[40 + w] = x2 + (x3 - x2) * (half)0.14285715f;
-    b[48 + w] = x2 + (x3 - x2) * (half)0.5714286f;
-    b[56 + w] = x3;
+    float x0 = t[w];
+    float x1 = t[8 + w];
+    float x2 = t[16 + w];
+    float x3 = t[24 + w];
+    b[w] = __float2half_rn(x0);
+    b[8 + w] = __float2half_rn(x0 + (x1 - x0) * 0.42857142857142855f);
+    b[16 + w] = __float2half_rn(x0 + (x1 - x0) * 0.8571428571428571f);
+    b[24 + w] = __float2half_rn(x1 + (x2 - x1) * 0.2857142857142857f);
+    b[32 + w] = __float2half_rn(x1 + (x2 - x1) * 0.7142857142857143f);
+    b[40 + w] = __float2half_rn(x2 + (x3 - x2) * 0.14285714285714285f);
+    b[48 + w] = __float2half_rn(x2 + (x3 - x2) * 0.5714285714285714f);
+    b[56 + w] = __float2half_rn(x3);
   }
   __memcpy(y, b, 64 * sizeof(half), NRAM2GDRAM);
 }
