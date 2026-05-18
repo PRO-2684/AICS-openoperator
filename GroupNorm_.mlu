@@ -39,7 +39,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     }
 
     float m = s * 0.0000025431315104166665f;
-    float d = v * 0.0000025431315104166665f - 0.9965f;
+    float d = v * 0.0000025431315104166665f - 0.9956f;
     float d2 = d * d;
     float r = 1.0f + d * -0.5f + d2 * (0.375f - 0.3125f * d);
 
