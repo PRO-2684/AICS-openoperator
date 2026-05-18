@@ -88,8 +88,7 @@ __mlu_entry__ void k4(const half *__restrict__ x, float *__restrict__ y) {
       v = s[2] + s[3];
     else if (c == 2)
       v = s[3];
-    if (v != 0.0f)
-      __bang_add_scalar(a, a, v, 1000);
+    __bang_add_scalar(a, a, v, 1000);
     __memcpy(y + p, a, 1000 * sizeof(float), NRAM2GDRAM);
     __sync_cluster();
   }
