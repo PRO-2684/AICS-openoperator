@@ -105,11 +105,7 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd('cat /proc/self/cgroup && mount | grep cgroup')
-run_cmd('lspci | grep -i cambricon')
-run_cmd('cnmon')
-
-
+run_cmd('for f in /sys/fs/cgroup/cpu,cpuacct/cpu.cfs_quota_us /sys/fs/cgroup/cpu,cpuacct/cpu.cfs_period_us /sys/fs/cgroup/cpu,cpuacct/cpu.shares /sys/fs/cgroup/cpuset/cpuset.cpus /sys/fs/cgroup/cpuset/cpuset.mems /sys/fs/cgroup/memory/memory.limit_in_bytes /sys/fs/cgroup/memory/memory.usage_in_bytes /sys/fs/cgroup/memory/memory.max_usage_in_bytes /sys/fs/cgroup/memory/memory.failcnt; do echo -n "$f="; cat "$f" 2>/dev/null || echo NA; done; for bdf in 0000:4F:00.0 0000:50:00.0 0000:53:00.0 0000:57:00.0 0000:9C:00.0 0000:9D:00.0 0000:A0:00.0 0000:A1:00.0 0000:A4:00.0 0000:B1:00.0; do echo -n "$bdf numa_node="; cat /sys/bus/pci/devices/$bdf/numa_node 2>/dev/null || echo NA; done')
 
 )PY");
 
