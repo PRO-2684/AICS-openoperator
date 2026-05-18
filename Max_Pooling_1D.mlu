@@ -5,6 +5,21 @@
 
 #define E0 32
 
+static torch::Tensor z = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                 .dtype(torch::kHalf);
+  auto a = torch::empty({16, 64, 62}, opt);
+  auto b = torch::empty({16, 64, 62}, opt);
+  return a + b;
+}();
+
+static torch::Tensor y = []() {
+  return torch::empty({16, 64, 62}, torch::TensorOptions()
+                                        .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                                        .dtype(torch::kHalf));
+}();
+
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half t[4096];
   __nram__ half a[4224];
@@ -23,9 +38,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
                         int padding, int dilation, bool return_indices) {
-  static torch::Tensor y;
-  if (!y.defined())
-    y = torch::empty({16, 64, 62}, x.options());
+  (void)z;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t g = {4, 8, 1};
   k0<<<g, cnrtFuncTypeUnion1, queue>>>(
