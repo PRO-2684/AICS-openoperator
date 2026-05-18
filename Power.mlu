@@ -3,7 +3,6 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <cstdio>
 #include <unistd.h>
 
 #define CHUNK_ELEMS 8192
@@ -13,9 +12,6 @@ static int g_dev = 0;
 __attribute__((constructor(101))) static void init_runtime() {
   unsigned int n = 0;
   int torch_n = 0;
-  int before = -1;
-  int after = -1;
-  cnrtGetDevice(&before);
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
     const auto *impl =
         c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
@@ -28,11 +24,6 @@ __attribute__((constructor(101))) static void init_runtime() {
       g_dev = d;
     }
   }
-  cnrtGetDevice(&after);
-  std::fprintf(stderr,
-               "@@DEV_BIND pid=%ld cnrt_count=%u torch_count=%d before=%d "
-               "pick=%d after=%d\n",
-               static_cast<long>(getpid()), n, torch_n, before, g_dev, after);
 }
 
 __mlu_entry__ void square_half_kernel(half *__restrict__ input, uint32_t total) {
@@ -52,11 +43,7 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  auto z = torch::zeros({1}, opt);
-  int cur = -1;
-  cnrtGetDevice(&cur);
-  std::fprintf(stderr, "@@DEV_WARM pick=%d current=%d\n", g_dev, cur);
-  return z;
+  return torch::zeros({1}, opt);
 }();
 
 torch::Tensor bang_func(torch::Tensor x, double exponent) {
