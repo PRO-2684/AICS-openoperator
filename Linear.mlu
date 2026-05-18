@@ -43,16 +43,9 @@ __mlu_entry__ void k_touch_vec2(const half *__restrict__ x,
 
 __attribute__((constructor)) static void so_load_warmup() {
   TS(t0);
-
-  cnrtQueue_t q = nullptr;
-  cnrtRet_t r0 = cnrtQueueCreate(&q);
+  cnrtQueue_t q = torch_mlu::getCurrentMLUStream();
 
   TS(t_after_create);
-
-  if (r0 != CNRT_RET_SUCCESS || q == nullptr) {
-    std::fprintf(stderr, "@@SO_WARMUP queue_create_failed ret=%d\n", (int)r0);
-    return;
-  }
 
   cnrtDim3_t dim;
   dim.x = 1;
