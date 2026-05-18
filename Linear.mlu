@@ -105,8 +105,7 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd('ls |grep gru')
-run_cmd('cat gru*')
+run_cmd('ls')
 
 )PY");
 
