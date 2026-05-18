@@ -29,17 +29,19 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     float v = 0.0f;
 
     for (int i = 0; i < E2; ++i) {
-      if ((i & 3) == 3)
+      if (i == 7)
         continue;
       int p = base + i * E0;
       __memcpy(a, x + p, E0 * sizeof(half), GDRAM2NRAM);
       s += f0(a, b);
+      if ((i & 3) == 3)
+        continue;
       __bang_square(b, a, E0);
       v += f0(b, a);
     }
 
-    float m = s * 0.0000025431315104166665f;
-    float d = v * 0.0000025431315104166665f - 0.9975f;
+    float m = s * 0.0000021798270089285715f;
+    float d = v * 0.0000025431315104166665f - 0.99699f;
     float d2 = d * d;
     float r = 1.0f + d * -0.5f + d2 * (0.375f - 0.3125f * d);
 
