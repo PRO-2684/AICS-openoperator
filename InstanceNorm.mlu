@@ -156,7 +156,7 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-  cnrtDim3_t dim = {4, 8, 1};
+  cnrtDim3_t dim = {4, 16, 1};
   inst_norm_split_kernel<<<dim, cnrtFuncTypeUnion1, queue>>>(
       (const half *)x.data_ptr<at::Half>(), (half *)y.data_ptr<at::Half>());
 
