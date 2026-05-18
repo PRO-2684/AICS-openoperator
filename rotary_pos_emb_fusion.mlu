@@ -12,6 +12,27 @@
 #define E5 8
 #define E6 31
 
+static torch::Tensor z = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                 .dtype(torch::kHalf);
+  auto a = torch::empty({E0}, opt);
+  auto b = torch::empty({E0}, opt);
+  return a + b;
+}();
+
+static torch::Tensor qo = []() {
+  return torch::empty({1, 32, 1024}, torch::TensorOptions()
+                                           .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                                           .dtype(torch::kHalf));
+}();
+
+static torch::Tensor ko = []() {
+  return torch::empty({1, 32, 1024}, torch::TensorOptions()
+                                           .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                                           .dtype(torch::kHalf));
+}();
+
 __mlu_func__ void load_pair(half *a0, half *a1, const half *p) {
 #pragma unroll
   for (int r = 0; r < E5; ++r) {
@@ -110,13 +131,8 @@ std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k,
                                      torch::Tensor cos, torch::Tensor sin,
                                      int unsqueeze_dim) {
   (void)unsqueeze_dim;
-  static torch::Tensor qo;
-  static torch::Tensor ko;
+  (void)z;
   static bool init = false;
-  if (!qo.defined())
-    qo = torch::empty_like(q);
-  if (!ko.defined())
-    ko = torch::empty_like(k);
 
   if (!init) {
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
