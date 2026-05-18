@@ -23,6 +23,19 @@ __mlu_func__ void k2(half *__restrict__ h, float *__restrict__ a) {
   k1(a);
 }
 
+__mlu_func__ void k3(float *__restrict__ a) {
+  __bang_add(a, a, a + 1, 999);
+  __bang_add(a, a, a + 2, 998);
+  __bang_add(a, a, a + 4, 996);
+  __bang_add(a, a, a + 8, 992);
+  __bang_add(a, a, a + 16, 984);
+  __bang_add(a, a, a + 32, 968);
+  __bang_add(a, a, a + 64, 936);
+  __bang_add(a, a, a + 128, 872);
+  __bang_add(a, a, a + 256, 744);
+  __bang_add(a, a, a + 512, 488);
+}
+
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
   __nram__ half h0[4096];
   __nram__ half h1[4096];
@@ -56,11 +69,37 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
   __sync_io();
 }
 
+__mlu_entry__ void k4(const half *__restrict__ x, float *__restrict__ y) {
+  __mlu_shared__ float s[4];
+  __nram__ half h[1024];
+  __nram__ float a[1024];
+  int c = coreId;
+  for (int row = taskIdY; row < 128; row += taskDimY) {
+    int p = row * 4000 + c * 1000;
+    __memcpy(h, x + p, 1000 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(a, h, 1000);
+    k3(a);
+    s[c] = a[0];
+    __sync_cluster();
+    float v = 0.0f;
+    if (c == 0)
+      v = s[1] + s[2] + s[3];
+    else if (c == 1)
+      v = s[2] + s[3];
+    else if (c == 2)
+      v = s[3];
+    if (v != 0.0f)
+      __bang_add_scalar(a, a, v, 1000);
+    __memcpy(y + p, a, 1000 * sizeof(float), NRAM2GDRAM);
+    __sync_cluster();
+  }
+}
+
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
   auto y = torch::empty({128, 4000}, x.options().dtype(torch::kFloat32));
-  cnrtDim3_t g = {32, 1, 1};
-  k0<<<g, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t g = {4, 8, 1};
+  k4<<<g, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()), y.data_ptr<float>());
   return y;
 }
