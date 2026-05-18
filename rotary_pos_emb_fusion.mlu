@@ -22,13 +22,13 @@ static torch::Tensor z = []() {
 }();
 
 static torch::Tensor qo = []() {
-  return torch::empty({1, 32, 1024}, torch::TensorOptions()
+  return torch::empty({2, 64, 4, 64}, torch::TensorOptions()
                                            .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
                                            .dtype(torch::kHalf));
 }();
 
 static torch::Tensor ko = []() {
-  return torch::empty({1, 32, 1024}, torch::TensorOptions()
+  return torch::empty({2, 64, 4, 64}, torch::TensorOptions()
                                            .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
                                            .dtype(torch::kHalf));
 }();
