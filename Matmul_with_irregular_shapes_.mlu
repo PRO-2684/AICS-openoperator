@@ -10,8 +10,8 @@
 #define TN 256
 #define TK 128
 #define TR 129
-#define RB 8
-#define TG 17
+#define RB 7
+#define TG 19
 #define TC 24
 #define KC 24
 #define TT (TG * TC)
@@ -141,7 +141,7 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto &W = gW;
   static bool init = false;
   if (!init) {
-    cnrtDim3_t d = {112, 1, 1};
+    cnrtDim3_t d = {96, 1, 1};
     cnrtDim3_t p = {128, 1, 1};
     kprep<<<p, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
         reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
