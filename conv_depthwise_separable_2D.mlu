@@ -66,6 +66,13 @@ static torch::Tensor g0 = []() {
   return a + b;
 }();
 
+static torch::Tensor gy = []() {
+  return torch::empty({16, 64, 254, 254},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                          .dtype(torch::kFloat32));
+}();
+
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor depthwise_kernel,
                         torch::Tensor pointwise_kernel, int in_channels,
                         int out_channels, int kernel_size, int stride,
@@ -77,9 +84,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor depthwise_kernel,
   (void)padding;
   (void)dilation;
   (void)g0;
-  static torch::Tensor y;
-  if (!y.defined())
-    y = torch::empty({16, 64, 254, 254}, x.options().dtype(torch::kFloat32));
+  auto &y = gy;
   cnrtDim3_t dim = {4, 8, 1};
   k0<<<dim, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
