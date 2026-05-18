@@ -1,7 +1,9 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
+#include <unistd.h>
 
 #define TOTAL_ELEMS (16 * 16384)
 #define TASKS 32
@@ -9,6 +11,24 @@
 #define CHUNK_ELEMS (ELEMS_PER_TASK / 2)
 #define L2_SCALE ((half)0.00782012939453125f)
 
+
+static int g_dev = 0;
+
+__attribute__((constructor(101))) static void init_runtime() {
+  unsigned int n = 0;
+  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+    const auto *impl =
+        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+    int torch_n = static_cast<int>(impl->deviceCount());
+    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
+      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
+      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+      cnrtSetDevice(d);
+      g_dev = d;
+    }
+  }
+}
 __mlu_entry__ void l2_norm_scale_kernel(half *__restrict__ x) {
   const int base = taskId * ELEMS_PER_TASK;
 
