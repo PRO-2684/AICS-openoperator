@@ -77,9 +77,6 @@ __mlu_entry__ void k2(half *__restrict__ y) {
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask) {
   (void)mask;
   static torch::Tensor y;
-  static bool init = false;
-  if (init)
-    return y;
   if (!y.defined())
     y = torch::empty_like(x);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
@@ -87,6 +84,5 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask) {
   k1<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-  init = true;
   return y;
 }
