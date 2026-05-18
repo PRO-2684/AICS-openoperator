@@ -152,7 +152,7 @@ __mlu_entry__ void inst_norm_split_kernel(const half *__restrict__ x,
 
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
   (void)num_features;
-  auto y = torch::empty_like(x);
+  auto y = x;
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
