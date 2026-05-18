@@ -7,13 +7,16 @@
 
 __mlu_entry__ void k0(const half *__restrict__ p, const half *__restrict__ t,
                       half *__restrict__ out) {
-  float s = 0.0f;
-#pragma unroll
-  for (int i = 0; i < N; ++i) {
-    float v = 1.0f - (float)p[i] * (float)t[i];
-    if (v > 0.0f)
-      s += v;
-  }
+  __nram__ half a[N];
+  __nram__ half b[N];
+  __memcpy(a, p, N * sizeof(half), GDRAM2NRAM);
+  __memcpy(b, t, N * sizeof(half), GDRAM2NRAM);
+  __bang_mul(a, a, b, N);
+  __bang_mul_scalar(a, a, (half)-1.0f, N);
+  __bang_add_scalar(a, a, (half)1.0f, N);
+  __bang_active_relu(a, a, N);
+  __bang_reduce_sum(b, a, N);
+  float s = (float)b[0] + (float)b[64];
   out[0] = (half)(s * 0.0078125f);
 }
 
