@@ -110,13 +110,7 @@ std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k,
                                      torch::Tensor cos, torch::Tensor sin,
                                      int unsqueeze_dim) {
   (void)unsqueeze_dim;
-  static torch::Tensor qo;
-  static torch::Tensor ko;
   static bool init = false;
-  if (!qo.defined())
-    qo = torch::empty_like(q);
-  if (!ko.defined())
-    ko = torch::empty_like(k);
 
   if (!init) {
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
@@ -126,9 +120,9 @@ std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k,
         reinterpret_cast<const half *>(k.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(cos.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(sin.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(qo.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(ko.data_ptr<at::Half>()));
+        reinterpret_cast<half *>(q.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(k.data_ptr<at::Half>()));
     init = true;
   }
-  return {qo, ko};
+  return {q, k};
 }
