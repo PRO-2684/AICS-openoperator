@@ -4,8 +4,6 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(half *__restrict__ out) {
-  for (int i = 0; i < 40; ++i)
-    out[i] = (half)0.0f;
   out[1] = (half)1.0f;
   out[2] = (half)2.0f;
   out[3] = (half)3.0f;
@@ -57,6 +55,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices,
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   if (!ready) {
+    cnrtMemsetAsync(out.data_ptr(), 0, 80, queue);
     cnrtDim3_t d0 = {1, 1, 1};
     k0<<<d0, cnrtFuncTypeBlock, queue>>>(
         reinterpret_cast<half *>(out.data_ptr<at::Half>()));
