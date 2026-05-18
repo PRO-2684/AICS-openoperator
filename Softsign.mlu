@@ -3,34 +3,19 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define E0 4096
+#define E0 8192
 #define E1 32
-
-__mlu_func__ void f0(half *a, half *b) {
-  __bang_abs(b, a, E0);
-  __bang_add_scalar(b, b, (half)1.0f, E0);
-  __bang_active_recip_greater_1(b, b, E0);
-  __bang_mul(a, a, b, E0);
-}
 
 __mlu_entry__ void k0(half *__restrict__ x) {
   __nram__ half a[E0];
   __nram__ half b[E0];
-  __nram__ half c[E0];
-  __nram__ half d[E0];
-  int p = taskId * E0 * 2;
-  half *x0 = x + p;
-  half *x1 = x + p + E0;
-  __memcpy(a, x0, E0 * sizeof(half), GDRAM2NRAM);
-  __sync_io();
-  __memcpy(c, x1, E0 * sizeof(half), GDRAM2NRAM);
-  f0(a, b);
-  __sync_io_move_compute();
-  __memcpy(x0, a, E0 * sizeof(half), NRAM2GDRAM);
-  f0(c, d);
-  __sync_io_move_compute();
-  __memcpy(x1, c, E0 * sizeof(half), NRAM2GDRAM);
-  __sync_io();
+  int p = taskId * E0;
+  __memcpy(a, x + p, E0 * sizeof(half), GDRAM2NRAM);
+  __bang_abs(b, a, E0);
+  __bang_add_scalar(b, b, (half)1.0f, E0);
+  __bang_active_recip_greater_1(b, b, E0);
+  __bang_mul(a, a, b, E0);
+  __memcpy(x + p, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
 static torch::Tensor g0 = []() {
