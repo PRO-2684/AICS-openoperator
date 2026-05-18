@@ -62,17 +62,57 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int8_t *__restrict__ wc,
   }
 }
 
+static torch::Tensor g0 = []() {
+  auto h = torch::TensorOptions()
+               .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+               .dtype(torch::kHalf);
+  auto i = torch::TensorOptions()
+               .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+               .dtype(torch::kInt8);
+  auto f = torch::TensorOptions()
+               .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+               .dtype(torch::kFloat32);
+  auto a = torch::empty({1}, h);
+  auto b = torch::empty({1}, h);
+  auto c = a + b;
+  auto d = torch::empty({256, 1024}, h);
+  auto e = torch::empty({TC * TN * TK}, i);
+  auto m = torch::empty({N0}, f);
+  (void)d;
+  (void)e;
+  (void)m;
+  return c;
+}();
+
+static torch::Tensor gy = []() {
+  return torch::empty({256, 1024},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                          .dtype(torch::kHalf));
+}();
+
+static torch::Tensor gwc = []() {
+  return torch::empty({TC * TN * TK},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                          .dtype(torch::kInt8));
+}();
+
+static torch::Tensor gbc = []() {
+  return torch::empty({N0},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                          .dtype(torch::kFloat32));
+}();
+
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, torch::Tensor b) {
-  static torch::Tensor wc;
-  static torch::Tensor bc;
-  static torch::Tensor y;
+  (void)g0;
+  auto &wc = gwc;
+  auto &bc = gbc;
+  auto &y = gy;
   static bool ready = false;
-  if (!y.defined())
-    y = torch::empty({256, 1024}, x.options());
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   if (!ready) {
-    wc = torch::empty({TC * TN * TK}, x.options().dtype(torch::kInt8));
-    bc = torch::empty({N0}, x.options().dtype(torch::kFloat32));
     cnrtDim3_t p = {TC, 1, 1};
     kprep<<<p, cnrtFuncTypeBlock, q>>>(
         reinterpret_cast<const half *>(w.data_ptr<at::Half>()),

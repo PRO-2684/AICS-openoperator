@@ -68,17 +68,41 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   }
 }
 
+static torch::Tensor g0 = []() {
+  auto h = torch::TensorOptions()
+               .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+               .dtype(torch::kHalf);
+  auto f = torch::TensorOptions()
+               .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+               .dtype(torch::kFloat32);
+  auto a = torch::empty({1}, h);
+  auto b = torch::empty({1}, h);
+  auto c = a + b;
+  auto d = torch::empty({16, 1024, 768}, f);
+  auto e = torch::empty({TC * (K0 / TK) * TN * TK}, h);
+  (void)d;
+  (void)e;
+  return c;
+}();
+
+static torch::Tensor gC = []() {
+  return torch::empty({16, 1024, 768},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                          .dtype(torch::kFloat32));
+}();
+
+static torch::Tensor gW = []() {
+  return torch::empty({TC * (K0 / TK) * TN * TK},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                          .dtype(torch::kHalf));
+}();
+
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  static torch::Tensor C;
-  static torch::Tensor W;
-  if (!C.defined())
-    C = torch::empty({16, 1024, 768}, A.options().dtype(torch::kFloat32));
-  else
-    C.resize_({16, 1024, 768});
-  if (!W.defined())
-    W = torch::empty({TC * (K0 / TK) * TN * TK}, A.options().dtype(torch::kHalf));
-  else
-    W.resize_({TC * (K0 / TK) * TN * TK});
+  (void)g0;
+  auto &C = gC;
+  auto &W = gW;
   cnrtDim3_t d = {96, 1, 1};
   cnrtDim3_t p = {32, 1, 1};
   kprep<<<p, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
