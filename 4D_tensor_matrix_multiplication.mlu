@@ -1,7 +1,9 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
+#include <unistd.h>
 
 #define M0 2097152
 #define N0 768
@@ -12,6 +14,24 @@
 #define TC 3
 #define TT (TR * TC)
 
+
+static int g_dev = 0;
+
+__attribute__((constructor(101))) static void init_runtime() {
+  unsigned int n = 0;
+  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+    const auto *impl =
+        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+    int torch_n = static_cast<int>(impl->deviceCount());
+    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
+      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
+      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+      cnrtSetDevice(d);
+      g_dev = d;
+    }
+  }
+}
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       float *__restrict__ c) {
   __nram__ half ah[2 * TM * K0];
