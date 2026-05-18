@@ -97,13 +97,15 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
   __nram__ half h[BM * H];
   __nram__ half wb[H * N];
   __nram__ half wf[H * N];
-  __nram__ half r[BM * G];
-  __nram__ half z[BM * G];
-  __nram__ half n[BM * G];
   __nram__ half u[BM * N];
-  __nram__ half v[BM * N];
   __nram__ half c0[N];
-  __nram__ half c1[N];
+  __nram__ float fu[BM * N];
+  __nram__ float fv[BM * N];
+  __nram__ float fr[BM * G];
+  __nram__ float fz[BM * G];
+  __nram__ float fn[BM * G];
+  __nram__ float fh[BM * G];
+  __nram__ float fc[N];
   __nram__ float ft[BM * N];
   __wram__ half ww[H * N];
 
@@ -118,75 +120,81 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
     __memcpy(h + b * H, hp + rb * H, H * sizeof(half), GDRAM2NRAM);
   }
 
-  __memcpy(wb, wi + col * k, G * k * sizeof(half), GDRAM2NRAM);
+  __memcpy(wb, wi + (H + col) * k, G * k * sizeof(half), GDRAM2NRAM);
   __memcpy(wb + G * k, wi + (H * 2 + col) * k, G * k * sizeof(half),
            GDRAM2NRAM);
   __bang_reshape_filter(wf, wb, N, 1, k, k);
   __memcpy(ww, wf, N * k * sizeof(half), NRAM2WRAM);
   __bang_matmul(ft, a, ww, BM, k, N);
-  __bang_float2half_rn(u, ft, BM * N);
-  __memcpy(c0, bi + col, G * sizeof(half), GDRAM2NRAM);
+  __memcpy(fu, ft, BM * N * sizeof(float), NRAM2NRAM);
+  __memcpy(c0, bi + H + col, G * sizeof(half), GDRAM2NRAM);
   __memcpy(c0 + G, bi + H * 2 + col, G * sizeof(half), GDRAM2NRAM);
-  __bang_cycle_add(u, u, c0, BM * N, N);
+  __bang_half2float(fc, c0, N);
+  __bang_cycle_add(fu, fu, fc, BM * N, N);
 
-  __memcpy(wb, wh + col * H, G * H * sizeof(half), GDRAM2NRAM);
+  __memcpy(wb, wh + (H + col) * H, G * H * sizeof(half), GDRAM2NRAM);
   __memcpy(wb + G * H, wh + (H * 2 + col) * H, G * H * sizeof(half),
            GDRAM2NRAM);
   __bang_reshape_filter(wf, wb, N, 1, H, H);
   __memcpy(ww, wf, N * H * sizeof(half), NRAM2WRAM);
   __bang_matmul(ft, h, ww, BM, H, N);
-  __bang_float2half_rn(v, ft, BM * N);
-  __memcpy(c1, bh + col, G * sizeof(half), GDRAM2NRAM);
-  __memcpy(c1 + G, bh + H * 2 + col, G * sizeof(half), GDRAM2NRAM);
-  __bang_cycle_add(v, v, c1, BM * N, N);
+  __memcpy(fv, ft, BM * N * sizeof(float), NRAM2NRAM);
+  __memcpy(c0, bh + H + col, G * sizeof(half), GDRAM2NRAM);
+  __memcpy(c0 + G, bh + H * 2 + col, G * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(fc, c0, N);
+  __bang_cycle_add(fv, fv, fc, BM * N, N);
 
-  __memcpy(z, u, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
-           N * sizeof(half), BM - 1);
-  __memcpy(n, u + G, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
-           N * sizeof(half), BM - 1);
-  __memcpy(u, v, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
-           N * sizeof(half), BM - 1);
-  __bang_add(z, z, u, BM * G);
-  __bang_active_sigmoid(z, z, BM * G);
+  __memcpy(fz, fu, G * sizeof(float), NRAM2NRAM, G * sizeof(float),
+           N * sizeof(float), BM - 1);
+  __memcpy(fn, fu + G, G * sizeof(float), NRAM2NRAM, G * sizeof(float),
+           N * sizeof(float), BM - 1);
+  __memcpy(fr, fv, G * sizeof(float), NRAM2NRAM, G * sizeof(float),
+           N * sizeof(float), BM - 1);
+  __bang_add(fz, fz, fr, BM * G);
+  __bang_active_sigmoid(fz, fz, BM * G);
 
-  __memcpy(wb, wi + (H + col) * k, G * k * sizeof(half), GDRAM2NRAM);
+  __memcpy(wb, wi + col * k, G * k * sizeof(half), GDRAM2NRAM);
   __bang_reshape_filter(wf, wb, G, 1, k, k);
   __memcpy(ww, wf, G * k * sizeof(half), NRAM2WRAM);
   __bang_matmul(ft, a, ww, BM, k, G);
-  __bang_float2half_rn(r, ft, BM * G);
-  __memcpy(c0, bi + H + col, G * sizeof(half), GDRAM2NRAM);
-  __bang_cycle_add(r, r, c0, BM * G, G);
-  __memcpy(wb, wh + (H + col) * H, G * H * sizeof(half), GDRAM2NRAM);
+  __memcpy(fr, ft, BM * G * sizeof(float), NRAM2NRAM);
+  __memcpy(c0, bi + col, G * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(fc, c0, G);
+  __bang_cycle_add(fr, fr, fc, BM * G, G);
+  __memcpy(wb, wh + col * H, G * H * sizeof(half), GDRAM2NRAM);
   __bang_reshape_filter(wf, wb, G, 1, H, H);
   __memcpy(ww, wf, G * H * sizeof(half), NRAM2WRAM);
   __bang_matmul(ft, h, ww, BM, H, G);
-  __bang_float2half_rn(u, ft, BM * G);
-  __memcpy(c0, bh + H + col, G * sizeof(half), GDRAM2NRAM);
-  __bang_cycle_add(u, u, c0, BM * G, G);
-  __bang_add(r, r, u, BM * G);
-  __bang_active_sigmoid(r, r, BM * G);
+  __memcpy(fh, ft, BM * G * sizeof(float), NRAM2NRAM);
+  __memcpy(c0, bh + col, G * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(fc, c0, G);
+  __bang_cycle_add(fh, fh, fc, BM * G, G);
+  __bang_add(fr, fr, fh, BM * G);
+  __bang_active_sigmoid(fr, fr, BM * G);
 
-  __memcpy(u, v + G, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
-           N * sizeof(half), BM - 1);
-  __bang_mul(u, u, r, BM * G);
-  __bang_add(n, n, u, BM * G);
-  __bang_active_tanh(n, n, BM * G);
+  __memcpy(fh, fv + G, G * sizeof(float), NRAM2NRAM, G * sizeof(float),
+           N * sizeof(float), BM - 1);
+  __bang_mul(fh, fh, fr, BM * G);
+  __bang_add(fn, fn, fh, BM * G);
+  __bang_active_tanh(fn, fn, BM * G);
 
   for (int b = 0; b < BM; ++b) {
     __memcpy(u + b * G, h + b * H + col, G * sizeof(half), NRAM2NRAM);
   }
-  __bang_sub(u, u, n, BM * G);
-  __bang_mul(u, u, z, BM * G);
-  __bang_add(n, n, u, BM * G);
+  __bang_half2float(fh, u, BM * G);
+  __bang_sub(fh, fh, fn, BM * G);
+  __bang_mul(fh, fh, fz, BM * G);
+  __bang_add(fn, fn, fh, BM * G);
+  __bang_float2half_rn(u, fn, BM * G);
 
   for (int b = 0; b < BM; ++b) {
     int rb = bb + bo + b;
-    __memcpy(hn + rb * H + col, n + b * G, G * sizeof(half), NRAM2GDRAM);
+    __memcpy(hn + rb * H + col, u + b * G, G * sizeof(half), NRAM2GDRAM);
     if (last) {
-      __memcpy(out + rb * T * H + t * H + col, n + b * G, G * sizeof(half),
+      __memcpy(out + rb * T * H + t * H + col, u + b * G, G * sizeof(half),
                NRAM2GDRAM);
     } else {
-      __memcpy(out + rb * H + col, n + b * G, G * sizeof(half), NRAM2GDRAM);
+      __memcpy(out + rb * H + col, u + b * G, G * sizeof(half), NRAM2GDRAM);
     }
   }
 }
