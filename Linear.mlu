@@ -15,23 +15,24 @@ static inline double us_between(clk_t::time_point a, clk_t::time_point b) {
 
 #define TS(name) auto name = clk_t::now()
 #define PSEG(tag, a, b)                                                        \
-  std::fprintf(stderr, "@@PROBE %-24s %.3f us\n", tag, us_between(a, b))
+  std::fprintf(stderr, "@@PROBE %-28s %.3f us\n", tag, us_between(a, b))
 
-__mlu_entry__ void k_empty(const half *__restrict__ x, half *__restrict__ y,
-                           int n) {
-  // intentionally empty: measures launch + sync overhead
+static int g_so_warmup_ok = 0;
+static double g_so_warmup_launch_us = -1.0;
+static double g_so_warmup_sync_us = -1.0;
+static double g_so_warmup_total_us = -1.0;
+
+__mlu_entry__ void k_so_empty() {
+  // empty kernel for first-launch warmup
 }
 
-__mlu_entry__ void k_touch1(const half *__restrict__ x, half *__restrict__ y,
+__mlu_entry__ void k_empty2(const half *__restrict__ x, half *__restrict__ y,
                             int n) {
-  int tid = taskId;
-  if (tid < n) {
-    y[tid] = x[tid];
-  }
+  // empty kernel for measuring launch after .so constructor warmup
 }
 
-__mlu_entry__ void k_touch_vec(const half *__restrict__ x, half *__restrict__ y,
-                               int n) {
+__mlu_entry__ void k_touch_vec2(const half *__restrict__ x,
+                                half *__restrict__ y, int n) {
   int base = taskId * 256;
   int remain = n - base;
   int len = remain > 256 ? 256 : remain;
@@ -40,11 +41,52 @@ __mlu_entry__ void k_touch_vec(const half *__restrict__ x, half *__restrict__ y,
   }
 }
 
+__attribute__((constructor)) static void so_load_warmup() {
+  TS(t0);
+
+  cnrtQueue_t q = nullptr;
+  cnrtRet_t r0 = cnrtQueueCreate(&q);
+
+  TS(t_after_create);
+
+  if (r0 != CNRT_RET_SUCCESS || q == nullptr) {
+    std::fprintf(stderr, "@@SO_WARMUP queue_create_failed ret=%d\n", (int)r0);
+    return;
+  }
+
+  cnrtDim3_t dim;
+  dim.x = 1;
+  dim.y = 1;
+  dim.z = 1;
+
+  TS(t_before_launch);
+  k_so_empty<<<dim, cnrtFuncTypeBlock, q>>>();
+  TS(t_after_launch);
+
+  cnrtRet_t r1 = cnrtQueueSync(q);
+  TS(t_after_sync);
+
+  cnrtRet_t r2 = cnrtQueueDestroy(q);
+  TS(t_after_destroy);
+
+  g_so_warmup_ok = (r1 == CNRT_RET_SUCCESS && r2 == CNRT_RET_SUCCESS);
+  g_so_warmup_launch_us = us_between(t_before_launch, t_after_launch);
+  g_so_warmup_sync_us = us_between(t_after_launch, t_after_sync);
+  g_so_warmup_total_us = us_between(t0, t_after_destroy);
+
+  std::fprintf(stderr,
+               "@@SO_WARMUP ok=%d create=%.3f us launch=%.3f us sync=%.3f us "
+               "destroy=%.3f us total=%.3f us ret_sync=%d ret_destroy=%d\n",
+               g_so_warmup_ok, us_between(t0, t_after_create),
+               g_so_warmup_launch_us, g_so_warmup_sync_us,
+               us_between(t_after_sync, t_after_destroy), g_so_warmup_total_us,
+               (int)r1, (int)r2);
+}
+
 torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
                         bool bias) {
   TS(t_entry);
 
-  // Keep args used to avoid over-aggressive optimization.
   volatile int vf = in_features + out_features + (bias ? 1 : 0);
   (void)vf;
 
@@ -64,13 +106,9 @@ torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
 
   TS(t_after_ptr);
 
-
-  // If your local torch_mlu stream API differs, change this line to the
-  // queue object you normally pass to <<<dim, ktype, queue>>>.
   cnrtQueue_t queue = torch_mlu::getCurrentMLUStream();
-  TS(t_after_stream);
 
-  TS(t_after_queue);
+  TS(t_after_stream);
 
   cnrtQueueSync(queue);
 
@@ -81,11 +119,6 @@ torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
   dim1.y = 1;
   dim1.z = 1;
 
-  cnrtDim3_t dim32;
-  dim32.x = 32;
-  dim32.y = 1;
-  dim32.z = 1;
-
   cnrtDim3_t dim_vec;
   dim_vec.x = (n + 255) / 256;
   if (dim_vec.x < 1)
@@ -95,24 +128,15 @@ torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
   dim_vec.y = 1;
   dim_vec.z = 1;
 
-  cnrtFunctionType_t ktype = CNRT_FUNC_TYPE_BLOCK;
-
   TS(t_before_empty_launch);
-  k_empty<<<dim1, ktype, queue>>>(xp, yp, n);
+  k_empty2<<<dim1, cnrtFuncTypeBlock, queue>>>(xp, yp, n);
   TS(t_after_empty_launch);
 
   cnrtQueueSync(queue);
   TS(t_after_empty_sync);
 
-  TS(t_before_touch1_launch);
-  k_touch1<<<dim32, ktype, queue>>>(xp, yp, n);
-  TS(t_after_touch1_launch);
-
-  cnrtQueueSync(queue);
-  TS(t_after_touch1_sync);
-
   TS(t_before_vec_launch);
-  k_touch_vec<<<dim_vec, ktype, queue>>>(xp, yp, n);
+  k_touch_vec2<<<dim_vec, cnrtFuncTypeBlock, queue>>>(xp, yp, n);
   TS(t_after_vec_launch);
 
   cnrtQueueSync(queue);
@@ -122,33 +146,32 @@ torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
 
   TS(t_after_empty1);
 
-  std::fprintf(stderr, "@@PROBE n=%lld in=%d out=%d bias=%d\n", (long long)n64,
-               in_features, out_features, (int)bias);
+  std::fprintf(stderr,
+               "@@PROBE n=%lld in=%d out=%d bias=%d so_warmup_ok=%d "
+               "so_launch=%.3f us so_sync=%.3f us so_total=%.3f us\n",
+               (long long)n64, in_features, out_features, (int)bias,
+               g_so_warmup_ok, g_so_warmup_launch_us, g_so_warmup_sync_us,
+               g_so_warmup_total_us);
 
   PSEG("args_only", t_entry, t_after_args);
   PSEG("numel", t_after_args, t_after_numel);
-  PSEG("empty_like_cold", t_after_numel, t_after_empty0);
+  PSEG("empty_like_after_so_load", t_after_numel, t_after_empty0);
   PSEG("data_ptr", t_after_empty0, t_after_ptr);
-  PSEG("get_stream", t_after_ptr, t_after_stream);
-  PSEG("stream_queue", t_after_stream, t_after_queue);
-  PSEG("sync_empty_queue", t_after_queue, t_after_sync0);
+  PSEG("get_stream_queue", t_after_ptr, t_after_stream);
+  PSEG("sync_empty_queue", t_after_stream, t_after_sync0);
 
-  PSEG("empty_launch_host", t_before_empty_launch, t_after_empty_launch);
-  PSEG("empty_sync_wait", t_after_empty_launch, t_after_empty_sync);
-  PSEG("empty_total", t_before_empty_launch, t_after_empty_sync);
+  PSEG("first_launch_after_so_host", t_before_empty_launch,
+       t_after_empty_launch);
+  PSEG("first_launch_after_so_sync", t_after_empty_launch, t_after_empty_sync);
+  PSEG("first_launch_after_so_total", t_before_empty_launch,
+       t_after_empty_sync);
 
-  PSEG("touch1_launch_host", t_before_touch1_launch, t_after_touch1_launch);
-  PSEG("touch1_sync_wait", t_after_touch1_launch, t_after_touch1_sync);
-  PSEG("touch1_total", t_before_touch1_launch, t_after_touch1_sync);
-
-  PSEG("vec_launch_host", t_before_vec_launch, t_after_vec_launch);
-  PSEG("vec_sync_wait", t_after_vec_launch, t_after_vec_sync);
-  PSEG("vec_total", t_before_vec_launch, t_after_vec_sync);
+  PSEG("second_launch_host", t_before_vec_launch, t_after_vec_launch);
+  PSEG("second_launch_sync", t_after_vec_launch, t_after_vec_sync);
+  PSEG("second_launch_total", t_before_vec_launch, t_after_vec_sync);
 
   PSEG("empty_like_warm", t_after_vec_sync, t_after_empty1);
   PSEG("whole_cpp_body", t_entry, t_after_empty1);
 
-  // Return out0 so the function shape/dtype/device matches empty_like behavior.
-  // This diagnostic version is for overhead measurement, not correctness.
   return out0;
 }
