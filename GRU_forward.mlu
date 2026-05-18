@@ -147,14 +147,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
   __memcpy(u, v, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
            N * sizeof(half), BM - 1);
   __bang_add(z, z, u, BM * G);
-  __bang_mul_scalar(z, z, (half)0.25f, BM * G);
+  __bang_mul_scalar(z, z, (half)0.5f, BM * G);
+  __bang_active_tanh(z, z, BM * G);
+  __bang_mul_scalar(z, z, (half)0.5f, BM * G);
   __bang_add_scalar(z, z, (half)0.5f, BM * G);
-  __bang_active_relu(z, z, BM * G);
-  __bang_mul_scalar(u, z, (half)-1.0f, BM * G);
-  __bang_add_scalar(u, u, (half)1.0f, BM * G);
-  __bang_active_relu(u, u, BM * G);
-  __bang_mul_scalar(z, u, (half)-1.0f, BM * G);
-  __bang_add_scalar(z, z, (half)1.0f, BM * G);
 
   __memcpy(wb, wi + col * k, G * k * sizeof(half), GDRAM2NRAM);
   __bang_reshape_filter(wf, wb, G, 1, k, k);
@@ -171,14 +167,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
   __memcpy(c0, bh + col, G * sizeof(half), GDRAM2NRAM);
   __bang_cycle_add(u, u, c0, BM * G, G);
   __bang_add(r, r, u, BM * G);
-  __bang_mul_scalar(r, r, (half)0.25f, BM * G);
+  __bang_mul_scalar(r, r, (half)0.5f, BM * G);
+  __bang_active_tanh(r, r, BM * G);
+  __bang_mul_scalar(r, r, (half)0.5f, BM * G);
   __bang_add_scalar(r, r, (half)0.5f, BM * G);
-  __bang_active_relu(r, r, BM * G);
-  __bang_mul_scalar(u, r, (half)-1.0f, BM * G);
-  __bang_add_scalar(u, u, (half)1.0f, BM * G);
-  __bang_active_relu(u, u, BM * G);
-  __bang_mul_scalar(r, u, (half)-1.0f, BM * G);
-  __bang_add_scalar(r, r, (half)1.0f, BM * G);
 
   __memcpy(u, v + G, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
            N * sizeof(half), BM - 1);
