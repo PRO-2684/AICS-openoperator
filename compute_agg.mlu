@@ -9,9 +9,7 @@ static torch::Tensor z = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
                  .dtype(torch::kHalf);
-  auto a = torch::empty({E0}, opt);
-  auto b = torch::empty({E0}, opt);
-  return a + b;
+  return torch::zeros({1}, opt);
 }();
 
 __mlu_entry__ void k0(const int *__restrict__ x, int *__restrict__ y) {

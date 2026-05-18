@@ -75,9 +75,7 @@ static torch::Tensor g0 = []() {
   auto f = torch::TensorOptions()
                .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
                .dtype(torch::kFloat32);
-  auto a = torch::empty({1}, h);
-  auto b = torch::empty({1}, h);
-  auto c = a + b;
+  auto c = torch::zeros({1}, h);
   auto d = torch::empty({16, 1024, 768}, f);
   auto e = torch::empty({TC * (K0 / TK) * TN * TK}, h);
   (void)d;
