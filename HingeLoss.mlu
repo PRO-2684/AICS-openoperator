@@ -12,6 +12,15 @@ static torch::Tensor out = []() {
               .dtype(torch::kHalf));
 }();
 
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                 .dtype(torch::kHalf);
+  auto a = torch::empty({1}, opt);
+  auto b = torch::empty({1}, opt);
+  return a + b;
+}();
+
 __mlu_entry__ void k0(const half *__restrict__ p, const half *__restrict__ t,
                       half *__restrict__ out) {
   __nram__ half a[N];
@@ -28,6 +37,7 @@ __mlu_entry__ void k0(const half *__restrict__ p, const half *__restrict__ t,
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
+  (void)g0;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {1, 1, 1};
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(

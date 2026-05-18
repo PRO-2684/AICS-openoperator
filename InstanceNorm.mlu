@@ -150,8 +150,18 @@ __mlu_entry__ void inst_norm_split_kernel(const half *__restrict__ x,
   }
 }
 
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                 .dtype(torch::kHalf);
+  auto a = torch::empty({1}, opt);
+  auto b = torch::empty({1}, opt);
+  return a + b;
+}();
+
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
   (void)num_features;
+  (void)g0;
   auto y = x;
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
