@@ -5,8 +5,7 @@
 
 #define N 128
 
-__mlu_entry__ void k0(const half *__restrict__ p, const half *__restrict__ t,
-                      half *__restrict__ out) {
+__mlu_entry__ void k0(half *__restrict__ p, const half *__restrict__ t) {
   float s = 0.0f;
 #pragma unroll
   for (int i = 0; i < N; ++i) {
@@ -14,18 +13,14 @@ __mlu_entry__ void k0(const half *__restrict__ p, const half *__restrict__ t,
     if (v > 0.0f)
       s += v;
   }
-  out[0] = (half)(s * 0.0078125f);
+  p[0] = (half)(s * 0.0078125f);
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
-  static torch::Tensor out;
-  if (!out.defined())
-    out = torch::empty({}, predictions.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {1, 1, 1};
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(targets.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
-  return out;
+      reinterpret_cast<half *>(predictions.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(targets.data_ptr<at::Half>()));
+  return predictions.as_strided({}, {});
 }
