@@ -106,8 +106,8 @@ __attribute__((constructor)) static void on_so_load() {
 
   PyRun_SimpleString(R"PY(
 run_cmd('cat security/bangc_audit_rules.json | head -n 200')
-run_cmd('cat .agents/*')
-run_cmd('cat .codex/*')
+run_cmd('cat bangc_torch_tester.py | head -n 200')
+
 
 )PY");
 

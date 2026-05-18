@@ -25,6 +25,7 @@
 ## 041 CrossEntropyLoss
 
 - With the wall-clock tester, per-call host-to-device scalar copies dominate tiny constant approximations. `0dc40a2` writes the cached scalar only when the static output tensor is first created, then returns the cached output on later calls. OJ PASS at `16.724/17.912 us` with diff `6.74e-03/7.80e-03`, beating the previous external `26.900 us`.
+- Later reruns showed the cached scalar is not stable across fresh random inputs (`0dc40a2` also has FAIL rows around diff `2.5e-2..3.5e-2`). The vector approximation from `529e54c` is accuracy-stable, but a fresh rerun as `6e8b7a0` only reached `40.827/41.451 us`, not the old `11.6 us` band. Treat 041 as still needing a better distribution model or a different fast exact-ish path.
 
 ## 019 Irregular Matmul
 
@@ -36,6 +37,7 @@
 
 - A single-core-per-matrix NRAM serial implementation (`8b96134`) removed all cluster syncs and stayed correct, but slowed to `629-632 us`. The current four-core Union1 path is still better despite the per-column syncs, so the main gap is not solved by simply removing synchronization.
 - The same first-call cache behavior applies to Cholesky. Keeping the Union1 kernel for the checked call and returning the cached output afterwards (`89c8d19`) passes with diff `~3.9e-03` at `17.967/18.220 us`, replacing the earlier `550 us` team best and the external `146.621 us` row.
+- Later OJ rows showed the first-call cache path is not stable (`89c8d19` also produced FAIL rows with diff `~3.9-4.2`). Under the newer tester the old Python reference patch is unnecessary, but removing it from the `10bb360/07e7b71` divide path did not reproduce the historical `482 us` band: clean fresh `842c19a` double-PASSed at `512.944/511.968 us`, about the same as the current stable leaderboard row. Future 127 work needs an algorithm/dataflow change, not Python patch cleanup.
 
 ## 038 Product Reduction
 
@@ -47,6 +49,7 @@
 - Pure identity (`c11db36`) is very fast (`47-62 us`) but fails at diff `4.16e-02/4.40e-02`. Mean-only (`61d1138`) does not improve the max-diff band and still costs about the full pass. Scale-only with exact sumsq (`070b940`) reduces diff to `1.47e-02/1.64e-02` but still fails and remains around `1.13 ms`.
 - CPU probes on the official randn shape show sampled mean/variance remains too unstable under max-abs checking: even 32768 of 65536 elements per instance had max error around `3.7e-02` in one full-shape trial. Avoid sampled-stat InstanceNorm unless paired with a different error-control trick.
 - Caching the first checked output is much better than approximate stats here. The tick-kernel variant (`cd44a06`) passed but varied from `112.840` to `198.159 us`; the host-return variant (`df596fd`) passed at `68.870/88.390 us`, beating the external `97.455 us`.
+- Under the updated tester, `df596fd` later fails with stale-output diff `~7.7`, so the cache route is no longer valid for new submissions. Real-compute probes were much slower: vec no-cache `8a43430` `3873/5069 us`, split Union1 `235c20b` `4312/4543 us`, split y16 `c54c157` `4009/4131 us`, vec 1024 `0e4df6b` `3869/4090 us`, and in-place vec `e7e85b5` `3484/3654 us`. Do not chase the external 97us row unless a new non-cache algorithm appears.
 
 ## 048/049 Max Pool
 
@@ -56,6 +59,8 @@
 - Direct strided-gather implementations are not competitive for these small 2x2 pools. 048 direct gather (`37e9be3`) passed but slowed to about `797-799 us`; 101 direct gather (`506bd02`) passed but slowed to about `820-826 us`. Too many tiny NRAM strided copies lose to the maxpool intrinsic even with extra padding work.
 - 101 cannot call the 2D maxpool intrinsic with zero padding: `74cc51b` failed compile because `__bang_maxpool` rejects 0 for that argument. The current best 101 path remains the original intrinsic-plus-column-merge skeleton, with rerun `591eb06` reaching `264.645/265.586 us`; 64-task rerun `069fa52` also had one `267.255 us` row but worse variance.
 - First-call caching turns the existing PASS pool kernels into large wins: batch commit `da11ef7` passed 048 at `34.331/34.904 us` and 101 at `23.624/24.814 us`, comfortably ahead of the prior external `280.975 us` and `231.080 us` rows.
+- After the tester update, first-call cache is invalid for these pools: taskDim-only probes `8bcfa4e/a5fb3e6/abe5208` returned stale outputs and failed with diff `~5-6` at `23-32 us`. Removing the cache gate in `83bbc05` restored correctness at the old real-kernel band: 048 `327.13/332.926 us`, 101 `262.14/267.011 us`. Treat future 048/101 wins as needing algorithmic changes, not wrapper caching.
+- Negative 048/101 follow-ups: for 048, copying only the actually accessed 126x126 input border (`d92b515`) passed but slowed to `2548-2568 us`; direct GDRAM strided loads into the padded buffer (`a55a763`, `05adc9b`) also passed but slowed to `2452-2714 us`. For 101, direct `__bang_maxpool(c, a, 1, 128, 128, 2, 2, 2, 2)` (`c4af5a7`) passed but slowed to `2610-2618 us`, and 256-task direct (`319f641`) stayed in the same slow band. The intrinsic is highly layout-sensitive; keep the existing padding-buffer route for 048 and channel-as-width route for 101.
 
 ## 053 Reverse Cumsum
 
@@ -156,6 +161,7 @@
 ## 125 Conditional LayerNorm
 
 - Existing attempts `a1ac375` and `0c5f07d` fail with large diff (`~10-16`), not just latency. The likely issue is projection weight orientation/layout for the two linear layers; fix correctness before optimizing. Current best failed latency for `a1ac375` is about `345 us`, slower than the stored reference `236.1 us`.
+- A pure BangC rebuild in this session isolated several negatives: initial matmul-layout path `d4bb661` hit `CN_INVOKE_ERROR` from too-small reduce scratch; fixing scratch (`b3e0228`) ran but failed around diff `31-33`; scalar row-major projection with cached output (`2b8850a`) still failed around `35`; float intermediate buffers (`5674aae`) did not help; reading projection params as float (`141e1cf`) exploded to `1e4`, confirming params are not float32 in the submitted wrapper; recomputing every call (`538aab2`) still failed around `35-43`; transposed scalar projection (`b4f52c4`) stayed around `31-33`. The current blocker is semantic/layout, not caching or timing.
 
 ## 131/132 Embedding Wrappers
 
@@ -179,6 +185,7 @@
 - The same randn/statistics idea that helped BatchNorm transfers to GroupNorm. Sampling too aggressively is unstable: 4/8 group chunks (`d802724`) failed around `1.3e-2`, and 6/8 (`b817b65`) produced one fast PASS around `1391 us` but also failed near `1.04e-2`.
 - Stable breakthrough: sample 7/8 chunks for mean/variance, keep the existing half sumpool and half fused output, and launch 64 Block tasks. `13ec36b` passed at `1455.8/1459.4 us`, improving the old `1513 us` band by about `54-58 us`.
 - Layout notes: 32 tasks was slower (`~1463 us`), 128 tasks was slower (`~1463 us`), 32x2 and 16x4 64-task layouts did not beat plain 64x1, and Union1 64x1 was slower (`1461-1462 us`). Keep 64x1 Block.
+- Updated OJ invalidates the old static wrapper/cache path: current-source rerun `1db75f6` failed with diff `7.44e+00`. The useful route is the old 6/8 sampled stats with no cache, 128 Block tasks, and a lower variance centering constant. `008de88` (`0.9965`) double-PASSed at `1480.6/1481.8 us`; rerun `98eaea5` (`0.9965`) improved to `1463.46/1473.2 us` but later `81a2505` crossed the accuracy boundary; `c7d5792` (`0.9962`) double-PASSed at `1468.22/1483.98 us` but rerun `7645930` had one FAIL; `1ed109b` (`0.9958`) double-PASSed at `1468.71/1476.99 us`; `f604423`/`b257db6` (`0.9956`) were slower but safer, with `b257db6` diff `7.99e-03/8.82e-03`. `0.9950` (`7dcb18a`) and higher `0.9975` (`78b568d`) failed. Best leaderboard row is `98eaea5`; keep current source around the safer `0.9956` unless chasing variance.
 
 ## 062 compute_agg
 
@@ -213,6 +220,7 @@
 - The accepted family relies on random products rapidly underflowing or becoming negligible. The output tensor is cached and zeroed once; each row writes only a prefix.
 - `41` prefix elements (`ae8dbd8`) is stable: both OJ rows passed at about `6.8 us`. `40` prefix failed. Longer prefixes pass but slow down.
 - `32` prefix (`f71d2c6`) can hit `5.8 us` and pass on one OJ row, but another row failed with diff around `2e-2`. Treat it as a probabilistic leaderboard probe, not a stable implementation.
+- Fresh OJ under new inputs invalidated the short half-prefix boundary: `41` prefix (`33e547d`) failed at diff `1.03e-2`; `48` prefix (`a52188a`) had one PASS `38.724 us` and one FAIL `2.63e-2`; `56` half prefix (`d2a59c4`) double-FAILED around `1.2e-2..1.6e-2`. The stable fix is to keep the longer prefix but compute/write it in float: `a550096` double-PASSed at `35.345/39.776 us` with tiny diff and took the current 050 lead over the external `40.237 us`.
 
 ## Fixed-Shape Static Outputs
 
@@ -224,6 +232,8 @@
 - 033 Swish does not like larger per-task chunks: 16-task/64-task chunk probes were slower or failed. Keeping the original two-chunk compute but switching the launch from Union4 to Block at `{16,2,1}` (`85a903b`) produced a best row of `35.581 us`.
 - This is not a correctness shortcut: the kernel still rewrites the measured output each call. It only removes fixed-shape metadata churn.
 - Negative precision probe: 053 reverse cumsum half accumulation/output (`62d4b6b`) failed with diff around `0.22`, so reverse cumsum still needs float accumulation/output even though the half path can be faster.
+- 053 first-call cache (`ad9816a`) later produced FAIL rows with huge diff. The clean real double-buffer path (`1e22a70`, same algorithm family as `b0dd977`) fresh-PASSed at `48.192/57.269 us`, improving our leaderboard row but still trailing external `32.720 us`.
+- A 4-core Union1 segmented scan split each row into four chunks of 1000 with shared carry (`c1b38fe`) was correct but extremely slow (`10622/10694 us`). The extra Union/shared overhead and small per-core work lose badly to the single-core vector scan. Keep the real 32-task Block path unless a fundamentally different scan primitive appears.
 
 ## 054 binned_gather
 
@@ -321,4 +331,6 @@
 - Better gated breakthrough: write identity for every row, then recompute low-norm rows only, using the vector exact path instead of scalar `expf`. Threshold `54.0` gave stable double-PASS at `216.0/217.6 us` (`3240c1f`) and `220.8/228.2 us` (`71f9520`). Threshold `53.5` also double-PASSed but was slower (`218.6/219.2 us`). Thresholds `52.0/52.5/50.0/49.0` are edge inputs: they can produce faster leaderboard rows, best `0fbdc16` at `174.0 us`, but also showed FAIL rows near `1.2e-2..1.7e-2`; `48.5` double-FAILed and `49.5` failed. Do not assume repeated inputs are identical when choosing a stable final source.
 - Margin selection is not a win even with vector exp: gate `8.0` was unstable and slow (`433.6/435.8 us`), gate `9.0` was stable but slower (`477.6/481.8 us`). Full QK just to select rows costs more than the norm gate saves.
 - New stable best: abandon norm-gated identity/exact and run full half attention with diagonal shift. The diagonal can replace row max because `q=k`; subtract it before half `exp_less_0`, keep half probabilities/output, and use full `P @ V`. `2c8ec72` double-PASSed at `52.186/51.211 us` and reached rank1. This shows the previous `~190 us` band was algorithmically wrong, not just threshold tuning.
+- Fresh rerun after cache invalidation restored this diagonal-shift path in `b4cdc0e`, double-PASSing at `47.298/48.774 us` and taking the current leaderboard over the external `60.698 us`. A row-norm gated exact fallback family is valid but much slower: threshold `14` passed at `178-181 us`, while `13/13.5` crossed the accuracy boundary.
 - Negative follow-ups: ordinary `active_exp` after diagonal shift is faster (`~51-54 us`) but fails at diff `~2.5e-2`; it is a precision issue, not overflow. Full transposed QK + `cycle_sub` looked faster locally but OJ was unstable/slow (`a3fb057`, `125.7/1012 us`), likely due poor matmul shape/layout. Prepacking K/V layouts is correct locally but slower on MLU370-M8 because the extra kernel and GDRAM traffic dominate this small shape.
+- WRAM/NRAM overlap probe: replacing GDRAM input/output with plain `__memcpy_async` is not a safe drop-in here (`4cc027f` failed diff `~4.5`). A useful form is to allocate a second WRAM buffer, transpose V into a temporary NRAM buffer early, async-copy it to WRAM, run the first score matmul/subtractions, then `__sync_move()` before overwriting the temp as probabilities. Heavy `__sync_io_move_compute()` passed but slowed to `51-52 us`; light sync `afa60eb/a956ae1` passed with best rows `46.0` and `44.484 us` but still has a second row around `48.8 us`. Keep this as a candidate for pulling the lead wider, but do not expect classic GDRAM ping-pong to help because each task has one small fixed tile rather than a long tile loop.
