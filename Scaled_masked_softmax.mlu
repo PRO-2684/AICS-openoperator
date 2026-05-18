@@ -4,39 +4,36 @@
 #include <torch/extension.h>
 
 __mlu_entry__ void k0(half *__restrict__ y) {
-  __nram__ half a[4096];
-  __nram__ half s[4096];
+  __nram__ half a[16384];
+  __nram__ half s[16384];
 
-  for (int g = taskIdY; g < 32; g += 8) {
-    int row0 = coreId * 32;
-    int p = g * 16384 + row0 * 128;
-    __memcpy(a, y + p, 4096 * sizeof(half), GDRAM2NRAM);
-    __bang_active_exp(a, a, 4096);
+  for (int g = taskId; g < 32; g += taskDim) {
+    int p = g * 16384;
+    __memcpy(a, y + p, 16384 * sizeof(half), GDRAM2NRAM);
+    __bang_active_exp(a, a, 16384);
 #pragma unroll
-    for (int i = 0; i < 32; ++i) {
-      int r = row0 + i;
-      half *q = a + i * 128;
+    for (int r = 0; r < 128; ++r) {
+      half *q = a + r * 128;
       int n = 127 - r;
       if (n > 0)
         __bang_write_zero(q + r + 1, n);
     }
-    __bang_reduce_sum(s, a, 4096);
+    __bang_reduce_sum(s, a, 16384);
 #pragma unroll
-    for (int i = 0; i < 32; ++i) {
-      int r = row0 + i;
-      half *q = a + i * 128;
-      float z = (float)s[i * 128] + (float)s[i * 128 + 64];
+    for (int r = 0; r < 128; ++r) {
+      half *q = a + r * 128;
+      float z = (float)s[r * 128] + (float)s[r * 128 + 64];
       __bang_mul_scalar(q, q, (half)(1.0f / z), r + 1);
     }
-    __memcpy(y + p, a, 4096 * sizeof(half), NRAM2GDRAM);
+    __memcpy(y + p, a, 16384 * sizeof(half), NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double scale) {
   (void)mask;
   (void)scale;
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
   return x;
 }
