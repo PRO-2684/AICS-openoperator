@@ -17,9 +17,8 @@ __mlu_entry__ void k0(const half *__restrict__ q, half *__restrict__ y) {
   __wram__ half w0[8192];
   __wram__ half w1[8192];
 
-  __memcpy_async(a0, q + base + r * 64, 4096 * sizeof(half), GDRAM2NRAM);
-  __memcpy_async(a1, q + base, 8192 * sizeof(half), GDRAM2NRAM);
-  __sync_io();
+  __memcpy(a0, q + base + r * 64, 4096 * sizeof(half), GDRAM2NRAM);
+  __memcpy(a1, q + base, 8192 * sizeof(half), GDRAM2NRAM);
   __bang_reshape_filter(a2, a1, 128, 1, 1, 64);
   __memcpy(w0, a2, 8192 * sizeof(half), NRAM2WRAM);
   __bang_transpose(a3, a1, 128, 64);
@@ -45,8 +44,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, half *__restrict__ y) {
     __bang_mul_scalar(f2 + i * 64, f2 + i * 64, 1.0f / s, 64);
   }
   __bang_float2half_rn(a0, f2, 4096);
-  __memcpy_async(y + base + r * 64, a0, 4096 * sizeof(half), NRAM2GDRAM);
-  __sync_io();
+  __memcpy(y + base + r * 64, a0, 4096 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
