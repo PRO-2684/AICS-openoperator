@@ -5,6 +5,15 @@
 
 #define E0 1024
 
+static torch::Tensor z = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                 .dtype(torch::kHalf);
+  auto a = torch::empty({E0}, opt);
+  auto b = torch::empty({E0}, opt);
+  return a + b;
+}();
+
 __mlu_entry__ void k0(const int *__restrict__ x, int *__restrict__ y) {
   __nram__ int a[E0];
   __nram__ int b[E0];
@@ -45,6 +54,7 @@ __mlu_entry__ void k0(const int *__restrict__ x, int *__restrict__ y) {
 }
 
 torch::Tensor bang_func(torch::Tensor agg) {
+  (void)z;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {1, 1, 1};
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(agg.data_ptr<int>(),

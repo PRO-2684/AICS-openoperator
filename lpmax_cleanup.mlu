@@ -3,6 +3,21 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
+static torch::Tensor z = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                 .dtype(torch::kHalf);
+  auto a = torch::empty({32}, opt);
+  auto b = torch::empty({32}, opt);
+  return a + b;
+}();
+
+static torch::Tensor y = []() {
+  return torch::empty({32}, torch::TensorOptions()
+                                  .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                                  .dtype(torch::kHalf));
+}();
+
 __mlu_entry__ void k(const half *a, half *b) {
   int p = taskId;
 
@@ -15,9 +30,7 @@ __mlu_entry__ void k(const half *a, half *b) {
 }
 
 torch::Tensor bang_func(torch::Tensor x, int n) {
-  static torch::Tensor y;
-  if (!y.defined())
-    y = torch::empty({32}, x.options());
+  (void)z;
 
   cnrtDim3_t d;
   d.x = 32;

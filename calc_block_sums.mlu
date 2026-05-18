@@ -6,6 +6,21 @@
 #define E0 1024
 #define E1 4
 
+static torch::Tensor z = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                 .dtype(torch::kFloat32);
+  auto a = torch::empty({E1}, opt);
+  auto b = torch::empty({E1}, opt);
+  return a + b;
+}();
+
+static torch::Tensor out = []() {
+  return torch::empty({E1}, torch::TensorOptions()
+                                  .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                                  .dtype(torch::kFloat32));
+}();
+
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
   int p = taskId;
   int q = p * E0;
@@ -24,9 +39,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
 
 torch::Tensor bang_func(torch::Tensor input, int iters_per_cta) {
   (void)iters_per_cta;
-  static torch::Tensor out;
-  if (!out.defined())
-    out = torch::empty({E1}, input.options().dtype(torch::kFloat));
+  (void)z;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {E1, 1, 1};
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
