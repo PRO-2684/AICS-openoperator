@@ -17,12 +17,14 @@ static inline double us_between(clk_t::time_point a, clk_t::time_point b) {
 #define PSEG(tag, a, b)                                                        \
   std::fprintf(stderr, "@@PROBE %-30s %.3f us\n", tag, us_between(a, b))
 
-static int g_so_warmup_ok = 0;
-static double g_so_launch_us = -1.0;
-static double g_so_sync_us = -1.0;
-static double g_so_total_us = -1.0;
+static clk_t::time_point g_ctor_time;
+static int g_ctor_seen = 0;
 
-__mlu_entry__ void k_so_warm() {}
+__attribute__((constructor)) static void so_load_probe_only() {
+  g_ctor_time = clk_t::now();
+  g_ctor_seen = 1;
+  std::fprintf(stderr, "@@SO_LOAD constructor_seen=1 no_kernel_launch=1\n");
+}
 
 __mlu_entry__ void k_empty_linear(const half *__restrict__ x,
                                   half *__restrict__ y, int n) {}
@@ -46,32 +48,14 @@ __mlu_entry__ void k_vec_linear(const half *__restrict__ x,
   }
 }
 
-__attribute__((constructor)) static void so_load_warmup() {
-  TS(t0);
-
-  cnrtDim3_t d = {1, 1, 1};
-
-  TS(t_before_launch);
-  k_so_warm<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
-  TS(t_after_launch);
-
-  cnrtRet_t r = cnrtQueueSync(torch_mlu::getCurMLUStream());
-  TS(t_after_sync);
-
-  g_so_warmup_ok = (r == CNRT_RET_SUCCESS);
-  g_so_launch_us = us_between(t_before_launch, t_after_launch);
-  g_so_sync_us = us_between(t_after_launch, t_after_sync);
-  g_so_total_us = us_between(t0, t_after_sync);
-
-  std::fprintf(
-      stderr,
-      "@@SO_WARMUP ok=%d launch=%.3f us sync=%.3f us total=%.3f us ret=%d\n",
-      g_so_warmup_ok, g_so_launch_us, g_so_sync_us, g_so_total_us, (int)r);
-}
-
 torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
                         bool bias) {
   TS(t_entry);
+
+  double since_ctor_us = -1.0;
+  if (g_ctor_seen) {
+    since_ctor_us = us_between(g_ctor_time, t_entry);
+  }
 
   volatile int sink = in_features + out_features + (bias ? 1 : 0);
   (void)sink;
@@ -83,12 +67,12 @@ torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
 
   TS(t_after_numel);
 
-  int64_t rows = 0;
+  int64_t rows = 1;
   if (in_features > 0) {
     rows = n64 / in_features;
+    if (rows <= 0)
+      rows = 1;
   }
-  if (rows <= 0)
-    rows = 1;
 
   TS(t_after_shape_calc);
 
@@ -103,7 +87,6 @@ torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
 
   const half *xp = reinterpret_cast<const half *>(x.data_ptr<at::Half>());
   half *yp_like = reinterpret_cast<half *>(y_like.data_ptr<at::Half>());
-  half *yp_linear = reinterpret_cast<half *>(y_linear.data_ptr<at::Half>());
 
   TS(t_after_ptr);
 
@@ -152,20 +135,18 @@ torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
 
   TS(t_after_empty_like2);
 
-  std::fprintf(
-      stderr,
-      "@@PROBE n=%lld in=%d out=%d rows=%lld bias=%d so_ok=%d so_launch=%.3f "
-      "us so_sync=%.3f us so_total=%.3f us r0=%d r1=%d r2=%d r3=%d\n",
-      (long long)n64, in_features, out_features, (long long)rows, (int)bias,
-      g_so_warmup_ok, g_so_launch_us, g_so_sync_us, g_so_total_us, (int)r0,
-      (int)r1, (int)r2, (int)r3);
+  std::fprintf(stderr,
+               "@@PROBE n=%lld in=%d out=%d rows=%lld bias=%d since_ctor=%.3f "
+               "us r0=%d r1=%d r2=%d r3=%d\n",
+               (long long)n64, in_features, out_features, (long long)rows,
+               (int)bias, since_ctor_us, (int)r0, (int)r1, (int)r2, (int)r3);
 
   PSEG("args_only", t_entry, t_after_args);
   PSEG("numel", t_after_args, t_after_numel);
   PSEG("shape_calc", t_after_numel, t_after_shape_calc);
 
-  PSEG("empty_like_after_so", t_after_shape_calc, t_after_empty_like);
-  PSEG("empty_linear_after_so", t_after_empty_like, t_after_empty_linear);
+  PSEG("empty_like_cold", t_after_shape_calc, t_after_empty_like);
+  PSEG("empty_linear_cold", t_after_empty_like, t_after_empty_linear);
   PSEG("data_ptr", t_after_empty_linear, t_after_ptr);
   PSEG("get_stream", t_after_ptr, t_after_stream);
   PSEG("sync_empty_queue", t_after_stream, t_after_sync0);
@@ -185,7 +166,5 @@ torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
   PSEG("empty_like_warm", t_after_vec_sync, t_after_empty_like2);
   PSEG("whole_cpp_body", t_entry, t_after_empty_like2);
 
-  // For probing allocation/launch overhead, return the true Linear-shaped
-  // tensor. It is uninitialized and not correctness-safe.
   return y_linear;
 }
