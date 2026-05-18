@@ -3,6 +3,15 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
+static torch::Tensor z = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                 .dtype(torch::kHalf);
+  auto a = torch::empty({1, 1, 8, 8}, opt);
+  auto b = torch::empty({1, 1, 8, 8}, opt);
+  return a + b;
+}();
+
 static torch::Tensor y = []() {
   return torch::empty(
       {1, 1, 8, 8}, torch::TensorOptions()
@@ -52,6 +61,7 @@ torch::Tensor bang_func(torch::Tensor input, int out_h, int out_w,
   (void)out_h;
   (void)out_w;
   (void)align_corners;
+  (void)z;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {1, 1, 1};
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
