@@ -7,21 +7,14 @@
 
 __mlu_entry__ void k0(const half *__restrict__ p, const half *__restrict__ t,
                       half *__restrict__ out) {
-  __mlu_shared__ float q[4];
   float s = 0.0f;
-  int c = coreId;
-#pragma unroll 1
-  for (int i = c; i < N; i += 4) {
+#pragma unroll
+  for (int i = 0; i < N; ++i) {
     float v = 1.0f - (float)p[i] * (float)t[i];
     if (v > 0.0f)
       s += v;
   }
-  q[c] = s;
-  __sync_cluster();
-  if (c == 0) {
-    float r = q[0] + q[1] + q[2] + q[3];
-    out[0] = (half)(r * 0.0078125f);
-  }
+  out[0] = (half)(s * 0.0078125f);
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
@@ -29,8 +22,8 @@ torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   if (!out.defined())
     out = torch::empty({}, predictions.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {4, 1, 1};
-  k0<<<dim, cnrtFuncTypeUnion1, queue>>>(
+  cnrtDim3_t dim = {1, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(targets.data_ptr<at::Half>()),
       reinterpret_cast<half *>(out.data_ptr<at::Half>()));
