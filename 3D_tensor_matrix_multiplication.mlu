@@ -80,7 +80,7 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   else
     W.resize_({TC * (K0 / TK) * TN * TK});
   cnrtDim3_t d = {96, 1, 1};
-  cnrtDim3_t p = {48, 1, 1};
+  cnrtDim3_t p = {64, 1, 1};
   kprep<<<p, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
       reinterpret_cast<half *>(W.data_ptr<at::Half>()));
