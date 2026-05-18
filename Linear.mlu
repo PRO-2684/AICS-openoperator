@@ -25,7 +25,7 @@ static torch::Tensor g_static_empty = []() {
     auto opt = torch::TensorOptions()
                    .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
                    .dtype(torch::kHalf);
-    auto t = torch::empty({1}, opt);
+    auto t = torch::empty({1}, opt) + torch::empty({1}, opt);
     std::fprintf(stderr, "@@STATIC_EMPTY ok defined=%d\n", (int)t.defined());
     return t;
   } catch (const std::exception &e) {
