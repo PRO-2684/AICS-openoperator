@@ -14,7 +14,7 @@ __mlu_entry__ void k0(const half *__restrict__ p, const half *__restrict__ t,
   __bang_mul(a, a, b, N);
   __bang_mul_scalar(a, a, (half)-1.0f, N);
   __bang_add_scalar(a, a, (half)1.0f, N);
-  __bang_active_relu(a, a, N);
+  __bang_relu(a, a, N);
   __bang_reduce_sum(b, a, N);
   float s = (float)b[0] + (float)b[64];
   out[0] = (half)(s * 0.0078125f);
