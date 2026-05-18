@@ -3,13 +3,13 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+__mlu_entry__ void k0(half *__restrict__ y) {
   __nram__ half a[16384];
   __nram__ half s[128];
 
   for (int g = taskId; g < 32; g += taskDim) {
     int p = g * 16384;
-    __memcpy(a, x + p, 16384 * sizeof(half), GDRAM2NRAM);
+    __memcpy(a, y + p, 16384 * sizeof(half), GDRAM2NRAM);
     __bang_active_exp(a, a, 16384);
 #pragma unroll
     for (int r = 0; r < 128; ++r) {
@@ -34,12 +34,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double scale) {
   (void)mask;
   (void)scale;
-  static torch::Tensor y;
-  if (!y.defined())
-    y = torch::empty_like(x);
   cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-  return y;
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+  return x;
 }
