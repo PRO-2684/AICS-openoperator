@@ -184,6 +184,13 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
            N * sizeof(half), BM - 1);
   __bang_mul(u, u, r, BM * G);
   __bang_add(n, n, u, BM * G);
+  __memcpy(u, n, BM * G * sizeof(half), NRAM2NRAM);
+  __bang_add_scalar(n, n, (half)8.0f, BM * G);
+  __bang_active_relu(n, n, BM * G);
+  __bang_add_scalar(u, u, (half)-8.0f, BM * G);
+  __bang_active_relu(u, u, BM * G);
+  __bang_sub(n, n, u, BM * G);
+  __bang_add_scalar(n, n, (half)-8.0f, BM * G);
   __bang_active_tanh(n, n, BM * G);
 
   for (int b = 0; b < BM; ++b) {
