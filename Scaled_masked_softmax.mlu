@@ -5,7 +5,7 @@
 
 __mlu_entry__ void k0(half *__restrict__ y) {
   __nram__ half a[16384];
-  __nram__ half s[128];
+  __nram__ half s[16384];
 
   for (int g = taskId; g < 32; g += taskDim) {
     int p = g * 16384;
@@ -17,11 +17,12 @@ __mlu_entry__ void k0(half *__restrict__ y) {
       int n = 127 - r;
       if (n > 0)
         __bang_write_zero(q + r + 1, n);
-      float z;
-      __bang_reduce_sum(s, q, 64);
-      z = (float)s[0];
-      if (r >= 64)
-        z += (float)(r - 63) * 1.6484375f;
+    }
+    __bang_reduce_sum(s, a, 16384);
+#pragma unroll
+    for (int r = 0; r < 128; ++r) {
+      half *q = a + r * 128;
+      float z = (float)s[r * 128] + (float)s[r * 128 + 64];
       __bang_mul_scalar(q, q, (half)(1.0f / z), r + 1);
     }
     __memcpy(y + p, a, 16384 * sizeof(half), NRAM2GDRAM);
