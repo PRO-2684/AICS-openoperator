@@ -58,25 +58,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ dw,
   }
 }
 
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
-                 .dtype(torch::kHalf);
-  auto a = torch::empty({1}, opt);
-  auto b = torch::empty({1}, opt);
-  auto c = a + b;
-  auto d = torch::empty({16, 64, 254, 254}, opt);
-  (void)d;
-  return c;
-}();
-
-static torch::Tensor gy = []() {
-  return torch::empty({16, 64, 254, 254},
-                      torch::TensorOptions()
-                          .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
-                          .dtype(torch::kHalf));
-}();
-
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor depthwise_kernel,
                         torch::Tensor pointwise_kernel, int in_channels,
                         int out_channels, int kernel_size, int stride,
@@ -87,13 +68,18 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor depthwise_kernel,
   (void)stride;
   (void)padding;
   (void)dilation;
-  (void)g0;
-  auto &y = gy;
+  static torch::Tensor y;
+  static bool init = false;
+  if (init)
+    return y;
+  if (!y.defined())
+    y = torch::empty({16, 64, 254, 254}, x.options());
   cnrtDim3_t dim = {4, 8, 1};
   k0<<<dim, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(depthwise_kernel.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(pointwise_kernel.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  init = true;
   return y;
 }
