@@ -23,7 +23,7 @@ __mlu_entry__ void k0(half *__restrict__ y) {
     for (int r = 0; r < 128; ++r) {
       half *q = a + r * 128;
       float z = (float)s[r * 128] + (float)s[r * 128 + 64];
-      __bang_mul_scalar(q, q, (half)(1.0f / z), r + 1);
+      __bang_mul_scalar(q, q, (half)(1.0f / z), 128);
     }
     __memcpy(y + p, a, 16384 * sizeof(half), NRAM2GDRAM);
   }
