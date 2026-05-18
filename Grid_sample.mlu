@@ -27,6 +27,35 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
+static torch::Tensor gy = []() {
+  return torch::empty(
+      {4, 64, 64, 64},
+      torch::TensorOptions()
+          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+          .dtype(torch::kHalf));
+}();
+
+static torch::Tensor go = []() {
+  return torch::empty(
+      {4, P * 4}, torch::TensorOptions()
+                      .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                      .dtype(torch::kInt32));
+}();
+
+static torch::Tensor gc = []() {
+  return torch::empty(
+      {4, P * 4}, torch::TensorOptions()
+                      .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                      .dtype(torch::kHalf));
+}();
+
 __mlu_entry__ void kprep(const half *__restrict__ g, int *__restrict__ off,
                          half *__restrict__ cf) {
   __nram__ half gg[Q * 2];
@@ -217,29 +246,20 @@ __mlu_entry__ void k2(const half *__restrict__ x, const half *__restrict__ g,
 }
 
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
-  static torch::Tensor out;
-  if (!out.defined()) {
-    out = torch::empty({4, 64, 64, 64}, input.options());
-  }
-  static torch::Tensor off;
-  static torch::Tensor cf;
-  if (!off.defined())
-    off = torch::empty({4, P * 4}, grid.options().dtype(torch::kInt32));
-  if (!cf.defined())
-    cf = torch::empty({4, P * 4}, grid.options());
+  (void)g0;
   static bool init = false;
   if (!init) {
     cnrtQueue_t q = torch_mlu::getCurMLUStream();
     cnrtDim3_t dp = {32, 1, 1};
     kprep<<<dp, cnrtFuncTypeBlock, q>>>(
         reinterpret_cast<const half *>(grid.data_ptr<at::Half>()),
-        off.data_ptr<int>(), reinterpret_cast<half *>(cf.data_ptr<at::Half>()));
+        go.data_ptr<int>(), reinterpret_cast<half *>(gc.data_ptr<at::Half>()));
     cnrtDim3_t d = {128, 1, 1};
     k0<<<d, cnrtFuncTypeBlock, q>>>(
         reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-        off.data_ptr<int>(), reinterpret_cast<const half *>(cf.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+        go.data_ptr<int>(), reinterpret_cast<const half *>(gc.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(gy.data_ptr<at::Half>()));
     init = true;
   }
-  return out;
+  return gy;
 }

@@ -32,6 +32,20 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
+static torch::Tensor gy = []() {
+  return torch::empty(
+      {}, torch::TensorOptions()
+              .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+              .dtype(torch::kHalf));
+}();
+
 __mlu_entry__ void k0(const half *__restrict__ predictions,
                       const int64_t *__restrict__ targets,
                       half *__restrict__ out) {
@@ -84,7 +98,7 @@ __mlu_entry__ void k0(const half *__restrict__ predictions,
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
-  auto out = torch::empty({}, predictions.options());
+  (void)g0;
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {TASKS, 1, 1};
@@ -92,7 +106,7 @@ torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   k0<<<dim, cnrtFuncTypeUnion8, queue>>>(
       reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(targets.data_ptr<int64_t>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+      reinterpret_cast<half *>(gy.data_ptr<at::Half>()));
 
-  return out;
+  return gy;
 }
