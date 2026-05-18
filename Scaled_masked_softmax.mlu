@@ -17,12 +17,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
       int n = 127 - r;
       if (n > 0)
         __bang_write_zero(q + r + 1, n);
-    }
-    __bang_sumpool(s, a, 128, 1, 128, 1, 128, 128, 1);
-#pragma unroll
-    for (int r = 0; r < 128; ++r) {
-      half *q = a + r * 128;
-      float z = (float)s[r];
+      __bang_reduce_sum(s, q, 128);
+      float z = (float)s[0] + (float)s[64];
       __bang_mul_scalar(q, q, (half)(1.0f / z), 128);
     }
     __memcpy(y + p, a, 16384 * sizeof(half), NRAM2GDRAM);
