@@ -25,16 +25,12 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
 torch::Tensor bang_func(torch::Tensor input, int iters_per_cta) {
   (void)iters_per_cta;
   static torch::Tensor out;
-  static bool init = false;
   if (!out.defined())
     out = torch::empty({E1}, input.options().dtype(torch::kFloat));
-  if (!init) {
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t dim = {E1, 1, 1};
-    k0<<<dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-        out.data_ptr<float>());
-    init = true;
-  }
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {E1, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
+      out.data_ptr<float>());
   return out;
 }

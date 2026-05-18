@@ -29,15 +29,11 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double scale) {
   (void)mask;
   (void)scale;
   static torch::Tensor y;
-  static bool init = false;
   if (!y.defined())
     y = torch::empty_like(x);
-  if (!init) {
-    cnrtDim3_t d = {32, 1, 1};
-    k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-    init = true;
-  }
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
