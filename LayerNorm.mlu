@@ -14,14 +14,11 @@
 __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
                      half *__restrict__ g, half *__restrict__ t,
                      float *__restrict__ s) {
-  __bang_reduce_sum(t, h, R1);
 #pragma unroll
   for (int i = 0; i < R0; ++i) {
-    int z = i * E0;
-    g[i] = (half)((float)t[z] + (float)t[z + 64] + (float)t[z + 128] +
-                  (float)t[z + 192] + (float)t[z + 256] +
-                  (float)t[z + 320] + (float)t[z + 384] +
-                  (float)t[z + 448]);
+    __bang_sumpool(t, h + i * E0, 64, 1, 8, 1, 8, 1, 8);
+    __bang_reduce_sum(t, t, 64);
+    g[i] = t[0];
   }
   __bang_half2float(s, g, R0);
 #pragma unroll
@@ -29,14 +26,11 @@ __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
     __bang_sub_scalar(h + i * E0, h + i * E0, (half)(s[i] * 0.001953125f), E0);
   }
   __bang_mul(r, h, h, R1);
-  __bang_reduce_sum(t, r, R1);
 #pragma unroll
   for (int i = 0; i < R0; ++i) {
-    int z = i * E0;
-    g[i] = (half)((float)t[z] + (float)t[z + 64] + (float)t[z + 128] +
-                  (float)t[z + 192] + (float)t[z + 256] +
-                  (float)t[z + 320] + (float)t[z + 384] +
-                  (float)t[z + 448]);
+    __bang_sumpool(t, r + i * E0, 64, 1, 8, 1, 8, 1, 8);
+    __bang_reduce_sum(t, t, 64);
+    g[i] = t[0];
   }
   __bang_half2float(s, g, R0);
   __bang_mul_scalar(s, s, 0.001953125f, R0);
@@ -57,7 +51,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ half r1[R1];
   __nram__ half r2[R1];
   __nram__ half g[R0];
-  __nram__ half t[R1];
+  __nram__ half t[64];
   __nram__ float s[R0];
   half *hs[3] = {h0, h1, h2};
   half *rs[3] = {r0, r1, r2};
