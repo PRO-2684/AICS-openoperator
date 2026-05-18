@@ -12,10 +12,12 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   half *o = y + p * E0;
   __nram__ half a[E0];
   __nram__ float b[E0];
+  __nram__ float c[E0];
   __memcpy(a, r, E0 * sizeof(half), GDRAM2NRAM);
   __bang_half2float(b, a, E0);
-  __bang_reduce_sum(b, b, E0);
-  float s = b[0];
+  __memcpy(c, b, E0 * sizeof(float), NRAM2NRAM);
+  __bang_reduce_sum(c, c, E0);
+  float s = c[0];
   if (s > 0.0f) {
     float inv = 1.0f / s;
     __bang_mul_scalar(b, b, inv, E0);
