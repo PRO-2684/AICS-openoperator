@@ -105,12 +105,10 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd('lscpu')
-run_cmd('cat /sys/fs/cgroup/cpu.max')
-run_cmd('cat /sys/fs/cgroup/cpuset.cpus')
-run_cmd('cat /sys/fs/cgroup/cpuset.cpus.effective')
-run_cmd('cat /proc/meminfo | head -40')
-run_cmd('taskset -pc $$')
+run_cmd('cat /proc/self/cgroup && mount | grep cgroup')
+run_cmd('lspci | grep -i cambricon')
+run_cmd('cnmon')
+
 
 
 )PY");
