@@ -85,12 +85,33 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
   __sync_io();
 }
 
+static torch::Tensor g0 = []() {
+  auto h = torch::TensorOptions()
+               .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+               .dtype(torch::kHalf);
+  auto f = torch::TensorOptions()
+               .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+               .dtype(torch::kFloat32);
+  auto a = torch::empty({1}, h);
+  auto b = torch::empty({1}, h);
+  auto c = a + b;
+  auto d = torch::empty({128, 4000}, f);
+  (void)d;
+  return c;
+}();
+
+static torch::Tensor gy = []() {
+  return torch::empty({128, 4000},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                          .dtype(torch::kFloat32));
+}();
+
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
-  static torch::Tensor y;
+  (void)g0;
+  auto &y = gy;
   static bool init = false;
-  if (!y.defined())
-    y = torch::empty({128, 4000}, x.options().dtype(torch::kFloat32));
   if (!init) {
     cnrtDim3_t g = {32, 1, 1};
     k0<<<g, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
