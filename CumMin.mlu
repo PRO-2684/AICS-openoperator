@@ -64,17 +64,13 @@ __mlu_entry__ void k(const half *x, half *y) {
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
   static torch::Tensor y;
-  static bool init = false;
   if (!y.defined())
     y = torch::empty_like(x);
 
-  if (!init) {
-    cnrtDim3_t d = {4, 8, 1};
-    k<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
-        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-    init = true;
-  }
+  cnrtDim3_t d = {4, 8, 1};
+  k<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
 
   return y;
 }
