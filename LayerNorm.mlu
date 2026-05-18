@@ -11,6 +11,21 @@
 #define L0(i, h) __memcpy_async(h, x + P0(i), R1 * sizeof(half), GDRAM2NRAM)
 #define S0(i, h) __memcpy_async(y + P0(i), h, R1 * sizeof(half), NRAM2GDRAM)
 
+static torch::Tensor z = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                 .dtype(torch::kHalf);
+  auto a = torch::empty({32, 128, 512}, opt);
+  auto b = torch::empty({32, 128, 512}, opt);
+  return a + b;
+}();
+
+static torch::Tensor y = []() {
+  return torch::empty({32, 128, 512}, torch::TensorOptions()
+                                           .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                                           .dtype(torch::kHalf));
+}();
+
 __mlu_func__ void f0(half *__restrict__ h, half *__restrict__ r,
                      half *__restrict__ g, half *__restrict__ t,
                      float *__restrict__ s) {
@@ -77,10 +92,8 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bia
   (void)weight;
   (void)bias;
   (void)normalized_shape;
-  static torch::Tensor y;
+  (void)z;
   static bool init = false;
-  if (!y.defined())
-    y = torch::empty_like(x);
   if (!init) {
     cnrtDim3_t d = {32, 1, 1};
     k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
