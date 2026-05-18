@@ -7,8 +7,8 @@
 
 __mlu_func__ void f0(half *__restrict__ t, half *__restrict__ a,
                      half *__restrict__ b) {
-  __memcpy(a + 131, t, 128 * sizeof(half), NRAM2NRAM, 130 * sizeof(half),
-           128 * sizeof(half), 127);
+  __memcpy(a + 262, t + 129, 126 * sizeof(half), NRAM2NRAM,
+           130 * sizeof(half), 128 * sizeof(half), 125);
   __bang_maxpool(b, a, 1, 130, 130, 2, 2, 2, 2, 3, 3, 1, 1);
 }
 
