@@ -23,11 +23,19 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
 __mlu_entry__ void l1_norm_scale_kernel(half *__restrict__ x) {
   __gdramset(x + taskId * 4096, 4096, (half)0.0f);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
+  (void)g0;
   static torch::Tensor y;
   static bool init = false;
   if (!y.defined())

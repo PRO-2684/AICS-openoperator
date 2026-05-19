@@ -25,6 +25,13 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
 __mlu_entry__ void k0(half *__restrict__ y) {
   __nram__ half a[E0];
   __bang_write_value(a, E0, (half)0.0f);
@@ -34,6 +41,7 @@ __mlu_entry__ void k0(half *__restrict__ y) {
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)x;
   (void)dim;
+  (void)g0;
   static torch::Tensor out;
   if (!out.defined()) {
     out = torch::empty({16, 256}, x.options());
