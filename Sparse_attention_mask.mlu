@@ -28,58 +28,69 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   int p = taskId;
   int h = p >> 2;
   int b = p & 3;
-  int r = b * 64;
-  int s = r == 0 ? 0 : r - 32;
-  bool e = (b == 0 || b == 3);
-  int n = e ? 96 : 128;
   int base = h * 16384;
   __nram__ half a0[8192];
   __nram__ half a1[8192];
   __nram__ half a2[8192];
   __nram__ half a3[8192];
   __nram__ float f0[8192];
-  __nram__ float f1[8192];
   __nram__ float f2[4096];
   __wram__ half w0[8192];
 
-  __memcpy(a0, q + base + r * 64, 4096 * sizeof(half), GDRAM2NRAM);
-  __memcpy(a2, k + base + s * 64, n * 64 * sizeof(half), GDRAM2NRAM);
-  if (e) {
-    __bang_write_value(a2 + n * 64, (128 - n) * 64, (half)0.0f);
-  }
-  __bang_reshape_filter(a1, a2, 128, 1, 1, 64);
-  __memcpy(w0, a1, 8192 * sizeof(half), NRAM2WRAM);
-  __bang_matmul(f0, a0, w0, 64, 64, 128);
-  __bang_mul_scalar(f0, f0, 0.125f, 8192);
-  __bang_float2half_rn(a3, f0, 8192);
-  __bang_active_exp(a3, a3, 8192);
-#pragma unroll
-  for (int i = 0; i < 64; ++i) {
-    int left = r + i - 32 - s;
-    int right = r + i + 33 - s;
-    if (right > n) {
-      right = n;
+  for (int part = 0; part < 2; ++part) {
+    int r = b * 64 + part * 32;
+    int s = r - 32;
+    if (s < 0) {
+      s = 0;
     }
-    if (left > 0) {
-      __bang_write_value(a3 + i * 128, left, (half)0.0f);
+    if (s > 192) {
+      s = 192;
     }
-    if (right < 128) {
-      __bang_write_value(a3 + i * 128 + right, 128 - right, (half)0.0f);
-    }
-  }
-  __bang_reduce_sum(a0, a3, 8192);
+    int n = (r == 0 || r == 224) ? 64 : 96;
+    int cnt = 32 * n;
 
-  __memcpy(a2, v + base + s * 64, n * 64 * sizeof(half), GDRAM2NRAM);
-  __bang_transpose(a1, a2, 128, 64);
-  __memcpy(w0, a1, 8192 * sizeof(half), NRAM2WRAM);
-  __bang_matmul(f2, a3, w0, 64, 128, 64);
+    __memcpy(a0, q + base + r * 64, 2048 * sizeof(half), GDRAM2NRAM);
+    __memcpy(a2, k + base + s * 64, n * 64 * sizeof(half), GDRAM2NRAM);
+    __bang_reshape_filter(a1, a2, n, 1, 1, 64);
+    __memcpy(w0, a1, n * 64 * sizeof(half), NRAM2WRAM);
+    __bang_matmul(f0, a0, w0, 32, 64, n);
+    __bang_mul_scalar(f0, f0, 0.125f, cnt);
+    __bang_float2half_rn(a3, f0, cnt);
+    __bang_active_exp(a3, a3, cnt);
 #pragma unroll
-  for (int i = 0; i < 64; ++i) {
-    float z = (float)a0[i * 128] + (float)a0[i * 128 + 64];
-    __bang_mul_scalar(f2 + i * 64, f2 + i * 64, 1.0f / z, 64);
+    for (int i = 0; i < 32; ++i) {
+      int left = r + i - 32 - s;
+      int right = r + i + 33 - s;
+      if (right > n) {
+        right = n;
+      }
+      if (left > 0) {
+        __bang_write_value(a3 + i * n, left, (half)0.0f);
+      }
+      if (right < n) {
+        __bang_write_value(a3 + i * n + right, n - right, (half)0.0f);
+      }
+    }
+#pragma unroll
+    for (int i = 0; i < 32; ++i) {
+      __bang_reduce_sum(a0 + i * 128, a3 + i * n, n);
+    }
+
+    __memcpy(a2, v + base + s * 64, n * 64 * sizeof(half), GDRAM2NRAM);
+    __bang_transpose(a1, a2, n, 64);
+    __memcpy(w0, a1, n * 64 * sizeof(half), NRAM2WRAM);
+    __bang_matmul(f2, a3, w0, 32, n, 64);
+#pragma unroll
+    for (int i = 0; i < 32; ++i) {
+      float z = (float)a0[i * 128];
+      if (n > 64) {
+        z += (float)a0[i * 128 + 64];
+      }
+      __bang_mul_scalar(f2 + i * 64, f2 + i * 64, 1.0f / z, 64);
+    }
+    __bang_float2half_rn(a0, f2, 2048);
+    __memcpy(y + base + r * 64, a0, 2048 * sizeof(half), NRAM2GDRAM);
   }
-  __bang_float2half_rn(a0, f2, 4096);
-  __memcpy(y + base + r * 64, a0, 4096 * sizeof(half), NRAM2GDRAM);
 }
 
 __mlu_entry__ void k1(half *__restrict__ m) {
