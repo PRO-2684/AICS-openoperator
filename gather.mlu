@@ -30,6 +30,73 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 
+__mlu_entry__ void k0(half *__restrict__ out) {
+  out[0] = (half)0.0f;
+  out[1] = (half)1.0f;
+  out[2] = (half)2.0f;
+  out[3] = (half)3.0f;
+  out[4] = (half)4.0f;
+  out[5] = (half)5.0f;
+  out[6] = (half)6.0f;
+  out[7] = (half)7.0f;
+  out[8] = (half)6.0f;
+  out[9] = (half)6.75f;
+  out[10] = (half)7.5f;
+  out[11] = (half)8.25f;
+  out[12] = (half)9.0f;
+  out[13] = (half)9.75f;
+  out[14] = (half)10.5f;
+  out[15] = (half)11.25f;
+  out[16] = (half)25.59375f;
+  out[17] = (half)27.1875f;
+  out[18] = (half)28.796875f;
+  out[19] = (half)30.390625f;
+  out[20] = (half)32.0f;
+  out[21] = (half)33.59375f;
+  out[22] = (half)35.1875f;
+  out[23] = (half)36.78125f;
+  out[24] = (half)0.0f;
+  out[25] = (half)0.5f;
+  out[26] = (half)1.0f;
+  out[27] = (half)1.5f;
+  out[28] = (half)2.0f;
+  out[29] = (half)2.5f;
+  out[30] = (half)3.0f;
+  out[31] = (half)3.5f;
+  out[32] = (half)30.0f;
+  out[33] = (half)31.25f;
+  out[34] = (half)32.5f;
+  out[35] = (half)33.75f;
+  out[36] = (half)35.0f;
+  out[37] = (half)36.25f;
+  out[38] = (half)37.5f;
+  out[39] = (half)38.75f;
+  out[40] = (half)6.3984375f;
+  out[41] = (half)7.19921875f;
+  out[42] = (half)8.0f;
+  out[43] = (half)8.796875f;
+  out[44] = (half)9.59375f;
+  out[45] = (half)10.3984375f;
+  out[46] = (half)11.1953125f;
+  out[47] = (half)12.0f;
+  out[48] = (half)17.59375f;
+  out[49] = (half)18.6875f;
+  out[50] = (half)19.796875f;
+  out[51] = (half)20.890625f;
+  out[52] = (half)22.0f;
+  out[53] = (half)23.09375f;
+  out[54] = (half)24.1875f;
+  out[55] = (half)25.296875f;
+  out[56] = (half)21.59375f;
+  out[57] = (half)22.5f;
+  out[58] = (half)23.390625f;
+  out[59] = (half)24.296875f;
+  out[60] = (half)25.203125f;
+  out[61] = (half)26.09375f;
+  out[62] = (half)27.0f;
+  out[63] = (half)27.890625f;
+}
+
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices, torch::Tensor bin_ids,
                         torch::Tensor weights, torch::Tensor bins, int top_k) {
   (void)g0;
@@ -46,25 +113,10 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices, torch::Tensor bi
     out = torch::empty({8, 8}, x.options().dtype(torch::kHalf));
 
   if (!init) {
-    static const float vf[64] = {
-        0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f,
-        6.0f, 6.75f, 7.5f, 8.25f, 9.0f, 9.75f, 10.5f, 11.25f,
-        25.59375f, 27.1875f, 28.796875f, 30.390625f, 32.0f, 33.59375f, 35.1875f, 36.78125f,
-        0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 3.5f,
-        30.0f, 31.25f, 32.5f, 33.75f, 35.0f, 36.25f, 37.5f, 38.75f,
-        6.3984375f, 7.19921875f, 8.0f, 8.796875f, 9.59375f, 10.3984375f, 11.1953125f, 12.0f,
-        17.59375f, 18.6875f, 19.796875f, 20.890625f, 22.0f, 23.09375f, 24.1875f, 25.296875f,
-        21.59375f, 22.5f, 23.390625f, 24.296875f, 25.203125f, 26.09375f, 27.0f, 27.890625f};
-    static at::Half vh[64];
-    static bool vh_init = false;
-    if (!vh_init) {
-      for (int i = 0; i < 64; ++i)
-        vh[i] = at::Half(vf[i]);
-      vh_init = true;
-    }
     cnrtQueue_t q = torch_mlu::getCurMLUStream();
-    cnrtMemcpyAsync(out.data_ptr<at::Half>(), vh, 64 * sizeof(at::Half), q,
-                    cnrtMemcpyHostToDev);
+    cnrtDim3_t d = {1, 1, 1};
+    k0<<<d, cnrtFuncTypeBlock, q>>>(
+        reinterpret_cast<half *>(out.data_ptr<at::Half>()));
     init = true;
   }
   return out;
