@@ -10,29 +10,21 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[512];
-  __nram__ half b[64];
+  __nram__ half b[128];
+  __nram__ half c0[64];
+  __nram__ half c1[64];
   for (int p = taskId; p < E0; p += taskDim) {
     int u = p & 7;
     int v = p >> 3;
     __memcpy(a, x + v * 4096 + u * 512, 512 * sizeof(half), GDRAM2NRAM);
-    for (int i = 0; i < 8; ++i) {
-      int h = i << 1;
-      for (int j = 0; j < 8; ++j) {
-        int w = j << 1;
-        float s = 0.0f;
-        int q = h * 16 + w;
-        s += (float)a[q];
-        s += (float)a[q + 1];
-        s += (float)a[q + 16];
-        s += (float)a[q + 17];
-        s += (float)a[q + 256];
-        s += (float)a[q + 257];
-        s += (float)a[q + 272];
-        s += (float)a[q + 273];
-        b[i * 8 + j] = (half)(s * 0.125f);
-      }
-    }
-    __memcpy(y + v * 512 + u * 64, b, 64 * sizeof(half), NRAM2GDRAM);
+    __bang_sumpool(b, a, 16, 2, 16, 2, 2, 2, 2);
+    __memcpy(c0, b, sizeof(half), NRAM2NRAM, sizeof(half),
+             2 * sizeof(half), 63);
+    __memcpy(c1, b + 1, sizeof(half), NRAM2NRAM, sizeof(half),
+             2 * sizeof(half), 63);
+    __bang_add(c0, c0, c1, 64);
+    __bang_mul_scalar(c0, c0, (half)0.125f, 64);
+    __memcpy(y + v * 512 + u * 64, c0, 64 * sizeof(half), NRAM2GDRAM);
   }
 }
 
