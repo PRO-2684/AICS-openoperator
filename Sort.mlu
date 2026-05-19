@@ -104,7 +104,16 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
+  auto a = torch::empty({16, 1024}, opt);
+  auto b = torch::empty({16, 1024}, opt);
+  return a + b;
+}();
+
+static torch::Tensor gy = []() {
+  return torch::empty({16, 1024},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                          .dtype(torch::kHalf));
 }();
 
 torch::Tensor bang_func(torch::Tensor x, int dim, bool descending) {
@@ -112,11 +121,8 @@ torch::Tensor bang_func(torch::Tensor x, int dim, bool descending) {
   (void)descending;
   (void)g0;
 
-  static torch::Tensor y;
   static bool init = false;
-  if (!y.defined()) {
-    y = torch::empty_like(x);
-  }
+  auto &y = gy;
 
   if (!init) {
     cnrtQueue_t q = torch_mlu::getCurMLUStream();
