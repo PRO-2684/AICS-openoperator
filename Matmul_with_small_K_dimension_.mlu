@@ -9,10 +9,10 @@
 #define N0 16384
 #define K0 32
 #define TM 64
-#define TN 256
+#define TN 512
 #define TK 32
 #define TR 256
-#define TC 64
+#define TC 32
 #define TT (TR * TC)
 
 
@@ -91,7 +91,7 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   if (!C.defined())
     C = torch::empty({M0, N0}, A.options().dtype(torch::kHalf));
   if (!init) {
-    cnrtDim3_t d = {64, 1, 1};
+    cnrtDim3_t d = {32, 1, 1};
     k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
         reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
