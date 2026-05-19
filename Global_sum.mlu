@@ -38,8 +38,10 @@ __attribute__((constructor(101))) static void init_runtime() {
 static torch::Tensor z = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kFloat32);
-  return torch::zeros({1}, opt);
+                 .dtype(torch::kHalf);
+  auto a = torch::empty({64, 8192}, opt);
+  auto b = torch::empty({64, 8192}, opt);
+  return a + b;
 }();
 
 static torch::Tensor out = []() {
