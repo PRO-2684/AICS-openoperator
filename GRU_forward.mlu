@@ -43,56 +43,56 @@ static torch::Tensor gy = []() {
   return torch::empty(
       {B, T, H}, torch::TensorOptions()
                      .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                     .dtype(torch::kFloat32));
+                     .dtype(torch::kHalf));
 }();
 
 static torch::Tensor gh0 = []() {
   return torch::empty(
       {B, H}, torch::TensorOptions()
                   .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                  .dtype(torch::kFloat32));
+                  .dtype(torch::kHalf));
 }();
 
 static torch::Tensor gh1 = []() {
   return torch::empty(
       {B, H}, torch::TensorOptions()
                   .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                  .dtype(torch::kFloat32));
+                  .dtype(torch::kHalf));
 }();
 
 static torch::Tensor gh2 = []() {
   return torch::empty(
       {B, H}, torch::TensorOptions()
                   .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                  .dtype(torch::kFloat32));
+                  .dtype(torch::kHalf));
 }();
 
 static torch::Tensor gh3 = []() {
   return torch::empty(
       {B, H}, torch::TensorOptions()
                   .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                  .dtype(torch::kFloat32));
+                  .dtype(torch::kHalf));
 }();
 
 static torch::Tensor gm = []() {
   return torch::empty(
       {B, H}, torch::TensorOptions()
                   .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                  .dtype(torch::kFloat32));
+                  .dtype(torch::kHalf));
 }();
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
                       const half *__restrict__ wh, const half *__restrict__ bi,
-                      const half *__restrict__ bh, const float *__restrict__ in,
-                      const float *__restrict__ hp, float *__restrict__ hn,
-                      float *__restrict__ out, int t, int k, int first,
+                      const half *__restrict__ bh, const half *__restrict__ in,
+                      const half *__restrict__ hp, half *__restrict__ hn,
+                      half *__restrict__ out, int t, int k, int first,
                       int last) {
   int col = (taskId & 7) * G;
   int bo = 0;
   int bb = (taskId >> 3) * BM;
   __nram__ half a[BM * H];
   __nram__ half h[BM * H];
-  __nram__ float hf[BM * H];
+  __nram__ half u[BM * G];
   __nram__ half wb[H * N];
   __nram__ half wf[H * N];
   __nram__ half c0[N];
@@ -111,11 +111,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
       __memcpy(a + b * k, x + rb * T * I0 + t * I0, k * sizeof(half),
                GDRAM2NRAM);
     } else {
-      __memcpy(hf + b * k, in + rb * H, k * sizeof(float), GDRAM2NRAM);
-      __bang_float2half_rn(a + b * k, hf + b * k, k);
+      __memcpy(a + b * k, in + rb * H, k * sizeof(half), GDRAM2NRAM);
     }
-    __memcpy(hf + b * H, hp + rb * H, H * sizeof(float), GDRAM2NRAM);
-    __bang_float2half_rn(h + b * H, hf + b * H, H);
+    __memcpy(h + b * H, hp + rb * H, H * sizeof(half), GDRAM2NRAM);
   }
 
   __memcpy(wb, wi + (H + col) * k, G * k * sizeof(half), GDRAM2NRAM);
@@ -209,20 +207,22 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
   __bang_active_tanh(fn, fn, BM * G);
 
   for (int b = 0; b < BM; ++b) {
-    __memcpy(fh + b * G, hf + b * H + col, G * sizeof(float), NRAM2NRAM);
+    __memcpy(u + b * G, h + b * H + col, G * sizeof(half), NRAM2NRAM);
   }
+  __bang_half2float(fh, u, BM * G);
   __bang_sub(fh, fh, fn, BM * G);
   __bang_mul(fh, fh, fz, BM * G);
   __bang_add(fn, fn, fh, BM * G);
+  __bang_float2half_rn(u, fn, BM * G);
 
   for (int b = 0; b < BM; ++b) {
     int rb = bb + bo + b;
-    __memcpy(hn + rb * H + col, fn + b * G, G * sizeof(float), NRAM2GDRAM);
+    __memcpy(hn + rb * H + col, u + b * G, G * sizeof(half), NRAM2GDRAM);
     if (last) {
-      __memcpy(out + rb * T * H + t * H + col, fn + b * G, G * sizeof(float),
+      __memcpy(out + rb * T * H + t * H + col, u + b * G, G * sizeof(half),
                NRAM2GDRAM);
     } else {
-      __memcpy(out + rb * H + col, fn + b * G, G * sizeof(float), NRAM2GDRAM);
+      __memcpy(out + rb * H + col, u + b * G, G * sizeof(half), NRAM2GDRAM);
     }
   }
 }
@@ -236,34 +236,38 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
   (void)num_layers;
   (void)g0;
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtMemsetAsync(gh0.data_ptr(), 0, B * H * sizeof(float), q);
-  cnrtMemsetAsync(gh1.data_ptr(), 0, B * H * sizeof(float), q);
+  cnrtMemsetAsync(gh0.data_ptr(), 0, B * H * sizeof(half), q);
+  cnrtMemsetAsync(gh1.data_ptr(), 0, B * H * sizeof(half), q);
   cnrtDim3_t d = {16, 1, 1};
   for (int t = 0; t < T; ++t) {
-    float *p0 = (t & 1) ? gh2.data_ptr<float>() : gh0.data_ptr<float>();
-    float *n0 = (t & 1) ? gh0.data_ptr<float>() : gh2.data_ptr<float>();
-    float *p1 = (t & 1) ? gh3.data_ptr<float>() : gh1.data_ptr<float>();
-    float *n1 = (t & 1) ? gh1.data_ptr<float>() : gh3.data_ptr<float>();
+    half *p0 = reinterpret_cast<half *>((t & 1) ? gh2.data_ptr<at::Half>()
+                                                : gh0.data_ptr<at::Half>());
+    half *n0 = reinterpret_cast<half *>((t & 1) ? gh0.data_ptr<at::Half>()
+                                                : gh2.data_ptr<at::Half>());
+    half *p1 = reinterpret_cast<half *>((t & 1) ? gh3.data_ptr<at::Half>()
+                                                : gh1.data_ptr<at::Half>());
+    half *n1 = reinterpret_cast<half *>((t & 1) ? gh1.data_ptr<at::Half>()
+                                                : gh3.data_ptr<at::Half>());
     k0<<<d, cnrtFuncTypeBlock, q>>>(
         reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(w0.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(w1.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(w2.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(w3.data_ptr<at::Half>()),
-        reinterpret_cast<const float *>(gm.data_ptr<float>()),
+        reinterpret_cast<const half *>(gm.data_ptr<at::Half>()),
         p0,
         n0,
-        reinterpret_cast<float *>(gm.data_ptr<float>()), t, I0, 1, 0);
+        reinterpret_cast<half *>(gm.data_ptr<at::Half>()), t, I0, 1, 0);
     k0<<<d, cnrtFuncTypeBlock, q>>>(
         reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(w4.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(w5.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(w6.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(w7.data_ptr<at::Half>()),
-        reinterpret_cast<const float *>(gm.data_ptr<float>()),
+        reinterpret_cast<const half *>(gm.data_ptr<at::Half>()),
         p1,
         n1,
-        reinterpret_cast<float *>(gy.data_ptr<float>()), t, H, 0, 1);
+        reinterpret_cast<half *>(gy.data_ptr<at::Half>()), t, H, 0, 1);
   }
   return gy;
 }
