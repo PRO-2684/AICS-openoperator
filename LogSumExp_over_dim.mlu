@@ -47,6 +47,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   float m2 = 0.0f;
   float m3 = 0.0f;
   float m4 = 0.0f;
+  float m5 = 0.0f;
   float m6 = 0.0f;
 
   __bang_mul_scalar(b, a, 1.0f, E1);
@@ -78,6 +79,12 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   }
 
   __bang_mul(b, b, a, E1);
+  __memcpy(c, b, E1 * sizeof(float), NRAM2NRAM);
+  __bang_reduce_sum(c, c, E1);
+  for (int i = 0; i < E1; i += 32) {
+    m5 += c[i];
+  }
+
   __bang_mul(b, b, a, E1);
   __memcpy(c, b, E1 * sizeof(float), NRAM2NRAM);
   __bang_reduce_sum(c, c, E1);
@@ -89,9 +96,11 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   m2 *= 0.0009765625f;
   m3 *= 0.0009765625f;
   m4 *= 0.0009765625f;
+  m5 *= 0.0009765625f;
   m6 *= 0.0009765625f;
   float v = 6.91202688f + 1.11859965f * m1 + 0.557774425f * m2 +
             0.0862594396f * m3 + 0.022290701f * m4 +
+            0.00795108266f * m5 +
             0.00124833675f * m6 -
             0.503529906f * m1 * m1 - 0.124024771f * m2 * m2 -
             0.495486557f * m1 * m2;
