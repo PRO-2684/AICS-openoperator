@@ -51,7 +51,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   __nram__ half ah[2 * TM * K0];
   __nram__ half bh[K0 * TN];
   __nram__ half bt[TN * K0];
-  __nram__ half hf[TN * K0];
   __nram__ float tmp[2 * TM * TN];
   __wram__ half ww[TN * K0];
 
@@ -63,8 +62,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   __memcpy(bh, b + nj, TN * sizeof(half), GDRAM2NRAM, TN * sizeof(half),
            N0 * sizeof(half), K0 - 1);
   __bang_transpose(bt, bh, K0, TN);
-  __bang_reshape_filter(hf, bt, TN, 1, 1, K0);
-  __memcpy(ww, hf, TN * K0 * sizeof(half), NRAM2WRAM);
+  __bang_reshape_filter(bh, bt, TN, 1, 1, K0);
+  __memcpy(ww, bh, TN * K0 * sizeof(half), NRAM2WRAM);
 
   int row = lane;
   if (row >= TR)
