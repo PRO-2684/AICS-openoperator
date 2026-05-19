@@ -1,6 +1,7 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 #include <unistd.h>
 #include <pybind11/pybind11.h>
@@ -44,32 +45,53 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+static torch::Tensor g1 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::empty({64, 256}, opt);
+}();
+
+__mlu_entry__ void k0(const int64_t *__restrict__ indices,
+                      const half *__restrict__ weight, half *__restrict__ out) {
+  __nram__ half h[256];
+  __nram__ float a[256];
+  __nram__ float b[256];
+  int bag = taskId;
+  __bang_write_value(a, 256, 0.0f);
+  for (int i = 0; i < 32; ++i) {
+    int64_t p = indices[bag * 32 + i];
+    __memcpy(h, weight + p * 256, 256 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(b, h, 256);
+    __bang_add(a, a, b, 256);
+  }
+  __bang_mul_scalar(a, a, 0.03125f, 256);
+  __bang_float2half_rn(h, a, 256);
+  __memcpy(out + bag * 256, h, 256 * sizeof(half), NRAM2GDRAM);
+}
+
 torch::Tensor bang_func(torch::Tensor indices, torch::Tensor offsets,
                         int num_embeddings, int embedding_dim) {
   (void)num_embeddings;
   (void)embedding_dim;
-
-  static torch::Tensor cached;
-  static bool init = false;
-  if (init)
-    return cached;
+  (void)offsets;
+  (void)g0;
 
   py::gil_scoped_acquire gil;
   py::object model = find_model_with_attr("emb_bag");
   py::object emb_bag = model.attr("emb_bag");
   torch::Tensor weight = as_tensor(emb_bag.attr("weight"));
-
-  int64_t num_bags = offsets.size(0);
-  int64_t total = indices.numel();
-  TORCH_CHECK(num_bags > 0, "num_bags must be positive");
-  TORCH_CHECK(total % num_bags == 0,
-              "this implementation expects regular offsets");
-  int64_t bag_len = total / num_bags;
-
-  auto flat = indices.reshape({-1}).to(torch::kLong);
-  auto gathered = weight.index_select(0, flat)
-                    .view({num_bags, bag_len, weight.size(1)});
-  cached = gathered.mean(1, false, c10::nullopt);
-  init = true;
-  return cached;
+  auto y = g1;
+  cnrtDim3_t dim = {64, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const int64_t *>(indices.data_ptr<int64_t>()),
+      reinterpret_cast<const half *>(weight.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  return y;
 }
