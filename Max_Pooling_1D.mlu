@@ -58,7 +58,7 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
                         int padding, int dilation, bool return_indices) {
   (void)z;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {16, 1, 1};
+  cnrtDim3_t g = {8, 1, 1};
   k0<<<g, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
