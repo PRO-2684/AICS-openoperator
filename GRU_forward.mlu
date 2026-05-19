@@ -147,6 +147,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ ip,
   __nram__ half a[BM * H];
   __nram__ half h[BM * H];
   __nram__ half u[BM * G];
+  __nram__ half v0[BM * G];
+  __nram__ half v1[BM * G];
+  __nram__ half v2[BM * G];
   __nram__ half c0[N];
   __nram__ float fu[BM * N];
   __nram__ float fv[BM * N];
@@ -191,29 +194,31 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ ip,
   __memcpy(fr, fv + G, G * sizeof(float), NRAM2NRAM, G * sizeof(float),
            N * sizeof(float), BM - 1);
   __bang_add(fz, fz, fr, BM * G);
-  __bang_active_sigmoid(fz, fz, BM * G);
+  __bang_float2half_rn(v0, fz, BM * G);
+  __bang_active_sigmoid(v0, v0, BM * G);
 
   __memcpy(fr, fu, G * sizeof(float), NRAM2NRAM, G * sizeof(float),
            N * sizeof(float), BM - 1);
   __memcpy(fh, fv, G * sizeof(float), NRAM2NRAM, G * sizeof(float),
            N * sizeof(float), BM - 1);
   __bang_add(fr, fr, fh, BM * G);
-  __bang_active_sigmoid(fr, fr, BM * G);
+  __bang_float2half_rn(v1, fr, BM * G);
+  __bang_active_sigmoid(v1, v1, BM * G);
 
   __memcpy(fh, fv + G * 2, G * sizeof(float), NRAM2NRAM, G * sizeof(float),
            N * sizeof(float), BM - 1);
-  __bang_mul(fh, fh, fr, BM * G);
-  __bang_add(fn, fn, fh, BM * G);
-  __bang_active_tanh(fn, fn, BM * G);
+  __bang_float2half_rn(v2, fn, BM * G);
+  __bang_float2half_rn(u, fh, BM * G);
+  __bang_mul(u, u, v1, BM * G);
+  __bang_add(v2, v2, u, BM * G);
+  __bang_active_tanh(v2, v2, BM * G);
 
   for (int b = 0; b < BM; ++b) {
     __memcpy(u + b * G, h + b * H + col, G * sizeof(half), NRAM2NRAM);
   }
-  __bang_half2float(fh, u, BM * G);
-  __bang_sub(fh, fh, fn, BM * G);
-  __bang_mul(fh, fh, fz, BM * G);
-  __bang_add(fn, fn, fh, BM * G);
-  __bang_float2half_rn(u, fn, BM * G);
+  __bang_sub(u, u, v2, BM * G);
+  __bang_mul(u, u, v0, BM * G);
+  __bang_add(u, u, v2, BM * G);
 
   for (int b = 0; b < BM; ++b) {
     int rb = bb + bo + b;
