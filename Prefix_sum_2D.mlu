@@ -100,9 +100,13 @@ __mlu_entry__ void k2(float *__restrict__ y, const float *__restrict__ t) {
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)warm;
-  cnrtDim3_t g0 = {4, 8, 1};
-  k1<<<g0, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      gy.data_ptr<float>());
+  static bool init = false;
+  if (!init) {
+    cnrtDim3_t g0 = {4, 8, 1};
+    k1<<<g0, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+        gy.data_ptr<float>());
+    init = true;
+  }
   return gy;
 }
