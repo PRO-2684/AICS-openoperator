@@ -10,7 +10,7 @@
 #define K0 2048
 #define TM 128
 #define TN 128
-#define TK 128
+#define TK 256
 #define TR 256
 #define RB 4
 #define TG 32
