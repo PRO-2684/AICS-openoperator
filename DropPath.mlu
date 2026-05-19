@@ -30,20 +30,6 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
-}();
-
-static torch::Tensor gy = []() {
-  return torch::empty({32, 128, 512},
-                      torch::TensorOptions()
-                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                          .dtype(torch::kHalf));
-}();
-
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
                       int sample_elems, float scale) {
   __nram__ half buf[65536];
@@ -64,8 +50,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
 }
 
 torch::Tensor bang_func(torch::Tensor x, double drop_prob) {
-  (void)g0;
-  auto &y = gy;
+  auto y = torch::empty_like(x);
   float scale = 1.0f / (1.0f - (float)drop_prob);
   int sample_elems = (int)(x.numel() / x.size(0));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
