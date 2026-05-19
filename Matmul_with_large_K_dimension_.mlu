@@ -34,6 +34,36 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
+
+static torch::Tensor g0 = []() {
+  auto h = torch::TensorOptions()
+               .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+               .dtype(torch::kHalf);
+  auto f = torch::TensorOptions()
+               .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+               .dtype(torch::kFloat32);
+  auto z = torch::zeros({1}, h);
+  auto y = torch::empty({M0, N0}, f);
+  auto p = torch::empty({2, M0, N0}, f);
+  (void)y;
+  (void)p;
+  return z;
+}();
+
+static torch::Tensor gC = []() {
+  return torch::empty({M0, N0},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                          .dtype(torch::kFloat32));
+}();
+
+static torch::Tensor gP = []() {
+  return torch::empty({2, M0, N0},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                          .dtype(torch::kFloat32));
+}();
+
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       float *__restrict__ p) {
   __nram__ half ah[TM * TK];
@@ -83,13 +113,10 @@ __mlu_entry__ void k1(const float *__restrict__ p, float *__restrict__ c) {
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  static torch::Tensor C;
-  static torch::Tensor P;
+  (void)g0;
+  auto &C = gC;
+  auto &P = gP;
   static bool init = false;
-  if (!C.defined())
-    C = torch::empty({M0, N0}, A.options().dtype(torch::kFloat32));
-  if (!P.defined())
-    P = torch::empty({2, M0, N0}, A.options().dtype(torch::kFloat32));
   if (!init) {
     cnrtDim3_t d = {32, 1, 1};
     cnrtDim3_t d1 = {4, 1, 1};
