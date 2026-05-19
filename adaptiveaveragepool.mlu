@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 #define E0 64
-#define E1 32
+#define E1 64
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[512];
