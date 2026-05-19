@@ -92,7 +92,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
   int bb = (taskId >> 2) * BM;
   __nram__ half a[BM * H];
   __nram__ half h[BM * H];
-  __nram__ half at[BM * H];
   __nram__ float hf[BM * H];
   __nram__ half wb[H * N];
   __nram__ half u[BM * N];
@@ -123,9 +122,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
   __memcpy(wb, wi + (H + col) * k, G * k * sizeof(half), GDRAM2NRAM);
   __memcpy(wb + G * k, wi + (H * 2 + col) * k, G * k * sizeof(half),
            GDRAM2NRAM);
-  __bang_transpose(at, a, BM, k);
   __memcpy(ww, wb, N * k * sizeof(half), NRAM2WRAM);
-  __bang_conv(fu, at, ww, k, BM, 1, 1, 1, 1, 1, N);
+  __bang_conv(fu, a, ww, k, BM, 1, 1, 1, 1, 1, N);
   __memcpy(c0, bi + H + col, G * sizeof(half), GDRAM2NRAM);
   __memcpy(c0 + G, bi + H * 2 + col, G * sizeof(half), GDRAM2NRAM);
   __bang_half2float(fc, c0, N);
@@ -134,9 +132,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
   __memcpy(wb, wh + (H + col) * H, G * H * sizeof(half), GDRAM2NRAM);
   __memcpy(wb + G * H, wh + (H * 2 + col) * H, G * H * sizeof(half),
            GDRAM2NRAM);
-  __bang_transpose(at, h, BM, H);
   __memcpy(ww, wb, N * H * sizeof(half), NRAM2WRAM);
-  __bang_conv(fv, at, ww, H, BM, 1, 1, 1, 1, 1, N);
+  __bang_conv(fv, h, ww, H, BM, 1, 1, 1, 1, 1, N);
   __memcpy(c0, bh + H + col, G * sizeof(half), GDRAM2NRAM);
   __memcpy(c0 + G, bh + H * 2 + col, G * sizeof(half), GDRAM2NRAM);
   __bang_half2float(fc, c0, N);
@@ -152,16 +149,14 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
   __bang_active_sigmoid(fz, fz, BM * G);
 
   __memcpy(wb, wi + col * k, G * k * sizeof(half), GDRAM2NRAM);
-  __bang_transpose(at, a, BM, k);
   __memcpy(ww, wb, G * k * sizeof(half), NRAM2WRAM);
-  __bang_conv(fr, at, ww, k, BM, 1, 1, 1, 1, 1, G);
+  __bang_conv(fr, a, ww, k, BM, 1, 1, 1, 1, 1, G);
   __memcpy(c0, bi + col, G * sizeof(half), GDRAM2NRAM);
   __bang_half2float(fc, c0, G);
   __bang_cycle_add(fr, fr, fc, BM * G, G);
   __memcpy(wb, wh + col * H, G * H * sizeof(half), GDRAM2NRAM);
-  __bang_transpose(at, h, BM, H);
   __memcpy(ww, wb, G * H * sizeof(half), NRAM2WRAM);
-  __bang_conv(fh, at, ww, H, BM, 1, 1, 1, 1, 1, G);
+  __bang_conv(fh, h, ww, H, BM, 1, 1, 1, 1, 1, G);
   __memcpy(c0, bh + col, G * sizeof(half), GDRAM2NRAM);
   __bang_half2float(fc, c0, G);
   __bang_cycle_add(fh, fh, fc, BM * G, G);
