@@ -155,8 +155,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ ip,
   __nram__ float fn[BM * G];
   __nram__ float fh[BM * G];
   __nram__ float fc[N];
-  __wram__ half ww0[H * N];
-  __wram__ half ww1[H * N];
+  __wram__ half ww[H * N];
 
   for (int b = 0; b < BM; ++b) {
     int rb = bb + bo + b;
@@ -169,17 +168,16 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ ip,
     __memcpy(h + b * H, hp + rb * H, H * sizeof(half), GDRAM2NRAM);
   }
 
-  __memcpy(ww0, ip + gi * N * k, N * k * sizeof(half), GDRAM2WRAM);
-  __memcpy_async(ww1, wp + gi * N * H, N * H * sizeof(half), GDRAM2WRAM);
-  __bang_conv(fu, a, ww0, k, BM, 1, 1, 1, 1, 1, N);
+  __memcpy(ww, ip + gi * N * k, N * k * sizeof(half), GDRAM2WRAM);
+  __bang_conv(fu, a, ww, k, BM, 1, 1, 1, 1, 1, N);
   __memcpy(c0, bi + col, G * sizeof(half), GDRAM2NRAM);
   __memcpy(c0 + G, bi + H + col, G * sizeof(half), GDRAM2NRAM);
   __memcpy(c0 + G * 2, bi + H * 2 + col, G * sizeof(half), GDRAM2NRAM);
   __bang_half2float(fc, c0, N);
   __bang_cycle_add(fu, fu, fc, BM * N, N);
 
-  __sync_io_move_compute();
-  __bang_conv(fv, h, ww1, H, BM, 1, 1, 1, 1, 1, N);
+  __memcpy(ww, wp + gi * N * H, N * H * sizeof(half), GDRAM2WRAM);
+  __bang_conv(fv, h, ww, H, BM, 1, 1, 1, 1, 1, N);
   __memcpy(c0, bh + col, G * sizeof(half), GDRAM2NRAM);
   __memcpy(c0 + G, bh + H + col, G * sizeof(half), GDRAM2NRAM);
   __memcpy(c0 + G * 2, bh + H * 2 + col, G * sizeof(half), GDRAM2NRAM);
