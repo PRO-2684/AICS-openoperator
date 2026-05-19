@@ -40,7 +40,7 @@ static torch::Tensor g0 = []() {
 }();
 
 static torch::Tensor gy = []() {
-  return torch::zeros(
+  return torch::empty(
       {}, torch::TensorOptions()
               .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
               .dtype(torch::kHalf));
@@ -50,10 +50,9 @@ __mlu_entry__ void k0(const half *__restrict__ predictions,
                       const int64_t *__restrict__ targets,
                       half *__restrict__ out) {
   if (taskId == 0) {
-    __nram__ half base[1];
-    base[0] = (half)C0;
-    __bang_atomic_reduce_add(out, base, 1);
+    out[0] = (half)C0;
   }
+  __sync_all_ipu();
 
   int row0 = taskId * ROWS_PER_TASK;
   int base = row0 * COLS;
@@ -110,7 +109,7 @@ torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {TASKS, 1, 1};
 
-  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+  k0<<<dim, cnrtFuncTypeUnion8, queue>>>(
       reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(targets.data_ptr<int64_t>()),
       reinterpret_cast<half *>(gy.data_ptr<at::Half>()));
