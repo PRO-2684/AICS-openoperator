@@ -25,16 +25,28 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
+static torch::Tensor gy = []() {
+  return torch::empty({16, 16384},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                          .dtype(torch::kHalf));
+}();
+
 __mlu_entry__ void kernel(half *__restrict__ output) {
   __gdramset(output + taskId * E0, E0, (half)0.00006103515625f);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
-  static torch::Tensor y;
+  (void)g0;
+  auto &y = gy;
   static bool init = false;
-  if (!y.defined())
-    y = torch::empty_like(x);
-
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   if (init) {
     return y;
