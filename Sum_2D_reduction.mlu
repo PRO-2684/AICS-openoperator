@@ -52,9 +52,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
   __nram__ half a[E2];
   __nram__ float b[E2];
   __nram__ float c[32];
-  if (taskId < E0)
-    y[taskId] = 0.0f;
-  __sync_all_ipu();
   int r = taskId >> 1;
   int p = r * E1 + (taskId & 1) * E2;
   __memcpy(a, x + p, E2 * sizeof(half), GDRAM2NRAM);
@@ -67,7 +64,8 @@ torch::Tensor bang_func(torch::Tensor x) {
   (void)z;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {32, 1, 1};
-  k0<<<d, cnrtFuncTypeUnion8, queue>>>(
+  cnrtMemsetAsync(out.data_ptr<float>(), 0, E0 * sizeof(float), queue);
+  k0<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       out.data_ptr<float>());
   return out;
