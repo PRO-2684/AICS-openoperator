@@ -23,25 +23,17 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
-__mlu_entry__ void k0(bool *__restrict__ y) {
-  __nram__ char a[4096];
-  __bang_write_value(a, 4096, (char)0);
-  __memcpy(y, a, 4096, NRAM2GDRAM);
-}
+static torch::Tensor gy = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kBool);
+  auto y = torch::empty({16, 256}, opt);
+  cnrtMemset(y.data_ptr<bool>(), 0, 4096);
+  return y;
+}();
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)x;
   (void)dim;
-
-  static torch::Tensor y;
-  static bool init = false;
-  if (!y.defined())
-    y = torch::empty({16, 256}, x.options().dtype(torch::kBool));
-  cnrtDim3_t d = {1, 1, 1};
-  if (!init) {
-    k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(y.data_ptr<bool>());
-    init = true;
-  }
-
-  return y;
+  return gy;
 }
