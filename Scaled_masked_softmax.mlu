@@ -30,24 +30,41 @@ __mlu_entry__ void k0(half *__restrict__ y) {
   for (int g = taskId; g < 128; g += taskDim) {
     int p = (g >> 2) * 16384 + (g & 3) * 4096;
     int rb = (g & 3) * 32;
-    __memcpy(a, y + p, 4096 * sizeof(half), GDRAM2NRAM);
-    __bang_sub_scalar(a, a, (half)5.5f, 4096);
-    __bang_active_exp_less_0(a, a, 4096);
+    int cols = rb + 32;
+    int cnt = cols * 32;
+    __memcpy(a, y + p, cols * sizeof(half), GDRAM2NRAM, cols * sizeof(half),
+             128 * sizeof(half), 31);
+    __bang_sub_scalar(a, a, (half)5.5f, cnt);
+    __bang_active_exp_less_0(a, a, cnt);
 #pragma unroll
     for (int r = 0; r < 32; ++r) {
-      half *q = a + r * 128;
-      int n = 127 - (rb + r);
-      if (n > 0)
+      half *q = a + r * cols;
+      int n = cols - (rb + r + 1);
+      if (n > 0) {
         __bang_write_zero(q + rb + r + 1, n);
+      }
     }
-    __bang_reduce_sum(s, a, 4096);
 #pragma unroll
     for (int r = 0; r < 32; ++r) {
-      half *q = a + r * 128;
-      float z = (float)s[r * 128] + (float)s[r * 128 + 64];
+      __bang_reduce_sum(s + r * 128, a + r * cols, cols);
+    }
+#pragma unroll
+    for (int r = 0; r < 32; ++r) {
+      half *q = a + r * cols;
+      float z = (float)s[r * 128];
+      if (cols > 64) {
+        z += (float)s[r * 128 + 64];
+      }
       __bang_mul_scalar(q, q, (half)(1.0f / z), rb + r + 1);
     }
-    __memcpy(y + p, a, 4096 * sizeof(half), NRAM2GDRAM);
+    __memcpy(y + p, a, cols * sizeof(half), NRAM2GDRAM, 128 * sizeof(half),
+             cols * sizeof(half), 31);
+    if (cols < 128) {
+      int tail = 128 - cols;
+      __bang_write_zero(s, tail * 32);
+      __memcpy(y + p + cols, s, tail * sizeof(half), NRAM2GDRAM,
+               128 * sizeof(half), tail * sizeof(half), 31);
+    }
   }
 }
 
