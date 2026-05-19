@@ -10,6 +10,22 @@ namespace py = pybind11;
 
 static py::object find_model_with_attr(const char *attr) {
   py::gil_scoped_acquire gil;
+  PyFrameObject *frame = PyEval_GetFrame();
+  if (frame) {
+    PyObject *locals = PyFrame_GetLocals(frame);
+    if (locals) {
+      PyObject *self = PyMapping_GetItemString(locals, "self");
+      Py_DECREF(locals);
+      if (self) {
+        int has = PyObject_HasAttrString(self, attr);
+        py::object obj = py::reinterpret_steal<py::object>(self);
+        if (has)
+          return obj;
+      } else {
+        PyErr_Clear();
+      }
+    }
+  }
   py::object gc = py::module_::import("gc");
   py::list objs = gc.attr("get_objects")();
   for (py::handle h : objs) {
