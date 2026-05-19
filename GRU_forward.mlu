@@ -142,6 +142,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
   __memcpy(c0, bh + H + col, G * sizeof(half), GDRAM2NRAM);
   __memcpy(c0 + G, bh + H * 2 + col, G * sizeof(half), GDRAM2NRAM);
   __bang_half2float(fc, c0, N);
+  __bang_write_value(fc + G, G, 0.0f);
   __bang_cycle_add(fv, fv, fc, BM * N, N);
 
   __memcpy(fz, fu, G * sizeof(float), NRAM2NRAM, G * sizeof(float),
@@ -175,6 +176,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
   __memcpy(fh, fv + G, G * sizeof(float), NRAM2NRAM, G * sizeof(float),
            N * sizeof(float), BM - 1);
   __bang_mul(fh, fh, fr, BM * G);
+  __memcpy(c0, bh + H * 2 + col, G * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(fc, c0, G);
+  __bang_cycle_add(fh, fh, fc, BM * G, G);
   __bang_add(fn, fn, fh, BM * G);
   __bang_active_tanh(fn, fn, BM * G);
 
