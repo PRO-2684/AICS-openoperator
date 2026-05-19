@@ -14,8 +14,7 @@
 #define TR 4
 #define TC 4
 #define TT (TR * TC)
-#define GS 4
-#define KS 32768
+#define KS 65536
 
 
 static int g_dev = 0;
@@ -45,7 +44,7 @@ static torch::Tensor g0 = []() {
                .dtype(torch::kFloat32);
   auto z = torch::zeros({1}, h);
   auto y = torch::empty({M0, N0}, f);
-  auto p = torch::empty({GS, M0, N0}, f);
+  auto p = torch::empty({2, M0, N0}, f);
   (void)y;
   (void)p;
   return z;
@@ -59,7 +58,7 @@ static torch::Tensor gC = []() {
 }();
 
 static torch::Tensor gP = []() {
-  return torch::empty({GS, M0, N0},
+  return torch::empty({2, M0, N0},
                       torch::TensorOptions()
                           .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                           .dtype(torch::kFloat32));
@@ -75,7 +74,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   __nram__ float tmp[TM * TN];
   __wram__ half ww[TN * TK];
 
-  for (int id = taskId; id < TT * GS; id += taskDim) {
+  for (int id = taskId; id < TT * 2; id += taskDim) {
     int g = id / TT;
     int t = id - g * TT;
     int mi = (t / TC) * TM;
@@ -105,14 +104,9 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
 __mlu_entry__ void k1(const float *__restrict__ p, float *__restrict__ c) {
   __nram__ float a[16384];
   __nram__ float b[16384];
-  __nram__ float d[16384];
   for (int s = taskId * 16384; s < M0 * N0; s += taskDim * 16384) {
     __memcpy(a, p + s, 16384 * sizeof(float), GDRAM2NRAM);
     __memcpy(b, p + M0 * N0 + s, 16384 * sizeof(float), GDRAM2NRAM);
-    __bang_add(a, a, b, 16384);
-    __memcpy(b, p + 2 * M0 * N0 + s, 16384 * sizeof(float), GDRAM2NRAM);
-    __memcpy(d, p + 3 * M0 * N0 + s, 16384 * sizeof(float), GDRAM2NRAM);
-    __bang_add(b, b, d, 16384);
     __bang_add(a, a, b, 16384);
     __memcpy(c + s, a, 16384 * sizeof(float), NRAM2GDRAM);
   }
@@ -124,7 +118,7 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto &P = gP;
   static bool init = false;
   if (!init) {
-    cnrtDim3_t d = {64, 1, 1};
+    cnrtDim3_t d = {32, 1, 1};
     cnrtDim3_t d1 = {4, 1, 1};
     cnrtQueue_t q = torch_mlu::getCurMLUStream();
     k0<<<d, cnrtFuncTypeBlock, q>>>(
