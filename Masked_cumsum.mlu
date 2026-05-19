@@ -50,10 +50,14 @@ __mlu_func__ void k1(float *__restrict__ a, float *__restrict__ b) {
 }
 
 __mlu_func__ void k2(half *__restrict__ h, int8_t *__restrict__ c,
-                     float *__restrict__ a, float *__restrict__ b) {
-  __bang_half2float(a, h, E1);
-  __bang_int82float(b, c, E1, 0);
-  __bang_mul(a, a, b, E1);
+                     float *__restrict__ a, float *__restrict__ b, int z) {
+  if (z) {
+    __bang_write_value(h + E1, E3 - E1, (half)0.0f);
+    __bang_write_value(c + E1, E3 - E1, (int8_t)0);
+  }
+  __bang_half2float(a, h, E3);
+  __bang_int82float(b, c, E3, 0);
+  __bang_mul(a, a, b, E3);
   k1(a, b);
 }
 
@@ -122,9 +126,9 @@ __mlu_entry__ void k0(const half *__restrict__ x,
       }
     }
     if (q == 0)
-      k2(h0, c0, a0, b0);
+      k2(h0, c0, a0, b0, r + 1 >= E0);
     else
-      k2(h1, c1, a1, b1);
+      k2(h1, c1, a1, b1, r + 1 >= E0);
     __sync_io_move_compute();
     if (q == 0)
       __memcpy_async(y + r * E1, a0, E1 * sizeof(float), NRAM2GDRAM);
