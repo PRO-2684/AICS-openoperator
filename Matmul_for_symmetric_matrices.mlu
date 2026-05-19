@@ -9,12 +9,12 @@
 #define N0 4096
 #define K0 4096
 #define TM 128
-#define TN 128
+#define TN 256
 #define TK 128
 #define TR 64
-#define RB 8
-#define TG 4
-#define TC 32
+#define RB 3
+#define TG 11
+#define TC 16
 #define TT (TG * TC)
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
@@ -104,7 +104,7 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto &C = gC;
   static bool init = false;
   if (!init) {
-    cnrtDim3_t d = {128, 1, 1};
+    cnrtDim3_t d = {96, 1, 1};
     k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
         reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
