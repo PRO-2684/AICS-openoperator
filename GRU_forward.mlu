@@ -94,6 +94,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
   __nram__ half h[BM * H];
   __nram__ float hf[BM * H];
   __nram__ half wb[H * N];
+  __nram__ half wf[H * N];
   __nram__ half u[BM * N];
   __nram__ half c0[N];
   __nram__ float fu[BM * N];
@@ -122,7 +123,17 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
   __memcpy(wb, wi + (H + col) * k, G * k * sizeof(half), GDRAM2NRAM);
   __memcpy(wb + G * k, wi + (H * 2 + col) * k, G * k * sizeof(half),
            GDRAM2NRAM);
-  __memcpy(ww, wb, N * k * sizeof(half), NRAM2WRAM);
+  int p = 0;
+  for (int i = 0; i < 64; i += 4) {
+    for (int j = 0; j < N / 64; ++j) {
+      for (int m = 0; m < 4; ++m) {
+        int o = i + j * 64 + m;
+        __memcpy(wf + p, wb + o * k, k * sizeof(half), NRAM2NRAM);
+        p += k;
+      }
+    }
+  }
+  __memcpy(ww, wf, N * k * sizeof(half), NRAM2WRAM);
   __bang_conv(fu, a, ww, k, BM, 1, 1, 1, 1, 1, N);
   __memcpy(c0, bi + H + col, G * sizeof(half), GDRAM2NRAM);
   __memcpy(c0 + G, bi + H * 2 + col, G * sizeof(half), GDRAM2NRAM);
@@ -132,7 +143,17 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
   __memcpy(wb, wh + (H + col) * H, G * H * sizeof(half), GDRAM2NRAM);
   __memcpy(wb + G * H, wh + (H * 2 + col) * H, G * H * sizeof(half),
            GDRAM2NRAM);
-  __memcpy(ww, wb, N * H * sizeof(half), NRAM2WRAM);
+  p = 0;
+  for (int i = 0; i < 64; i += 4) {
+    for (int j = 0; j < N / 64; ++j) {
+      for (int m = 0; m < 4; ++m) {
+        int o = i + j * 64 + m;
+        __memcpy(wf + p, wb + o * H, H * sizeof(half), NRAM2NRAM);
+        p += H;
+      }
+    }
+  }
+  __memcpy(ww, wf, N * H * sizeof(half), NRAM2WRAM);
   __bang_conv(fv, h, ww, H, BM, 1, 1, 1, 1, 1, N);
   __memcpy(c0, bh + H + col, G * sizeof(half), GDRAM2NRAM);
   __memcpy(c0 + G, bh + H * 2 + col, G * sizeof(half), GDRAM2NRAM);
@@ -149,13 +170,33 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ wi,
   __bang_active_sigmoid(fz, fz, BM * G);
 
   __memcpy(wb, wi + col * k, G * k * sizeof(half), GDRAM2NRAM);
-  __memcpy(ww, wb, G * k * sizeof(half), NRAM2WRAM);
+  p = 0;
+  for (int i = 0; i < 64; i += 4) {
+    for (int j = 0; j < G / 64; ++j) {
+      for (int m = 0; m < 4; ++m) {
+        int o = i + j * 64 + m;
+        __memcpy(wf + p, wb + o * k, k * sizeof(half), NRAM2NRAM);
+        p += k;
+      }
+    }
+  }
+  __memcpy(ww, wf, G * k * sizeof(half), NRAM2WRAM);
   __bang_conv(fr, a, ww, k, BM, 1, 1, 1, 1, 1, G);
   __memcpy(c0, bi + col, G * sizeof(half), GDRAM2NRAM);
   __bang_half2float(fc, c0, G);
   __bang_cycle_add(fr, fr, fc, BM * G, G);
   __memcpy(wb, wh + col * H, G * H * sizeof(half), GDRAM2NRAM);
-  __memcpy(ww, wb, G * H * sizeof(half), NRAM2WRAM);
+  p = 0;
+  for (int i = 0; i < 64; i += 4) {
+    for (int j = 0; j < G / 64; ++j) {
+      for (int m = 0; m < 4; ++m) {
+        int o = i + j * 64 + m;
+        __memcpy(wf + p, wb + o * H, H * sizeof(half), NRAM2NRAM);
+        p += H;
+      }
+    }
+  }
+  __memcpy(ww, wf, G * H * sizeof(half), NRAM2WRAM);
   __bang_conv(fh, h, ww, H, BM, 1, 1, 1, 1, 1, G);
   __memcpy(c0, bh + col, G * sizeof(half), GDRAM2NRAM);
   __bang_half2float(fc, c0, G);
