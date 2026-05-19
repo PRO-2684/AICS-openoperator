@@ -8,11 +8,11 @@
 #define M0 256
 #define N0 256
 #define K0 131072
-#define TM 128
-#define TN 128
+#define TM 64
+#define TN 256
 #define TK 128
-#define TR 2
-#define TC 2
+#define TR 4
+#define TC 1
 #define TT (TR * TC)
 #define KS 16384
 
