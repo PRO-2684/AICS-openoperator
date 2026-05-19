@@ -8,10 +8,10 @@
 #define M0 16384
 #define N0 16384
 #define K0 32
-#define TM 64
+#define TM 128
 #define TN 1024
 #define TK 32
-#define TR 256
+#define TR 128
 #define TC 16
 #define TT (TR * TC)
 
@@ -56,11 +56,11 @@ static torch::Tensor gC = []() {
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       float *__restrict__ c) {
-  __nram__ half ah[2 * TM * TK];
+  __nram__ half ah[TM * TK];
   __nram__ half bh[TK * TN];
   __nram__ half bt[TN * TK];
   __nram__ half hf[TN * TK];
-  __nram__ float tmp[2 * TM * TN];
+  __nram__ float tmp[TM * TN];
   __wram__ half ww[TN * TK];
 
   int col = taskId % TC;
@@ -78,29 +78,12 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   if (row >= TR)
     return;
 
-  __memcpy(ah, a + row * TM * K0, TK * sizeof(half), GDRAM2NRAM,
-           TK * sizeof(half), K0 * sizeof(half), TM - 1);
-
-  int cur = 0;
-  int next = row + lanes;
-  while (true) {
-    if (next < TR) {
-      __memcpy_async(ah + (1 - cur) * TM * TK, a + next * TM * K0,
-                     TK * sizeof(half), GDRAM2NRAM, TK * sizeof(half),
-                     K0 * sizeof(half), TM - 1);
-    }
-    __bang_matmul(tmp + cur * TM * TN, ah + cur * TM * TK, ww, TM, TK, TN);
-    __asm__ volatile("sync;");
-    __memcpy_async(c + row * TM * N0 + nj, tmp + cur * TM * TN,
-                   TN * sizeof(float), NRAM2GDRAM, N0 * sizeof(float),
-                   TN * sizeof(float), TM - 1);
-    if (next >= TR) {
-      __asm__ volatile("sync;");
-      break;
-    }
-    row = next;
-    next += lanes;
-    cur = 1 - cur;
+  for (; row < TR; row += lanes) {
+    __memcpy(ah, a + row * TM * K0, TK * sizeof(half), GDRAM2NRAM,
+             TK * sizeof(half), K0 * sizeof(half), TM - 1);
+    __bang_matmul(tmp, ah, ww, TM, TK, TN);
+    __memcpy(c + row * TM * N0 + nj, tmp, TN * sizeof(float), NRAM2GDRAM,
+             N0 * sizeof(float), TN * sizeof(float), TM - 1);
   }
 }
 
@@ -109,7 +92,7 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto &C = gC;
   static bool init = false;
   if (!init) {
-    cnrtDim3_t d = {16, 2, 1};
+    cnrtDim3_t d = {32, 1, 1};
     k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
         reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
