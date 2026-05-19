@@ -27,6 +27,13 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
                       int *__restrict__ y) {
   __nram__ half a[E1 + 2];
@@ -60,6 +67,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
 
 torch::Tensor bang_func(torch::Tensor input, double v) {
   (void)v;
+  (void)g0;
   static torch::Tensor out;
   static torch::Tensor work2;
   static bool init = false;
