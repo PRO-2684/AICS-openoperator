@@ -70,6 +70,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                      K0 * sizeof(half), TM - 1);
     }
     __bang_matmul(tmp + cur * TM * TN, ah + cur * TM * TK, ww, TM, TK, TN);
+    __asm__ volatile("sync;");
     __bang_float2half_rn(oh, tmp + cur * TM * TN, TM * TN);
     __asm__ volatile("sync;");
     __memcpy_async(c + row * TM * N0 + nj, oh, TN * sizeof(half), NRAM2GDRAM,
