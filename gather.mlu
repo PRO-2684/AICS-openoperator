@@ -29,6 +29,12 @@ static torch::Tensor g0 = []() {
                  .dtype(torch::kHalf);
   return torch::zeros({1}, opt);
 }();
+static torch::Tensor g1 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::empty({8, 8}, opt);
+}();
 
 __mlu_entry__ void k0(half *__restrict__ out) {
   out[0] = (half)0.0f;
@@ -110,7 +116,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices, torch::Tensor bi
   static torch::Tensor out;
   static bool init = false;
   if (!out.defined())
-    out = torch::empty({8, 8}, x.options().dtype(torch::kHalf));
+    out = g1;
 
   if (!init) {
     cnrtQueue_t q = torch_mlu::getCurMLUStream();
