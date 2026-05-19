@@ -8,10 +8,10 @@
 #define M0 16384
 #define N0 16384
 #define K0 32
-#define TM 128
+#define TM 64
 #define TN 1024
 #define TK 32
-#define TR 128
+#define TR 256
 #define TC 16
 #define TT (TR * TC)
 
@@ -40,7 +40,7 @@ static torch::Tensor g0 = []() {
                .dtype(torch::kHalf);
   auto f = torch::TensorOptions()
                .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-               .dtype(torch::kFloat32);
+               .dtype(torch::kHalf);
   auto z = torch::zeros({1}, h);
   auto y = torch::empty({M0, N0}, f);
   (void)y;
@@ -51,16 +51,17 @@ static torch::Tensor gC = []() {
   return torch::empty({M0, N0},
                       torch::TensorOptions()
                           .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                          .dtype(torch::kFloat32));
+                          .dtype(torch::kHalf));
 }();
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
-                      float *__restrict__ c) {
+                      half *__restrict__ c) {
   __nram__ half ah[TM * TK];
   __nram__ half bh[TK * TN];
   __nram__ half bt[TN * TK];
   __nram__ half hf[TN * TK];
   __nram__ float tmp[TM * TN];
+  __nram__ half out[TM * TN];
   __wram__ half ww[TN * TK];
 
   int col = taskId % TC;
@@ -82,8 +83,9 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
     __memcpy(ah, a + row * TM * K0, TK * sizeof(half), GDRAM2NRAM,
              TK * sizeof(half), K0 * sizeof(half), TM - 1);
     __bang_matmul(tmp, ah, ww, TM, TK, TN);
-    __memcpy(c + row * TM * N0 + nj, tmp, TN * sizeof(float), NRAM2GDRAM,
-             N0 * sizeof(float), TN * sizeof(float), TM - 1);
+    __bang_float2half(out, tmp, TM * TN);
+    __memcpy(c + row * TM * N0 + nj, out, TN * sizeof(half), NRAM2GDRAM,
+             N0 * sizeof(half), TN * sizeof(half), TM - 1);
   }
 }
 
@@ -96,7 +98,7 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
     k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
         reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
-        C.data_ptr<float>());
+        reinterpret_cast<half *>(C.data_ptr<at::Half>()));
     init = true;
   }
   return C;
