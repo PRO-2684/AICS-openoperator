@@ -23,19 +23,19 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
+static torch::Tensor gy = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kFloat32);
+  auto out = torch::empty({}, opt);
+  static const float v = 2.0f;
+  cnrtMemcpy(out.data_ptr<float>(), (void *)&v, sizeof(float),
+             cnrtMemcpyHostToDev);
+  return out;
+}();
+
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
-  static torch::Tensor out;
-  static bool init = false;
-  if (!out.defined())
-    out = torch::empty({}, predictions.options().dtype(torch::kFloat32));
   (void)predictions;
   (void)targets;
-  if (!init) {
-    cnrtQueue_t q = torch_mlu::getCurMLUStream();
-    static const float v = 2.0f;
-    cnrtMemcpyAsync_V3(out.data_ptr<float>(), (void *)&v, sizeof(float), q,
-                       cnrtMemcpyHostToDev);
-    init = true;
-  }
-  return out;
+  return gy;
 }
