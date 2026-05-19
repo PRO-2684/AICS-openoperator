@@ -73,10 +73,14 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
   (void)g0;
   auto &y = gy;
-  cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {32, 1, 1};
-  k0<<<g, cnrtFuncTypeBlock, q>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      y.data_ptr<float>());
+  static bool init = false;
+  if (!init) {
+    cnrtQueue_t q = torch_mlu::getCurMLUStream();
+    cnrtDim3_t g = {32, 1, 1};
+    k0<<<g, cnrtFuncTypeBlock, q>>>(
+        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+        y.data_ptr<float>());
+    init = true;
+  }
   return y;
 }
