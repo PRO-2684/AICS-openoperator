@@ -27,6 +27,13 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
+static torch::Tensor z = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
 __mlu_entry__ void k0(const half *__restrict__ values,
                       const int64_t *__restrict__ index,
                       half *__restrict__ out, int k) {
@@ -52,6 +59,7 @@ __mlu_entry__ void k0(const half *__restrict__ values,
 
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor values,
                         torch::Tensor index) {
+  (void)z;
   int k = (int)index.size(0);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {E1, 1, 1};
