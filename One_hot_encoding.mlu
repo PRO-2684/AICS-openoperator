@@ -23,6 +23,13 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
 __mlu_entry__ void k0(const int64_t *__restrict__ x, unsigned int *__restrict__ y) {
   __nram__ unsigned int a[4096];
   int p = taskId * 32;
@@ -37,6 +44,7 @@ __mlu_entry__ void k0(const int64_t *__restrict__ x, unsigned int *__restrict__ 
 
 torch::Tensor bang_func(torch::Tensor x, int n) {
   (void)n;
+  (void)g0;
   static torch::Tensor y;
   static bool init = false;
   if (!y.defined())

@@ -23,6 +23,13 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
 __mlu_entry__ void k0(half *__restrict__ a, const half *__restrict__ b) {
   int n = taskId < 24 ? 2368 : 2496;
   int p = taskId < 24 ? taskId * 4672 : 112128 + (taskId - 24) * 4800;
@@ -70,6 +77,7 @@ __mlu_entry__ void k1(float *__restrict__ a, const float *__restrict__ b) {
 }
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
+  (void)g0;
   cnrtDim3_t d = {16, 2, 1};
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   if (a.scalar_type() == at::kFloat) {

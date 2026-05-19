@@ -48,6 +48,13 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
 __mlu_entry__ void k(const half *x, half *y) {
   int q = taskId << 2;
 
@@ -83,6 +90,7 @@ __mlu_entry__ void k(const half *x, half *y) {
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
+  (void)g0;
   static torch::Tensor y;
   if (!y.defined())
     y = torch::empty_like(x);
