@@ -46,6 +46,31 @@ __mlu_entry__ void kprepb(const half *__restrict__ b, half *__restrict__ p) {
   }
 }
 
+__mlu_entry__ void kprep2(const half *__restrict__ a, const half *__restrict__ b,
+                          half *__restrict__ pa, half *__restrict__ pb) {
+  __nram__ half ah[TK * TM];
+  __nram__ half af[TM * TK];
+  __nram__ half bh[TN * TK];
+  __nram__ half hf[TN * TK];
+  for (int t = taskId; t < TG * RB * (K0 / TK); t += taskDim) {
+    int mi = (t / (K0 / TK)) * TM;
+    int kk = (t % (K0 / TK)) * TK;
+    __memcpy(ah, a + kk * AM + mi, TM * sizeof(half), GDRAM2NRAM,
+             TM * sizeof(half), AM * sizeof(half), TK - 1);
+    __bang_transpose(af, ah, TK, TM);
+    __memcpy(pa + mi * K0 + kk, af, TK * sizeof(half), NRAM2GDRAM,
+             K0 * sizeof(half), TK * sizeof(half), TM - 1);
+  }
+  for (int t = taskId; t < TC * (K0 / TK); t += taskDim) {
+    int nj = (t / (K0 / TK)) * TN;
+    int kk = (t % (K0 / TK)) * TK;
+    __memcpy(bh, b + nj * BK + kk, TK * sizeof(half), GDRAM2NRAM,
+             TK * sizeof(half), BK * sizeof(half), TN - 1);
+    __bang_reshape_filter(hf, bh, TN, 1, 1, TK);
+    __memcpy(pb + t * TN * TK, hf, TN * TK * sizeof(half), NRAM2GDRAM);
+  }
+}
+
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       float *__restrict__ c) {
   __nram__ half af[TM * TK];
@@ -137,13 +162,13 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto &Q = gB;
   cnrtDim3_t d = {16, 2, 1};
   cnrtDim3_t p = {128, 1, 1};
-  kprep<<<p, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  kprep2<<<p, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(P.data_ptr<at::Half>()));
-  kprepb<<<p, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(P.data_ptr<at::Half>()),
       reinterpret_cast<half *>(Q.data_ptr<at::Half>()));
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  k0<<<d, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(P.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(Q.data_ptr<at::Half>()),
       C.data_ptr<float>());
