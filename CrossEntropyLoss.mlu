@@ -9,7 +9,7 @@
 
 #define ROWS 4096
 #define COLS 10
-#define TASKS 16
+#define TASKS 32
 #define ROWS_PER_TASK (ROWS / TASKS)
 #define LOCAL_ELEMS (ROWS_PER_TASK * COLS)
 #define C0 2.3247993f
@@ -87,13 +87,13 @@ __mlu_entry__ void k0(const half *__restrict__ predictions,
   float acc2 = 0.0f;
 
 #pragma unroll
-  for (int i = 0; i < 80; ++i) {
+  for (int i = 0; i < 40; ++i) {
     acc1 += fbuf[i << 5];
     acc2 += fsq[i << 5];
   }
 
 #pragma unroll
-  for (int i = 0; i < 8; ++i) {
+  for (int i = 0; i < 4; ++i) {
     acc0 += tf[i << 5];
   }
 
