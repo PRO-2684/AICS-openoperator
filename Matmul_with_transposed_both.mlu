@@ -33,11 +33,22 @@ __mlu_entry__ void kprep(const half *__restrict__ a, half *__restrict__ p) {
   }
 }
 
+__mlu_entry__ void kprepb(const half *__restrict__ b, half *__restrict__ p) {
+  __nram__ half bh[TN * TK];
+  __nram__ half hf[TN * TK];
+  for (int t = taskId; t < TC * (K0 / TK); t += taskDim) {
+    int nj = (t / (K0 / TK)) * TN;
+    int kk = (t % (K0 / TK)) * TK;
+    __memcpy(bh, b + nj * BK + kk, TK * sizeof(half), GDRAM2NRAM,
+             TK * sizeof(half), BK * sizeof(half), TN - 1);
+    __bang_reshape_filter(hf, bh, TN, 1, 1, TK);
+    __memcpy(p + t * TN * TK, hf, TN * TK * sizeof(half), NRAM2GDRAM);
+  }
+}
+
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       float *__restrict__ c) {
-  __nram__ half bh[TN * TK];
   __nram__ half af[TM * TK];
-  __nram__ half hf[TN * TK];
   __nram__ float acc[RB * TM * TN];
   __nram__ float tmp[TM * TN];
   __wram__ half ww[TN * TK];
@@ -48,10 +59,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
 
     __bang_write_zero(acc, RB * TM * TN);
     for (int kk = 0; kk < K0; kk += TK) {
-      __memcpy(bh, b + nj * BK + kk, TK * sizeof(half), GDRAM2NRAM,
-               TK * sizeof(half), BK * sizeof(half), TN - 1);
-      __bang_reshape_filter(hf, bh, TN, 1, 1, TK);
-      __memcpy(ww, hf, TN * TK * sizeof(half), NRAM2WRAM);
+      int wi = (t / TG) * (K0 / TK) + kk / TK;
+      __memcpy(ww, b + wi * TN * TK, TN * TK * sizeof(half), GDRAM2WRAM);
       for (int rb = 0; rb < RB; ++rb) {
         int mi = base_m + rb * TM;
         __memcpy(af, a + mi * K0 + kk, TK * sizeof(half), GDRAM2NRAM,
@@ -114,18 +123,29 @@ static torch::Tensor gA = []() {
                           .dtype(torch::kHalf));
 }();
 
+static torch::Tensor gB = []() {
+  return torch::empty({TC * (K0 / TK) * TN * TK},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                          .dtype(torch::kHalf));
+}();
+
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   (void)g0;
   auto &C = gC;
   auto &P = gA;
+  auto &Q = gB;
   cnrtDim3_t d = {16, 2, 1};
   cnrtDim3_t p = {128, 1, 1};
   kprep<<<p, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
       reinterpret_cast<half *>(P.data_ptr<at::Half>()));
+  kprepb<<<p, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(Q.data_ptr<at::Half>()));
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(P.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(Q.data_ptr<at::Half>()),
       C.data_ptr<float>());
   return C;
 }
