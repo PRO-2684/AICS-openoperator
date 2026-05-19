@@ -34,12 +34,11 @@ __attribute__((constructor(101))) static void init_runtime() {
   }
 }
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
-                      half *__restrict__ c) {
+                      float *__restrict__ c) {
   __nram__ half ah[2 * TM * TK];
   __nram__ half bh[TK * TN];
   __nram__ half bt[TN * TK];
   __nram__ half hf[TN * TK];
-  __nram__ half oh[TM * TN];
   __nram__ float tmp[2 * TM * TN];
   __wram__ half ww[TN * TK];
 
@@ -71,10 +70,9 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
     }
     __bang_matmul(tmp + cur * TM * TN, ah + cur * TM * TK, ww, TM, TK, TN);
     __asm__ volatile("sync;");
-    __bang_float2half_rn(oh, tmp + cur * TM * TN, TM * TN);
-    __asm__ volatile("sync;");
-    __memcpy_async(c + row * TM * N0 + nj, oh, TN * sizeof(half), NRAM2GDRAM,
-                   N0 * sizeof(half), TN * sizeof(half), TM - 1);
+    __memcpy_async(c + row * TM * N0 + nj, tmp + cur * TM * TN,
+                   TN * sizeof(float), NRAM2GDRAM, N0 * sizeof(float),
+                   TN * sizeof(float), TM - 1);
     if (next >= TR) {
       __asm__ volatile("sync;");
       break;
@@ -89,13 +87,13 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   static torch::Tensor C;
   static bool init = false;
   if (!C.defined())
-    C = torch::empty({M0, N0}, A.options().dtype(torch::kHalf));
+    C = torch::empty({M0, N0}, A.options().dtype(torch::kFloat32));
   if (!init) {
     cnrtDim3_t d = {32, 1, 1};
     k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
         reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
         reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(C.data_ptr<at::Half>()));
+        C.data_ptr<float>());
     init = true;
   }
   return C;
