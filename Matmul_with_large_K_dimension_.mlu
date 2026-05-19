@@ -118,7 +118,7 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto &P = gP;
   static bool init = false;
   if (!init) {
-    cnrtDim3_t d = {16, 2, 1};
+    cnrtDim3_t d = {8, 4, 1};
     cnrtDim3_t d1 = {4, 1, 1};
     cnrtQueue_t q = torch_mlu::getCurMLUStream();
     k0<<<d, cnrtFuncTypeBlock, q>>>(
