@@ -39,11 +39,19 @@ static torch::Tensor g0 = []() {
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[E3];
-  __nram__ half b[E4 + 48];
+  __nram__ half z[512];
+  __bang_write_zero(z, 512);
   for (int g = taskId; g < E2; g += taskDim) {
+    half *o = y + g * E4;
     __memcpy(a, x + g * E3, E3 * sizeof(half), GDRAM2NRAM);
-    __bang_pad(b, a, 1, E0, E0, 2, 2, 2, 2);
-    __memcpy(y + g * E4, b, E4 * sizeof(half), NRAM2GDRAM);
+    __memcpy(o, z, 264 * sizeof(half), NRAM2GDRAM);
+    __memcpy(o + 130 * E1, z, 264 * sizeof(half), NRAM2GDRAM);
+    __memcpy(o + 2 * E1, z, 2 * sizeof(half), NRAM2GDRAM,
+             E1 * sizeof(half), 2 * sizeof(half), 127);
+    __memcpy(o + 2 * E1 + 130, z, 2 * sizeof(half), NRAM2GDRAM,
+             E1 * sizeof(half), 2 * sizeof(half), 127);
+    __memcpy(o + 2 * E1 + 2, a, E0 * sizeof(half), NRAM2GDRAM,
+             E1 * sizeof(half), E0 * sizeof(half), 127);
   }
 }
 
