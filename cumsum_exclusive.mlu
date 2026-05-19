@@ -109,9 +109,13 @@ static torch::Tensor g0 = []() {
   auto h = torch::TensorOptions()
                .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                .dtype(torch::kHalf);
-  auto a = torch::empty({128, 4000}, h);
-  auto b = torch::empty({128, 4000}, h);
-  return a + b;
+  auto f = torch::TensorOptions()
+               .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+               .dtype(torch::kFloat32);
+  auto c = torch::zeros({1}, h);
+  auto d = torch::empty({128, 4000}, f);
+  (void)d;
+  return c;
 }();
 
 static torch::Tensor gy = []() {
