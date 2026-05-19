@@ -96,19 +96,9 @@ static torch::Tensor g0 = []() {
   auto h = torch::TensorOptions()
                .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                .dtype(torch::kHalf);
-  auto i = torch::TensorOptions()
-               .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-               .dtype(torch::kInt8);
-  auto f = torch::TensorOptions()
-               .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-               .dtype(torch::kFloat32);
   auto c = torch::zeros({1}, h);
   auto d = torch::empty({256, 1024}, h);
-  auto e = torch::empty({TC * TN * TK}, i);
-  auto m = torch::empty({N0}, f);
   (void)d;
-  (void)e;
-  (void)m;
   return c;
 }();
 
@@ -117,20 +107,6 @@ static torch::Tensor gy = []() {
                       torch::TensorOptions()
                           .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                           .dtype(torch::kHalf));
-}();
-
-static torch::Tensor gwc = []() {
-  return torch::empty({TC * TN * TK},
-                      torch::TensorOptions()
-                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                          .dtype(torch::kInt8));
-}();
-
-static torch::Tensor gbc = []() {
-  return torch::empty({N0},
-                      torch::TensorOptions()
-                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                          .dtype(torch::kFloat32));
 }();
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, torch::Tensor b) {
