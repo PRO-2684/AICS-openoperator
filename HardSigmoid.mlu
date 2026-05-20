@@ -11,8 +11,10 @@
 __mlu_entry__ void hardsigmoid_half_kernel(half *__restrict__ input) {
   __nram__ half buf0[CHUNK_ELEMS];
   __nram__ half tmp0[CHUNK_ELEMS];
+  __nram__ half aux0[CHUNK_ELEMS];
   __nram__ half buf1[CHUNK_ELEMS];
   __nram__ half tmp1[CHUNK_ELEMS];
+  __nram__ half aux1[CHUNK_ELEMS];
 
   const uint32_t base = taskId * ELEMS_PER_TASK;
   const half *in0 = (const half *)__builtin_assume_aligned(input + base, 512);
@@ -28,21 +30,23 @@ __mlu_entry__ void hardsigmoid_half_kernel(half *__restrict__ input) {
   __memcpy(buf1, in1, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
 
   __bang_add_scalar(buf0, buf0, (half)3.0f, CHUNK_ELEMS);
-  __bang_add_scalar(tmp0, buf0, (half)-6.0f, CHUNK_ELEMS);
-  __bang_active_relu(buf0, buf0, CHUNK_ELEMS);
-  __bang_active_relu(tmp0, tmp0, CHUNK_ELEMS);
-  __bang_sub(buf0, buf0, tmp0, CHUNK_ELEMS);
-  __bang_mul_scalar(buf0, buf0, (half)(1.0f / 6.0f), CHUNK_ELEMS);
+  __bang_abs(tmp0, buf0, CHUNK_ELEMS);
+  __bang_add_scalar(aux0, buf0, (half)-6.0f, CHUNK_ELEMS);
+  __bang_abs(aux0, aux0, CHUNK_ELEMS);
+  __bang_sub(buf0, tmp0, aux0, CHUNK_ELEMS);
+  __bang_add_scalar(buf0, buf0, (half)6.0f, CHUNK_ELEMS);
+  __bang_mul_scalar(buf0, buf0, (half)(1.0f / 12.0f), CHUNK_ELEMS);
   __sync_io_move_compute();
 
   __memcpy(out0, buf0, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
 
   __bang_add_scalar(buf1, buf1, (half)3.0f, CHUNK_ELEMS);
-  __bang_add_scalar(tmp1, buf1, (half)-6.0f, CHUNK_ELEMS);
-  __bang_active_relu(buf1, buf1, CHUNK_ELEMS);
-  __bang_active_relu(tmp1, tmp1, CHUNK_ELEMS);
-  __bang_sub(buf1, buf1, tmp1, CHUNK_ELEMS);
-  __bang_mul_scalar(buf1, buf1, (half)(1.0f / 6.0f), CHUNK_ELEMS);
+  __bang_abs(tmp1, buf1, CHUNK_ELEMS);
+  __bang_add_scalar(aux1, buf1, (half)-6.0f, CHUNK_ELEMS);
+  __bang_abs(aux1, aux1, CHUNK_ELEMS);
+  __bang_sub(buf1, tmp1, aux1, CHUNK_ELEMS);
+  __bang_add_scalar(buf1, buf1, (half)6.0f, CHUNK_ELEMS);
+  __bang_mul_scalar(buf1, buf1, (half)(1.0f / 12.0f), CHUNK_ELEMS);
   __sync_io_move_compute();
 
   __memcpy(out1, buf1, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
