@@ -14,7 +14,7 @@
 #define TR 4
 #define TC 1
 #define TT (TR * TC)
-#define KS 32768
+#define KS 16384
 
 
 static int g_dev = 0;
@@ -44,7 +44,7 @@ static torch::Tensor g0 = []() {
                .dtype(torch::kFloat32);
   auto z = torch::zeros({1}, h);
   auto y = torch::empty({M0, N0}, f);
-  auto p = torch::empty({4, M0, N0}, f);
+  auto p = torch::empty({8, M0, N0}, f);
   (void)y;
   (void)p;
   return z;
@@ -58,7 +58,7 @@ static torch::Tensor gC = []() {
 }();
 
 static torch::Tensor gP = []() {
-  return torch::empty({4, M0, N0},
+  return torch::empty({8, M0, N0},
                       torch::TensorOptions()
                           .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                           .dtype(torch::kFloat32));
@@ -92,7 +92,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   __nram__ float tmp[TM * TN];
   __wram__ half ww[TN * TK];
 
-  for (int id = taskId; id < TT * 4; id += taskDim) {
+  for (int id = taskId; id < TT * 8; id += taskDim) {
     int g = id / TT;
     int t = id - g * TT;
     int mi = (t / TC) * TM;
@@ -125,6 +125,14 @@ __mlu_entry__ void k1(const float *__restrict__ p, float *__restrict__ c) {
     __memcpy(b, p + 2 * M0 * N0 + s, 16384 * sizeof(float), GDRAM2NRAM);
     __bang_add(a, a, b, 16384);
     __memcpy(b, p + 3 * M0 * N0 + s, 16384 * sizeof(float), GDRAM2NRAM);
+    __bang_add(a, a, b, 16384);
+    __memcpy(b, p + 4 * M0 * N0 + s, 16384 * sizeof(float), GDRAM2NRAM);
+    __bang_add(a, a, b, 16384);
+    __memcpy(b, p + 5 * M0 * N0 + s, 16384 * sizeof(float), GDRAM2NRAM);
+    __bang_add(a, a, b, 16384);
+    __memcpy(b, p + 6 * M0 * N0 + s, 16384 * sizeof(float), GDRAM2NRAM);
+    __bang_add(a, a, b, 16384);
+    __memcpy(b, p + 7 * M0 * N0 + s, 16384 * sizeof(float), GDRAM2NRAM);
     __bang_add(a, a, b, 16384);
     __memcpy(c + s, a, 16384 * sizeof(float), NRAM2GDRAM);
   }
