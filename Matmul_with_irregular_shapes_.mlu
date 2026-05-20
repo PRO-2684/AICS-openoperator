@@ -9,12 +9,12 @@
 #define N0 5921
 #define K0 2949
 #define TM 64
-#define TN 512
+#define TN 640
 #define TK 128
 #define TR 129
-#define RB 4
-#define TG 33
-#define TC 12
+#define RB 3
+#define TG 43
+#define TC 10
 #define KC 24
 #define TT (TG * TC)
 
