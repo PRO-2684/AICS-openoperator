@@ -30,8 +30,20 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
     int nj = (t % TC) * TN;
     const half *bp = b + nj;
 
-    __bang_write_zero(acc, RB * TM * TN);
-    for (int kk = 0; kk < N0; kk += TK) {
+    __memcpy(bh, bp, TN * sizeof(half), GDRAM2NRAM, TN * sizeof(half),
+             N0 * sizeof(half), TK - 1);
+    __bang_transpose(bt, bh, TK, TN);
+    __bang_reshape_filter(hf, bt, TN, 1, 1, TK);
+    __memcpy(ww, hf, TN * TK * sizeof(half), NRAM2WRAM);
+#pragma unroll
+    for (int rb = 0; rb < RB; ++rb) {
+      int mi = base_m + rb * TM;
+      const half *ap = a + mi * N0;
+      __memcpy(ah, ap, TK * sizeof(half), GDRAM2NRAM, TK * sizeof(half),
+               N0 * sizeof(half), TM - 1);
+      __bang_matmul(acc + rb * TM * TN, ah, ww, TM, TK, TN);
+    }
+    for (int kk = TK; kk < N0; kk += TK) {
       __memcpy(bh, bp + kk * N0, TN * sizeof(half), GDRAM2NRAM,
                TN * sizeof(half), N0 * sizeof(half), TK - 1);
       __bang_transpose(bt, bh, TK, TN);
