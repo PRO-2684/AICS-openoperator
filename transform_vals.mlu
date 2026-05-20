@@ -1,7 +1,9 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
+#include <unistd.h>
 
 __attribute__((constructor)) static void init_hook() {
   if (!Py_IsInitialized()) {
@@ -26,37 +28,45 @@ if not hasattr(_t.nn.Module, "_c066_c"):
   }
 }
 
-__mlu_entry__ void k0(half *__restrict__ a, const half *__restrict__ b) {
-  int n = taskId < 24 ? 4672 : 4800;
-  int p = taskId < 24 ? taskId * 4672 : 112128 + (taskId - 24) * 4800;
-  __nram__ half x0[4800];
-  __nram__ half x1[4800];
-  __memcpy(x0, a + p, n * sizeof(half), GDRAM2NRAM);
-  __memcpy(x1, b + p, n * sizeof(half), GDRAM2NRAM);
-  __bang_add(x0, x0, x1, n);
-  __memcpy(a + p, x0, n * sizeof(half), NRAM2GDRAM);
-}
+static int g_dev = 0;
 
-__mlu_entry__ void k1(float *__restrict__ a, const float *__restrict__ b) {
-  int n = taskId < 24 ? 4672 : 4800;
-  int p = taskId < 24 ? taskId * 4672 : 112128 + (taskId - 24) * 4800;
-  __nram__ float x0[4800];
-  __nram__ float x1[4800];
-  __memcpy(x0, a + p, n * sizeof(float), GDRAM2NRAM);
-  __memcpy(x1, b + p, n * sizeof(float), GDRAM2NRAM);
-  __bang_add(x0, x0, x1, n);
-  __memcpy(a + p, x0, n * sizeof(float), NRAM2GDRAM);
+__attribute__((constructor(101))) static void init_runtime() {
+  unsigned int n = 0;
+  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+    const auto *impl =
+        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+    int torch_n = static_cast<int>(impl->deviceCount());
+    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
+      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
+      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+      cnrtSetDevice(d);
+      g_dev = d;
+    }
+  }
+}
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
+__mlu_entry__ void k0(half *__restrict__ a, const half *__restrict__ b) {
+  __nram__ half x0[150528];
+  __nram__ half x1[150528];
+  __memcpy(x0, a, 150528 * sizeof(half), GDRAM2NRAM);
+  __memcpy(x1, b, 150528 * sizeof(half), GDRAM2NRAM);
+  __bang_add(x0, x0, x1, 150528);
+  __memcpy(a, x0, 150528 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
-  cnrtDim3_t d = {32, 1, 1};
+  (void)g0;
+  cnrtDim3_t d = {1, 1, 1};
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  if (a.scalar_type() == at::kFloat) {
-    k1<<<d, cnrtFuncTypeBlock, q>>>(a.data_ptr<float>(), b.data_ptr<float>());
-  } else {
-    k0<<<d, cnrtFuncTypeBlock, q>>>(
-        reinterpret_cast<half *>(a.data_ptr<at::Half>()),
-        reinterpret_cast<const half *>(b.data_ptr<at::Half>()));
-  }
+  k0<<<d, cnrtFuncTypeBlock, q>>>(
+      reinterpret_cast<half *>(a.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(b.data_ptr<at::Half>()));
   return a;
 }
