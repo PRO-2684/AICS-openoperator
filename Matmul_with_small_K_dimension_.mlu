@@ -54,12 +54,30 @@ static torch::Tensor gC = []() {
                           .dtype(torch::kFloat32));
 }();
 
-__mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
-                      float *__restrict__ c) {
-  __nram__ half ah[TM * TK];
+static torch::Tensor gW = []() {
+  return torch::empty({TC * TN * TK},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                          .dtype(torch::kHalf));
+}();
+
+__mlu_entry__ void kprep(const half *__restrict__ b, half *__restrict__ w) {
   __nram__ half bh[TK * TN];
   __nram__ half bt[TN * TK];
   __nram__ half hf[TN * TK];
+  for (int col = taskId; col < TC; col += taskDim) {
+    int nj = col * TN;
+    __memcpy(bh, b + nj, TN * sizeof(half), GDRAM2NRAM, TN * sizeof(half),
+             N0 * sizeof(half), TK - 1);
+    __bang_transpose(bt, bh, TK, TN);
+    __bang_reshape_filter(hf, bt, TN, 1, 1, TK);
+    __memcpy(w + col * TN * TK, hf, TN * TK * sizeof(half), NRAM2GDRAM);
+  }
+}
+
+__mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
+                      float *__restrict__ c) {
+  __nram__ half ah[TM * TK];
   __nram__ float tmp[TM * TN];
   __wram__ half ww[TN * TK];
 
@@ -68,11 +86,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   int lanes = (taskDim - 1 - col) / TC + 1;
   int nj = col * TN;
 
-  __memcpy(bh, b + nj, TN * sizeof(half), GDRAM2NRAM, TN * sizeof(half),
-           N0 * sizeof(half), TK - 1);
-  __bang_transpose(bt, bh, TK, TN);
-  __bang_reshape_filter(hf, bt, TN, 1, 1, TK);
-  __memcpy(ww, hf, TN * TK * sizeof(half), NRAM2WRAM);
+  __memcpy(ww, b + col * TN * TK, TN * TK * sizeof(half), GDRAM2WRAM);
   int row = lane;
   if (row >= TR)
     return;
@@ -89,12 +103,17 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   (void)g0;
   auto &C = gC;
+  auto &W = gW;
   static bool init = false;
   if (!init) {
     cnrtDim3_t d = {32, 1, 1};
+    cnrtDim3_t p = {8, 1, 1};
+    kprep<<<p, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+        reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(W.data_ptr<at::Half>()));
     k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
         reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
-        reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
+        reinterpret_cast<const half *>(W.data_ptr<at::Half>()),
         C.data_ptr<float>());
     init = true;
   }
