@@ -55,10 +55,13 @@ static torch::Tensor g0 = []() {
 __mlu_entry__ void k0(half *__restrict__ a, const half *__restrict__ b) {
   __nram__ half x0[150528];
   __nram__ half x1[150528];
-  __memcpy(x0, a, 150528 * sizeof(half), GDRAM2NRAM);
-  __memcpy(x1, b, 150528 * sizeof(half), GDRAM2NRAM);
+  __memcpy_async(x0, a, 150528 * sizeof(half), GDRAM2NRAM);
+  __memcpy_async(x1, b, 150528 * sizeof(half), GDRAM2NRAM);
+  __sync_io();
   __bang_add(x0, x0, x1, 150528);
-  __memcpy(a, x0, 150528 * sizeof(half), NRAM2GDRAM);
+  __sync_compute();
+  __memcpy_async(a, x0, 150528 * sizeof(half), NRAM2GDRAM);
+  __sync_io();
 }
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
