@@ -100,14 +100,9 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
     const half *ap = a + mi * K0;
     float *cp = p + g * M0 * N0 + mi * N0 + nj;
 
-    int kb = g * KS;
+    __bang_write_zero(acc, TM * TN);
     int ke = (g + 1) * KS;
-    __memcpy(ah, ap + kb, TK * sizeof(half), GDRAM2NRAM,
-             TK * sizeof(half), K0 * sizeof(half), TM - 1);
-    __memcpy(ww, b + (kb / TK) * TN * TK, TN * TK * sizeof(half),
-             GDRAM2WRAM);
-    __bang_matmul(acc, ah, ww, TM, TK, TN);
-    for (int kk = kb + TK; kk < ke; kk += TK) {
+    for (int kk = g * KS; kk < ke; kk += TK) {
       __memcpy(ah, ap + kk, TK * sizeof(half), GDRAM2NRAM,
                TK * sizeof(half), K0 * sizeof(half), TM - 1);
       __memcpy(ww, b + (kk / TK) * TN * TK, TN * TK * sizeof(half),
