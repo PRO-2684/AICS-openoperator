@@ -16,9 +16,7 @@ __mlu_entry__ void k0(half *__restrict__ x) {
   int p = taskId * E0;
   __memcpy(a, x + p, E0 * sizeof(half), GDRAM2NRAM);
   __bang_abs(b, a, E0);
-  __memcpy(c, a, E0 * sizeof(half), NRAM2NRAM);
-  __bang_add(c, c, b, E0);
-  __bang_mul_scalar(c, c, (half)0.5f, E0);
+  __bang_active_relu(c, a, E0);
   __bang_write_value(d, E0, (half)-0.00983889f);
   __bang_mul(d, d, b, E0);
   __bang_add_scalar(d, d, (half)0.11630905f, E0);
