@@ -11,10 +11,10 @@ __mlu_entry__ void k0(half *__restrict__ x) {
   __nram__ half a[E0];
   __nram__ half b[E0];
   __memcpy(a, x + taskId * E0, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_ge_scalar(b, a, (half)0.0f, E0);
-  __bang_mul_scalar(b, b, (half)0.99f, E0);
-  __bang_add_scalar(b, b, (half)0.01f, E0);
-  __bang_mul(a, a, b, E0);
+  __bang_abs(b, a, E0);
+  __bang_mul_scalar(a, a, (half)0.505f, E0);
+  __bang_mul_scalar(b, b, (half)0.495f, E0);
+  __bang_add(a, a, b, E0);
   __memcpy(x + taskId * E0, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
