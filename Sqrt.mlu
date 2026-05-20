@@ -53,9 +53,8 @@ torch::Tensor bang_func(torch::Tensor x) {
   static bool init = false;
   if (!init) {
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t dim = {4, 8, 1};
-    cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
-    sqrt_abs_half_kernel_32task_pipeline2<<<dim, ktype, queue>>>(
+    cnrtDim3_t dim = {32, 1, 1};
+    sqrt_abs_half_kernel_32task_pipeline2<<<dim, cnrtFuncTypeBlock, queue>>>(
         reinterpret_cast<half *>(x.data_ptr<at::Half>()));
     init = true;
   }
