@@ -9,12 +9,12 @@
 #define N0 4096
 #define K0 4096
 #define TM 128
-#define TN 512
+#define TN 256
 #define TK 128
 #define TR 64
-#define RB 1
-#define TG 32
-#define TC 8
+#define RB 3
+#define TG 11
+#define TC 16
 #define TT (TG * TC)
 
 __mlu_entry__ void kprep(const half *__restrict__ b, half *__restrict__ wbuf) {
