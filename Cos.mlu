@@ -13,15 +13,7 @@ __mlu_entry__ void cos_half_kernel(half *__restrict__ input) {
   half *p =
       (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
   __memcpy(a, p, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  __bang_mul(a, a, a, CHUNK_ELEMS);
-  __bang_mul_scalar(b, a, (half)0.0000125612426f, CHUNK_ELEMS);
-  __bang_add_scalar(b, b, (half)-0.00116237215f, CHUNK_ELEMS);
-  __bang_mul(b, b, a, CHUNK_ELEMS);
-  __bang_add_scalar(b, b, (half)0.0398793103f, CHUNK_ELEMS);
-  __bang_mul(b, b, a, CHUNK_ELEMS);
-  __bang_add_scalar(b, b, (half)-0.495011096f, CHUNK_ELEMS);
-  __bang_mul(b, b, a, CHUNK_ELEMS);
-  __bang_add_scalar(b, b, (half)0.99778149f, CHUNK_ELEMS);
+  __bang_active_cos(b, a, CHUNK_ELEMS);
   __memcpy(p, b, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
 }
 
