@@ -11,21 +11,12 @@
 __mlu_entry__ void k0(half *__restrict__ x) {
   __nram__ half a[E0];
   __nram__ half b[E0];
-  __nram__ half c[E0];
   int p = taskId * E0;
   __memcpy(a, x + p, E0 * sizeof(half), GDRAM2NRAM);
   __bang_abs(b, a, E0);
-  __bang_mul_scalar(c, b, (half)-0.00064866477f, E0);
-  __bang_add_scalar(c, c, (half)0.0114584973f, E0);
-  __bang_mul(c, c, b, E0);
-  __bang_add_scalar(c, c, (half)-0.0815985385f, E0);
-  __bang_mul(c, c, b, E0);
-  __bang_add_scalar(c, c, (half)0.305276824f, E0);
-  __bang_mul(c, c, b, E0);
-  __bang_add_scalar(c, c, (half)-0.667136183f, E0);
-  __bang_mul(c, c, b, E0);
-  __bang_add_scalar(c, c, (half)0.9385f, E0);
-  __bang_mul(a, a, c, E0);
+  __bang_add_scalar(b, b, (half)1.0f, E0);
+  __bang_active_recip(b, b, E0);
+  __bang_mul(a, a, b, E0);
   __memcpy(x + p, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
