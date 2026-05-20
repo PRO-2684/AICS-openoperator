@@ -14,7 +14,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
     __memcpy_async(x1, b + p, 65536 * sizeof(half), GDRAM2NRAM);
     __sync_io();
     __bang_add(x1, x0, x1, 65536);
-    __sync_io_move_compute();
+    __sync_compute();
     __memcpy_async(y + p, x1, 65536 * sizeof(half), NRAM2GDRAM);
     __sync_io();
   }
