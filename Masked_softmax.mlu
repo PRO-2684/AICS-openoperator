@@ -81,7 +81,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y) {
 
     __memcpy(a, in, E2 * sizeof(half), GDRAM2NRAM, E2 * sizeof(half),
              E1 * sizeof(half), E3 - 1);
-    __bang_sub_scalar(a, a, (half)5.5f, E2 * E3);
+    __bang_sub_scalar(a, a, (half)6.0f, E2 * E3);
     __bang_active_exp_less_0(a, a, E2 * E3);
 
 #pragma unroll
