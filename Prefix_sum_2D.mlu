@@ -126,8 +126,8 @@ torch::Tensor bang_func(torch::Tensor x) {
   (void)warm;
   static bool init = false;
   if (!init) {
-    cnrtDim3_t g0 = {16, 1, 1};
-    k3<<<g0, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+    cnrtDim3_t g0 = {4, 8, 1};
+    k1<<<g0, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
         reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
         gy.data_ptr<float>());
     init = true;
