@@ -64,8 +64,10 @@ static torch::Tensor gy = []() {
                             .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                             .dtype(torch::kHalf));
   cnrtDim3_t dim = {128, 1, 1};
-  alibi_kernel<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  alibi_kernel<<<dim, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<half*>(t.data_ptr<at::Half>()), 128, 8, 131072);
+  cnrtQueueSync(q);
   return t;
 }();
 
