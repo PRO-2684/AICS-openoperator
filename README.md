@@ -155,10 +155,10 @@ python scripts/update_problems.py
 | 104 | [KL_Divergence_Loss](KL_Divergence_Loss.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/610a54d) |
 | 105 | [Embedding_lookup](Embedding_lookup.mlu) | [@ZJtoast](https://github.com/ZJtoast) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/15b7cd5) |
 | 106 | [Embedding_bag_mean](Embedding_bag_mean.mlu) | [@ZJtoast](https://github.com/ZJtoast) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/b207669) |
-| 107 | [Sinusoidal_positional_encoding](Sinusoidal_positional_encoding.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/b08da20) |
+| 107 | [Sinusoidal_positional_encoding](Sinusoidal_positional_encoding.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/a125bd7) |
 | 108 | [ALiBi_attention_bias](ALiBi_attention_bias.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/d6f7654) |
 | 109 | [Scatter_add](Scatter_add.mlu) | N/A | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/985dae3) |
-| 110 | [Gather_rows](Gather_rows.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/a082769) |
+| 110 | [Gather_rows](Gather_rows.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/e56f33e) |
 | 111 | [Masked_select](Masked_select.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/daab964) |
 | 112 | [Index_put](Index_put.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/6fb35f62b1da1a5e57e26465618ac04c51bf0340) |
 | 113 | [Upsample_nearest](Upsample_nearest.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/b3730f2) |
