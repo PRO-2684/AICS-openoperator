@@ -1,26 +1,42 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <unistd.h>
 
 #define E0 16
 #define E1 256
 #define E2 65536
+#define E3 32768
+#define E4 32
 
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[E2];
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z) {
+  __nram__ half a[E3];
+  __nram__ half r[E1];
+  __nram__ half s[E1];
+  int p = (taskId >> 1) * E2 + (taskId & 1) * E3;
+  int q = taskId * E1;
+  __memcpy(a, x + p, E3 * sizeof(half), GDRAM2NRAM);
+  __bang_sumpool(r, a, E1, 1, 128, 1, 128, 1, 128);
+  __bang_square(a, a, E3);
+  __bang_sumpool(s, a, E1, 1, 128, 1, 128, 1, 128);
+  __memcpy(z + q, r, E1 * sizeof(half), NRAM2GDRAM);
+  __memcpy(z + E4 * E1 + q, s, E1 * sizeof(half), NRAM2GDRAM);
+}
+
+__mlu_entry__ void k1(const half *__restrict__ z, half *__restrict__ y) {
+  __nram__ half h[E1];
   __nram__ half r[E1];
   __nram__ half s[E1];
   __nram__ float e[E1];
   __nram__ float f[E1];
   __nram__ float g[E1];
-  int p = taskId * E2;
-  __memcpy(a, x + p, E2 * sizeof(half), GDRAM2NRAM);
-  __bang_sumpool(r, a, E1, 1, 256, 1, 256, 1, 256);
-  __bang_square(a, a, E2);
-  __bang_sumpool(s, a, E1, 1, 256, 1, 256, 1, 256);
+  int p = taskId * 2 * E1;
+  __memcpy(r, z + p, E1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(h, z + p + E1, E1 * sizeof(half), GDRAM2NRAM);
+  __bang_add(r, r, h, E1);
+  __memcpy(s, z + E4 * E1 + p, E1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(h, z + E4 * E1 + p + E1, E1 * sizeof(half), GDRAM2NRAM);
+  __bang_add(s, s, h, E1);
   __bang_half2float(e, r, E1);
   __bang_half2float(f, s, E1);
   __bang_mul(g, e, e, E1);
@@ -29,49 +45,26 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __bang_mul_scalar(f, f, 0.00392156862745098f, E1);
   __bang_active_relu(f, f, E1);
   __bang_sqrt(f, f, E1);
-  __bang_float2half(r, f, E1);
-  __memcpy(y + taskId * E1, r, E1 * sizeof(half), NRAM2GDRAM);
+  __bang_float2half(h, f, E1);
+  __memcpy(y + taskId * E1, h, E1 * sizeof(half), NRAM2GDRAM);
 }
-
-
-static int g_dev = 0;
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
-}
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
-}();
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
-  (void)g0;
+  static torch::Tensor tmp;
   static torch::Tensor out;
-  static bool init = false;
+  if (!tmp.defined())
+    tmp = torch::empty({E4 * E1 * 2}, x.options());
   if (!out.defined())
     out = torch::empty({E0, E1}, x.options());
-  if (!init) {
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t h0 = {E0, 1, 1};
-    k0<<<h0, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(out.data_ptr<at::Half>()));
-    init = true;
-  }
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t h0 = {E4, 1, 1};
+  cnrtDim3_t h1 = {E0, 1, 1};
+  k0<<<h0, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(tmp.data_ptr<at::Half>()));
+  k1<<<h1, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(tmp.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
   return out;
 }
