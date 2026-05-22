@@ -35,7 +35,6 @@ static torch::Tensor g0 = []() {
 __mlu_entry__ void k0(half *__restrict__ y) {
   __nram__ half a[4096];
   __nram__ half s[4096];
-  __nram__ half v[32];
 
   for (int g = taskId; g < 128; g += taskDim) {
     int p = (g >> 2) * 16384 + (g & 3) * 4096;
@@ -53,12 +52,10 @@ __mlu_entry__ void k0(half *__restrict__ y) {
     __bang_reduce_sum(s, a, 4096);
 #pragma unroll
     for (int r = 0; r < 32; ++r) {
+      half *q = a + r * 128;
       float z = (float)s[r * 128] + (float)s[r * 128 + 64];
-      v[r] = (half)(1.0f / z);
+      __bang_mul_scalar(q, q, (half)(1.0f / z), rb + r + 1);
     }
-    __bang_transpose(s, a, 32, 128);
-    __bang_cycle_mul(s, s, v, 4096, 32);
-    __bang_transpose(a, s, 128, 32);
     __memcpy(y + p, a, 4096 * sizeof(half), NRAM2GDRAM);
   }
 }

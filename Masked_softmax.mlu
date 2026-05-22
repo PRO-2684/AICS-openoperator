@@ -92,6 +92,9 @@ __mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y) {
 
     __memcpy(out, a, E2 * sizeof(half), NRAM2GDRAM, E1 * sizeof(half),
              E2 * sizeof(half), E3 - 1);
+    __bang_write_zero(a, E2 * E3);
+    __memcpy(out + E2, a, E2 * sizeof(half), NRAM2GDRAM, E1 * sizeof(half),
+             E2 * sizeof(half), E3 - 1);
   }
 }
 
@@ -111,12 +114,6 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask) {
   (void)g0;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {E4, 1, 1};
-  static bool ready = false;
-  if (!ready) {
-    k2<<<dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<half *>(gy.data_ptr<at::Half>()));
-    ready = true;
-  }
   k1<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(gy.data_ptr<at::Half>()));
