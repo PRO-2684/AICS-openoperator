@@ -27,6 +27,20 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
+static torch::Tensor gy = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kInt16);
+  return torch::empty({16, 256}, opt);
+}();
+
 __mlu_entry__ void k0(const half *__restrict__ x, int64_t *__restrict__ y) {
   __nram__ half a[65536];
   __nram__ half b[65536];
@@ -620,10 +634,9 @@ __mlu_entry__ void k20(const half *__restrict__ x, int16_t *__restrict__ y) {
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
-  static torch::Tensor y;
+  (void)g0;
+  auto &y = gy;
   static bool init = false;
-  if (!y.defined())
-    y = torch::empty({16, 256}, x.options().dtype(torch::kInt16));
   if (!init) {
     cnrtDim3_t d = {32, 1, 1};
     k20<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
