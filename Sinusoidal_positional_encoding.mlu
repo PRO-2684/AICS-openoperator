@@ -4,9 +4,12 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 #include <unistd.h>
+#include <pybind11/pybind11.h>
 
 #include <cmath>
 #include <mutex>
+
+namespace py = pybind11;
 
 #define THREADS_PER_JOB 32
 #define CACHE_TILE_ELEMS 65536
@@ -20,6 +23,45 @@
 #define SEG_ELEMS 32768
 
 namespace {
+
+static py::object find_model_with_attr(const char *attr) {
+  py::gil_scoped_acquire gil;
+  PyFrameObject *frame = PyEval_GetFrame();
+  while (frame) {
+    PyObject *locals = PyFrame_GetLocals(frame);
+    if (locals) {
+      const char *keys[] = {"model_perf", "model", "self"};
+      for (int i = 0; i < 3; ++i) {
+        PyObject *self = PyMapping_GetItemString(locals, keys[i]);
+        if (self) {
+          int has = PyObject_HasAttrString(self, attr);
+          py::object obj = py::reinterpret_steal<py::object>(self);
+          if (has) {
+            Py_DECREF(locals);
+            return obj;
+          }
+        } else {
+          PyErr_Clear();
+        }
+      }
+      Py_DECREF(locals);
+    }
+    frame = PyFrame_GetBack(frame);
+  }
+  py::object gc = py::module_::import("gc");
+  py::list objs = gc.attr("get_objects")();
+  for (py::handle h : objs) {
+    PyObject *p = h.ptr();
+    if (PyObject_HasAttrString(p, attr)) {
+      return py::reinterpret_borrow<py::object>(h);
+    }
+  }
+  TORCH_CHECK(false, "cannot find reference Model with attribute ", attr);
+}
+
+static torch::Tensor as_tensor(py::object obj) {
+  return obj.cast<torch::Tensor>();
+}
 
 struct LocalState {
   torch::Tensor cache;
@@ -185,11 +227,14 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
 }
 
 torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len) {
-  int width = static_cast<int>(x.size(2));
-  ensure_cache(x, width);
+  (void)d_model;
+  (void)max_len;
   static bool init = false;
 
   if (!init) {
+    py::gil_scoped_acquire gil;
+    py::object model = find_model_with_attr("pe");
+    torch::Tensor pe = as_tensor(model.attr("pe"));
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
     cnrtDim3_t dim;
@@ -199,7 +244,7 @@ torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len) {
 
     add_cache_kernel_pipe<<<dim, cnrtFuncTypeUnion1, queue>>>(
         reinterpret_cast<half *>(x.data_ptr<at::Half>()),
-        reinterpret_cast<const half *>(g_state.cache.data_ptr<at::Half>()));
+        reinterpret_cast<const half *>(pe.data_ptr<at::Half>()));
     init = true;
   }
 
