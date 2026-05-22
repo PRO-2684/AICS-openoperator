@@ -44,8 +44,18 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
     int base_m = (t / TC) * (RB * TM);
     int nj = (t % TC) * TN;
 
-    __bang_write_zero(acc, RB * TM * TN);
-    for (int kk = 0; kk < K0; kk += TK) {
+    int wi0 = (t % TC) * (K0 / TK);
+    __memcpy(ww, b + wi0 * (TN * TK), TN * TK * sizeof(half), GDRAM2WRAM);
+    for (int rb = 0; rb < RB; ++rb) {
+      int mi = base_m + rb * TM;
+      if (mi >= M0)
+        continue;
+      const half *ap = a + mi * K0;
+      __memcpy(ah, ap, TK * sizeof(half), GDRAM2NRAM, TK * sizeof(half),
+               K0 * sizeof(half), TM - 1);
+      __bang_matmul(acc + rb * TM * TN, ah, ww, TM, TK, TN);
+    }
+    for (int kk = TK; kk < K0; kk += TK) {
       int wi = (t % TC) * (K0 / TK) + kk / TK;
       __memcpy(ww, b + wi * (TN * TK), TN * TK * sizeof(half), GDRAM2WRAM);
       for (int rb = 0; rb < RB; ++rb) {
