@@ -8,15 +8,18 @@
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       half *__restrict__ c) {
   __nram__ half x[256];
+  __nram__ half w[256];
   __nram__ half z[65536];
 
   for (int p = taskId; p < 64; p += taskDim) {
     __memcpy(x, b + p * 256, 256 * sizeof(half), GDRAM2NRAM);
     int r = p * 256;
+    __memcpy(w, a + r, 256 * sizeof(half), GDRAM2NRAM);
 #pragma unroll 256
     for (int i = 0; i < 256; ++i) {
-      __bang_mul_scalar(z + i * 256, x, a[r + i], 256);
+      __bang_write_value(z + i * 256, 256, w[i]);
     }
+    __bang_cycle_mul(z, z, x, 65536, 256);
     __memcpy(c + p * 65536, z, 65536 * sizeof(half), NRAM2GDRAM);
   }
 }
@@ -59,8 +62,8 @@ static torch::Tensor gc = []() {
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
   (void)g0;
   auto &c = gc;
-  cnrtDim3_t d = {8, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {64, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(a.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(b.data_ptr<at::Half>()),
       reinterpret_cast<half *>(c.data_ptr<at::Half>()));
