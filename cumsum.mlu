@@ -51,40 +51,6 @@ __mlu_func__ void k2(half *__restrict__ h, float *__restrict__ a,
   k1(a, b);
 }
 
-__mlu_func__ void k3(float *__restrict__ a, float *__restrict__ b) {
-  __bang_write_value(a + 1000, 24, 0.0f);
-  __bang_write_value(b, 1, 0.0f);
-  __memcpy(b + 1, a, 1023 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 1024);
-  __bang_write_value(b, 2, 0.0f);
-  __memcpy(b + 2, a, 1022 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 1024);
-  __bang_write_value(b, 4, 0.0f);
-  __memcpy(b + 4, a, 1020 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 1024);
-  __bang_write_value(b, 8, 0.0f);
-  __memcpy(b + 8, a, 1016 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 1024);
-  __bang_write_value(b, 16, 0.0f);
-  __memcpy(b + 16, a, 1008 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 1024);
-  __bang_write_value(b, 32, 0.0f);
-  __memcpy(b + 32, a, 992 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 1024);
-  __bang_write_value(b, 64, 0.0f);
-  __memcpy(b + 64, a, 960 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 1024);
-  __bang_write_value(b, 128, 0.0f);
-  __memcpy(b + 128, a, 896 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 1024);
-  __bang_write_value(b, 256, 0.0f);
-  __memcpy(b + 256, a, 768 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 1024);
-  __bang_write_value(b, 512, 0.0f);
-  __memcpy(b + 512, a, 512 * sizeof(float), NRAM2NRAM);
-  __bang_add(a, a, b, 1024);
-}
-
 
 static int g_dev = 0;
 
@@ -151,34 +117,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
     q ^= 1;
   }
   __sync_io();
-}
-
-__mlu_entry__ void k4(const half *__restrict__ x, float *__restrict__ y) {
-  __mlu_shared__ float s[4];
-  __nram__ half h[1024];
-  __nram__ float a[1024];
-  __nram__ float b[1024];
-  int c = coreId;
-  if (c != 0x80) {
-    for (int r = taskIdY; r < 128; r += taskDimY) {
-      int p = r * 4000 + c * 1000;
-      __memcpy(h, x + p, 1000 * sizeof(half), GDRAM2NRAM);
-      __bang_half2float(a, h, 1000);
-      k3(a, b);
-      s[c] = a[999];
-      __sync_cluster();
-      float v = 0.0f;
-      if (c == 1)
-        v = s[0];
-      else if (c == 2)
-        v = s[0] + s[1];
-      else if (c == 3)
-        v = s[0] + s[1] + s[2];
-      __bang_add_scalar(a, a, v, 1000);
-      __memcpy(y + p, a, 1000 * sizeof(float), NRAM2GDRAM);
-      __sync_cluster();
-    }
-  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
