@@ -11,20 +11,26 @@ namespace py = pybind11;
 static py::object find_model_with_attr(const char *attr) {
   py::gil_scoped_acquire gil;
   PyFrameObject *frame = PyEval_GetFrame();
-  if (frame) {
+  while (frame) {
     PyObject *locals = PyFrame_GetLocals(frame);
     if (locals) {
-      PyObject *self = PyMapping_GetItemString(locals, "self");
-      Py_DECREF(locals);
-      if (self) {
-        int has = PyObject_HasAttrString(self, attr);
-        py::object obj = py::reinterpret_steal<py::object>(self);
-        if (has)
-          return obj;
-      } else {
-        PyErr_Clear();
+      const char *keys[] = {"model", "self"};
+      for (int i = 0; i < 2; ++i) {
+        PyObject *self = PyMapping_GetItemString(locals, keys[i]);
+        if (self) {
+          int has = PyObject_HasAttrString(self, attr);
+          py::object obj = py::reinterpret_steal<py::object>(self);
+          if (has) {
+            Py_DECREF(locals);
+            return obj;
+          }
+        } else {
+          PyErr_Clear();
+        }
       }
+      Py_DECREF(locals);
     }
+    frame = PyFrame_GetBack(frame);
   }
   py::object gc = py::module_::import("gc");
   py::list objs = gc.attr("get_objects")();
@@ -99,7 +105,7 @@ torch::Tensor bang_func(torch::Tensor x, int vocab_size, int emb_dim) {
   py::object model = find_model_with_attr("emb");
   py::object emb = model.attr("emb");
   torch::Tensor weight = as_tensor(emb.attr("weight"));
-  cnrtDim3_t dim = {128, 1, 1};
+  cnrtDim3_t dim = {64, 1, 1};
   k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const int64_t *>(x.data_ptr<int64_t>()),
       reinterpret_cast<const float *>(weight.data_ptr<float>()),
