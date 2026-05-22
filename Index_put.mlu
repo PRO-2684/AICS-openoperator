@@ -7,7 +7,7 @@
 #include <unistd.h>
 
 #define E0 512
-#define E1 64
+#define E1 128
 
 
 static int g_dev = 0;
