@@ -37,7 +37,7 @@ static torch::Tensor g0 = []() {
 static torch::Tensor gy = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kInt32);
+                 .dtype(torch::kInt16);
   return torch::empty({16, 256}, opt);
 }();
 
@@ -721,6 +721,33 @@ __mlu_entry__ void k23(const half *__restrict__ x, int32_t *__restrict__ y) {
   __memcpy(y + n * 256, o, 256 * sizeof(int32_t), NRAM2GDRAM);
 }
 
+__mlu_entry__ void k24(const half *__restrict__ x, int16_t *__restrict__ y) {
+  int n = taskId;
+  if (n >= 16)
+    return;
+  __nram__ half a[256];
+  __nram__ half b[256];
+  __nram__ half c[256];
+  __nram__ half d[256];
+  __nram__ half e[256];
+  __nram__ int32_t t[256];
+  __nram__ int16_t o[256];
+  const half *base = x + n * 65536;
+  __memcpy(a, base, 256 * sizeof(half), GDRAM2NRAM);
+  __bang_write_value(b, 256, (half)0.0f);
+  for (int i = 1; i < 256; ++i) {
+    __memcpy(c, base + i * 256, 256 * sizeof(half), GDRAM2NRAM);
+    __bang_gt(d, c, a, 256);
+    __bang_maximum(a, c, a, 256);
+    __bang_write_value(e, 256, (half)i);
+    __bang_fusion(FUSION_FSM, e, e, b, d, 256, 256);
+    __bang_add(b, b, e, 256);
+  }
+  __bang_half2int32(t, b, 256, 0);
+  __bang_int322int16(o, t, 256, 0, 0);
+  __memcpy(y + n * 256, o, 256 * sizeof(int16_t), NRAM2GDRAM);
+}
+
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
   (void)g0;
@@ -728,9 +755,9 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   static bool init = false;
   if (!init) {
     cnrtDim3_t d = {16, 1, 1};
-    k23<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+    k24<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
         reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-        y.data_ptr<int32_t>());
+        y.data_ptr<int16_t>());
     init = true;
   }
   return y;
