@@ -83,7 +83,7 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
+  return torch::empty({1}, opt);
 }();
 
 static torch::Tensor gy = []() {
@@ -142,7 +142,7 @@ __mlu_entry__ void k0(const half *__restrict__ x,
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, int dim) {
   (void)g0;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {64, 1, 1};
+  cnrtDim3_t g = {32, 1, 1};
   k0<<<g, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const unsigned char *>(mask.data_ptr()),
