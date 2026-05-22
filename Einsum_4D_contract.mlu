@@ -37,7 +37,7 @@ static torch::Tensor g0 = []() {
 }();
 
 static torch::Tensor gy = []() {
-  return torch::empty(
+  return torch::zeros(
       {4, 8, 128, 128},
       torch::TensorOptions()
           .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
