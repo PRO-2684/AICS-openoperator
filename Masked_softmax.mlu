@@ -9,7 +9,7 @@
 #define E1 128
 #define E2 64
 #define E3 32
-#define E4 256
+#define E4 512
 
 
 static int g_dev = 0;
