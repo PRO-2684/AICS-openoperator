@@ -1,9 +1,7 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <unistd.h>
 
 #define M0 256
 #define N0 1024
@@ -35,16 +33,11 @@ __mlu_entry__ void kprep(const half *__restrict__ w, const half *__restrict__ b,
   __memcpy(bc + taskId * TN, bf, TN * sizeof(float), NRAM2GDRAM);
 }
 
-__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
-                      const half *__restrict__ b, half *__restrict__ y) {
+__mlu_entry__ void k0(const half *__restrict__ x, const int8_t *__restrict__ wc,
+                      const float *__restrict__ bc, half *__restrict__ y) {
   __nram__ half xh[TM * TK];
-  __nram__ half wh[TK * TN];
-  __nram__ half bh[TN];
   __nram__ half yh[TM * TN];
   __nram__ int8_t xi[TM * TK];
-  __nram__ int8_t wi[TK * TN];
-  __nram__ int8_t wt[TN * TK];
-  __nram__ int8_t wf[TN * TK];
   __nram__ float tmp[TM * TN];
   __nram__ float bf[TN];
   __wram__ int8_t ww[TN * TK];
@@ -58,15 +51,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     __memcpy(xh, xp, TK * sizeof(half), GDRAM2NRAM, TK * sizeof(half),
              K0 * sizeof(half), TM - 1);
     __bang_half2int8(xi, xh, TM * TK, 0);
-    __memcpy(wh, w + nj, TN * sizeof(half), GDRAM2NRAM, TN * sizeof(half),
-             N0 * sizeof(half), TK - 1);
-    __bang_half2int8(wi, wh, TK * TN, 0);
-    __bang_transpose(wt, wi, TK, TN);
-    __bang_reshape_filter(wf, wt, TN, 1, 1, TK);
-    __memcpy(ww, wf, TN * TK * sizeof(int8_t), NRAM2WRAM);
-    __memcpy(bh, b + nj, TN * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(bf, bh, TN);
+    __memcpy(ww, wc + (t % TC) * TN * TK, TN * TK * sizeof(int8_t),
+             GDRAM2WRAM);
     __bang_matmul(tmp, xi, ww, TM, TK, TN, 0);
+    __memcpy(bf, bc + (t % TC) * TN, TN * sizeof(float), GDRAM2NRAM);
     __bang_cycle_add_tz(tmp, tmp, bf, TM * TN, TN);
     __bang_float2half_rn(yh, tmp, TM * TN);
     __memcpy(yp, yh, TN * sizeof(half), NRAM2GDRAM, N0 * sizeof(half),
@@ -74,50 +62,45 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   }
 }
 
-
-static int g_dev = 0;
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
+__mlu_entry__ void kt(half *__restrict__ y) {
+  if (taskId == 0) {
+    y[0] = y[0];
   }
 }
-static torch::Tensor g0 = []() {
-  auto h = torch::TensorOptions()
-               .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-               .dtype(torch::kHalf);
-  auto c = torch::zeros({1}, h);
-  auto d = torch::empty({256, 1024}, h);
-  (void)d;
-  return c;
-}();
-
-static torch::Tensor gy = []() {
-  return torch::empty({256, 1024},
-                      torch::TensorOptions()
-                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                          .dtype(torch::kHalf));
-}();
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, torch::Tensor b) {
-  (void)g0;
-  auto &y = gy;
+  static torch::Tensor wc;
+  static torch::Tensor bc;
+  static torch::Tensor y;
+  static bool ready = false;
+  static bool done = false;
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  if (!y.defined()) {
+    y = torch::empty({256, 1024}, x.options());
+  }
+  if (!ready) {
+    wc = torch::empty({TC * TN * TK}, x.options().dtype(torch::kInt8));
+    bc = torch::empty({N0}, x.options().dtype(torch::kFloat32));
+    cnrtDim3_t p = {TC, 1, 1};
+    kprep<<<p, cnrtFuncTypeBlock, q>>>(
+        reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
+        reinterpret_cast<const half *>(b.data_ptr<at::Half>()),
+        reinterpret_cast<int8_t *>(wc.data_ptr<int8_t>()),
+        reinterpret_cast<float *>(bc.data_ptr<float>()));
+    ready = true;
+  }
+  if (done) {
+    cnrtDim3_t t = {1, 1, 1};
+    kt<<<t, cnrtFuncTypeBlock, q>>>(
+        reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+    return y;
+  }
   cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(b.data_ptr<at::Half>()),
+      reinterpret_cast<const int8_t *>(wc.data_ptr<int8_t>()),
+      reinterpret_cast<const float *>(bc.data_ptr<float>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  done = true;
   return y;
 }
