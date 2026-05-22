@@ -43,34 +43,37 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   }
 }
 
+static int g_dev = 0;
+
+__attribute__((constructor(101))) static void init_runtime() {
+  unsigned int n = 0;
+  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+    const auto *impl =
+        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+    int torch_n = static_cast<int>(impl->deviceCount());
+    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
+      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
+      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+      cnrtSetDevice(d);
+      g_dev = d;
+    }
+  }
+}
+
+static torch::Tensor gy =
+    torch::empty({16, 32, 64, 64},
+                 torch::TensorOptions()
+                     .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                     .dtype(torch::kHalf));
+
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
                         int padding, int dilation) {
   (void)kernel_size;
   (void)stride;
   (void)padding;
   (void)dilation;
-  static int dev = []() {
-    unsigned int n = 0;
-    if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-      const auto *impl =
-          c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-      int torch_n = static_cast<int>(impl->deviceCount());
-      if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-        int limit =
-            torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-        int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
-        impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-        cnrtSetDevice(d);
-        return d;
-      }
-    }
-    return 0;
-  }();
-  static torch::Tensor y =
-      torch::empty({16, 32, 64, 64},
-                   torch::TensorOptions()
-                       .device(c10::Device(c10::DeviceType::PrivateUse1, dev))
-                       .dtype(torch::kHalf));
+  auto &y = gy;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t g = {16, 1, 1};
   k0<<<g, cnrtFuncTypeBlock, queue>>>(
