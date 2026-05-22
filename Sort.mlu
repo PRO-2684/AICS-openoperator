@@ -69,14 +69,22 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 
 __mlu_entry__ void k1(half *__restrict__ y) {
   __nram__ half a[E0];
-  __nram__ half t[E0];
-  int r = taskId;
-  int p = r * E0;
+  __nram__ half lo[E1];
+  __nram__ half hi[E1];
+  __nram__ half mn[E1];
+  __nram__ half mx[E1];
+  int p = taskId * E0;
   __memcpy(a, y + p, E0 * sizeof(half), GDRAM2NRAM);
   for (int j = E1; j > 0; j >>= 1) {
-    for (int s = 0; s < E0; s += (j << 1)) {
-      CSEG(s, s + j, j, true);
-    }
+    int n = E1 / j;
+    int size = j * sizeof(half);
+    int span = (j << 1) * sizeof(half);
+    __memcpy(lo, a, size, NRAM2NRAM, size, span, n - 1);
+    __memcpy(hi, a + j, size, NRAM2NRAM, size, span, n - 1);
+    __bang_minequal(mn, lo, hi, E1);
+    __bang_maxequal(mx, lo, hi, E1);
+    __memcpy(a, mn, size, NRAM2NRAM, span, size, n - 1);
+    __memcpy(a + j, mx, size, NRAM2NRAM, span, size, n - 1);
   }
   __memcpy(y + p, a, E0 * sizeof(half), NRAM2GDRAM);
 }
