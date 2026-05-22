@@ -103,7 +103,7 @@ static torch::Tensor g0 = []() {
 }();
 
 static torch::Tensor gy = []() {
-  return torch::empty({256, 1024},
+  return torch::zeros({256, 1024},
                       torch::TensorOptions()
                           .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                           .dtype(torch::kHalf));
