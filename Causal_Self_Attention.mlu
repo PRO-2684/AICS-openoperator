@@ -100,76 +100,39 @@ __mlu_entry__ void k1(const half *__restrict__ q, const half *__restrict__ k,
     return;
   }
 
-  if (part == 2) {
-    __memcpy(a0, q + base + 4096, 2048 * sizeof(half), GDRAM2NRAM);
-    __memcpy(a1, k + base, 6144 * sizeof(half), GDRAM2NRAM);
-    __bang_reshape_filter(a2, a1, 96, 1, 1, 64);
-    __memcpy(w0, a2, 6144 * sizeof(half), NRAM2WRAM);
-    __bang_matmul(f0, a0, w0, 32, 64, 96);
-    __bang_mul_scalar(f0, f0, 0.125f, 3072);
-    __bang_float2half_rn(a3, f0, 3072);
-    __bang_active_exp(a3, a3, 3072);
-#pragma unroll
-    for (int i = 0; i < 32; ++i) {
-      int z = 65 + i;
-      if (z < 96) {
-        __bang_write_value(a3 + i * 96 + z, 96 - z, (half)0.0f);
-      }
-    }
-    __bang_write_zero(a2, 4096);
-#pragma unroll
-    for (int i = 0; i < 32; ++i) {
-      __memcpy(a2 + i * 128, a3 + i * 96, 96 * sizeof(half), NRAM2NRAM);
-    }
-    __bang_reduce_sum(a0, a2, 4096);
-
-    __memcpy(a1, v + base, 6144 * sizeof(half), GDRAM2NRAM);
-    __bang_transpose(a2, a1, 96, 64);
-    __memcpy(w0, a2, 6144 * sizeof(half), NRAM2WRAM);
-    __bang_matmul(f2, a3, w0, 32, 96, 64);
-#pragma unroll
-    for (int i = 0; i < 32; ++i) {
-      float s = (float)a0[i * 128] + (float)a0[i * 128 + 64];
-      __bang_mul_scalar(f2 + i * 64, f2 + i * 64, 1.0f / s, 64);
-    }
-    __bang_float2half_rn(a4, f2, 2048);
-    __memcpy(y + base + 4096, a4, 2048 * sizeof(half), NRAM2GDRAM);
-    return;
-  }
-
-  __memcpy(a0, q + base + 6144, 2048 * sizeof(half), GDRAM2NRAM);
+  __memcpy(a0, q + base + 4096, 4096 * sizeof(half), GDRAM2NRAM);
   __memcpy(a1, k + base, 8192 * sizeof(half), GDRAM2NRAM);
   __bang_reshape_filter(a2, a1, 128, 1, 1, 64);
   __memcpy(w0, a2, 8192 * sizeof(half), NRAM2WRAM);
-  __bang_matmul(f0, a0, w0, 32, 64, 128);
-  __bang_mul_scalar(f0, f0, 0.125f, 4096);
-  __bang_float2half_rn(a3, f0, 4096);
-  __bang_active_exp(a3, a3, 4096);
+  __bang_matmul(f0, a0, w0, 64, 64, 128);
+  __bang_mul_scalar(f0, f0, 0.125f, 8192);
+  __bang_float2half_rn(a3, f0, 8192);
+  __bang_active_exp(a3, a3, 8192);
 #pragma unroll
-  for (int i = 0; i < 32; ++i) {
-    int z = 97 + i;
+  for (int i = 0; i < 64; ++i) {
+    int z = 65 + i;
     if (z < 128) {
       __bang_write_value(a3 + i * 128 + z, 128 - z, (half)0.0f);
     }
   }
-  __bang_reduce_sum(a0, a3, 4096);
+  __bang_reduce_sum(a0, a3, 8192);
   __memcpy(a1, v + base, 8192 * sizeof(half), GDRAM2NRAM);
   __bang_transpose(a2, a1, 128, 64);
   __memcpy(w0, a2, 8192 * sizeof(half), NRAM2WRAM);
-  __bang_matmul(f2, a3, w0, 32, 128, 64);
+  __bang_matmul(f2, a3, w0, 64, 128, 64);
 #pragma unroll
-  for (int i = 0; i < 32; ++i) {
+  for (int i = 0; i < 64; ++i) {
     float s = (float)a0[i * 128] + (float)a0[i * 128 + 64];
     __bang_mul_scalar(f2 + i * 64, f2 + i * 64, 1.0f / s, 64);
   }
-  __bang_float2half_rn(a4, f2, 2048);
-  __memcpy(y + base + 6144, a4, 2048 * sizeof(half), NRAM2GDRAM);
+  __bang_float2half_rn(a0, f2, 4096);
+  __memcpy(y + base + 4096, a0, 4096 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v) {
   (void)z;
   auto &y = gy;
-  cnrtDim3_t d = {64, 1, 1};
+  cnrtDim3_t d = {48, 1, 1};
   k1<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(q.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(k.data_ptr<at::Half>()),
