@@ -28,8 +28,8 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  auto a = torch::empty({2, 4, 256, 64}, opt);
-  auto b = torch::empty({2, 4, 256, 64}, opt);
+  auto a = torch::empty({1, 4, 256, 64}, opt);
+  auto b = torch::empty({1, 4, 256, 64}, opt);
   return a + b;
 }();
 
