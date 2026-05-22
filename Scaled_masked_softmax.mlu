@@ -24,37 +24,37 @@ __attribute__((constructor(101))) static void init_runtime() {
 }
 
 __mlu_entry__ void k0(half *__restrict__ y) {
-  __nram__ half a[4096];
-  __nram__ half s[4096];
+  __nram__ half a[2048];
+  __nram__ half s[2048];
 
-  for (int g = taskId; g < 128; g += taskDim) {
-    int p = (g >> 2) * 16384 + (g & 3) * 4096;
-    int rb = (g & 3) * 32;
-    __memcpy(a, y + p, 4096 * sizeof(half), GDRAM2NRAM);
-    __bang_sub_scalar(a, a, (half)5.5f, 4096);
-    __bang_active_exp_less_0(a, a, 4096);
+  for (int g = taskId; g < 256; g += taskDim) {
+    int p = (g >> 3) * 16384 + (g & 7) * 2048;
+    int rb = (g & 7) * 16;
+    __memcpy(a, y + p, 2048 * sizeof(half), GDRAM2NRAM);
+    __bang_sub_scalar(a, a, (half)5.5f, 2048);
+    __bang_active_exp_less_0(a, a, 2048);
 #pragma unroll
-    for (int r = 0; r < 32; ++r) {
+    for (int r = 0; r < 16; ++r) {
       half *q = a + r * 128;
       int n = 127 - (rb + r);
       if (n > 0)
         __bang_write_zero(q + rb + r + 1, n);
     }
-    __bang_reduce_sum(s, a, 4096);
+    __bang_reduce_sum(s, a, 2048);
 #pragma unroll
-    for (int r = 0; r < 32; ++r) {
+    for (int r = 0; r < 16; ++r) {
       half *q = a + r * 128;
       float z = (float)s[r * 128] + (float)s[r * 128 + 64];
       __bang_mul_scalar(q, q, (half)(1.0f / z), rb + r + 1);
     }
-    __memcpy(y + p, a, 4096 * sizeof(half), NRAM2GDRAM);
+    __memcpy(y + p, a, 2048 * sizeof(half), NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double scale) {
   (void)mask;
   (void)scale;
-  cnrtDim3_t d = {128, 1, 1};
+  cnrtDim3_t d = {256, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
   return x;
