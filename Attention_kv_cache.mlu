@@ -42,7 +42,8 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ kc,
                       const half *__restrict__ vn, half *__restrict__ y) {
   int h = taskIdY;
   int c = coreId;
-  __mlu_shared__ float r0[260];
+  __mlu_shared__ float r0[4];
+  __mlu_shared__ half r1[256];
   __nram__ half q0[256];
   __nram__ half a0[8192];
   __nram__ half a1[8192];
@@ -67,43 +68,37 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ kc,
     __bang_float2half_rn(q0, s0, 128);
     __bang_active_exp(q0, q0, 128);
 
-    float ps = 0.0f;
-#pragma unroll
-    for (int i = 0; i < 128; ++i) {
-      ps += (float)q0[i];
-    }
     __memcpy(a0, vc + h * 32768 + t * 64, 8192 * sizeof(half), GDRAM2NRAM);
     __bang_transpose(a1, a0, 128, 64);
     __memcpy(w0, a1, 8192 * sizeof(half), NRAM2WRAM);
     __bang_matmul(o0, q0, w0, 1, 128, 64);
+    __bang_reduce_sum(q0, q0, 128);
+    float ps = (float)q0[0] + (float)q0[64];
 
-    __memcpy(r0 + c * 64, o0, 64 * sizeof(float), NRAM2SRAM);
-    r0[256 + c] = ps;
+    __bang_float2half_rn(a0, o0, 64);
+    __memcpy(r1 + c * 64, a0, 64 * sizeof(half), NRAM2SRAM);
+    r0[c] = ps;
   }
   __sync_cluster();
 
   if (c == 0) {
-    __memcpy(s0, r0, 256 * sizeof(float), SRAM2NRAM);
+    __memcpy(a0, r1, 256 * sizeof(half), SRAM2NRAM);
+    __bang_half2float(s0, a0, 256);
     __bang_add(o0, s0, s0 + 64, 64);
     __bang_add(o0, o0, s0 + 128, 64);
     __bang_add(o0, o0, s0 + 192, 64);
-    __memcpy(s1, r0 + 256, 4 * sizeof(float), SRAM2NRAM);
+    __memcpy(s1, r0, 4 * sizeof(float), SRAM2NRAM);
 
     __memcpy(q0, kn + h * 64, 64 * sizeof(half), GDRAM2NRAM);
     __bang_mul(q0, q0, a2, 64);
-    __bang_half2float(s0, q0, 64);
-    float sn = 0.0f;
-#pragma unroll
-    for (int i = 0; i < 64; ++i) {
-      sn += s0[i];
-    }
+    __bang_reduce_sum(q0, q0, 64);
+    float sn = (float)q0[0];
     sn = expf(sn * 0.125f);
     float inv = 1.0f / (s1[0] + s1[1] + s1[2] + s1[3] + sn);
     __memcpy(q0, vn + h * 64, 64 * sizeof(half), GDRAM2NRAM);
-#pragma unroll
-    for (int i = 0; i < 64; ++i) {
-      o0[i] = (o0[i] + sn * (float)q0[i]) * inv;
-    }
+    __bang_half2float(s0, q0, 64);
+    __bang_mul_scalar(s0, s0, sn, 64);
+    __bang_fusion(FUSION_FAM, o0, o0, s0, inv, 64, 64);
     __bang_float2half_rn(o1, o0, 64);
     __memcpy(y + h * 64, o1, 64 * sizeof(half), NRAM2GDRAM);
   }
