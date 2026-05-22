@@ -32,6 +32,36 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __wram__ half w0[8192];
 
   __memcpy(a0, q + base + r * 64, 4096 * sizeof(half), GDRAM2NRAM);
+  if (r == 0) {
+    __memcpy(a1, k + base, 4096 * sizeof(half), GDRAM2NRAM);
+    __bang_reshape_filter(a2, a1, 64, 1, 1, 64);
+    __memcpy(w0, a2, 4096 * sizeof(half), NRAM2WRAM);
+    __bang_matmul(f0, a0, w0, 64, 64, 64);
+    __bang_mul_scalar(f0, f0, 0.125f, 4096);
+    __bang_float2half_rn(a3, f0, 4096);
+    __bang_active_exp(a3, a3, 4096);
+#pragma unroll
+    for (int i = 0; i < 64; ++i) {
+      int z = i + 1;
+      if (z < 64) {
+        __bang_write_value(a3 + i * 64 + z, 64 - z, (half)0.0f);
+      }
+    }
+    __bang_reduce_sum(a0, a3, 4096);
+
+    __memcpy(a1, v + base, 4096 * sizeof(half), GDRAM2NRAM);
+    __bang_transpose(a2, a1, 64, 64);
+    __memcpy(w0, a2, 4096 * sizeof(half), NRAM2WRAM);
+    __bang_matmul(f2, a3, w0, 64, 64, 64);
+#pragma unroll
+    for (int i = 0; i < 64; ++i) {
+      float s = (float)a0[i * 64];
+      __bang_mul_scalar(f2 + i * 64, f2 + i * 64, 1.0f / s, 64);
+    }
+    __bang_float2half_rn(a0, f2, 4096);
+    __memcpy(y + base, a0, 4096 * sizeof(half), NRAM2GDRAM);
+    return;
+  }
   __memcpy(a1, k + base, 8192 * sizeof(half), GDRAM2NRAM);
   __bang_reshape_filter(a2, a1, 128, 1, 1, 64);
   __memcpy(w0, a2, 8192 * sizeof(half), NRAM2WRAM);
