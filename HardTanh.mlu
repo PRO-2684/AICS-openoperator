@@ -5,7 +5,7 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define CHUNK_ELEMS 262144
+#define CHUNK_ELEMS 16384
 
 static int g_dev = 0;
 
@@ -52,7 +52,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   static bool init = false;
   if (!init) {
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t dim = {1, 1, 1};
+    cnrtDim3_t dim = {16, 1, 1};
     hardtanh_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
         reinterpret_cast<half *>(x.data_ptr<at::Half>()));
     init = true;
