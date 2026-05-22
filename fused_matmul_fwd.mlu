@@ -64,9 +64,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
     __bang_transpose(wt, wi, TK, TN);
     __bang_reshape_filter(wf, wt, TN, 1, 1, TK);
     __memcpy(ww, wf, TN * TK * sizeof(int8_t), NRAM2WRAM);
+    __bang_matmul(tmp, xi, ww, TM, TK, TN, 0);
     __memcpy(bh, b + nj, TN * sizeof(half), GDRAM2NRAM);
     __bang_half2float(bf, bh, TN);
-    __bang_matmul(tmp, xi, ww, TM, TK, TN, 0);
     __bang_cycle_add_tz(tmp, tmp, bf, TM * TN, TN);
     __bang_float2half_rn(yh, tmp, TM * TN);
     __memcpy(yp, yh, TN * sizeof(half), NRAM2GDRAM, N0 * sizeof(half),
