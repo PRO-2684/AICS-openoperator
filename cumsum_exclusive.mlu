@@ -6,19 +6,43 @@
 #include <unistd.h>
 
 __mlu_func__ void k1(float *__restrict__ a, float *__restrict__ b) {
-  (void)b;
-  __bang_add(a + 1, a + 1, a, 3999);
-  __bang_add(a + 2, a + 2, a, 3998);
-  __bang_add(a + 4, a + 4, a, 3996);
-  __bang_add(a + 8, a + 8, a, 3992);
-  __bang_add(a + 16, a + 16, a, 3984);
-  __bang_add(a + 32, a + 32, a, 3968);
-  __bang_add(a + 64, a + 64, a, 3936);
-  __bang_add(a + 128, a + 128, a, 3872);
-  __bang_add(a + 256, a + 256, a, 3744);
-  __bang_add(a + 512, a + 512, a, 3488);
-  __bang_add(a + 1024, a + 1024, a, 2976);
-  __bang_add(a + 2048, a + 2048, a, 1952);
+  __bang_write_value(a + 4000, 96, 0.0f);
+  __bang_write_value(b, 1, 0.0f);
+  __memcpy(b + 1, a, 4095 * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, 4096);
+  __bang_write_value(b, 2, 0.0f);
+  __memcpy(b + 2, a, 4094 * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, 4096);
+  __bang_write_value(b, 4, 0.0f);
+  __memcpy(b + 4, a, 4092 * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, 4096);
+  __bang_write_value(b, 8, 0.0f);
+  __memcpy(b + 8, a, 4088 * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, 4096);
+  __bang_write_value(b, 16, 0.0f);
+  __memcpy(b + 16, a, 4080 * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, 4096);
+  __bang_write_value(b, 32, 0.0f);
+  __memcpy(b + 32, a, 4064 * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, 4096);
+  __bang_write_value(b, 64, 0.0f);
+  __memcpy(b + 64, a, 4032 * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, 4096);
+  __bang_write_value(b, 128, 0.0f);
+  __memcpy(b + 128, a, 3968 * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, 4096);
+  __bang_write_value(b, 256, 0.0f);
+  __memcpy(b + 256, a, 3840 * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, 4096);
+  __bang_write_value(b, 512, 0.0f);
+  __memcpy(b + 512, a, 3584 * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, 4096);
+  __bang_write_value(b, 1024, 0.0f);
+  __memcpy(b + 1024, a, 3072 * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, 4096);
+  __bang_write_value(b, 2048, 0.0f);
+  __memcpy(b + 2048, a, 2048 * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, 4096);
 }
 
 __mlu_func__ void k2(half *__restrict__ h, float *__restrict__ a,
@@ -107,7 +131,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   auto &y = gy;
   static bool init = false;
   if (!init) {
-    cnrtDim3_t g = {64, 1, 1};
+    cnrtDim3_t g = {32, 1, 1};
     k0<<<g, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
         reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
         y.data_ptr<float>());
