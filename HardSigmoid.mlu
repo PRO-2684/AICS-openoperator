@@ -9,18 +9,13 @@
 
 __mlu_entry__ void hardsigmoid_half_kernel(half *__restrict__ input) {
   __nram__ half a[CHUNK_ELEMS];
-  __nram__ half b[CHUNK_ELEMS];
-  __nram__ half c[CHUNK_ELEMS];
   half *p =
       (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
   __memcpy(a, p, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
   __bang_add_scalar(a, a, (half)3.0f, CHUNK_ELEMS);
-  __bang_abs(b, a, CHUNK_ELEMS);
-  __bang_add_scalar(c, a, (half)-6.0f, CHUNK_ELEMS);
-  __bang_abs(c, c, CHUNK_ELEMS);
-  __bang_sub(a, b, c, CHUNK_ELEMS);
-  __bang_add_scalar(a, a, (half)6.0f, CHUNK_ELEMS);
-  __bang_mul_scalar(a, a, (half)(1.0f / 12.0f), CHUNK_ELEMS);
+  __bang_maximum_scalar(a, a, (half)0.0f, CHUNK_ELEMS);
+  __bang_minimum_scalar(a, a, (half)6.0f, CHUNK_ELEMS);
+  __bang_mul_scalar(a, a, (half)(1.0f / 6.0f), CHUNK_ELEMS);
   __memcpy(p, a, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
 }
 
