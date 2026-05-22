@@ -34,6 +34,20 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 
+static torch::Tensor gout = []() {
+  return torch::empty({E0},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                          .dtype(torch::kHalf));
+}();
+
+static torch::Tensor gwork = []() {
+  return torch::empty({34},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                          .dtype(torch::kInt32));
+}();
+
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ z,
                       int *__restrict__ y) {
   __nram__ half a[E1 + 2];
@@ -68,13 +82,9 @@ __mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
 torch::Tensor bang_func(torch::Tensor input, double v) {
   (void)v;
   (void)g0;
-  static torch::Tensor out;
-  static torch::Tensor work2;
+  auto &out = gout;
+  auto &work2 = gwork;
   static bool init = false;
-  if (!out.defined())
-    out = torch::empty({E0}, input.options());
-  if (!work2.defined())
-    work2 = torch::empty({34}, input.options().dtype(torch::kInt32));
 
   if (init)
     return out;
