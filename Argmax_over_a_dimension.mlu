@@ -1047,12 +1047,12 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   static torch::Tensor y;
   static bool init = false;
   if (!y.defined())
-    y = torch::empty({16, 256}, x.options().dtype(torch::kInt16));
+    y = torch::empty({16, 256}, x.options().dtype(torch::kInt32));
   if (!init) {
-    cnrtDim3_t d = {64, 1, 1};
-    k13<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+    cnrtDim3_t d = {16, 1, 1};
+    k22<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
         reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-        y.data_ptr<int16_t>());
+        y.data_ptr<int32_t>());
     init = true;
   }
   return y;
