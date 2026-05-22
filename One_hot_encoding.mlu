@@ -27,9 +27,7 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  auto a = torch::empty({1024, 512}, opt);
-  auto b = torch::empty({1024, 512}, opt);
-  return a + b;
+  return torch::zeros({1}, opt);
 }();
 
 static torch::Tensor gy = []() {
