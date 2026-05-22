@@ -85,15 +85,16 @@ __mlu_entry__ void k0(const int64_t *__restrict__ indices,
                       float *__restrict__ out) {
   __nram__ float a[256];
   __nram__ float b[256];
-  int bag = taskId;
-  __bang_write_value(a, 256, 0.0f);
-  for (int i = 0; i < 32; ++i) {
-    int64_t p = indices[bag * 32 + i];
-    __memcpy(b, weight + p * 256, 256 * sizeof(float), GDRAM2NRAM);
-    __bang_add(a, a, b, 256);
+  for (int bag = taskId; bag < 64; bag += taskDim) {
+    __bang_write_value(a, 256, 0.0f);
+    for (int i = 0; i < 32; ++i) {
+      int64_t p = indices[bag * 32 + i];
+      __memcpy(b, weight + p * 256, 256 * sizeof(float), GDRAM2NRAM);
+      __bang_add(a, a, b, 256);
+    }
+    __bang_mul_scalar(a, a, 0.03125f, 256);
+    __memcpy(out + bag * 256, a, 256 * sizeof(float), NRAM2GDRAM);
   }
-  __bang_mul_scalar(a, a, 0.03125f, 256);
-  __memcpy(out + bag * 256, a, 256 * sizeof(float), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor indices, torch::Tensor offsets,
@@ -108,7 +109,7 @@ torch::Tensor bang_func(torch::Tensor indices, torch::Tensor offsets,
   py::object emb_bag = model.attr("emb_bag");
   torch::Tensor weight = as_tensor(emb_bag.attr("weight"));
   auto y = g1;
-  cnrtDim3_t dim = {64, 1, 1};
+  cnrtDim3_t dim = {32, 1, 1};
   k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const int64_t *>(indices.data_ptr<int64_t>()),
       reinterpret_cast<const float *>(weight.data_ptr<float>()),
