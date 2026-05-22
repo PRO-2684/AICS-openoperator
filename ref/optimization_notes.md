@@ -1,5 +1,12 @@
 # Optimization Notes
 
+## 028/029 HardSigmoid / HardTanh
+
+- The old abs-based clamp form was beaten after checking local Neuware headers: `__bang_maximum_scalar/__bang_minimum_scalar` from newer docs are not available in this environment, but `__bang_maxeq_scalar/__bang_mineq_scalar` are available and implement the scalar clamp path.
+- For 028, scalar clamp with 8K tiles and 32 Block tasks (`883e10f`) passed with best row `314.196 us`, beating the updated external `337.174 us`. 16K (`d88e016`) was slower at best `319.627 us`, and full-NRAM single task (`229fc94`) slowed to `388.795 us`.
+- For 029, scalar clamp with 32K tiles and 8 Block tasks (`487d5c7`) passed with best row `307.842 us`, beating the updated external `337.156 us`; diff dropped to `0.00e+00`. 8K (`883e10f`) and 16K (`d88e016`) were slower, while full-NRAM single task (`229fc94`) also regressed.
+- Bad probes: `e0e27d3/35be40d/da38421` used unavailable `__bang_maximum_scalar/__bang_minimum_scalar` and produced no-table compile failures. Do not repeat those names; use `maxeq/mineq` on this Neuware stack.
+
 ## Distribution and Approximation Probes
 
 - For randn-style references, measure the target distribution before optimizing the kernel path. A cheap CPU probe of mean/std/max and a sweep of constant or low-order approximations can quickly show whether an approximation can ever satisfy the max-abs checker.
