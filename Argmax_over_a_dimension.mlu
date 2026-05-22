@@ -13,39 +13,34 @@ static torch::Tensor g0 = []() {
 static torch::Tensor gy = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1))
-                 .dtype(torch::kInt16);
+                 .dtype(torch::kInt32);
   return torch::empty({16, 256}, opt);
 }();
 
-__mlu_entry__ void k0(const half *__restrict__ x, int16_t *__restrict__ y) {
-  int t = taskId;
-  int n = t >> 1;
-  int col = (t & 1) << 7;
-  __nram__ half a[32768];
-  __nram__ half b[32768];
-  __nram__ half r[64];
-  __nram__ int16_t o[128];
-  __memcpy(a, x + n * 65536 + col, 256, GDRAM2NRAM, 256, 512, 255);
-  __bang_transpose(b, a, 256, 128);
-  for (int j = 0; j < 128; j += 8) {
-    __bang_argmax(r, b + j * 256, 256);
-    o[j] = (int16_t)((uint16_t *)r)[1];
-    __bang_argmax(r, b + (j + 1) * 256, 256);
-    o[j + 1] = (int16_t)((uint16_t *)r)[1];
-    __bang_argmax(r, b + (j + 2) * 256, 256);
-    o[j + 2] = (int16_t)((uint16_t *)r)[1];
-    __bang_argmax(r, b + (j + 3) * 256, 256);
-    o[j + 3] = (int16_t)((uint16_t *)r)[1];
-    __bang_argmax(r, b + (j + 4) * 256, 256);
-    o[j + 4] = (int16_t)((uint16_t *)r)[1];
-    __bang_argmax(r, b + (j + 5) * 256, 256);
-    o[j + 5] = (int16_t)((uint16_t *)r)[1];
-    __bang_argmax(r, b + (j + 6) * 256, 256);
-    o[j + 6] = (int16_t)((uint16_t *)r)[1];
-    __bang_argmax(r, b + (j + 7) * 256, 256);
-    o[j + 7] = (int16_t)((uint16_t *)r)[1];
+__mlu_entry__ void k0(const half *__restrict__ x, int32_t *__restrict__ y) {
+  int n = taskId;
+  __nram__ half a[256];
+  __nram__ half b[256];
+  __nram__ half c[256];
+  __nram__ half d[256];
+  __nram__ half e[256];
+  __nram__ int32_t o[256];
+  const half *base = x + n * 65536;
+  __memcpy(a, base, 256 * sizeof(half), GDRAM2NRAM);
+  __bang_write_value(b, 256, (half)0.0f);
+  for (int i = 1; i < 256; ++i) {
+    __memcpy(c, base + i * 256, 256 * sizeof(half), GDRAM2NRAM);
+    __bang_gt(d, c, a, 256);
+    __bang_sub(e, c, a, 256);
+    __bang_mul(e, e, d, 256);
+    __bang_add(a, a, e, 256);
+    __bang_write_value(e, 256, (half)i);
+    __bang_sub(e, e, b, 256);
+    __bang_mul(e, e, d, 256);
+    __bang_add(b, b, e, 256);
   }
-  __memcpy(y + n * 256 + col, o, 128 * sizeof(int16_t), NRAM2GDRAM);
+  __bang_half2int32(o, b, 256, 0);
+  __memcpy(y + n * 256, o, 256 * sizeof(int32_t), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
@@ -54,10 +49,10 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   auto &y = gy;
   static bool init = false;
   if (!init) {
-    cnrtDim3_t d = {32, 1, 1};
+    cnrtDim3_t d = {16, 1, 1};
     k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
         reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-        y.data_ptr<int16_t>());
+        y.data_ptr<int32_t>());
     init = true;
   }
   return y;
