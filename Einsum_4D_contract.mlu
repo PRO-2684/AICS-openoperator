@@ -5,8 +5,6 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
-#pragma bang walign(64)
-
 #define E0 32
 #define E1 8192
 #define E2 16384
