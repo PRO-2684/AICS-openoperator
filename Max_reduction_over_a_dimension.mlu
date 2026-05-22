@@ -7,19 +7,13 @@
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[65536];
+  __nram__ half d[256];
   int n = taskId;
   const half *src = x + n * 65536;
   half *dst = y + n * 256;
   __memcpy(a, src, 65536 * sizeof(half), GDRAM2NRAM);
-  __bang_maximum(a, a, a + 32768, 32768);
-  __bang_maximum(a, a, a + 16384, 16384);
-  __bang_maximum(a, a, a + 8192, 8192);
-  __bang_maximum(a, a, a + 4096, 4096);
-  __bang_maximum(a, a, a + 2048, 2048);
-  __bang_maximum(a, a, a + 1024, 1024);
-  __bang_maximum(a, a, a + 512, 512);
-  __bang_maximum(a, a, a + 256, 256);
-  __memcpy(dst, a, 256 * sizeof(half), NRAM2GDRAM);
+  __bang_maxpool(d, a, 1, 256, 256, 256, 1, 1, 1);
+  __memcpy(dst, d, 256 * sizeof(half), NRAM2GDRAM);
 }
 
 
