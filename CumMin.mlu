@@ -7,7 +7,7 @@
 
 #define S(D)                                                                  \
   __memcpy(b, a, (D)*2, NRAM2NRAM);                                           \
-  __bang_minequal(b + (D), a + (D), a, 4000 - (D));                           \
+  __bang_minequal(b + (D), a + (D), a, 4096 - (D));                           \
   t = a;                                                                      \
   a = b;                                                                      \
   b = t;
@@ -61,6 +61,7 @@ __mlu_entry__ void k(const half *x, half *y) {
   for (int r = taskId; r < 128; r += taskDim) {
     int p = r * 4000;
     __memcpy(h, x + p, 8000, GDRAM2NRAM);
+    __bang_write_value(h + 4000, 96, (half)65504.0f);
     f0(h, s);
     __memcpy(y + p, h, 8000, NRAM2GDRAM);
   }
