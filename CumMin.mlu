@@ -56,21 +56,14 @@ static torch::Tensor g0 = []() {
 }();
 
 __mlu_entry__ void k(const half *x, half *y) {
-  int p = taskId * 8000;
-  __nram__ half h0[4096];
-  __nram__ half h1[4096];
-  __nram__ half s0[4096];
-  __nram__ half s1[4096];
-  __memcpy_async(h0, x + p, 8000, GDRAM2NRAM);
-  __sync_io();
-  __memcpy_async(h1, x + p + 4000, 8000, GDRAM2NRAM);
-  f0(h0, s0);
-  __sync_io_move_compute();
-  __memcpy_async(y + p, h0, 8000, NRAM2GDRAM);
-  f0(h1, s1);
-  __sync_io_move_compute();
-  __memcpy_async(y + p + 4000, h1, 8000, NRAM2GDRAM);
-  __sync_io();
+  __nram__ half h[4096];
+  __nram__ half s[4096];
+  for (int r = taskId; r < 128; r += taskDim) {
+    int p = r * 4000;
+    __memcpy(h, x + p, 8000, GDRAM2NRAM);
+    f0(h, s);
+    __memcpy(y + p, h, 8000, NRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
@@ -80,7 +73,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   if (!y.defined())
     y = torch::empty_like(x);
 
-  cnrtDim3_t d = {64, 1, 1};
+  cnrtDim3_t d = {96, 1, 1};
   k<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
