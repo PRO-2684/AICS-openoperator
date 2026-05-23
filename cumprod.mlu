@@ -5,7 +5,7 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define K0 48
+#define K0 40
 
 __mlu_func__ void f0(half *a) {
   half s = a[0];
