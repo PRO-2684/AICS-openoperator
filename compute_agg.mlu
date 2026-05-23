@@ -34,12 +34,16 @@ static torch::Tensor z = []() {
 __mlu_entry__ void k0(const int *__restrict__ x, int *__restrict__ y) {
   __nram__ int a[E0];
   __memcpy(a, x, E0 * sizeof(int), GDRAM2NRAM);
-  int s = 0;
-#pragma unroll
-  for (int i = 0; i < E0; ++i) {
-    s += a[i];
-    a[i] = s;
-  }
+  __bang_add(a + 1, a + 1, a, E0 - 1);
+  __bang_add(a + 2, a + 2, a, E0 - 2);
+  __bang_add(a + 4, a + 4, a, E0 - 4);
+  __bang_add(a + 8, a + 8, a, E0 - 8);
+  __bang_add(a + 16, a + 16, a, E0 - 16);
+  __bang_add(a + 32, a + 32, a, E0 - 32);
+  __bang_add(a + 64, a + 64, a, E0 - 64);
+  __bang_add(a + 128, a + 128, a, E0 - 128);
+  __bang_add(a + 256, a + 256, a, E0 - 256);
+  __bang_add(a + 512, a + 512, a, E0 - 512);
   __memcpy(y, a, E0 * sizeof(int), NRAM2GDRAM);
 }
 
