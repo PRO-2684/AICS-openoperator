@@ -18,11 +18,13 @@ __mlu_func__ void f0(float *a) {
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
   __nram__ half h[K0];
   __nram__ float a[K0];
-  int p = taskId * 4000;
-  __memcpy(h, x + p, K0 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(a, h, K0);
-  f0(a);
-  __memcpy(y + p, a, K0 * sizeof(float), NRAM2GDRAM);
+  for (int r = taskId; r < 128; r += taskDim) {
+    int p = r * 4000;
+    __memcpy(h, x + p, K0 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(a, h, K0);
+    f0(a);
+    __memcpy(y + p, a, K0 * sizeof(float), NRAM2GDRAM);
+  }
 }
 
 
@@ -72,7 +74,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   static bool init = false;
   if (!init) {
     cnrtQueue_t q = torch_mlu::getCurMLUStream();
-    cnrtDim3_t g = {128, 1, 1};
+    cnrtDim3_t g = {96, 1, 1};
     k0<<<g, cnrtFuncTypeBlock, q>>>(
         reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
         y.data_ptr<float>());
