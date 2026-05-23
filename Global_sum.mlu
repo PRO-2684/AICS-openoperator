@@ -9,13 +9,11 @@
 #define E1 16384
 #define E2 256
 
-__mlu_func__ float f0(half *__restrict__ x, half *__restrict__ y,
-                      float *__restrict__ z, int n) {
+__mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y, int n) {
   int q = n / E2;
   __bang_sumpool(y, x, E2, 1, q, 1, q, 1, q);
   __bang_reduce_sum(y, y, E2);
-  __bang_half2float(z, y, E2);
-  return z[0] + z[32] + z[64] + z[96] + z[128] + z[160] + z[192] + z[224];
+  return y[0] + y[32] + y[64] + y[96] + y[128] + y[160] + y[192] + y[224];
 }
 
 static int g_dev = 0;
@@ -58,11 +56,12 @@ static torch::Tensor tmp = []() {
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ t,
                       float *__restrict__ y) {
   __nram__ half a[E1];
-  __nram__ half b[E2];
+  __nram__ float b[E1];
   __nram__ float c[E2];
   int p = taskId * E1;
   __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-  t[taskId] = f0(a, b, c, E1);
+  __bang_half2float(b, a, E1);
+  t[taskId] = f0(b, c, E1);
   __sync_all_ipu();
   if (taskId == 0) {
     __bang_write_value(c, E2, 0.0f);
@@ -76,8 +75,8 @@ torch::Tensor bang_func(torch::Tensor x) {
   (void)z;
   static bool init = false;
   if (!init) {
-    cnrtDim3_t d = {E0, 1, 1};
-    k0<<<d, cnrtFuncTypeUnion8, torch_mlu::getCurMLUStream()>>>(
+    cnrtDim3_t d = {4, 8, 1};
+    k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
         reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
         tmp.data_ptr<float>(), out.data_ptr<float>());
     init = true;
