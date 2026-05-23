@@ -51,17 +51,16 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
 }
 
 __mlu_entry__ void k1(const half *__restrict__ x, float *__restrict__ y) {
-  __mlu_shared__ float s[512];
-  __nram__ half h[32768];
-  __nram__ float a[32768];
-  __nram__ float b[32768];
+  __mlu_shared__ half s[512];
+  __nram__ half a[32768];
+  __nram__ half b[32768];
+  __nram__ float f[32768];
   int c = coreId;
   if (c != 0x80) {
   int g = taskIdY * 2 + (c >> 1);
   int u = c & 1;
   int p = g * 65536 + u * 32768;
-  __memcpy(h, x + p, 32768 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(a, h, 32768);
+  __memcpy(a, x + p, 32768 * sizeof(half), GDRAM2NRAM);
   for (int o = 1; o < 256; o <<= 1) {
     for (int r = 0; r < 128; ++r) {
       __bang_add(a + r * 256 + o, a + r * 256 + o, a + r * 256, 256 - o);
@@ -73,7 +72,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, float *__restrict__ y) {
     __bang_add(a + o * 256, a + o * 256, b, n);
   }
   if (u == 0) {
-    __memcpy(s + (c >> 1) * 256, a + 32512, 256 * sizeof(float), NRAM2SRAM);
+    __memcpy(s + (c >> 1) * 256, a + 32512, 256 * sizeof(half), NRAM2SRAM);
   }
   }
   __sync_cluster();
@@ -82,10 +81,11 @@ __mlu_entry__ void k1(const half *__restrict__ x, float *__restrict__ y) {
   int u = c & 1;
   int p = g * 65536 + u * 32768;
   if (u != 0) {
-    __memcpy(b, s + (c >> 1) * 256, 256 * sizeof(float), SRAM2NRAM);
+    __memcpy(b, s + (c >> 1) * 256, 256 * sizeof(half), SRAM2NRAM);
     __bang_cycle_add(a, a, b, 32768, 256);
   }
-  __memcpy(y + p, a, 32768 * sizeof(float), NRAM2GDRAM);
+  __bang_half2float(f, a, 32768);
+  __memcpy(y + p, f, 32768 * sizeof(float), NRAM2GDRAM);
   }
 }
 
