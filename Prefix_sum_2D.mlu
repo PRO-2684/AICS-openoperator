@@ -56,6 +56,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, float *__restrict__ y) {
   __nram__ float a[32768];
   __nram__ float b[32768];
   int c = coreId;
+  if (c != 0x80) {
   int g = taskIdY * 2 + (c >> 1);
   int u = c & 1;
   int p = g * 65536 + u * 32768;
@@ -74,12 +75,18 @@ __mlu_entry__ void k1(const half *__restrict__ x, float *__restrict__ y) {
   if (u == 0) {
     __memcpy(s + (c >> 1) * 256, a + 32512, 256 * sizeof(float), NRAM2SRAM);
   }
+  }
   __sync_cluster();
+  if (c != 0x80) {
+  int g = taskIdY * 2 + (c >> 1);
+  int u = c & 1;
+  int p = g * 65536 + u * 32768;
   if (u != 0) {
     __memcpy(b, s + (c >> 1) * 256, 256 * sizeof(float), SRAM2NRAM);
     __bang_cycle_add(a, a, b, 32768, 256);
   }
   __memcpy(y + p, a, 32768 * sizeof(float), NRAM2GDRAM);
+  }
 }
 
 __mlu_entry__ void k2(float *__restrict__ y, const float *__restrict__ t) {
