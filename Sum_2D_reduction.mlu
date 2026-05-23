@@ -8,13 +8,13 @@
 #define E0 16
 #define E1 65536
 #define E2 32768
-#define E3 256
+#define E3 32
 
 __mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y, int n) {
   int q = n / E3;
   __bang_sumpool(y, x, E3, 1, q, 1, q, 1, q);
   __bang_reduce_sum(y, y, E3);
-  return y[0] + y[32] + y[64] + y[96] + y[128] + y[160] + y[192] + y[224];
+  return y[0];
 }
 
 static int g_dev = 0;
