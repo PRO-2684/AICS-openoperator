@@ -5,7 +5,7 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define K0 40
+#define K0 38
 
 __mlu_func__ void f0(float *a) {
   float s = a[0];
