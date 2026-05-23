@@ -54,17 +54,31 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
   y[p] = s;
 }
 
+__mlu_entry__ void k1(const half *__restrict__ x, float *__restrict__ y) {
+  __nram__ half a[4096];
+  __nram__ float b[4096];
+  __memcpy(a, x, 4096 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(b, a, 4096);
+#pragma unroll
+  for (int p = 0; p < E1; ++p) {
+    float *t = b + p * E0;
+    __bang_reduce_sum(t, t, E0);
+    float s = 0.0f;
+#pragma unroll
+    for (int i = 0; i < 32; ++i) {
+      s += t[i << 5];
+    }
+    y[p] = s;
+  }
+}
+
 torch::Tensor bang_func(torch::Tensor input, int iters_per_cta) {
   (void)iters_per_cta;
   (void)z;
-  static bool init = false;
-  if (!init) {
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t dim = {E1, 1, 1};
-    k0<<<dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-        out.data_ptr<float>());
-    init = true;
-  }
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {1, 1, 1};
+  k1<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
+      out.data_ptr<float>());
   return out;
 }
