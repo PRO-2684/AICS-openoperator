@@ -32,8 +32,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, int32_t *__restrict__ y) {
     __memcpy(c, base + i * 256, 256 * sizeof(half), GDRAM2NRAM);
     __bang_gt(d, c, a, 256);
     __bang_sub(e, c, a, 256);
-    __bang_mul(e, e, d, 256);
-    __bang_add(a, a, e, 256);
+    __bang_fusion(FUSION_FMA, a, d, e, a, 256, 256);
     __bang_mul(e, b, d, 256);
     __bang_sub(b, b, e, 256);
     __bang_mul_scalar(e, d, (half)i, 256);
