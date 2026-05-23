@@ -12,21 +12,34 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[512];
   __nram__ half b[64];
   __nram__ half c[64];
-  unsigned int ch = 1;
-  unsigned int h = 16;
-  unsigned int w = 16;
-  unsigned int kh = 2;
-  unsigned int kw = 2;
-  unsigned int sh = 2;
-  unsigned int sw = 2;
   for (int p = taskId; p < E0; p += taskDim) {
     int u = p & 7;
     int v = p >> 3;
     __memcpy(a, x + v * 4096 + u * 512, 512 * sizeof(half), GDRAM2NRAM);
-    __bang_avgpool(b, a, ch, h, w, kh, kw, sw, sh);
-    __bang_avgpool(c, a + 256, ch, h, w, kh, kw, sw, sh);
+    __memcpy(b, a, sizeof(half), NRAM2NRAM, sizeof(half),
+             2 * sizeof(half), 63);
+    __memcpy(c, a + 1, sizeof(half), NRAM2NRAM, sizeof(half),
+             2 * sizeof(half), 63);
     __bang_add(b, b, c, 64);
-    __bang_mul_scalar(b, b, (half)0.5f, 64);
+    __memcpy(c, a + 16, sizeof(half), NRAM2NRAM, sizeof(half),
+             2 * sizeof(half), 63);
+    __bang_add(b, b, c, 64);
+    __memcpy(c, a + 17, sizeof(half), NRAM2NRAM, sizeof(half),
+             2 * sizeof(half), 63);
+    __bang_add(b, b, c, 64);
+    __memcpy(c, a + 256, sizeof(half), NRAM2NRAM, sizeof(half),
+             2 * sizeof(half), 63);
+    __bang_add(b, b, c, 64);
+    __memcpy(c, a + 257, sizeof(half), NRAM2NRAM, sizeof(half),
+             2 * sizeof(half), 63);
+    __bang_add(b, b, c, 64);
+    __memcpy(c, a + 272, sizeof(half), NRAM2NRAM, sizeof(half),
+             2 * sizeof(half), 63);
+    __bang_add(b, b, c, 64);
+    __memcpy(c, a + 273, sizeof(half), NRAM2NRAM, sizeof(half),
+             2 * sizeof(half), 63);
+    __bang_add(b, b, c, 64);
+    __bang_mul_scalar(b, b, (half)0.125f, 64);
     __memcpy(y + v * 512 + u * 64, b, 64 * sizeof(half), NRAM2GDRAM);
   }
 }
