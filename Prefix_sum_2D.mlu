@@ -51,44 +51,53 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
 }
 
 __mlu_entry__ void k1(const half *__restrict__ x, float *__restrict__ y) {
-  __mlu_shared__ float s[512];
-  __nram__ half h[32768];
-  __nram__ float a[32768];
-  __nram__ float b[32768];
+  __mlu_shared__ float s[768];
+  __nram__ half h[16384];
+  __nram__ float a[16384];
+  __nram__ float b[16384];
   __nram__ float z[256];
   int c = coreId;
+  for (int base = 0; base < 16; base += 8) {
   if (c != 0x80) {
-  int g = taskIdY * 2 + (c >> 1);
-  int u = c & 1;
-  int p = g * 65536 + u * 32768;
-  __memcpy(h, x + p, 32768 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(a, h, 32768);
-  __bang_write_zero(z, 256);
+  int g = base + taskIdY;
+  int u = c;
+  int p = g * 65536 + u * 16384;
+  __memcpy(h, x + p, 16384 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(a, h, 16384);
   for (int o = 1; o < 256; o <<= 1) {
-    __memcpy(b + o, a, (256 - o) * sizeof(float), NRAM2NRAM,
-             256 * sizeof(float), 256 * sizeof(float), 127);
-    __memcpy(b, z, o * sizeof(float), NRAM2NRAM, 256 * sizeof(float), 0, 127);
-    __bang_add(a, a, b, 32768);
+    for (int r = 0; r < 64; ++r) {
+      __bang_add(a + r * 256 + o, a + r * 256 + o, a + r * 256, 256 - o);
+    }
   }
-  for (int o = 1; o < 128; o <<= 1) {
-    int n = 32768 - o * 256;
+  for (int o = 1; o < 64; o <<= 1) {
+    int n = 16384 - o * 256;
     __memcpy(b, a, n * sizeof(float), NRAM2NRAM);
     __bang_add(a + o * 256, a + o * 256, b, n);
   }
-  if (u == 0) {
-    __memcpy(s + (c >> 1) * 256, a + 32512, 256 * sizeof(float), NRAM2SRAM);
+  if (u < 3) {
+    __memcpy(s + u * 256, a + 16128, 256 * sizeof(float), NRAM2SRAM);
   }
   }
   __sync_cluster();
   if (c != 0x80) {
-  int g = taskIdY * 2 + (c >> 1);
-  int u = c & 1;
-  int p = g * 65536 + u * 32768;
+  int g = base + taskIdY;
+  int u = c;
+  int p = g * 65536 + u * 16384;
   if (u != 0) {
-    __memcpy(b, s + (c >> 1) * 256, 256 * sizeof(float), SRAM2NRAM);
-    __bang_cycle_add(a, a, b, 32768, 256);
+    __memcpy(b, s, 256 * sizeof(float), SRAM2NRAM);
+    if (u > 1) {
+      __memcpy(b + 256, s + 256, 256 * sizeof(float), SRAM2NRAM);
+      __bang_add(b, b, b + 256, 256);
+    }
+    if (u > 2) {
+      __memcpy(b + 256, s + 512, 256 * sizeof(float), SRAM2NRAM);
+      __bang_add(b, b, b + 256, 256);
+    }
+    __bang_cycle_add(a, a, b, 16384, 256);
   }
-  __memcpy(y + p, a, 32768 * sizeof(float), NRAM2GDRAM);
+  __memcpy(y + p, a, 16384 * sizeof(float), NRAM2GDRAM);
+  }
+  __sync_cluster();
   }
 }
 
