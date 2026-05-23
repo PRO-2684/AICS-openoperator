@@ -122,7 +122,7 @@ python scripts/update_problems.py
 | 071 | [Cos](Cos.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/a2099ea) |
 | 072 | [ElementwiseAdd](ElementwiseAdd.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/dd922e7) |
 | 073 | [Power](Power.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/5ac33ea) |
-| 074 | [Std_reduction_over_dim](Std_reduction_over_dim.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/7b1043a) |
+| 074 | [Std_reduction_over_dim](Std_reduction_over_dim.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/28c3998) |
 | 075 | [TopK](TopK.mlu) | N/A | 🔴 |
 | 076 | [Sort](Sort.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/8cc27cd) |
 | 077 | [LogSumExp_over_dim](LogSumExp_over_dim.mlu) | N/A | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/f7dcce8) |
