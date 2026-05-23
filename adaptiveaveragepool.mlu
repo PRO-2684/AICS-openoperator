@@ -1,70 +1,42 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <unistd.h>
 
 #define E0 64
-#define E1 64
+#define E1 32
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[512];
   __nram__ half b[64];
-  __nram__ half c[64];
   for (int p = taskId; p < E0; p += taskDim) {
     int u = p & 7;
     int v = p >> 3;
     __memcpy(a, x + v * 4096 + u * 512, 512 * sizeof(half), GDRAM2NRAM);
-    __memcpy(b, a, sizeof(half), NRAM2NRAM, sizeof(half),
-             2 * sizeof(half), 63);
-    __memcpy(c, a + 1, sizeof(half), NRAM2NRAM, sizeof(half),
-             2 * sizeof(half), 63);
-    __bang_add(b, b, c, 64);
-    __memcpy(c, a + 16, sizeof(half), NRAM2NRAM, sizeof(half),
-             2 * sizeof(half), 63);
-    __bang_add(b, b, c, 64);
-    __memcpy(c, a + 17, sizeof(half), NRAM2NRAM, sizeof(half),
-             2 * sizeof(half), 63);
-    __bang_add(b, b, c, 64);
-    __memcpy(c, a + 256, sizeof(half), NRAM2NRAM, sizeof(half),
-             2 * sizeof(half), 63);
-    __bang_add(b, b, c, 64);
-    __memcpy(c, a + 257, sizeof(half), NRAM2NRAM, sizeof(half),
-             2 * sizeof(half), 63);
-    __bang_add(b, b, c, 64);
-    __memcpy(c, a + 272, sizeof(half), NRAM2NRAM, sizeof(half),
-             2 * sizeof(half), 63);
-    __bang_add(b, b, c, 64);
-    __memcpy(c, a + 273, sizeof(half), NRAM2NRAM, sizeof(half),
-             2 * sizeof(half), 63);
-    __bang_add(b, b, c, 64);
-    __bang_mul_scalar(b, b, (half)0.125f, 64);
+    for (int i = 0; i < 8; ++i) {
+      int h = i << 1;
+      for (int j = 0; j < 8; ++j) {
+        int w = j << 1;
+        float s = 0.0f;
+        int q = h * 16 + w;
+        s += (float)a[q];
+        s += (float)a[q + 1];
+        s += (float)a[q + 16];
+        s += (float)a[q + 17];
+        s += (float)a[q + 256];
+        s += (float)a[q + 257];
+        s += (float)a[q + 272];
+        s += (float)a[q + 273];
+        b[i * 8 + j] = (half)(s * 0.125f);
+      }
+    }
     __memcpy(y + v * 512 + u * 64, b, 64 * sizeof(half), NRAM2GDRAM);
   }
 }
 
-
-static int g_dev = 0;
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
-}
 static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
                  .dtype(torch::kHalf);
   auto c = torch::zeros({1}, opt);
   auto d = torch::empty({2, 4, 8, 8, 8}, opt);
@@ -75,7 +47,7 @@ static torch::Tensor g0 = []() {
 static torch::Tensor gy = []() {
   return torch::empty({2, 4, 8, 8, 8},
                       torch::TensorOptions()
-                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
                           .dtype(torch::kHalf));
 }();
 
