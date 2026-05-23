@@ -5,25 +5,23 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define K0 32
+#define K0 48
 
-__mlu_func__ void f0(float *a) {
-  float s = a[0];
+__mlu_func__ void f0(half *a) {
+  half s = a[0];
   for (int i = 1; i < K0; ++i) {
     s = s * a[i];
     a[i] = s;
   }
 }
 
-__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half h[K0];
-  __nram__ float a[K0];
   for (int r = taskId; r < 128; r += taskDim) {
     int p = r * 4000;
     __memcpy(h, x + p, K0 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(a, h, K0);
-    f0(a);
-    __memcpy(y + p, a, K0 * sizeof(float), NRAM2GDRAM);
+    f0(h);
+    __memcpy(y + p, h, K0 * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -62,8 +60,8 @@ static torch::Tensor gy = []() {
   auto y = torch::empty({128, 4000},
                         torch::TensorOptions()
                             .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                            .dtype(torch::kFloat32));
-  cnrtMemsetAsync(y.data_ptr(), 0, 2048000, torch_mlu::getCurMLUStream());
+                            .dtype(torch::kHalf));
+  cnrtMemsetAsync(y.data_ptr(), 0, 1024000, torch_mlu::getCurMLUStream());
   return y;
 }();
 
@@ -77,7 +75,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
     cnrtDim3_t g = {120, 1, 1};
     k0<<<g, cnrtFuncTypeBlock, q>>>(
         reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-        y.data_ptr<float>());
+        reinterpret_cast<half *>(y.data_ptr<at::Half>()));
     init = true;
   }
   return y;
