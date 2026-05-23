@@ -37,31 +37,36 @@ static torch::Tensor y = []() {
 }();
 
 __mlu_entry__ void k(const half *a, half *b) {
-  int p = taskId;
+  int p = taskId * 4;
 
   __nram__ half x[64];
-  __nram__ half y[64];
+  __nram__ half r[64];
 
   __memcpy(x, a + p * 64, 128, GDRAM2NRAM);
-  __bang_max(y, x, 64);
-  __memcpy(b + p, y, 2, NRAM2GDRAM);
+  __bang_max(r, x, 64);
+  __memcpy(b + p, r, 2, NRAM2GDRAM);
+  __memcpy(x, a + (p + 1) * 64, 128, GDRAM2NRAM);
+  __bang_max(r, x, 64);
+  __memcpy(b + p + 1, r, 2, NRAM2GDRAM);
+  __memcpy(x, a + (p + 2) * 64, 128, GDRAM2NRAM);
+  __bang_max(r, x, 64);
+  __memcpy(b + p + 2, r, 2, NRAM2GDRAM);
+  __memcpy(x, a + (p + 3) * 64, 128, GDRAM2NRAM);
+  __bang_max(r, x, 64);
+  __memcpy(b + p + 3, r, 2, NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int n) {
   (void)z;
 
-  static bool init = false;
-  if (!init) {
-    cnrtDim3_t d;
-    d.x = 32;
-    d.y = 1;
-    d.z = 1;
+  cnrtDim3_t d;
+  d.x = 8;
+  d.y = 1;
+  d.z = 1;
 
-    k<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-    init = true;
-  }
+  k<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
 
   return y;
 }
