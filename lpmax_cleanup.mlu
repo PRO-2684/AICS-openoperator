@@ -40,7 +40,7 @@ __mlu_entry__ void k(const half *a, half *b) {
   __nram__ half x[2048];
   __nram__ half r[32];
   __memcpy(x, a, 4096, GDRAM2NRAM);
-  __bang_maxpool(r, x, 32, 1, 64, 1, 64, 1, 64);
+  __bang_maxpool(r, x, 1, 32, 64, 1, 64, 1, 64);
   __memcpy(b, r, 64, NRAM2GDRAM);
 }
 
