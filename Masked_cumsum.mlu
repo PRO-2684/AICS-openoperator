@@ -55,9 +55,10 @@ __mlu_func__ void k2(half *__restrict__ h, int8_t *__restrict__ c,
     __bang_write_value(h + E1, E3 - E1, (half)0.0f);
     __bang_write_value(c + E1, E3 - E1, (int8_t)0);
   }
+  half *d = (half *)b;
+  __bang_int82half(d, c, E3, 0);
+  __bang_mul(h, h, d, E3);
   __bang_half2float(a, h, E3);
-  __bang_int82float(b, c, E3, 0);
-  __bang_mul(a, a, b, E3);
   k1(a, b);
 }
 
@@ -142,7 +143,7 @@ __mlu_entry__ void k0(const half *__restrict__ x,
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, int dim) {
   (void)g0;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {128, 1, 1};
+  cnrtDim3_t g = {32, 1, 1};
   k0<<<g, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const unsigned char *>(mask.data_ptr()),
