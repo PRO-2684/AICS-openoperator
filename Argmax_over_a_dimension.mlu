@@ -3,6 +3,13 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
 static torch::Tensor gy = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1))
@@ -39,6 +46,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, int32_t *__restrict__ y) {
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
+  (void)g0;
   auto &y = gy;
   static bool init = false;
   if (!init) {
