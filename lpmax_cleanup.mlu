@@ -37,30 +37,23 @@ static torch::Tensor y = []() {
 }();
 
 __mlu_entry__ void k(const half *a, half *b) {
-  int p = taskId * 4;
+  int p = taskId * 8;
 
   __nram__ half x[64];
   __nram__ half r[64];
 
-  __memcpy(x, a + p * 64, 128, GDRAM2NRAM);
-  __bang_max(r, x, 64);
-  __memcpy(b + p, r, 2, NRAM2GDRAM);
-  __memcpy(x, a + (p + 1) * 64, 128, GDRAM2NRAM);
-  __bang_max(r, x, 64);
-  __memcpy(b + p + 1, r, 2, NRAM2GDRAM);
-  __memcpy(x, a + (p + 2) * 64, 128, GDRAM2NRAM);
-  __bang_max(r, x, 64);
-  __memcpy(b + p + 2, r, 2, NRAM2GDRAM);
-  __memcpy(x, a + (p + 3) * 64, 128, GDRAM2NRAM);
-  __bang_max(r, x, 64);
-  __memcpy(b + p + 3, r, 2, NRAM2GDRAM);
+  for (int i = 0; i < 8; ++i) {
+    __memcpy(x, a + (p + i) * 64, 128, GDRAM2NRAM);
+    __bang_max(r, x, 64);
+    __memcpy(b + p + i, r, 2, NRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int n) {
   (void)z;
 
   cnrtDim3_t d;
-  d.x = 8;
+  d.x = 4;
   d.y = 1;
   d.z = 1;
 
