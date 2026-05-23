@@ -33,6 +33,34 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __memcpy(y + taskId * E1, r, E1 * sizeof(half), NRAM2GDRAM);
 }
 
+__mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half a[32768];
+  __nram__ half r[128];
+  __nram__ half s[128];
+  __nram__ float e[128];
+  __nram__ float f[128];
+  __nram__ float g[128];
+  int n = taskId >> 1;
+  int o = (taskId & 1) * 128;
+  const half *src = x + n * E2 + o;
+  for (int i = 0; i < E1; ++i) {
+    __memcpy(a + i * 128, src + i * E1, 128 * sizeof(half), GDRAM2NRAM);
+  }
+  __bang_sumpool(r, a, 128, 1, 256, 1, 256, 1, 256);
+  __bang_square(a, a, 32768);
+  __bang_sumpool(s, a, 128, 1, 256, 1, 256, 1, 256);
+  __bang_half2float(e, r, 128);
+  __bang_half2float(f, s, 128);
+  __bang_mul(g, e, e, 128);
+  __bang_mul_scalar(g, g, 0.00390625f, 128);
+  __bang_sub(f, f, g, 128);
+  __bang_mul_scalar(f, f, 0.00392156862745098f, 128);
+  __bang_active_relu(f, f, 128);
+  __bang_sqrt(f, f, 128);
+  __bang_float2half(r, f, 128);
+  __memcpy(y + n * E1 + o, r, 128 * sizeof(half), NRAM2GDRAM);
+}
+
 static int g_dev = 0;
 
 __attribute__((constructor(101))) static void init_runtime() {
@@ -66,8 +94,8 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
     out = torch::empty({E0, E1}, x.options());
   if (!init) {
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t h0 = {E0, 1, 1};
-    k0<<<h0, cnrtFuncTypeBlock, queue>>>(
+    cnrtDim3_t h0 = {32, 1, 1};
+    k1<<<h0, cnrtFuncTypeBlock, queue>>>(
         reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
         reinterpret_cast<half *>(out.data_ptr<at::Half>()));
     init = true;
