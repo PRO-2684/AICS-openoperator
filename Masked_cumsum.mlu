@@ -52,9 +52,9 @@ __mlu_func__ void k1(float *__restrict__ a, float *__restrict__ b) {
 __mlu_func__ void k2(half *__restrict__ h, int8_t *__restrict__ c,
                      float *__restrict__ a, float *__restrict__ b, int z) {
   (void)z;
+  __bang_int82half(h + E3, c, E3, 0);
+  __bang_mul(h, h, h + E3, E3);
   __bang_half2float(a, h, E3);
-  __bang_int82float(b, c, E3, 0);
-  __bang_mul(a, a, b, E3);
   k1(a, b);
 }
 
@@ -93,8 +93,8 @@ static torch::Tensor gy = []() {
 __mlu_entry__ void k0(const half *__restrict__ x,
                       const unsigned char *__restrict__ m,
                       float *__restrict__ y) {
-  __nram__ half h0[E3];
-  __nram__ half h1[E3];
+  __nram__ half h0[E2 + E3];
+  __nram__ half h1[E2 + E3];
   __nram__ int8_t c0[E3];
   __nram__ int8_t c1[E3];
   __nram__ float a0[E2];
