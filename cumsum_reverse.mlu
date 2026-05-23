@@ -140,7 +140,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   auto &y = gy;
   static bool init = false;
   if (!init) {
-    cnrtDim3_t g = {72, 1, 1};
+    cnrtDim3_t g = {80, 1, 1};
     k0<<<g, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
         reinterpret_cast<const half *>(x.data_ptr<at::Half>()), y.data_ptr<float>());
     init = true;
