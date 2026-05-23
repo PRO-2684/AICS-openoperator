@@ -6,19 +6,25 @@
 #include <unistd.h>
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[16];
-  for (int p = taskId; p < 2048; p += taskDim) {
+  __nram__ half a[1024];
+  __nram__ half b[256];
+  for (int p = taskId; p < 128; p += taskDim) {
     int a0 = p & 15;
-    int a1 = (p >> 4) & 15;
-    int a2 = p >> 8;
-    int q = ((a2 * 32 + (a1 << 1)) * 32 + (a0 << 1)) * 16;
+    int a1 = p >> 4;
+    int q = (a1 * 1024 + (a0 << 6)) * 16;
+    __memcpy(a, x + q, 512 * sizeof(half), GDRAM2NRAM);
+    __memcpy(a + 512, x + q + 512, 512 * sizeof(half), GDRAM2NRAM);
 #pragma unroll
-    for (int i = 0; i < 16; ++i) {
-      float s = (float)x[q + i] + (float)x[q + 16 + i] +
-                (float)x[q + 512 + i] + (float)x[q + 528 + i];
-      a[i] = (half)(s * 0.25f);
+    for (int j = 0; j < 16; ++j) {
+#pragma unroll
+      for (int i = 0; i < 16; ++i) {
+        int r = (j << 5) + i;
+        float s = (float)a[r] + (float)a[r + 16] +
+                  (float)a[r + 512] + (float)a[r + 528];
+        b[(j << 4) + i] = (half)(s * 0.25f);
+      }
     }
-    __memcpy(y + (p << 4), a, 32, NRAM2GDRAM);
+    __memcpy(y + (p << 8), b, 256 * sizeof(half), NRAM2GDRAM);
   }
 }
 
