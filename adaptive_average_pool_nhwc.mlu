@@ -8,23 +8,12 @@
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[1024];
   __nram__ half b[256];
-  __nram__ half d[256];
   for (int r = taskId; r < 128; r += taskDim) {
     int n = r >> 4;
     int h = r & 15;
     int p = n * 16384 + h * 1024;
     __memcpy(a, x + p, 1024 * sizeof(half), GDRAM2NRAM);
-    __memcpy(b, a, 16 * sizeof(half), NRAM2NRAM, 16 * sizeof(half),
-             32 * sizeof(half), 15);
-    __memcpy(d, a + 16, 16 * sizeof(half), NRAM2NRAM, 16 * sizeof(half),
-             32 * sizeof(half), 15);
-    __bang_add(b, b, d, 256);
-    __memcpy(d, a + 512, 16 * sizeof(half), NRAM2NRAM, 16 * sizeof(half),
-             32 * sizeof(half), 15);
-    __bang_add(b, b, d, 256);
-    __memcpy(d, a + 528, 16 * sizeof(half), NRAM2NRAM, 16 * sizeof(half),
-             32 * sizeof(half), 15);
-    __bang_add(b, b, d, 256);
+    __bang_sumpool(b, a, 16, 2, 32, 2, 2, 2, 2);
     __bang_mul_scalar(b, b, (half)0.25f, 256);
     __memcpy(y + r * 256, b, 256 * sizeof(half), NRAM2GDRAM);
   }
