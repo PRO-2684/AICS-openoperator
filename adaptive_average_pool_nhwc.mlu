@@ -13,8 +13,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     int h = r & 15;
     int p = n * 16384 + h * 1024;
     __memcpy(a, x + p, 1024 * sizeof(half), GDRAM2NRAM);
-    __bang_sumpool(b, a, 16, 2, 32, 2, 2, 2, 2);
-    __bang_mul_scalar(b, b, (half)0.25f, 256);
+    __bang_avgpool(b, a, 16, 2, 32, 2, 2);
     __memcpy(y + r * 256, b, 256 * sizeof(half), NRAM2GDRAM);
   }
 }
