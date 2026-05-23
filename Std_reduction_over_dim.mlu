@@ -43,9 +43,8 @@ __mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y) {
   int n = taskId >> 1;
   int o = (taskId & 1) * 128;
   const half *src = x + n * E2 + o;
-  for (int i = 0; i < E1; ++i) {
-    __memcpy(a + i * 128, src + i * E1, 128 * sizeof(half), GDRAM2NRAM);
-  }
+  __memcpy(a, src, 128 * sizeof(half), GDRAM2NRAM, 128 * sizeof(half),
+           256 * sizeof(half), 255);
   __bang_sumpool(r, a, 128, 1, 256, 1, 256, 1, 256);
   __bang_square(a, a, 32768);
   __bang_sumpool(s, a, 128, 1, 256, 1, 256, 1, 256);
