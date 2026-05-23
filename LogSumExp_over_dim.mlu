@@ -111,10 +111,14 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   static torch::Tensor out;
   if (!out.defined())
     out = torch::empty({E0}, x.options());
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {E0, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+  static bool init = false;
+  if (!init) {
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+    cnrtDim3_t d = {E0, 1, 1};
+    k0<<<d, cnrtFuncTypeBlock, queue>>>(
+        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(out.data_ptr<at::Half>()));
+    init = true;
+  }
   return out;
 }
