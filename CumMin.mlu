@@ -61,21 +61,7 @@ __mlu_entry__ void k(const half *x, half *y) {
   for (int r = taskId; r < 128; r += taskDim) {
     int p = r * 4000;
     __memcpy(h, x + p, 8000, GDRAM2NRAM);
-    half *a = h;
-    half *b = s;
-    half *t;
-    S(1)
-    S(2)
-    S(4)
-    S(8)
-    S(16)
-    S(32)
-    S(64)
-    S(128)
-    S(256)
-    S(512)
-    S(1024)
-    S(2048)
+    f0(h, s);
     __memcpy(y + p, h, 8000, NRAM2GDRAM);
   }
 }
