@@ -74,7 +74,7 @@ torch::Tensor bang_func(torch::Tensor x, int dim) {
   static bool init = false;
   if (!init) {
     cnrtQueue_t q = torch_mlu::getCurMLUStream();
-    cnrtDim3_t g = {116, 1, 1};
+    cnrtDim3_t g = {124, 1, 1};
     k0<<<g, cnrtFuncTypeBlock, q>>>(
         reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
         y.data_ptr<float>());
