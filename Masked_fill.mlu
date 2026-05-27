@@ -73,18 +73,20 @@ static torch::Tensor gy = []() {
 
 __mlu_entry__ void k0(const half *__restrict__ x, const unsigned char *__restrict__ m,
                       half *__restrict__ y, half fillv) {
-  __nram__ half a[43712];
-  __nram__ half b[43712];
-  __nram__ half c[43712];
-  __nram__ unsigned char d[43712];
-  int n = taskId < 64 ? 43712 : 43648;
-  int s = taskId < 64 ? taskId * 43712 : 2797568 + (taskId - 64) * 43648;
-  __memcpy(a, x + s, n * sizeof(half), GDRAM2NRAM);
-  __memcpy(d, m + s, n * sizeof(unsigned char), GDRAM2NRAM);
-  __bang_uchar2half(c, d, n);
-  __bang_fusion(FUSION_FSM, b, a, (half)-65504.0, (half)-1.0, n);
-  __bang_fusion(FUSION_FMA, b, b, c, a, n, n);
-  __memcpy(y + s, b, n * sizeof(half), NRAM2GDRAM);
+  __nram__ half a[65536];
+  __nram__ half b[65536];
+  __nram__ half c[65536];
+  __nram__ unsigned char d[65536];
+  int p = taskId * 131072;
+  for (int o = 0; o < 131072; o += 65536) {
+    int s = p + o;
+    __memcpy(a, x + s, 65536 * sizeof(half), GDRAM2NRAM);
+    __memcpy(d, m + s, 65536 * sizeof(unsigned char), GDRAM2NRAM);
+    __bang_uchar2half(c, d, 65536);
+    __bang_fusion(FUSION_FSM, b, a, (half)-65504.0, (half)-1.0, 65536);
+    __bang_fusion(FUSION_FMA, b, b, c, a, 65536, 65536);
+    __memcpy(y + s, b, 65536 * sizeof(half), NRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
@@ -95,7 +97,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) 
   if (init) {
     return y;
   }
-  cnrtDim3_t d = {96, 1, 1};
+  cnrtDim3_t d = {32, 1, 1};
   half fv = (half)((std::isinf(fill_value) && fill_value < 0.0) ? -65504.0
                                                                  : fill_value);
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
