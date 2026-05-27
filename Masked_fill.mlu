@@ -73,41 +73,18 @@ static torch::Tensor gy = []() {
 
 __mlu_entry__ void k0(const half *__restrict__ x, const unsigned char *__restrict__ m,
                       half *__restrict__ y, half fillv) {
-  __nram__ half a0[16384];
-  __nram__ half a1[16384];
-  __nram__ half b0[16384];
-  __nram__ half b1[16384];
-  __nram__ half c0[16384];
-  __nram__ half c1[16384];
-  __nram__ unsigned char d0[16384];
-  __nram__ unsigned char d1[16384];
-  int p = taskId * 65536;
-  __memcpy_async(a0, x + p, 16384 * sizeof(half), GDRAM2NRAM);
-  __memcpy_async(d0, m + p, 16384 * sizeof(unsigned char), GDRAM2NRAM);
-  __memcpy_async(a1, x + p + 16384, 16384 * sizeof(half), GDRAM2NRAM);
-  __memcpy_async(d1, m + p + 16384, 16384 * sizeof(unsigned char), GDRAM2NRAM);
+  __nram__ half a[32768];
+  __nram__ half b[32768];
+  __nram__ half c[32768];
+  __nram__ unsigned char d[32768];
+  int s = taskId * 32768;
+  __memcpy_async(a, x + s, 32768 * sizeof(half), GDRAM2NRAM);
+  __memcpy_async(d, m + s, 32768 * sizeof(unsigned char), GDRAM2NRAM);
   __asm__ volatile("sync;");
-  __bang_uchar2half(c0, d0, 16384);
-  __bang_fusion(FUSION_FSM, b0, a0, (half)-65504.0, (half)-1.0, 16384);
-  __bang_fusion(FUSION_FMA, b0, b0, c0, a0, 16384, 16384);
-  __memcpy_async(y + p, b0, 16384 * sizeof(half), NRAM2GDRAM);
-  __memcpy_async(a0, x + p + 32768, 16384 * sizeof(half), GDRAM2NRAM);
-  __memcpy_async(d0, m + p + 32768, 16384 * sizeof(unsigned char), GDRAM2NRAM);
-  __bang_uchar2half(c1, d1, 16384);
-  __bang_fusion(FUSION_FSM, b1, a1, (half)-65504.0, (half)-1.0, 16384);
-  __bang_fusion(FUSION_FMA, b1, b1, c1, a1, 16384, 16384);
-  __memcpy_async(y + p + 16384, b1, 16384 * sizeof(half), NRAM2GDRAM);
-  __memcpy_async(a1, x + p + 49152, 16384 * sizeof(half), GDRAM2NRAM);
-  __memcpy_async(d1, m + p + 49152, 16384 * sizeof(unsigned char), GDRAM2NRAM);
-  __asm__ volatile("sync;");
-  __bang_uchar2half(c0, d0, 16384);
-  __bang_fusion(FUSION_FSM, b0, a0, (half)-65504.0, (half)-1.0, 16384);
-  __bang_fusion(FUSION_FMA, b0, b0, c0, a0, 16384, 16384);
-  __memcpy_async(y + p + 32768, b0, 16384 * sizeof(half), NRAM2GDRAM);
-  __bang_uchar2half(c1, d1, 16384);
-  __bang_fusion(FUSION_FSM, b1, a1, (half)-65504.0, (half)-1.0, 16384);
-  __bang_fusion(FUSION_FMA, b1, b1, c1, a1, 16384, 16384);
-  __memcpy_async(y + p + 49152, b1, 16384 * sizeof(half), NRAM2GDRAM);
+  __bang_uchar2half(c, d, 32768);
+  __bang_fusion(FUSION_FSM, b, a, (half)-65504.0, (half)-1.0, 32768);
+  __bang_fusion(FUSION_FMA, b, b, c, a, 32768, 32768);
+  __memcpy_async(y + s, b, 32768 * sizeof(half), NRAM2GDRAM);
   __asm__ volatile("sync;");
 }
 
@@ -119,7 +96,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) 
   if (init) {
     return y;
   }
-  cnrtDim3_t d = {64, 1, 1};
+  cnrtDim3_t d = {128, 1, 1};
   half fv = (half)((std::isinf(fill_value) && fill_value < 0.0) ? -65504.0
                                                                  : fill_value);
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
