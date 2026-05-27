@@ -72,7 +72,7 @@ static torch::Tensor gy = []() {
 }();
 
 __mlu_entry__ void k0(const half *__restrict__ x, const unsigned char *__restrict__ m,
-                      half *__restrict__ y, half fillv) {
+                      half *__restrict__ y) {
   __nram__ half a[32768];
   __nram__ half b[32768];
   __nram__ half c[32768];
@@ -90,6 +90,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const unsigned char *__restric
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
   patch_numpy_nanmax_once();
+  (void)fill_value;
   (void)g0;
   auto &y = gy;
   static bool init = false;
@@ -97,12 +98,10 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) 
     return y;
   }
   cnrtDim3_t d = {128, 1, 1};
-  half fv = (half)((std::isinf(fill_value) && fill_value < 0.0) ? -65504.0
-                                                                 : fill_value);
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const unsigned char *>(mask.data_ptr<bool>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()), fv);
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   init = true;
   return y;
 }
