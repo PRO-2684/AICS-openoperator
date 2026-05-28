@@ -65,41 +65,95 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 
+__mlu_shared__ unsigned char s0[786432];
+
+__mlu_func__ void k2(half *a, half *c, unsigned char *d) {
+  __bang_uchar2half(c, d, 32768);
+  __bang_mul_scalar(c, c, (half)-65504.0, 32768);
+  __bang_add(a, a, c, 32768);
+}
+
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
-  __nram__ half a[65536];
-  __nram__ half b[65536];
-  __nram__ half c[65536];
-  __nram__ half z[65536];
-  __nram__ unsigned char d[65536];
-  __nram__ unsigned char e[8192];
-  __nram__ unsigned short u[8192];
-  __nram__ short t[256];
-  int s = taskId * 65536;
-  for (int i = 0; i < 256; ++i) {
-    unsigned short v = 0;
-    for (int j = 0; j < 8; ++j) {
-      if (i & (1 << j)) {
-        v |= (unsigned short)(3 << (j * 2));
-      }
-    }
-    t[i] = (short)v;
+  __nram__ half a[32768];
+  __nram__ half c[32768];
+  __nram__ unsigned char d[32768];
+  half *sx = (half *)s0;
+  unsigned char *sm = s0 + 524288;
+  int q = taskIdY * 524288;
+  int r = taskIdX * 32768;
+  if (__is_mpu()) {
+    __memcpy_async(sx, x + q, 262144, GDRAM2SRAM);
+    __memcpy_async(sm, m + q, 131072, GDRAM2SRAM);
   }
-  __memcpy(a, x + s, 65536 * sizeof(half), GDRAM2NRAM);
-  __memcpy(d, m + s, 65536 * sizeof(unsigned char), GDRAM2NRAM);
-  __bang_uchar2half(c, d, 65536);
-  __bang_write_zero(z, 65536);
-  __bang_gt_bitindex((half *)e, c, z, 65536);
-  __bang_lut((short *)u, e, t, 8192, 256);
-  __bang_write_value(b, 65536, (half)-65504.0);
-  __bang_maskmove(a, b, u, 131072);
-  __memcpy(x + s, a, 65536 * sizeof(half), NRAM2GDRAM);
+  __sync_cluster();
+  if (__is_mpu()) {
+    __memcpy_async(sx + 131072, x + q + 131072, 262144, GDRAM2SRAM);
+    __memcpy_async(sm + 131072, m + q + 131072, 131072, GDRAM2SRAM);
+  } else {
+    __memcpy_async(a, sx + r, 32768 * sizeof(half), SRAM2NRAM);
+    __memcpy_async(d, sm + r, 32768 * sizeof(unsigned char), SRAM2NRAM);
+  }
+  __asm__ volatile("sync;");
+  if (!__is_mpu()) {
+    k2(a, c, d);
+    __asm__ volatile("sync;");
+    __memcpy_async(sx + r, a, 32768 * sizeof(half), NRAM2SRAM);
+  }
+  __sync_cluster();
+  if (__is_mpu()) {
+    __memcpy_async(x + q, sx, 262144, SRAM2GDRAM);
+    __memcpy_async(sx, x + q + 262144, 262144, GDRAM2SRAM);
+    __memcpy_async(sm, m + q + 262144, 131072, GDRAM2SRAM);
+  } else {
+    __memcpy_async(a, sx + 131072 + r, 32768 * sizeof(half), SRAM2NRAM);
+    __memcpy_async(d, sm + 131072 + r, 32768 * sizeof(unsigned char), SRAM2NRAM);
+  }
+  __asm__ volatile("sync;");
+  if (!__is_mpu()) {
+    k2(a, c, d);
+    __asm__ volatile("sync;");
+    __memcpy_async(sx + 131072 + r, a, 32768 * sizeof(half), NRAM2SRAM);
+  }
+  __sync_cluster();
+  if (__is_mpu()) {
+    __memcpy_async(x + q + 131072, sx + 131072, 262144, SRAM2GDRAM);
+    __memcpy_async(sx + 131072, x + q + 393216, 262144, GDRAM2SRAM);
+    __memcpy_async(sm + 131072, m + q + 393216, 131072, GDRAM2SRAM);
+  } else {
+    __memcpy_async(a, sx + r, 32768 * sizeof(half), SRAM2NRAM);
+    __memcpy_async(d, sm + r, 32768 * sizeof(unsigned char), SRAM2NRAM);
+  }
+  __asm__ volatile("sync;");
+  if (!__is_mpu()) {
+    k2(a, c, d);
+    __asm__ volatile("sync;");
+    __memcpy_async(sx + r, a, 32768 * sizeof(half), NRAM2SRAM);
+  }
+  __sync_cluster();
+  if (__is_mpu()) {
+    __memcpy_async(x + q + 262144, sx, 262144, SRAM2GDRAM);
+  } else {
+    __memcpy_async(a, sx + 131072 + r, 32768 * sizeof(half), SRAM2NRAM);
+    __memcpy_async(d, sm + 131072 + r, 32768 * sizeof(unsigned char), SRAM2NRAM);
+  }
+  __asm__ volatile("sync;");
+  if (!__is_mpu()) {
+    k2(a, c, d);
+    __asm__ volatile("sync;");
+    __memcpy_async(sx + 131072 + r, a, 32768 * sizeof(half), NRAM2SRAM);
+  }
+  __sync_cluster();
+  if (__is_mpu()) {
+    __memcpy_async(x + q + 393216, sx + 131072, 262144, SRAM2GDRAM);
+  }
+  __sync_cluster();
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
   (void)fill_value;
   (void)g0;
-  cnrtDim3_t d = {1, 64, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {4, 8, 1};
+  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const unsigned char *>(mask.data_ptr<bool>()));
   return x;
