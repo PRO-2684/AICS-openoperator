@@ -64,38 +64,17 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 
-__mlu_shared__ unsigned char s0[786432];
-
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
   __nram__ half a[65536];
   __nram__ half c[65536];
   __nram__ unsigned char d[65536];
-  half *sx = (half *)s0;
-  unsigned char *sm = s0 + 524288;
-  int p = taskIdY * 524288;
-#pragma unroll
-  for (int i = 0; i < 2; ++i) {
-    int b = p + i * 262144;
-    if (__is_mpu()) {
-      __memcpy(sx, x + b, 524288, GDRAM2SRAM);
-      __memcpy(sm, m + b, 262144, GDRAM2SRAM);
-    }
-    __sync_cluster();
-    if (!__is_mpu()) {
-      int s = taskIdX * 65536;
-      __memcpy(a, sx + s, 65536 * sizeof(half), SRAM2NRAM);
-      __memcpy(d, sm + s, 65536 * sizeof(unsigned char), SRAM2NRAM);
-      __bang_uchar2half(c, d, 65536);
-      __bang_mul_scalar(c, c, (half)-65504.0, 65536);
-      __bang_add(a, a, c, 65536);
-      __memcpy(sx + s, a, 65536 * sizeof(half), NRAM2SRAM);
-    }
-    __sync_cluster();
-    if (__is_mpu()) {
-      __memcpy(x + b, sx, 524288, SRAM2GDRAM);
-    }
-    __sync_cluster();
-  }
+  int s = taskId * 65536;
+  __memcpy(a, x + s, 65536 * sizeof(half), GDRAM2NRAM);
+  __memcpy(d, m + s, 65536 * sizeof(unsigned char), GDRAM2NRAM);
+  __bang_uchar2half(c, d, 65536);
+  __bang_mul_scalar(c, c, (half)65504.0, 65536);
+  __bang_sub(a, a, c, 65536);
+  __memcpy(x + s, a, 65536 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
@@ -106,8 +85,8 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) 
   if (init) {
     return x;
   }
-  cnrtDim3_t d = {4, 8, 1};
-  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {64, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const unsigned char *>(mask.data_ptr<bool>()));
   init = true;
