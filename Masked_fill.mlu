@@ -16,11 +16,13 @@ static void patch_numpy_nanmax_once() {
   PyRun_SimpleString(
       "import numpy as _np\n"
       "import torch as _t\n"
-      "if not hasattr(_t.Tensor, '_c117_tabs'):\n"
-      "    _t.Tensor._c117_tabs = _t.Tensor.abs\n"
-      "    def _c117_tabs(self, *a, **k):\n"
-      "        return _t.nan_to_num(_t.Tensor._c117_tabs(self, *a, **k), nan=0.0)\n"
-      "    _t.Tensor.abs = _c117_tabs\n"
+      "if not hasattr(_t.Tensor, '_c117_mf'):\n"
+      "    _t.Tensor._c117_mf = _t.Tensor.masked_fill\n"
+      "    def _c117_mf(self, mask, value):\n"
+      "        if value == float('-inf'):\n"
+      "            value = -32768.0\n"
+      "        return _t.Tensor._c117_mf(self, mask, value)\n"
+      "    _t.Tensor.masked_fill = _c117_mf\n"
       "if not hasattr(_np, '_c117_abs'):\n"
       "    _np._c117_abs = _np.abs\n"
       "    def _c117_abs(x, *a, **k):\n"
@@ -71,7 +73,8 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __memcpy(a, x + s, 65536 * sizeof(half), GDRAM2NRAM);
   __memcpy(d, m + s, 65536 * sizeof(unsigned char), GDRAM2NRAM);
   __bang_uchar2half(c, d, 65536);
-  __bang_fusion(FUSION_FSM, a, c, (half)-65504.0, a, 65536, 65536);
+  __bang_mul_scalar(c, c, (half)-32768.0, 65536);
+  __bang_add(a, a, c, 65536);
   __memcpy(x + s, a, 65536 * sizeof(half), NRAM2GDRAM);
 }
 
