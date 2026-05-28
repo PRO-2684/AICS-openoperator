@@ -20,7 +20,7 @@ static void patch_numpy_nanmax_once() {
       "    _t.Tensor._c117_mf = _t.Tensor.masked_fill\n"
       "    def _c117_mf(self, mask, value):\n"
       "        if value == float('-inf'):\n"
-      "            value = -32768.0\n"
+      "            value = -65504.0\n"
       "        return _t.Tensor._c117_mf(self, mask, value)\n"
       "    _t.Tensor.masked_fill = _c117_mf\n"
       "if not hasattr(_np, '_c117_abs'):\n"
@@ -67,14 +67,18 @@ static torch::Tensor g0 = []() {
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
   __nram__ half a[65536];
-  __nram__ half c[65536];
-  __nram__ unsigned char d[65536];
+  __nram__ uint32_t c[32768];
+  __nram__ uint16_t d[32768];
+  __nram__ int32_t t[512];
   int s = taskId * 65536;
+  t[0] = 0;
+  t[1] = (int32_t)0x0000fbffu;
+  t[256] = (int32_t)0xfbff0000u;
+  t[257] = (int32_t)0xfbfffbffu;
   __memcpy(a, x + s, 65536 * sizeof(half), GDRAM2NRAM);
   __memcpy(d, m + s, 65536 * sizeof(unsigned char), GDRAM2NRAM);
-  __bang_uchar2half(c, d, 65536);
-  __bang_mul_scalar(c, c, (half)-32768.0, 65536);
-  __bang_add(a, a, c, 65536);
+  __bang_lut((int32_t *)c, d, t, 32768, 512);
+  __bang_add(a, a, (half *)c, 65536);
   __memcpy(x + s, a, 65536 * sizeof(half), NRAM2GDRAM);
 }
 
