@@ -65,17 +65,21 @@ static torch::Tensor g0 = []() {
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
   __nram__ half a[E0];
-  __nram__ half c[E0];
-  __nram__ unsigned char d[E0];
+  __nram__ uint32_t c[E0 / 2];
+  __nram__ uint16_t d[E0 / 2];
+  __nram__ int32_t t[512];
   int s = taskId * E0;
   half *px = (half *)__builtin_assume_aligned(x + s, 512);
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
+  t[0] = 0;
+  t[1] = (int32_t)0x0000fc00u;
+  t[256] = (int32_t)0xfc000000u;
+  t[257] = (int32_t)0xfc00fc00u;
   __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
-  __bang_uchar2int16((short *)c, d, E0, 0);
-  __bang_mul_scalar((short *)c, (short *)c, (short)0xfc00, E0);
+  __bang_lut((int32_t *)c, d, t, E0 / 2, 512);
   __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_add(a, a, c, E0);
+  __bang_add(a, a, (half *)c, E0);
   __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
