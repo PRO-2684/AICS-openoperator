@@ -69,19 +69,15 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __nram__ half c[65536];
   __nram__ unsigned char d[65536];
   int s = taskId * 65536;
-  half *px = (half *)__builtin_assume_aligned(x + s, 512);
-  const unsigned char *pm =
-      (const unsigned char *)__builtin_assume_aligned(m + s, 512);
-  __memcpy(a, px, 65536 * sizeof(half), GDRAM2NRAM);
-  __memcpy(d, pm, 65536 * sizeof(unsigned char), GDRAM2NRAM);
+  __memcpy(a, x + s, 65536 * sizeof(half), GDRAM2NRAM);
+  __memcpy(d, m + s, 65536 * sizeof(unsigned char), GDRAM2NRAM);
   __bang_uchar2half(c, d, 65536);
   __bang_mul_scalar(c, c, (half)-65504.0, 65536);
   __bang_add(a, a, c, 65536);
-  __memcpy(px, a, 65536 * sizeof(half), NRAM2GDRAM);
+  __memcpy(x + s, a, 65536 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
-  patch_numpy_nanmax_once();
   (void)fill_value;
   (void)g0;
   static bool init = false;
