@@ -74,15 +74,20 @@ static torch::Tensor gy = []() {
 __mlu_entry__ void k0(const half *__restrict__ x, const unsigned char *__restrict__ m,
                       half *__restrict__ y) {
   __nram__ half a[32768];
-  __nram__ half b[32768];
-  __nram__ half c[32768];
+  __nram__ uint16_t b[32768];
+  __nram__ int16_t c[32768];
   __nram__ unsigned char d[32768];
+  __nram__ int16_t t[64];
   int s = taskId * 32768;
   __memcpy(a, x + s, 32768 * sizeof(half), GDRAM2NRAM);
   __memcpy(d, m + s, 32768 * sizeof(unsigned char), GDRAM2NRAM);
-  __bang_uchar2half(c, d, 32768);
-  __bang_fusion(FUSION_FSM, b, a, (half)-65504.0, (half)-1.0, 32768);
-  __bang_fusion(FUSION_FMA, b, b, c, a, 32768, 32768);
+  t[0] = 0;
+  t[1] = -1;
+  __bang_uchar2int16((int16_t *)b, d, 32768, 0);
+  __bang_lut(c, b, t, 32768, 64);
+  __bang_bxor_scalar(b, (uint16_t *)a, (uint16_t)0xfbff, 32768);
+  __bang_band(b, b, (uint16_t *)c, 32768);
+  __bang_bxor(b, (uint16_t *)a, b, 32768);
   __memcpy(y + s, b, 32768 * sizeof(half), NRAM2GDRAM);
 }
 
