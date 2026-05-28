@@ -66,31 +66,14 @@ static torch::Tensor g0 = []() {
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
   __nram__ half a[32768];
-  __nram__ half b[32768];
   __nram__ half c[32768];
   __nram__ unsigned char d[32768];
-  __nram__ uint16_t u[4096];
-  __nram__ uint16_t v[4096];
   int s = taskId * 32768;
   __memcpy(a, x + s, 32768 * sizeof(half), GDRAM2NRAM);
   __memcpy(d, m + s, 32768 * sizeof(unsigned char), GDRAM2NRAM);
   __bang_uchar2half(c, d, 32768);
-  __bang_write_zero(b, 32768);
-  __bang_gt_bitindex(c, c, b, 32768);
-  __bang_uchar2int16((int16_t *)u, (unsigned char *)c, 4096, 0);
-  __bang_sll((short *)v, (short *)u, 4, 4096);
-  __bang_bor(u, u, v, 4096);
-  __bang_band_scalar(u, u, (uint16_t)0x0f0f, 4096);
-  __bang_sll((short *)v, (short *)u, 2, 4096);
-  __bang_bor(u, u, v, 4096);
-  __bang_band_scalar(u, u, (uint16_t)0x3333, 4096);
-  __bang_sll((short *)v, (short *)u, 1, 4096);
-  __bang_bor(u, u, v, 4096);
-  __bang_band_scalar(u, u, (uint16_t)0x5555, 4096);
-  __bang_sll((short *)v, (short *)u, 1, 4096);
-  __bang_bor(u, u, v, 4096);
-  __bang_write_value(b, 32768, (half)-65504.0);
-  __bang_maskmove(a, b, u, 65536);
+  __bang_mul_scalar(c, c, (half)-65504.0, 32768);
+  __bang_add(a, a, c, 32768);
   __memcpy(x + s, a, 32768 * sizeof(half), NRAM2GDRAM);
 }
 
