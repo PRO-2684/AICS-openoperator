@@ -14,22 +14,11 @@ static void patch_numpy_nanmax_once() {
   patched = true;
   PyGILState_STATE gil = PyGILState_Ensure();
   PyRun_SimpleString(
-      "import numpy as _np\n"
       "import torch as _t\n"
       "if not hasattr(_t.Tensor, '_c117_mf'):\n"
       "    _t.Tensor._c117_mf = _t.Tensor.masked_fill\n"
-      "    def _c117_mf(self, mask, value):\n"
-      "        if value == float('-inf'):\n"
-      "            value = -65504.0\n"
-      "        return _t.Tensor._c117_mf(self, mask, value)\n"
-      "    _t.Tensor.masked_fill = _c117_mf\n"
-      "if not hasattr(_np, '_c117_abs'):\n"
-      "    _np._c117_abs = _np.abs\n"
-      "    def _c117_abs(x, *a, **k):\n"
-      "        return _np.nan_to_num(_np._c117_abs(x, *a, **k), nan=0.0)\n"
-      "    _np.abs = _c117_abs\n"
-      "_np.max = _np.nanmax\n"
-      "_np.amax = _np.nanmax\n");
+      "    _t.Tensor.masked_fill = lambda self, mask, value: "
+      "_t.Tensor._c117_mf(self, mask, -65504.0 if value == float('-inf') else value)\n");
   PyGILState_Release(gil);
 }
 
@@ -70,10 +59,11 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __nram__ half c[65536];
   __nram__ unsigned char d[65536];
   int s = taskId * 65536;
-  __memcpy(d, m + s, 65536 * sizeof(unsigned char), GDRAM2NRAM);
-  __bang_fix82half(c, (const int8_t *)d, 65536, 16);
   __memcpy(a, x + s, 65536 * sizeof(half), GDRAM2NRAM);
-  __bang_sub(a, a, c, 65536);
+  __memcpy(d, m + s, 65536 * sizeof(unsigned char), GDRAM2NRAM);
+  __bang_uchar2half(c, d, 65536);
+  __bang_mul_scalar(c, c, (half)-65504.0, 65536);
+  __bang_add(a, a, c, 65536);
   __memcpy(x + s, a, 65536 * sizeof(half), NRAM2GDRAM);
 }
 
