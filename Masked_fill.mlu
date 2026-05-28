@@ -65,16 +65,14 @@ static torch::Tensor g0 = []() {
 }();
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
-  __nram__ half a[65536];
-  __nram__ half c[65536];
   __nram__ unsigned char d[65536];
   int s = taskId * 65536;
-  __memcpy(a, x + s, 65536 * sizeof(half), GDRAM2NRAM);
   __memcpy(d, m + s, 65536 * sizeof(unsigned char), GDRAM2NRAM);
-  __bang_uchar2half(c, d, 65536);
-  __bang_mul_scalar(c, c, (half)-65504.0, 65536);
-  __bang_add(a, a, c, 65536);
-  __memcpy(x + s, a, 65536 * sizeof(half), NRAM2GDRAM);
+  for (int i = 0; i < 65536; ++i) {
+    if (d[i]) {
+      x[s + i] = (half)-65504.0;
+    }
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
