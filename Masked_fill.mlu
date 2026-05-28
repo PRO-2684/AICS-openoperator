@@ -8,7 +8,7 @@
 #include <unistd.h>
 
 #define E0 131072
-#define E1 65536
+#define E1 32768
 
 static void fix_cmp_once() {
   static bool patched = false;
@@ -58,23 +58,27 @@ __attribute__((constructor(101))) static void init_runtime() {
 }
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
-  __nram__ half a[E1];
+  __nram__ unsigned short a[E1];
+  __nram__ unsigned short b[E1];
   __nram__ half c[E1];
+  __nram__ half v[E1];
   __nram__ unsigned char d[E1];
   int s = taskId * E0;
   half *px = (half *)__builtin_assume_aligned(x + s, 512);
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
-  __bang_write_zero((uint16_t *)c, E1);
+  for (int i = 0; i < 128; ++i)
+    a[i] = (unsigned short)(i * 2);
+  unsigned int q = 1;
+  for (; q < E1 / 128; q <<= 1)
+    __bang_add_scalar(a + q * 128, a, (unsigned short)(q * 256), q * 128);
+  __bang_write_value(v, E1, (half)-INFINITY);
   for (int o = 0; o < E0; o += E1) {
     __memcpy(d, pm + o, E1 * sizeof(unsigned char), GDRAM2NRAM);
-    __memcpy_async(a, px + o, E1 * sizeof(half), GDRAM2NRAM);
-    __bang_mul_scalar((unsigned char *)d, (unsigned char *)d,
-                      (unsigned char)0xfc, E1);
-    __memcpy(((unsigned char *)c) + 1, d, 1, NRAM2NRAM, 2, 1, E1 - 1);
-    __sync_io_move_compute();
-    __bang_add(a, a, c, E1);
-    __memcpy(px + o, a, E1 * sizeof(half), NRAM2GDRAM);
+    __bang_uchar2int16((int16_t *)c, d, E1, 0);
+    int n = __bang_filter((half *)b, (half *)a, c, E1);
+    if (n > 0)
+      __scatter(px + o, v, b, sizeof(half), NRAM2GDRAM, sizeof(half), n);
   }
 }
 
