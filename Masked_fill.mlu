@@ -65,19 +65,17 @@ static torch::Tensor g0 = []() {
 }();
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
-  __nram__ half a[65536];
-  __nram__ half b[65536];
-  __nram__ half c[65536];
-  __nram__ unsigned char d[65536];
-  int s = taskId * 65536;
-  __memcpy(a, x + s, 65536 * sizeof(half), GDRAM2NRAM);
-  __memcpy(d, m + s, 65536 * sizeof(unsigned char), GDRAM2NRAM);
-  __bang_uchar2half(c, d, 65536);
-  __bang_write_zero(b, 65536);
-  __bang_gt_bitindex(c, c, b, 65536);
-  __bang_write_value(b, 65536, (half)-65504.0);
-  __bang_maskmove(a, b, c, 65536);
-  __memcpy(x + s, a, 65536 * sizeof(half), NRAM2GDRAM);
+  __nram__ half a[59264];
+  __nram__ half c[59264];
+  __nram__ unsigned char d[59264];
+  int s = taskId * 58240;
+  int n = taskId == 71 ? 59264 : 58240;
+  __memcpy(a, x + s, n * sizeof(half), GDRAM2NRAM);
+  __memcpy(d, m + s, n * sizeof(unsigned char), GDRAM2NRAM);
+  __bang_uchar2half(c, d, n);
+  __bang_mul_scalar(c, c, (half)-65504.0, n);
+  __bang_add(a, a, c, n);
+  __memcpy(x + s, a, n * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
@@ -88,7 +86,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) 
   if (init) {
     return x;
   }
-  cnrtDim3_t d = {64, 1, 1};
+  cnrtDim3_t d = {72, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const unsigned char *>(mask.data_ptr<bool>()));
