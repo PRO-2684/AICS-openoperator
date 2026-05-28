@@ -58,7 +58,7 @@ __attribute__((constructor(101))) static void init_runtime() {
 }
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
-  __nram__ unsigned short a[E1];
+  __nram__ unsigned int a[E1];
   __nram__ half c[E1];
   __nram__ half z[E1];
   __nram__ half v[128];
@@ -69,10 +69,10 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
   for (int i = 0; i < 128; ++i)
-    a[i] = (unsigned short)(i * 2);
+    a[i] = (unsigned int)(i * 2);
   unsigned int q = 1;
   for (; q < E1 / 128; q <<= 1)
-    __bang_add_scalar(a + q * 128, a, (unsigned short)(q * 256), q * 128);
+    __bang_add_scalar(a + q * 128, a, (unsigned int)(q * 256), q * 128);
   __bang_write_zero(z, E1);
   __bang_write_value(v, 128, (half)-INFINITY);
   for (int o = 0; o < E0; o += E1) {
