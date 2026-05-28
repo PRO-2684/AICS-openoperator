@@ -76,10 +76,8 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
     __memcpy(a, x + s, 32768 * sizeof(half), GDRAM2NRAM);
     __memcpy(d, m + s, 32768 * sizeof(unsigned char), GDRAM2NRAM);
     __bang_uchar2half(c, d, 32768);
-    __bang_mul(b, a, c, 32768);
-    __bang_sub(a, a, b, 32768);
-    __bang_mul_scalar(c, c, (half)-65504.0, 32768);
-    __bang_add(a, a, c, 32768);
+    __bang_fusion(FUSION_FSM, b, a, (half)-65504.0, (half)-1.0, 32768);
+    __bang_fusion(FUSION_FMA, a, b, c, a, 32768, 32768);
     __memcpy(x + s, a, 32768 * sizeof(half), NRAM2GDRAM);
   }
 }
