@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #define E0 131072
+#define E1 65536
 
 static void fix_cmp_once() {
   static bool patched = false;
@@ -64,19 +65,28 @@ static torch::Tensor g0 = []() {
 }();
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
-  __nram__ half a[E0];
-  __nram__ half c[E0];
-  __nram__ unsigned char d[E0];
+  __nram__ unsigned char lo[E1];
+  __nram__ unsigned char hi[E1];
+  __nram__ unsigned char d[E1];
+  __nram__ unsigned char t[E1];
   int s = taskId * E0;
   half *px = (half *)__builtin_assume_aligned(x + s, 512);
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
-  __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
-  __bang_uchar2int16((int16_t *)c, d, E0, 0);
-  __bang_mul_scalar((short *)c, (short *)c, (short)0xfc00, E0);
-  __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_add(a, a, c, E0);
-  __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
+  unsigned char *pb = (unsigned char *)px;
+  for (int o = 0; o < E0; o += E1) {
+    __memcpy(lo, pb + 2 * o, 1, GDRAM2NRAM, 1, 2, E1 - 1);
+    __memcpy(hi, pb + 2 * o + 1, 1, GDRAM2NRAM, 1, 2, E1 - 1);
+    __memcpy(d, pm + o, E1 * sizeof(unsigned char), GDRAM2NRAM);
+    __bang_sub_scalar((uint8_t *)d, (uint8_t)0, (uint8_t *)d, E1);
+    __bang_not((uint8_t *)t, (uint8_t *)d, E1);
+    __bang_and((uint8_t *)lo, (uint8_t *)lo, (uint8_t *)t, E1);
+    __bang_and((uint8_t *)hi, (uint8_t *)hi, (uint8_t *)t, E1);
+    __bang_and_scalar((uint8_t *)d, (uint8_t *)d, (uint8_t)0xfc, E1);
+    __bang_or((uint8_t *)hi, (uint8_t *)hi, (uint8_t *)d, E1);
+    __memcpy(pb + 2 * o, lo, 1, NRAM2GDRAM, 2, 1, E1 - 1);
+    __memcpy(pb + 2 * o + 1, hi, 1, NRAM2GDRAM, 2, 1, E1 - 1);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
