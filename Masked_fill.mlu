@@ -76,7 +76,7 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __bang_sll((short *)c, (short *)c, 15, E0);
   __bang_sra((short *)c, (short *)c, 5, E0);
   __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_add(a, a, c, E0);
+  __bang_add_tz(a, a, c, E0);
   __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
