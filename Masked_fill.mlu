@@ -58,10 +58,10 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __nram__ half c[131072];
   __nram__ unsigned char d[131072];
   int s = taskId * 131072;
-  __memcpy(a, x + s, 131072 * sizeof(half), GDRAM2NRAM);
   __memcpy(d, m + s, 131072 * sizeof(unsigned char), GDRAM2NRAM);
   __bang_uchar2half(c, d, 131072);
   __bang_mul_scalar(c, c, (half)-65504.0, 131072);
+  __memcpy(a, x + s, 131072 * sizeof(half), GDRAM2NRAM);
   __bang_add(a, a, c, 131072);
   __memcpy(x + s, a, 131072 * sizeof(half), NRAM2GDRAM);
 }
