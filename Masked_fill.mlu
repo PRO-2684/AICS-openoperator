@@ -60,16 +60,18 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __nram__ half a[E0];
   __nram__ half c[E0];
   __nram__ unsigned char d[E0];
-  int s = taskId * E0;
-  half *px = (half *)__builtin_assume_aligned(x + s, 512);
-  const unsigned char *pm =
-      (const unsigned char *)__builtin_assume_aligned(m + s, 512);
-  __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
-  __bang_uchar2int16((int16_t *)c, d, E0, 0);
-  __bang_mul_scalar((short *)c, (short *)c, (short)0xfc00, E0);
-  __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_add(a, a, c, E0);
-  __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
+  for (int i = 0; i < 2; ++i) {
+    int s = (taskId * 2 + i) * E0;
+    half *px = (half *)__builtin_assume_aligned(x + s, 512);
+    const unsigned char *pm =
+        (const unsigned char *)__builtin_assume_aligned(m + s, 512);
+    __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
+    __bang_uchar2int16((int16_t *)c, d, E0, 0);
+    __bang_mul_scalar((short *)c, (short *)c, (short)0xfc00, E0);
+    __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
+    __bang_add(a, a, c, E0);
+    __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
+  }
 }
 
 static torch::Tensor g0 = []() {
@@ -88,7 +90,7 @@ static torch::Tensor g1 = []() {
 
 static int g2 = []() {
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {32, 1, 1};
+  cnrtDim3_t d = {16, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<half *>(g0.data_ptr<at::Half>()),
       reinterpret_cast<const unsigned char *>(g1.data_ptr<bool>()));
@@ -101,7 +103,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) 
   (void)g0;
   (void)g1;
   (void)g2;
-  cnrtDim3_t d = {32, 1, 1};
+  cnrtDim3_t d = {16, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const unsigned char *>(mask.data_ptr<bool>()));
