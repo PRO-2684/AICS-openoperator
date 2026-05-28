@@ -74,7 +74,7 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __bang_bor_scalar((unsigned short *)c, (unsigned short *)c,
                     (unsigned short)0x7c00, E0);
   __memcpy(a, x + s, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_minequal(a, a, c, E0);
+  __bang_minimum(a, a, c, E0);
   __memcpy(x + s, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
