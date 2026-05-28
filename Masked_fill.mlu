@@ -34,6 +34,8 @@ static void patch_numpy_nanmax_once() {
 }
 
 __attribute__((constructor)) static void init0() {
+  if (!Py_IsInitialized())
+    return;
   patch_numpy_nanmax_once();
 }
 
@@ -92,6 +94,7 @@ __mlu_entry__ void k0(const half *__restrict__ x,
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
+  patch_numpy_nanmax_once();
   (void)mask;
   (void)fill_value;
   return x;
