@@ -6,6 +6,7 @@
 #include <torch/extension.h>
 
 #define E0 65536
+#define E1 8192
 
 static void fix_cmp_once() {
   static bool patched = false;
@@ -39,21 +40,33 @@ __attribute__((constructor)) static void init0() {
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
   __nram__ half a[E0];
+  __nram__ half b[E0];
+  __nram__ half c[E0];
   __nram__ unsigned char d[E0];
-  __nram__ uint16_t u[E0];
-  __nram__ uint16_t v[E0];
-  __nram__ uint16_t w[E0];
-  __nram__ int16_t t0[64] = {0, (int16_t)0xffff};
-  __nram__ int16_t t1[64] = {0, (int16_t)0xfc00};
+  __nram__ uint16_t u[E1];
+  __nram__ uint16_t v[E1];
   int s = taskId * E0;
   __memcpy(a, x + s, E0 * sizeof(half), GDRAM2NRAM);
   __memcpy(d, m + s, E0 * sizeof(unsigned char), GDRAM2NRAM);
-  __bang_uchar2int16((int16_t *)u, d, E0, 0);
-  __bang_lut((int16_t *)w, (uint16_t *)u, t0, E0, 64);
-  __bang_lut((int16_t *)v, (uint16_t *)u, t1, E0, 64);
-  __bang_bnot(w, w, E0);
-  __bang_band((uint16_t *)a, (uint16_t *)a, w, E0);
-  __bang_bor((uint16_t *)a, (uint16_t *)a, v, E0);
+  __bang_uchar2half(c, d, E0);
+  __bang_write_zero(b, E0);
+  __bang_gt_bitindex(c, c, b, E0);
+  __bang_uchar2int16((int16_t *)u, (unsigned char *)c, E1, 0);
+  __bang_sll((short *)v, (short *)u, 4, E1);
+  __bang_bor(u, u, v, E1);
+  __bang_band_scalar(u, u, (uint16_t)0x0f0f, E1);
+  __bang_sll((short *)v, (short *)u, 2, E1);
+  __bang_bor(u, u, v, E1);
+  __bang_band_scalar(u, u, (uint16_t)0x3333, E1);
+  __bang_sll((short *)v, (short *)u, 1, E1);
+  __bang_bor(u, u, v, E1);
+  __bang_band_scalar(u, u, (uint16_t)0x5555, E1);
+  __bang_sll((short *)v, (short *)u, 1, E1);
+  __bang_bor(u, u, v, E1);
+  __bang_write_zero(b, E0);
+  __bang_bor_scalar((uint16_t *)b, (uint16_t *)b, (uint16_t)0xfc00, E0);
+  __bang_maskmove((void *)a, (const void *)b, (const void *)u,
+                  E0 * sizeof(half));
   __memcpy(x + s, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
