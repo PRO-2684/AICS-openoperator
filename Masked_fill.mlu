@@ -60,7 +60,10 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  return torch::zeros({4194304}, opt);
+  auto t = torch::zeros({4194304}, opt);
+  auto b = torch::zeros({4194304}, opt.dtype(torch::kBool));
+  (void)b;
+  return t;
 }();
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
@@ -71,11 +74,10 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   half *px = (half *)__builtin_assume_aligned(x + s, 512);
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
-  __memcpy_async(a, px, E0 * sizeof(half), GDRAM2NRAM);
-  __memcpy_async(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
-  __sync_io();
+  __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
   __bang_uchar2int16((int16_t *)c, d, E0, 0);
   __bang_mul_scalar((short *)c, (short *)c, (short)0xfc00, E0);
+  __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
   __bang_add(a, a, c, E0);
   __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
 }
