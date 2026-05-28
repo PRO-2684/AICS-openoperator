@@ -81,38 +81,30 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __memcpy_async(a1, x + p + 32768, 32768 * sizeof(half), GDRAM2NRAM);
   __memcpy_async(d1, m + p + 32768, 32768 * sizeof(unsigned char), GDRAM2NRAM);
   __bang_uchar2half(c0, d0, 32768);
-  __bang_mul(b0, a0, c0, 32768);
-  __bang_sub(a0, a0, b0, 32768);
-  __bang_mul_scalar(c0, c0, (half)-65504.0, 32768);
-  __bang_add(a0, a0, c0, 32768);
+  __bang_fusion(FUSION_FSM, b0, a0, (half)-65504.0, (half)-1.0, 32768);
+  __bang_fusion(FUSION_FMA, a0, b0, c0, a0, 32768, 32768);
   __asm__ volatile("sync;");
 
   __memcpy_async(x + p, a0, 32768 * sizeof(half), NRAM2GDRAM);
   __memcpy_async(a0, x + p + 65536, 32768 * sizeof(half), GDRAM2NRAM);
   __memcpy_async(d0, m + p + 65536, 32768 * sizeof(unsigned char), GDRAM2NRAM);
   __bang_uchar2half(c1, d1, 32768);
-  __bang_mul(b1, a1, c1, 32768);
-  __bang_sub(a1, a1, b1, 32768);
-  __bang_mul_scalar(c1, c1, (half)-65504.0, 32768);
-  __bang_add(a1, a1, c1, 32768);
+  __bang_fusion(FUSION_FSM, b1, a1, (half)-65504.0, (half)-1.0, 32768);
+  __bang_fusion(FUSION_FMA, a1, b1, c1, a1, 32768, 32768);
   __asm__ volatile("sync;");
 
   __memcpy_async(x + p + 32768, a1, 32768 * sizeof(half), NRAM2GDRAM);
   __memcpy_async(a1, x + p + 98304, 32768 * sizeof(half), GDRAM2NRAM);
   __memcpy_async(d1, m + p + 98304, 32768 * sizeof(unsigned char), GDRAM2NRAM);
   __bang_uchar2half(c0, d0, 32768);
-  __bang_mul(b0, a0, c0, 32768);
-  __bang_sub(a0, a0, b0, 32768);
-  __bang_mul_scalar(c0, c0, (half)-65504.0, 32768);
-  __bang_add(a0, a0, c0, 32768);
+  __bang_fusion(FUSION_FSM, b0, a0, (half)-65504.0, (half)-1.0, 32768);
+  __bang_fusion(FUSION_FMA, a0, b0, c0, a0, 32768, 32768);
   __asm__ volatile("sync;");
 
   __memcpy_async(x + p + 65536, a0, 32768 * sizeof(half), NRAM2GDRAM);
   __bang_uchar2half(c1, d1, 32768);
-  __bang_mul(b1, a1, c1, 32768);
-  __bang_sub(a1, a1, b1, 32768);
-  __bang_mul_scalar(c1, c1, (half)-65504.0, 32768);
-  __bang_add(a1, a1, c1, 32768);
+  __bang_fusion(FUSION_FSM, b1, a1, (half)-65504.0, (half)-1.0, 32768);
+  __bang_fusion(FUSION_FMA, a1, b1, c1, a1, 32768, 32768);
   __asm__ volatile("sync;");
 
   __memcpy_async(x + p + 98304, a1, 32768 * sizeof(half), NRAM2GDRAM);
