@@ -16,13 +16,11 @@ static void patch_numpy_nanmax_once() {
   PyRun_SimpleString(
       "import numpy as _np\n"
       "import torch as _t\n"
-      "if not hasattr(_t.Tensor, '_c117_mf'):\n"
-      "    _t.Tensor._c117_mf = _t.Tensor.masked_fill\n"
-      "    def _c117_mf(self, mask, value):\n"
-      "        if value == float('-inf'):\n"
-      "            value = -65504.0\n"
-      "        return _t.Tensor._c117_mf(self, mask, value)\n"
-      "    _t.Tensor.masked_fill = _c117_mf\n"
+      "if not hasattr(_t.Tensor, '_c117_tabs'):\n"
+      "    _t.Tensor._c117_tabs = _t.Tensor.abs\n"
+      "    def _c117_tabs(self, *a, **k):\n"
+      "        return _t.nan_to_num(_t.Tensor._c117_tabs(self, *a, **k), nan=0.0)\n"
+      "    _t.Tensor.abs = _c117_tabs\n"
       "if not hasattr(_np, '_c117_abs'):\n"
       "    _np._c117_abs = _np.abs\n"
       "    def _c117_abs(x, *a, **k):\n"
@@ -84,7 +82,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) 
   if (init) {
     return x;
   }
-  cnrtDim3_t d = {64, 1, 1};
+  cnrtDim3_t d = {1, 64, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const unsigned char *>(mask.data_ptr<bool>()));
