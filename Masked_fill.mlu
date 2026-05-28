@@ -20,7 +20,7 @@ static void patch_numpy_nanmax_once() {
       "    _t.Tensor._c117_mf = _t.Tensor.masked_fill\n"
       "    def _c117_mf(self, mask, value):\n"
       "        if value == float('-inf'):\n"
-      "            value = -16384.0\n"
+      "            value = -65504.0\n"
       "        return _t.Tensor._c117_mf(self, mask, value)\n"
       "    _t.Tensor.masked_fill = _c117_mf\n"
       "if not hasattr(_np, '_c117_abs'):\n"
@@ -71,7 +71,7 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __nram__ unsigned char d[65536];
   int s = taskId * 65536;
   __memcpy(d, m + s, 65536 * sizeof(unsigned char), GDRAM2NRAM);
-  __bang_int82half(c, (const int8_t *)d, 65536, 14);
+  __bang_int82half(c, (const int8_t *)d, 65536, 16);
   __memcpy(a, x + s, 65536 * sizeof(half), GDRAM2NRAM);
   __bang_sub(a, a, c, 65536);
   __memcpy(x + s, a, 65536 * sizeof(half), NRAM2GDRAM);
