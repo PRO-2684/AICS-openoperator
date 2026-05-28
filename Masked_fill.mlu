@@ -60,8 +60,10 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  return torch::zeros({16777216}, opt);
+  return torch::zeros({4194304}, opt);
 }();
+
+static cnrtQueue_t q0 = []() { return torch_mlu::getCurMLUStream(); }();
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
   __nram__ half a[E0];
@@ -72,8 +74,8 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
   __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
-  __bang_uchar2int16((int16_t *)c, d, E0, 10);
-  __bang_neg((int16_t *)c, (int16_t *)c, E0);
+  __bang_uchar2int16((int16_t *)c, d, E0, 0);
+  __bang_mul_scalar((short *)c, (short *)c, (short)0xfc00, E0);
   __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
   __bang_add(a, a, c, E0);
   __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
@@ -83,7 +85,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) 
   (void)fill_value;
   (void)g0;
   cnrtDim3_t d = {32, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  k0<<<d, cnrtFuncTypeBlock, q0>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const unsigned char *>(mask.data_ptr<bool>()));
   return x;
