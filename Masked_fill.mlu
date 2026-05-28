@@ -64,12 +64,25 @@ static torch::Tensor g0 = []() {
 }();
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
-  __nram__ half a[E0];
+  __nram__ unsigned int d[E0 / 4];
   int s = taskId * E0;
-  half *px = (half *)__builtin_assume_aligned(x + s, 512);
-  (void)m;
-  __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
-  __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
+  __memcpy(d, m + s, E0 * sizeof(unsigned char), GDRAM2NRAM);
+  unsigned short *y = (unsigned short *)x + s;
+#pragma unroll 2
+  for (int i = 0; i < E0 / 4; ++i) {
+    unsigned int v = d[i];
+    if (v) {
+      int p = i << 2;
+      if (v & 0x000000ffu)
+        y[p] = (unsigned short)0xfc00;
+      if (v & 0x0000ff00u)
+        y[p + 1] = (unsigned short)0xfc00;
+      if (v & 0x00ff0000u)
+        y[p + 2] = (unsigned short)0xfc00;
+      if (v & 0xff000000u)
+        y[p + 3] = (unsigned short)0xfc00;
+    }
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
