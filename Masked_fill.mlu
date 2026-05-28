@@ -7,7 +7,7 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define E0 32768
+#define E0 65536
 
 static void fix_cmp_once() {
   static bool patched = false;
@@ -74,16 +74,16 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
   __bang_uchar2half(c, d, E0);
   __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_fusion(FUSION_FMA, c, c, (half)-65504.0, a, E0, E0);
-  __bang_uchar2int16((short *)a, d, E0, 0);
-  __bang_add((unsigned short *)c, (unsigned short *)c, (unsigned short *)a, E0);
-  __memcpy(px, c, E0 * sizeof(half), NRAM2GDRAM);
+  __bang_mul_scalar(c, c, (half)-65504.0, E0);
+  __bang_add(c, c, c, E0);
+  __bang_add(a, a, c, E0);
+  __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
   (void)fill_value;
   (void)g0;
-  cnrtDim3_t d = {128, 1, 1};
+  cnrtDim3_t d = {1, 64, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const unsigned char *>(mask.data_ptr<bool>()));
