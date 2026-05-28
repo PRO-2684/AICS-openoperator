@@ -63,7 +63,7 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __bang_band_scalar(u, u, (uint16_t)0x5555, E1);
   __bang_sll((short *)v, (short *)u, 1, E1);
   __bang_bor(u, u, v, E1);
-  __memset_nram((void *)b, E0, (unsigned short)0xfc00);
+  __bang_write_value((uint16_t *)b, E0, (uint16_t)0xfc00);
   __bang_maskmove((void *)a, (const void *)b, (const void *)u,
                   E0 * sizeof(half));
   __memcpy(x + s, a, E0 * sizeof(half), NRAM2GDRAM);
