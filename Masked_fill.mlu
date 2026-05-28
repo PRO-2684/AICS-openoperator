@@ -61,14 +61,18 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   half *px = (half *)__builtin_assume_aligned(x + s, 512);
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
+  vv_uint32 a;
+  vv_uint32 b;
+  vv_uint32 c;
   vv_uint32 v;
-  vv_uint32 z;
   vv_bool p;
-  __vv_move(z, (unsigned int)0xfc00);
+  __vv_move(c, (unsigned int)0xfc00);
   for (int i = 0; i < E0; i += 256) {
-    __vv_load(v, pm + i);
-    __vv_setp_ne(p, v, (unsigned int)0);
-    __vv_store_m((unsigned short *)(px + i), z, p);
+    __vv_load(a, (const unsigned short *)(px + i));
+    __vv_load(b, pm + i);
+    __vv_setp_ne(p, b, (unsigned int)0);
+    __vv_select(v, c, a, p);
+    __vv_store((unsigned short *)(px + i), v);
   }
 }
 
