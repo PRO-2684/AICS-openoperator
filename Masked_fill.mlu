@@ -75,14 +75,14 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __bang_uchar2int16((int16_t *)c, d, E0, 0);
   __bang_mul_scalar((short *)c, (short *)c, (short)0xfc00, E0);
   __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_add(a, a, c, E0);
+  __bang_add_tz(a, a, c, E0);
   __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
   (void)fill_value;
   (void)g0;
-  cnrtDim3_t d = {8, 4, 1};
+  cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const unsigned char *>(mask.data_ptr<bool>()));
