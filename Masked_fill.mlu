@@ -66,24 +66,18 @@ static torch::Tensor g0 = []() {
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
   __nram__ half a[E0];
+  __nram__ half c[E0];
   __nram__ unsigned char d[E0];
   int s = taskId * E0;
   half *px = (half *)__builtin_assume_aligned(x + s, 512);
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
-  __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
   __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
-  half v = (half)-INFINITY;
-  for (int o = 0; o < E0; o += 256) {
-    vv_half r;
-    vv_uint8 b;
-    vv_bool p;
-    __vv_load(r, a + o);
-    __vv_load(b, d + o);
-    __vv_setp_ne(p, b, (unsigned char)0);
-    __vv_move_m(r, v, p);
-    __vv_store(a + o, r);
-  }
+  __bang_uchar2int16((int16_t *)c, d, E0, 0);
+  __bang_mul_scalar((uint16_t *)c, (uint16_t *)c, (uint16_t)0x8000, E0);
+  __bang_or_scalar((uint16_t *)c, (uint16_t *)c, (uint16_t)0x7c00, E0);
+  __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
+  __bang_minimum(a, a, c, E0);
   __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
