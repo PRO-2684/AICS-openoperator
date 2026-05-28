@@ -68,20 +68,22 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __nram__ half c[E0];
   __nram__ unsigned char d[E0];
   int s = taskId * E0;
-  __memcpy(d, m + s, E0 * sizeof(unsigned char), GDRAM2NRAM);
-  __bang_uchar2int16((short *)c, d, E0, 0);
-  __bang_sll((short *)c, (short *)c, 15, E0);
-  __bang_bor_scalar((unsigned short *)c, (unsigned short *)c,
-                    (unsigned short)0x7c00, E0);
-  __memcpy(a, x + s, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_minimum(a, a, c, E0);
-  __memcpy(x + s, a, E0 * sizeof(half), NRAM2GDRAM);
+  half *px = (half *)__builtin_assume_aligned(x + s, 512);
+  const unsigned char *pm =
+      (const unsigned char *)__builtin_assume_aligned(m + s, 512);
+  __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
+  __bang_uchar2half(c, d, E0);
+  __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
+  __bang_fusion(FUSION_FMA, c, c, (half)-65504.0, a, E0, E0);
+  __bang_uchar2int16((short *)a, d, E0, 0);
+  __bang_add((unsigned short *)c, (unsigned short *)c, (unsigned short *)a, E0);
+  __memcpy(px, c, E0 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
   (void)fill_value;
   (void)g0;
-  cnrtDim3_t d = {64, 1, 1};
+  cnrtDim3_t d = {1, 64, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const unsigned char *>(mask.data_ptr<bool>()));
