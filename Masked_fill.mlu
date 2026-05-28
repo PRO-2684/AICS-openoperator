@@ -74,9 +74,14 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
   __bang_uchar2int16((short *)c, d, E0, 0);
   __bang_sll((short *)c, (short *)c, 15, E0);
-  __bang_sra((short *)c, (short *)c, 5, E0);
+  __bang_sra((short *)c, (short *)c, 15, E0);
   __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_add_tz(a, a, c, E0);
+  __bang_bnot((unsigned short *)c, (unsigned short *)c, E0);
+  __bang_band((unsigned short *)a, (unsigned short *)a, (unsigned short *)c, E0);
+  __bang_bnot((unsigned short *)c, (unsigned short *)c, E0);
+  __bang_band_scalar((unsigned short *)c, (unsigned short *)c,
+                     (unsigned short)0xfc00, E0);
+  __bang_bor((unsigned short *)a, (unsigned short *)a, (unsigned short *)c, E0);
   __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
