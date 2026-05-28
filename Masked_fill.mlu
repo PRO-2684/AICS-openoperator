@@ -7,7 +7,8 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define E0 131072
+#define E0 139264
+#define N0 4194304
 
 static void fix_cmp_once() {
   static bool patched = false;
@@ -64,31 +65,28 @@ static torch::Tensor g0 = []() {
 }();
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
-  __nram__ unsigned int d[E0 / 4];
+  __nram__ half a[E0];
+  __nram__ half c[E0];
+  __nram__ unsigned char d[E0];
   int s = taskId * E0;
-  __memcpy(d, m + s, E0 * sizeof(unsigned char), GDRAM2NRAM);
-  unsigned short *y = (unsigned short *)x + s;
-#pragma unroll 2
-  for (int i = 0; i < E0 / 4; ++i) {
-    unsigned int v = d[i];
-    if (v) {
-      int p = i << 2;
-      if (v & 0x000000ffu)
-        y[p] = (unsigned short)0xfc00;
-      if (v & 0x0000ff00u)
-        y[p + 1] = (unsigned short)0xfc00;
-      if (v & 0x00ff0000u)
-        y[p + 2] = (unsigned short)0xfc00;
-      if (v & 0xff000000u)
-        y[p + 3] = (unsigned short)0xfc00;
-    }
-  }
+  int n = N0 - s;
+  if (n > E0)
+    n = E0;
+  half *px = (half *)__builtin_assume_aligned(x + s, 512);
+  const unsigned char *pm =
+      (const unsigned char *)__builtin_assume_aligned(m + s, 512);
+  __memcpy(d, pm, n * sizeof(unsigned char), GDRAM2NRAM);
+  __bang_uchar2int16((int16_t *)c, d, n, 0);
+  __bang_mul_scalar((short *)c, (short *)c, (short)0xfc00, n);
+  __memcpy(a, px, n * sizeof(half), GDRAM2NRAM);
+  __bang_add(a, a, c, n);
+  __memcpy(px, a, n * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
   (void)fill_value;
   (void)g0;
-  cnrtDim3_t d = {32, 1, 1};
+  cnrtDim3_t d = {31, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const unsigned char *>(mask.data_ptr<bool>()));
