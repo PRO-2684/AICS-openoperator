@@ -1,6 +1,5 @@
 #include <Python.h>
 #include <bang.h>
-#include <bang_variable_vector.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
@@ -57,6 +56,22 @@ __attribute__((constructor(101))) static void init_runtime() {
   }
 }
 
+__mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
+  __nram__ half a[E0];
+  __nram__ half c[E0];
+  __nram__ unsigned char d[E0];
+  int s = taskId * E0;
+  half *px = (half *)__builtin_assume_aligned(x + s, 512);
+  const unsigned char *pm =
+      (const unsigned char *)__builtin_assume_aligned(m + s, 512);
+  __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
+  __bang_uchar2int16((int16_t *)c, d, E0, 0);
+  __bang_mul_scalar((short *)c, (short *)c, (short)0xfc00, E0);
+  __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
+  __bang_add(a, a, c, E0);
+  __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
+}
+
 static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
@@ -64,41 +79,28 @@ static torch::Tensor g0 = []() {
   return torch::zeros({4194304}, opt);
 }();
 
-__mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
-  __nram__ unsigned char d[E0];
-  int s = taskId * E0;
-  half *px = (half *)__builtin_assume_aligned(x + s, 512);
-  const unsigned char *pm =
-      (const unsigned char *)__builtin_assume_aligned(m + s, 512);
-  __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
-  for (int o = 0; o < E0; o += 512) {
-    vv_uint32 a;
-    vv_uint32 b;
-    vv_uint32 c;
-    vv_uint32 e;
-    vv_bool p;
-    vv_bool q;
-    vv_bool r;
-    __vv_load(b, (const unsigned short *)(d + o));
-    __vv_setp_ne(p, b, (unsigned int)0);
-    __vv_load(a, (const unsigned int *)(px + o));
-    __vv_and(c, b, (unsigned int)0x00ff);
-    __vv_setp_ne(q, c, (unsigned int)0);
-    __vv_and(e, a, (unsigned int)0xffff0000);
-    __vv_or(e, e, (unsigned int)0x0000fc00);
-    __vv_select(a, e, a, q);
-    __vv_and(c, b, (unsigned int)0xff00);
-    __vv_setp_ne(r, c, (unsigned int)0);
-    __vv_and(e, a, (unsigned int)0x0000ffff);
-    __vv_or(e, e, (unsigned int)0xfc000000);
-    __vv_select(a, e, a, r);
-    __vv_store((unsigned int *)(px + o), a);
-  }
-}
+static torch::Tensor g1 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kBool);
+  return torch::zeros({4194304}, opt);
+}();
+
+static int g2 = []() {
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, q>>>(
+      reinterpret_cast<half *>(g0.data_ptr<at::Half>()),
+      reinterpret_cast<const unsigned char *>(g1.data_ptr<bool>()));
+  cnrtQueueSync(q);
+  return 0;
+}();
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
   (void)fill_value;
   (void)g0;
+  (void)g1;
+  (void)g2;
   cnrtDim3_t d = {32, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()),
