@@ -69,10 +69,24 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __nram__ unsigned char d[32768];
   int s = taskId * 32768;
   __memcpy(d, m + s, 32768 * sizeof(unsigned char), GDRAM2NRAM);
-#pragma unroll 4
-  for (int i = 0; i < 32768; ++i) {
-    if (d[i]) {
-      x[s + i] = (half)-65504.0;
+  unsigned int *q = (unsigned int *)d;
+#pragma unroll 2
+  for (int i = 0; i < 8192; ++i) {
+    unsigned int v = q[i];
+    int p = s + i * 4;
+    if (v) {
+      if (v & 0x000000ff) {
+        x[p] = (half)-65504.0;
+      }
+      if (v & 0x0000ff00) {
+        x[p + 1] = (half)-65504.0;
+      }
+      if (v & 0x00ff0000) {
+        x[p + 2] = (half)-65504.0;
+      }
+      if (v & 0xff000000) {
+        x[p + 3] = (half)-65504.0;
+      }
     }
   }
 }
