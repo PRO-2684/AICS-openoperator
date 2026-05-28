@@ -70,9 +70,9 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __nram__ half c[65536];
   __nram__ unsigned char d[65536];
   int s = taskId * 65536;
-  __memcpy(a, x + s, 65536 * sizeof(half), GDRAM2NRAM);
   __memcpy(d, m + s, 65536 * sizeof(unsigned char), GDRAM2NRAM);
   __bang_int82half(c, (const int8_t *)d, 65536, 14);
+  __memcpy(a, x + s, 65536 * sizeof(half), GDRAM2NRAM);
   __bang_sub(a, a, c, 65536);
   __memcpy(x + s, a, 65536 * sizeof(half), NRAM2GDRAM);
 }
