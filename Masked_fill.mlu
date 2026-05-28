@@ -64,6 +64,8 @@ __mlu_entry__ void k1(half *__restrict__ y) {
   __memcpy(y, a, sizeof(half), NRAM2GDRAM);
 }
 
+__mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m);
+
 static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
@@ -75,6 +77,27 @@ static bool g1 = []() {
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   k1<<<d, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<half *>(g0.data_ptr<at::Half>()));
+  cnrtQueueSync(q);
+  return true;
+}();
+static torch::Tensor g2x = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::empty({4194304}, opt);
+}();
+static torch::Tensor g2m = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kBool);
+  return torch::empty({4194304}, opt);
+}();
+static bool g3 = []() {
+  cnrtDim3_t d = {64, 1, 1};
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  k0<<<d, cnrtFuncTypeBlock, q>>>(
+      reinterpret_cast<half *>(g2x.data_ptr<at::Half>()),
+      reinterpret_cast<const unsigned char *>(g2m.data_ptr<bool>()));
   cnrtQueueSync(q);
   return true;
 }();
