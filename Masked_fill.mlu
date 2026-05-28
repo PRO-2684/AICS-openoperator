@@ -75,10 +75,10 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __memcpy_async(a, px, E0 * sizeof(half), GDRAM2NRAM);
   __sync_io();
   __bang_uchar2half(c, d, E0);
-  __bang_fusion(FUSION_FMA, c, c, (half)-65504.0, a, E0, E0);
-  __bang_uchar2int16((short *)a, d, E0, 0);
-  __bang_add((unsigned short *)c, (unsigned short *)c, (unsigned short *)a, E0);
-  __memcpy_async(px, c, E0 * sizeof(half), NRAM2GDRAM);
+  __bang_mul_scalar(c, c, (half)-65504.0, E0);
+  __bang_add(c, c, c, E0);
+  __bang_add(a, a, c, E0);
+  __memcpy_async(px, a, E0 * sizeof(half), NRAM2GDRAM);
   __sync_io();
 }
 
