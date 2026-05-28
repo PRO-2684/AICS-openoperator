@@ -81,7 +81,7 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
     vv_bool r;
     __vv_load(b, (const unsigned short *)(d + o));
     __vv_setp_ne(p, b, (unsigned int)0);
-    __vv_load_z(a, (const unsigned int *)(px + o), p);
+    __vv_load(a, (const unsigned int *)(px + o));
     __vv_and(c, b, (unsigned int)0x00ff);
     __vv_setp_ne(q, c, (unsigned int)0);
     __vv_and(e, a, (unsigned int)0xffff0000);
