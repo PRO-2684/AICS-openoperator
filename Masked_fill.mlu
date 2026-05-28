@@ -65,10 +65,12 @@ static torch::Tensor g0 = []() {
 }();
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
+  __nram__ unsigned char d[E0];
   int s = taskId * E0;
   half *px = (half *)__builtin_assume_aligned(x + s, 512);
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
+  __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
   for (int o = 0; o < E0; o += 512) {
     vv_uint32 a;
     vv_uint32 b;
@@ -77,7 +79,7 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
     vv_bool p;
     vv_bool q;
     vv_bool r;
-    __vv_load(b, (const unsigned short *)(pm + o));
+    __vv_load(b, (const unsigned short *)(d + o));
     __vv_setp_ne(p, b, (unsigned int)0);
     __vv_load_z(a, (const unsigned int *)(px + o), p);
     __vv_and(c, b, (unsigned int)0x00ff);
