@@ -39,19 +39,15 @@ __attribute__((constructor)) static void init0() {
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
   __nram__ half a[E0];
+  __nram__ half b[E0];
+  __nram__ half c[E0];
   __nram__ unsigned char d[E0];
-  __nram__ uint16_t u[E0];
-  __nram__ uint16_t v[E0];
   int s = taskId * E0;
   __memcpy(a, x + s, E0 * sizeof(half), GDRAM2NRAM);
   __memcpy(d, m + s, E0 * sizeof(unsigned char), GDRAM2NRAM);
-  __bang_uchar2int16((int16_t *)u, d, E0, 0);
-  __bang_sll((short *)u, (short *)u, 15, E0);
-  __bang_sra((short *)u, (short *)u, 15, E0);
-  __bang_band_scalar(v, u, (uint16_t)0xfc00, E0);
-  __bang_bnot(u, u, E0);
-  __bang_band((uint16_t *)a, (uint16_t *)a, u, E0);
-  __bang_bor((uint16_t *)a, (uint16_t *)a, v, E0);
+  __bang_uchar2half(c, d, E0);
+  __bang_write_value(b, E0, (half)-INFINITY);
+  __bang_maskmove(a, b, c, E0);
   __memcpy(x + s, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
