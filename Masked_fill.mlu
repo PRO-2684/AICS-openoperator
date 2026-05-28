@@ -57,11 +57,26 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
+
+__mlu_entry__ void k1(half *__restrict__ y) {
+  __nram__ half a[64];
+  __bang_write_zero(a, 64);
+  __memcpy(y, a, sizeof(half), NRAM2GDRAM);
+}
+
 static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
   return torch::zeros({1}, opt);
+}();
+static bool g1 = []() {
+  cnrtDim3_t d = {1, 1, 1};
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  k1<<<d, cnrtFuncTypeBlock, q>>>(
+      reinterpret_cast<half *>(g0.data_ptr<at::Half>()));
+  cnrtQueueSync(q);
+  return true;
 }();
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
