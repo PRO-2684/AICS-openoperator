@@ -92,7 +92,7 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
     __vv_and(e, a, (unsigned int)0x0000ffff);
     __vv_or(e, e, (unsigned int)0xfc000000);
     __vv_select(a, e, a, r);
-    __vv_store_m((unsigned int *)(px + o), a, p);
+    __vv_store((unsigned int *)(px + o), a);
   }
 }
 
