@@ -40,15 +40,14 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __nram__ half a[E0];
   __nram__ half c[E0];
   __nram__ unsigned char d[E0];
-  __nram__ short e[E0];
   int s = taskId * E0;
   __memcpy(a, x + s, E0 * sizeof(half), GDRAM2NRAM);
   __memcpy(d, m + s, E0 * sizeof(unsigned char), GDRAM2NRAM);
   __bang_uchar2half(c, d, E0);
   __bang_mul_scalar(c, c, (half)-65504.0, E0);
   __bang_add(a, a, c, E0);
-  __bang_uchar2int16(e, d, E0, 0);
-  __bang_add((unsigned short *)a, (unsigned short *)a, (unsigned short *)e, E0);
+  __bang_uchar2int16((short *)c, d, E0, 0);
+  __bang_add((unsigned short *)a, (unsigned short *)a, (unsigned short *)c, E0);
   __memcpy(x + s, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
