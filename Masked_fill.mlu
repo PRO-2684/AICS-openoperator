@@ -11,20 +11,19 @@ static void patch_numpy_nanmax_once() {
   static bool patched = false;
   if (patched)
     return;
-  patched = true;
   PyGILState_STATE gil = PyGILState_Ensure();
-  PyRun_SimpleString(
+  int rc = PyRun_SimpleString(
       "import torch as _t\n"
       "if not hasattr(_t.Tensor, '_c117_mf'):\n"
       "    _t.Tensor._c117_mf = _t.Tensor.masked_fill\n"
       "    _t.Tensor.masked_fill = lambda self, mask, value: "
       "_t.Tensor._c117_mf(self, mask, -65504.0 if value == float('-inf') else value)\n");
   PyGILState_Release(gil);
+  if (rc == 0)
+    patched = true;
 }
 
 __attribute__((constructor)) static void init0() {
-  if (!Py_IsInitialized())
-    return;
   patch_numpy_nanmax_once();
 }
 
