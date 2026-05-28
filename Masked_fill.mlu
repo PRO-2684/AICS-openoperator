@@ -75,8 +75,8 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __bang_uchar2half(c, d, E0);
   __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
   __bang_mul_scalar(c, c, (half)-65504.0, E0);
-  __bang_add(a, a, c, E0);
-  __bang_add(a, a, c, E0);
+  __bang_add_tz(c, c, c, E0);
+  __bang_add_tz(a, a, c, E0);
   __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
