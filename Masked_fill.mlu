@@ -60,10 +60,7 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  auto t = torch::zeros({4194304}, opt);
-  auto u = torch::zeros({4194304}, opt);
-  (void)u;
-  return t;
+  return torch::zeros({4194304}, opt);
 }();
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
@@ -74,15 +71,11 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   half *px = (half *)__builtin_assume_aligned(x + s, 512);
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
+  __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
   __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
   __bang_uchar2int16((int16_t *)c, d, E0, 0);
-  __bang_sub_scalar((int16_t *)c, (int16_t)0, (int16_t *)c, E0);
-  __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_not((uint16_t *)c, (uint16_t *)c, E0);
-  __bang_and((uint16_t *)a, (uint16_t *)a, (uint16_t *)c, E0);
-  __bang_not((uint16_t *)c, (uint16_t *)c, E0);
-  __bang_and_scalar((uint16_t *)c, (uint16_t *)c, (uint16_t)0xfc00, E0);
-  __bang_or((uint16_t *)a, (uint16_t *)a, (uint16_t *)c, E0);
+  __bang_mul_scalar((short *)c, (short *)c, (short)0xfc00, E0);
+  __bang_add(a, a, c, E0);
   __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
