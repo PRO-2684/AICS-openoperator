@@ -65,20 +65,32 @@ static torch::Tensor g0 = []() {
 }();
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
-  __nram__ unsigned char d[E0];
   int s = taskId * E0;
   half *px = (half *)__builtin_assume_aligned(x + s, 512);
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
-  __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
-  vv_uint16 r;
-  __vv_move(r, (unsigned short)0xfc00);
-  for (int o = 0; o < E0; o += 256) {
-    vv_uint8 b;
+  for (int o = 0; o < E0; o += 512) {
+    vv_uint32 a;
+    vv_uint32 b;
+    vv_uint32 c;
+    vv_uint32 e;
     vv_bool p;
-    __vv_load(b, d + o);
-    __vv_setp_ne(p, b, (unsigned char)0);
-    __vv_store_m((unsigned short *)(px + o), r, p);
+    vv_bool q;
+    vv_bool r;
+    __vv_load(b, (const unsigned short *)(pm + o));
+    __vv_setp_ne(p, b, (unsigned int)0);
+    __vv_load_z(a, (const unsigned int *)(px + o), p);
+    __vv_and(c, b, (unsigned int)0x00ff);
+    __vv_setp_ne(q, c, (unsigned int)0);
+    __vv_and(e, a, (unsigned int)0xffff0000);
+    __vv_or(e, e, (unsigned int)0x0000fc00);
+    __vv_select(a, e, a, q);
+    __vv_and(c, b, (unsigned int)0xff00);
+    __vv_setp_ne(r, c, (unsigned int)0);
+    __vv_and(e, a, (unsigned int)0x0000ffff);
+    __vv_or(e, e, (unsigned int)0xfc000000);
+    __vv_select(a, e, a, r);
+    __vv_store_m((unsigned int *)(px + o), a, p);
   }
 }
 
