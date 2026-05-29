@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #define E0 131072
+#define E1 32768
 
 static void fix_cmp_once() {
   static bool patched = false;
@@ -57,31 +58,27 @@ __attribute__((constructor(101))) static void init_runtime() {
 }
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
+  __nram__ uint16_t a[E1];
+  __nram__ uint16_t b[E1];
+  __nram__ uint16_t c[E1];
+  __nram__ half v[128];
   __nram__ unsigned char d[E0];
   int s = taskId * E0;
-  uint16_t *px = (uint16_t *)__builtin_assume_aligned((uint16_t *)(x + s), 512);
+  half *px = (half *)__builtin_assume_aligned(x + s, 512);
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
-  __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
-  const uint32_t *p4 = (const uint32_t *)d;
-  for (int i = 0; i < E0; i += 4) {
-    uint32_t v = p4[i >> 2];
-    if ((v & 0x000000ffu) && (v & 0x0000ff00u)) {
-      __store_gdram((uint32_t *)(px + i), (uint32_t)0xfc00fc00u);
-    } else {
-      if (v & 0x000000ffu)
-        __store_gdram(px + i, (uint16_t)0xfc00);
-      if (v & 0x0000ff00u)
-        __store_gdram(px + i + 1, (uint16_t)0xfc00);
-    }
-    if ((v & 0x00ff0000u) && (v & 0xff000000u)) {
-      __store_gdram((uint32_t *)(px + i + 2), (uint32_t)0xfc00fc00u);
-    } else {
-      if (v & 0x00ff0000u)
-        __store_gdram(px + i + 2, (uint16_t)0xfc00);
-      if (v & 0xff000000u)
-        __store_gdram(px + i + 3, (uint16_t)0xfc00);
-    }
+  for (int i = 0; i < 128; ++i)
+    a[i] = (uint16_t)(i * 2);
+  unsigned int q = 1;
+  for (; q < E1 / 128; q <<= 1)
+    __bang_add_scalar(a + q * 128, a, (uint16_t)(q * 256), q * 128);
+  __bang_write_value(v, 128, (half)-INFINITY);
+  for (int o = 0; o < E0; o += E1) {
+    __memcpy(d, pm + o, E1 * sizeof(unsigned char), GDRAM2NRAM);
+    __bang_uchar2int16((int16_t *)c, d, E1, 0);
+    uint32_t n = __bang_filter(b, a, c, E1);
+    if (n > 0)
+      __scatter(px + o, v, b, sizeof(half), NRAM2GDRAM, 0, n);
   }
 }
 
