@@ -1,5 +1,6 @@
 #include <Python.h>
 #include <bang.h>
+#include <bang_variable_vector.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
@@ -57,19 +58,27 @@ __attribute__((constructor(101))) static void init_runtime() {
 }
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
-  __nram__ half a[E0];
-  __nram__ half c[E0];
+  __nram__ uint16_t a[E0];
   __nram__ unsigned char d[E0];
   int s = taskId * E0;
   half *px = (half *)__builtin_assume_aligned(x + s, 512);
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
-  __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
-  __bang_mul_scalar((char *)d, (char *)d, (char)-4, E0);
-  __bang_write_zero((uint16_t *)c, E0);
-  __memcpy(((unsigned char *)c) + 1, d, 1, NRAM2NRAM, 2, 1, E0 - 1);
   __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_add(a, a, c, E0);
+  __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
+  vv_uint32 xv;
+  vv_uint32 mv;
+  vv_uint32 fv;
+  vv_uint32 yv;
+  vv_bool p;
+  __vv_move(fv, (unsigned int)0xfc00);
+  for (int o = 0; o < E0; o += 256) {
+    __vv_load(xv, (const unsigned short *)(a + o));
+    __vv_load(mv, d + o);
+    __vv_setp_ne(p, mv, (unsigned int)0);
+    __vv_select(yv, fv, xv, p);
+    __vv_store((unsigned short *)(a + o), yv);
+  }
   __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
