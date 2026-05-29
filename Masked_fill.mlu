@@ -1,5 +1,6 @@
 #include <Python.h>
 #include <bang.h>
+#include <bang_variable_vector.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
@@ -52,7 +53,7 @@ __attribute__((constructor(101))) static void init_runtime() {
     int torch_n = static_cast<int>(impl->deviceCount());
     if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
       int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      int d = limit > 3 ? 3 : 0;
+      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
       impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
       cnrtSetDevice(d);
       g_dev = d;
@@ -68,19 +69,29 @@ static torch::Tensor g0 = []() {
 }();
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
-  __nram__ half a[E0];
-  __nram__ half c[E0];
-  __nram__ unsigned char d[E0];
   int s = taskId * E0;
-  half *px = (half *)__builtin_assume_aligned(x + s, 512);
+  unsigned short *px =
+      (unsigned short *)__builtin_assume_aligned(x + s, 512);
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
-  __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
-  __bang_uchar2int16((int16_t *)c, d, E0, 0);
-  __bang_mul_scalar((short *)c, (short *)c, (short)0xfc00, E0);
-  __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_add(a, a, c, E0);
-  __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
+  vv_uint32 b;
+  vv_uint32 v;
+  vv_bool p;
+  __vv_move(v, (unsigned int)0xfc00);
+  for (int i = 0; i < E0; i += 512) {
+    __vv_load(b, pm + i);
+    __vv_setp_ne(p, b, (unsigned int)0);
+    __vv_store_m(px + i, v, p);
+    __vv_load(b, pm + i + 128);
+    __vv_setp_ne(p, b, (unsigned int)0);
+    __vv_store_m(px + i + 128, v, p);
+    __vv_load(b, pm + i + 256);
+    __vv_setp_ne(p, b, (unsigned int)0);
+    __vv_store_m(px + i + 256, v, p);
+    __vv_load(b, pm + i + 384);
+    __vv_setp_ne(p, b, (unsigned int)0);
+    __vv_store_m(px + i + 384, v, p);
+  }
 }
 
 __mlu_entry__ void k1(half *__restrict__ x, const unsigned char *__restrict__ m) {
