@@ -67,7 +67,8 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
   __bang_uchar2int16((int16_t *)c, d, E0, 0);
   __bang_mul_scalar((short *)c, (short *)c, (short)0xfc00, E0);
-  __bang_atomic_add(a, px, c, E0);
+  __bang_atomic_add_async(a, px, c, E0);
+  __sync_io_move_compute();
 }
 
 static torch::Tensor g0 = []() {
