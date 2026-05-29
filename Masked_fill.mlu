@@ -75,22 +75,22 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
   vv_uint32 b;
-  vv_uint32 v;
+  vv_float v;
   vv_bool p;
-  __vv_move(v, (unsigned int)0xfc00);
+  __vv_move(v, -(float)INFINITY);
   for (int i = 0; i < E0; i += 512) {
     __vv_load(b, pm + i);
     __vv_setp_ne(p, b, (unsigned int)0);
-    __vv_store_m(px + i, v, p);
+    __vv_store_m((half *)(px + i), v, p);
     __vv_load(b, pm + i + 128);
     __vv_setp_ne(p, b, (unsigned int)0);
-    __vv_store_m(px + i + 128, v, p);
+    __vv_store_m((half *)(px + i + 128), v, p);
     __vv_load(b, pm + i + 256);
     __vv_setp_ne(p, b, (unsigned int)0);
-    __vv_store_m(px + i + 256, v, p);
+    __vv_store_m((half *)(px + i + 256), v, p);
     __vv_load(b, pm + i + 384);
     __vv_setp_ne(p, b, (unsigned int)0);
-    __vv_store_m(px + i + 384, v, p);
+    __vv_store_m((half *)(px + i + 384), v, p);
   }
 }
 
