@@ -79,9 +79,9 @@ static torch::Tensor g1 = []() {
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m,
                       const uint16_t *__restrict__ r) {
-  __nram__ uint16_t a[E0];
+  __nram__ half a[E0];
   __nram__ unsigned char d[E0];
-  __nram__ uint16_t o[E0];
+  __nram__ half o[E0];
   __nram__ uint16_t v[E0];
   int s = taskId * E0;
   half *px = (half *)__builtin_assume_aligned(x + s, 512);
@@ -93,7 +93,8 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m,
   int n = __bang_filter(o, o, a, E0);
   __bang_write_value(v, n, (uint16_t)0xfc00);
   if (n > 0) {
-    __scatter(px, v, o, sizeof(uint16_t), NRAM2GDRAM, sizeof(uint16_t), n);
+    __scatter(px, v, (uint16_t *)o, sizeof(uint16_t), NRAM2GDRAM,
+              sizeof(uint16_t), n);
   }
 }
 
