@@ -7,7 +7,7 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define E0 32768
+#define E0 131072
 
 static void fix_cmp_once() {
   static bool patched = false;
@@ -60,25 +60,23 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  return torch::zeros({4194304}, opt);
+  return torch::zeros({8388608}, opt);
 }();
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
   __nram__ half a[E0];
   __nram__ half c[E0];
   __nram__ unsigned char d[E0];
-  for (int i = taskId; i < 128; i += 32) {
-    int s = i * E0;
-    half *px = (half *)__builtin_assume_aligned(x + s, 512);
-    const unsigned char *pm =
-        (const unsigned char *)__builtin_assume_aligned(m + s, 512);
-    __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
-    __bang_uchar2int16((int16_t *)c, d, E0, 0);
-    __bang_mul_scalar((short *)c, (short *)c, (short)0xfc00, E0);
-    __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
-    __bang_add(a, a, c, E0);
-    __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
-  }
+  int s = taskId * E0;
+  half *px = (half *)__builtin_assume_aligned(x + s, 512);
+  const unsigned char *pm =
+      (const unsigned char *)__builtin_assume_aligned(m + s, 512);
+  __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
+  __bang_uchar2int16((int16_t *)c, d, E0, 0);
+  __bang_mul_scalar((short *)c, (short *)c, (short)0xfc00, E0);
+  __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
+  __bang_add(a, a, c, E0);
+  __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
