@@ -7,7 +7,7 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define E0 65536
+#define E0 131072
 
 static void fix_cmp_once() {
   static bool patched = false;
@@ -64,37 +64,19 @@ static torch::Tensor g0 = []() {
 }();
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
-  __nram__ half a0[E0];
-  __nram__ half a1[E0];
-  __nram__ half c0[E0];
-  __nram__ half c1[E0];
-  __nram__ unsigned char d0[E0];
-  __nram__ unsigned char d1[E0];
-  int s = taskId * (E0 + E0);
+  __nram__ half a[E0];
+  __nram__ half c[E0];
+  __nram__ unsigned char d[E0];
+  int s = taskId * E0;
   half *px = (half *)__builtin_assume_aligned(x + s, 512);
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
-
-  __memcpy_async(d0, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
-  __memcpy_async(a0, px, E0 * sizeof(half), GDRAM2NRAM);
-  __sync_copy_dram_to_nram();
-
-  __memcpy_async(d1, pm + E0, E0 * sizeof(unsigned char), GDRAM2NRAM);
-  __memcpy_async(a1, px + E0, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_uchar2int16((int16_t *)c0, d0, E0, 0);
-  __bang_mul_scalar((short *)c0, (short *)c0, (short)0xfc00, E0);
-  __bang_add(a0, a0, c0, E0);
-  __sync_copy_dram_to_nram();
-  __sync_compute();
-
-  __memcpy_async(px, a0, E0 * sizeof(half), NRAM2GDRAM);
-  __bang_uchar2int16((int16_t *)c1, d1, E0, 0);
-  __bang_mul_scalar((short *)c1, (short *)c1, (short)0xfc00, E0);
-  __bang_add(a1, a1, c1, E0);
-  __sync_compute();
-
-  __memcpy_async(px + E0, a1, E0 * sizeof(half), NRAM2GDRAM);
-  __sync_copy_nram_to_dram();
+  __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
+  __bang_uchar2int16((int16_t *)c, d, E0, 0);
+  __bang_mul_scalar((short *)c, (short *)c, (short)0xfc00, E0);
+  __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
+  __bang_add(a, a, c, E0);
+  __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
