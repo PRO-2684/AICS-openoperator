@@ -57,14 +57,15 @@ __attribute__((constructor(101))) static void init_runtime() {
 }
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
+  __nram__ unsigned char d[E0];
   int s = taskId * E0;
   uint16_t *px = (uint16_t *)__builtin_assume_aligned((uint16_t *)(x + s), 512);
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
-  const uint32_t *pm4 =
-      (const uint32_t *)__builtin_assume_aligned((const uint32_t *)pm, 512);
+  __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
+  const uint32_t *p4 = (const uint32_t *)d;
   for (int i = 0; i < E0; i += 4) {
-    uint32_t v = __load_gdram(pm4 + (i >> 2));
+    uint32_t v = p4[i >> 2];
     if (v & 0x000000ffu)
       __store_gdram(px + i, (uint16_t)0xfc00);
     if (v & 0x0000ff00u)
