@@ -84,8 +84,8 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
   (void)fill_value;
   (void)g0;
-  cnrtDim3_t d = {32, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, gq>>>(
+  cnrtDim3_t d = {4, 8, 1};
+  k0<<<d, cnrtFuncTypeUnion1, gq>>>(
       reinterpret_cast<half *>(x.data_ptr()),
       reinterpret_cast<const unsigned char *>(mask.data_ptr()));
   return x;
