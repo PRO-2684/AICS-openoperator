@@ -7,7 +7,7 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define E0 65536
+#define E0 32768
 
 static void fix_cmp_once() {
   static bool patched = false;
@@ -67,7 +67,7 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __nram__ half a[E0];
   __nram__ half c[E0];
   __nram__ unsigned char d[E0];
-  for (int i = taskId; i < 64; i += 32) {
+  for (int i = taskId; i < 128; i += 32) {
     int s = i * E0;
     half *px = (half *)__builtin_assume_aligned(x + s, 512);
     const unsigned char *pm =
