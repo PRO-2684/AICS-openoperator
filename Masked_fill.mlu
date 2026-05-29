@@ -57,46 +57,19 @@ __attribute__((constructor(101))) static void init_runtime() {
 }
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
-  __nram__ half a0[32768];
-  __nram__ half a1[32768];
-  __nram__ half c0[32768];
-  __nram__ half c1[32768];
-  __nram__ unsigned char d0[32768];
-  __nram__ unsigned char d1[32768];
+  __nram__ half a[E0];
+  __nram__ half c[E0];
+  __nram__ unsigned char d[E0];
   int s = taskId * E0;
   half *px = (half *)__builtin_assume_aligned(x + s, 512);
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
-  __memcpy_async(d0, pm, 32768 * sizeof(unsigned char), GDRAM2NRAM);
-  __memcpy_async(a0, px, 32768 * sizeof(half), GDRAM2NRAM);
-  __sync_io();
-  __memcpy_async(d1, pm + 32768, 32768 * sizeof(unsigned char), GDRAM2NRAM);
-  __memcpy_async(a1, px + 32768, 32768 * sizeof(half), GDRAM2NRAM);
-  __bang_uchar2int16((int16_t *)c0, d0, 32768, 0);
-  __bang_mul_scalar((short *)c0, (short *)c0, (short)0xfc00, 32768);
-  __bang_add(a0, a0, c0, 32768);
-  __sync_io_move_compute();
-  __memcpy_async(px, a0, 32768 * sizeof(half), NRAM2GDRAM);
-  __memcpy_async(d0, pm + 65536, 32768 * sizeof(unsigned char), GDRAM2NRAM);
-  __memcpy_async(a0, px + 65536, 32768 * sizeof(half), GDRAM2NRAM);
-  __bang_uchar2int16((int16_t *)c1, d1, 32768, 0);
-  __bang_mul_scalar((short *)c1, (short *)c1, (short)0xfc00, 32768);
-  __bang_add(a1, a1, c1, 32768);
-  __sync_io_move_compute();
-  __memcpy_async(px + 32768, a1, 32768 * sizeof(half), NRAM2GDRAM);
-  __memcpy_async(d1, pm + 98304, 32768 * sizeof(unsigned char), GDRAM2NRAM);
-  __memcpy_async(a1, px + 98304, 32768 * sizeof(half), GDRAM2NRAM);
-  __bang_uchar2int16((int16_t *)c0, d0, 32768, 0);
-  __bang_mul_scalar((short *)c0, (short *)c0, (short)0xfc00, 32768);
-  __bang_add(a0, a0, c0, 32768);
-  __sync_io_move_compute();
-  __memcpy_async(px + 65536, a0, 32768 * sizeof(half), NRAM2GDRAM);
-  __bang_uchar2int16((int16_t *)c1, d1, 32768, 0);
-  __bang_mul_scalar((short *)c1, (short *)c1, (short)0xfc00, 32768);
-  __bang_add(a1, a1, c1, 32768);
-  __sync_io_move_compute();
-  __memcpy_async(px + 98304, a1, 32768 * sizeof(half), NRAM2GDRAM);
-  __sync_io();
+  __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
+  __bang_uchar2half(c, d, E0);
+  __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
+  __bang_fusion(FUSION_FMA, a, c, (half)-65504.0, a, E0, E0);
+  __bang_fusion(FUSION_FMA, a, c, (half)-65504.0, a, E0, E0);
+  __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
 static torch::Tensor g0 = []() {
