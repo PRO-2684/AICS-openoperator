@@ -3,7 +3,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
-#include <math.h>
+#include <stdint.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -57,19 +57,23 @@ __attribute__((constructor(101))) static void init_runtime() {
 }
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
-  __nram__ half a[E0];
-  __nram__ half c[E0];
-  __nram__ unsigned char d[E0];
   int s = taskId * E0;
-  half *px = (half *)__builtin_assume_aligned(x + s, 512);
+  uint16_t *px = (uint16_t *)__builtin_assume_aligned((uint16_t *)(x + s), 512);
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
-  __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
-  __bang_uchar2int16((int16_t *)c, d, E0, 0);
-  __bang_mul_scalar((short *)c, (short *)c, (short)0xfc00, E0);
-  __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_add(a, a, c, E0);
-  __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
+  const uint32_t *pm4 =
+      (const uint32_t *)__builtin_assume_aligned((const uint32_t *)pm, 512);
+  for (int i = 0; i < E0; i += 4) {
+    uint32_t v = __load_gdram(pm4 + (i >> 2));
+    if (v & 0x000000ffu)
+      __store_gdram(px + i, (uint16_t)0xfc00);
+    if (v & 0x0000ff00u)
+      __store_gdram(px + i + 1, (uint16_t)0xfc00);
+    if (v & 0x00ff0000u)
+      __store_gdram(px + i + 2, (uint16_t)0xfc00);
+    if (v & 0xff000000u)
+      __store_gdram(px + i + 3, (uint16_t)0xfc00);
+  }
 }
 
 static torch::Tensor g0 = []() {
