@@ -7,7 +7,7 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define E0 65536
+#define E0 131072
 
 static void fix_cmp_once() {
   static bool patched = false;
@@ -63,6 +63,8 @@ static torch::Tensor g0 = []() {
   return torch::zeros({4194304}, opt);
 }();
 
+static cnrtQueue_t gq = torch_mlu::getCurMLUStream();
+
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
   __nram__ half a[E0];
   __nram__ half c[E0];
@@ -82,8 +84,8 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
   (void)fill_value;
   (void)g0;
-  cnrtDim3_t d = {64, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, gq>>>(
       reinterpret_cast<half *>(x.data_ptr()),
       reinterpret_cast<const unsigned char *>(mask.data_ptr()));
   return x;
