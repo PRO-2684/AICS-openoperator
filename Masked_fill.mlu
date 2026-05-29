@@ -56,11 +56,22 @@ __attribute__((constructor(101))) static void init_runtime() {
   }
 }
 
+__mlu_entry__ void k1(half *__restrict__ x) {
+  __nram__ half a[64];
+  __bang_write_zero(a, 64);
+  __memcpy(x, a, 64 * sizeof(half), NRAM2GDRAM);
+}
+
 static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
+  auto t = torch::zeros({4194304}, opt);
+  cnrtDim3_t d = {1, 1, 1};
+  auto q = torch_mlu::getCurMLUStream();
+  k1<<<d, cnrtFuncTypeBlock, q>>>(reinterpret_cast<half *>(t.data_ptr<at::Half>()));
+  cnrtQueueSync(q);
+  return t;
 }();
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
@@ -72,10 +83,9 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   const unsigned char *pm =
       (const unsigned char *)__builtin_assume_aligned(m + s, 512);
   __memcpy(d, pm, E0 * sizeof(unsigned char), GDRAM2NRAM);
-  __memcpy_async(a, px, E0 * sizeof(half), GDRAM2NRAM);
   __bang_uchar2int16((short *)c, d, E0, 0);
   __bang_mul_scalar((short *)c, (short *)c, (short)0xfc00, E0);
-  __sync_io_move_compute();
+  __memcpy(a, px, E0 * sizeof(half), GDRAM2NRAM);
   __bang_add(a, a, c, E0);
   __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
 }
