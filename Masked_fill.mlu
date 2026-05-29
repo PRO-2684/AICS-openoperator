@@ -58,9 +58,9 @@ __attribute__((constructor(101))) static void init_runtime() {
 
 __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m) {
   __nram__ half a[E0];
-  __nram__ half c0[E0 + 64];
+  __nram__ half c0[E0 + 256];
   __nram__ unsigned char d[E0];
-  half *c = c0 + 64;
+  half *c = c0 + 256;
   int s = taskId * E0;
   half *px = (half *)__builtin_assume_aligned(x + s, 512);
   const unsigned char *pm =
