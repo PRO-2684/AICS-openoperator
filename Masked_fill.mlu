@@ -78,7 +78,7 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __bang_add(c, c, c, E0);
   __sync_io();
   __bang_add(a, a, c, E0);
-  __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
+  __memcpy_async(px, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double fill_value) {
