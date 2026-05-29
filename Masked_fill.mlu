@@ -76,7 +76,7 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
     __vv_load(xv, (const unsigned short *)(a + o));
     __vv_load(mv, d + o);
     __vv_setp_ne(p, mv, (unsigned int)0);
-    __vv_select(yv, fv, xv, p);
+    __vv_select(yv, xv, fv, p);
     __vv_store((unsigned short *)(a + o), yv);
   }
   __memcpy(px, a, E0 * sizeof(half), NRAM2GDRAM);
