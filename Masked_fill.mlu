@@ -66,14 +66,22 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   const uint32_t *p4 = (const uint32_t *)d;
   for (int i = 0; i < E0; i += 4) {
     uint32_t v = p4[i >> 2];
-    if (v & 0x000000ffu)
-      __store_gdram(px + i, (uint16_t)0xfc00);
-    if (v & 0x0000ff00u)
-      __store_gdram(px + i + 1, (uint16_t)0xfc00);
-    if (v & 0x00ff0000u)
-      __store_gdram(px + i + 2, (uint16_t)0xfc00);
-    if (v & 0xff000000u)
-      __store_gdram(px + i + 3, (uint16_t)0xfc00);
+    if ((v & 0x000000ffu) && (v & 0x0000ff00u)) {
+      __store_gdram((uint32_t *)(px + i), (uint32_t)0xfc00fc00u);
+    } else {
+      if (v & 0x000000ffu)
+        __store_gdram(px + i, (uint16_t)0xfc00);
+      if (v & 0x0000ff00u)
+        __store_gdram(px + i + 1, (uint16_t)0xfc00);
+    }
+    if ((v & 0x00ff0000u) && (v & 0xff000000u)) {
+      __store_gdram((uint32_t *)(px + i + 2), (uint32_t)0xfc00fc00u);
+    } else {
+      if (v & 0x00ff0000u)
+        __store_gdram(px + i + 2, (uint16_t)0xfc00);
+      if (v & 0xff000000u)
+        __store_gdram(px + i + 3, (uint16_t)0xfc00);
+    }
   }
 }
 
