@@ -91,6 +91,7 @@ __mlu_entry__ void k0(half *__restrict__ x, const unsigned char *__restrict__ m)
   __bang_uchar2int16((int16_t *)c1, d1, E0, 0);
   __bang_mul_scalar((short *)c1, (short *)c1, (short)0xfc00, E0);
   __bang_add(a1, a1, c1, E0);
+  __sync_io_move_compute();
   __memcpy_async(px1, a1, E0 * sizeof(half), NRAM2GDRAM);
   __sync_io();
 }
