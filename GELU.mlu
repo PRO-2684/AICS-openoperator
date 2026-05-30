@@ -34,10 +34,9 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
                  .dtype(torch::kHalf);
-  {
-    auto t = torch::empty({6442450944LL}, opt);
-  }
-  return torch::empty({1}, opt);
+  auto a = torch::empty({1}, opt);
+  auto b = torch::empty({1}, opt);
+  return a + b;
 }();
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
