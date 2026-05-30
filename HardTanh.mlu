@@ -44,12 +44,7 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  auto t = torch::zeros({16, 16384}, opt);
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {8, 1, 1};
-  hardtanh_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(t.data_ptr<at::Half>()));
-  return t;
+  return torch::zeros({1}, opt);
 }();
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
