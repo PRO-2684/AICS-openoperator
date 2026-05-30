@@ -16,7 +16,7 @@ __mlu_entry__ void elu_half_kernel(half *__restrict__ input) {
   __memcpy(b, a, CHUNK_ELEMS * sizeof(half), NRAM2NRAM);
   __bang_mineq_scalar(a, a, (half)0.0f, CHUNK_ELEMS);
   __bang_maxeq_scalar(b, b, (half)0.0f, CHUNK_ELEMS);
-  __bang_active_exp_less_0(a, a, CHUNK_ELEMS);
+  __bang_active_exphp(a, a, CHUNK_ELEMS);
   __bang_add_scalar(a, a, (half)-1.0f, CHUNK_ELEMS);
   __bang_add(a, a, b, CHUNK_ELEMS);
   __memcpy(p, a, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
