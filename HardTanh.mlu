@@ -26,8 +26,8 @@ __attribute__((constructor(101))) static void init_runtime() {
 }
 
 __mlu_func__ void hardtanh_compute(half *x, uint32_t elems) {
-  __bang_maxeq_scalar(x, x, (half)-1.0f, elems);
-  __bang_mineq_scalar(x, x, (half)1.0f, elems);
+  __bang_maximum_scalar(x, x, (half)-1.0f, elems);
+  __bang_minimum_scalar(x, x, (half)1.0f, elems);
 }
 
 __mlu_entry__ void hardtanh_half_kernel(half *__restrict__ input) {
