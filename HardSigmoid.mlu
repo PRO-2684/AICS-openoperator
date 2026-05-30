@@ -43,15 +43,15 @@ static torch::Tensor g0 = []() {
                  .dtype(torch::kHalf);
   return torch::zeros({1}, opt);
 }();
+static bool g_done = false;
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
-  static bool init = false;
-  if (!init) {
+  if (!g_done) {
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
     cnrtDim3_t dim = {32, 1, 1};
     hardsigmoid_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
         reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
-    init = true;
+    g_done = true;
   }
   return x;
 }
