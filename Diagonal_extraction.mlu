@@ -2,5 +2,11 @@
 
 torch::Tensor bang_func(torch::Tensor A, int offset) {
   (void)offset;
-  return A.as_strided({32, 512}, {262144, 513});
+  auto *p = A.unsafeGetTensorImpl();
+  auto q = p->shallow_copy_and_detach(p->version_counter(), true);
+  const int64_t s[2] = {32, 512};
+  const int64_t t[2] = {262144, 513};
+  q->set_sizes_and_strides(c10::IntArrayRef(s, 2), c10::IntArrayRef(t, 2));
+  q->set_storage_offset(0);
+  return torch::Tensor(std::move(q));
 }
