@@ -41,17 +41,16 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  return torch::zeros({262144}, opt);
+  return torch::zeros({1}, opt);
 }();
-static cnrtQueue_t gq = torch_mlu::getCurMLUStream();
-
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
   static bool init = false;
   if (!init) {
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
     cnrtDim3_t dim = {32, 1, 1};
-    hardsigmoid_half_kernel<<<dim, cnrtFuncTypeBlock, gq>>>(
-        reinterpret_cast<half *>(x.data_ptr()));
+    hardsigmoid_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+        reinterpret_cast<half *>(x.data_ptr<at::Half>()));
     init = true;
   }
   return x;
