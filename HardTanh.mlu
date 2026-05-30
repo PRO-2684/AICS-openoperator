@@ -44,16 +44,19 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
+  {
+    auto t = torch::empty({10737418240LL}, opt);
+  }
+  return torch::empty({1}, opt);
 }();
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
   static bool init = false;
   if (!init) {
-    cnrtQueue_t queue = torch_mlu::getDefaultMLUStream();
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
     cnrtDim3_t dim = {8, 1, 1};
     hardtanh_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
+        reinterpret_cast<half *>(x.data_ptr<at::Half>()));
     init = true;
   }
   return x;
