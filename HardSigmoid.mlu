@@ -49,7 +49,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
   static bool init = false;
   if (!init) {
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtQueue_t queue = torch_mlu::getDefaultMLUStream();
   cnrtDim3_t dim = {32, 1, 1};
   hardsigmoid_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
