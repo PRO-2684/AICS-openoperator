@@ -7,22 +7,9 @@
 
 __mlu_entry__ void gelu_half_kernel(half *__restrict__ input) {
   __nram__ half buf[CHUNK_ELEMS];
-  __nram__ half z[CHUNK_ELEMS];
-  __nram__ half h[CHUNK_ELEMS];
   half *ptr = (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
   __memcpy(buf, ptr, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  __bang_mul(z, buf, buf, CHUNK_ELEMS);
-  __bang_fusion(FUSION_FMA, h, z, (half)0.0000025f, (half)-0.0001557f,
-                CHUNK_ELEMS);
-  __bang_fusion(FUSION_FMA, h, h, z, (half)0.0037714f, CHUNK_ELEMS,
-                CHUNK_ELEMS);
-  __bang_fusion(FUSION_FMA, h, h, z, (half)-0.0462115f, CHUNK_ELEMS,
-                CHUNK_ELEMS);
-  __bang_fusion(FUSION_FMA, h, h, z, (half)0.3724281f, CHUNK_ELEMS,
-                CHUNK_ELEMS);
-  __bang_fusion(FUSION_FMA, h, h, z, (half)0.0057719f, CHUNK_ELEMS,
-                CHUNK_ELEMS);
-  __bang_fusion(FUSION_FMA, buf, buf, (half)0.5f, h, CHUNK_ELEMS, CHUNK_ELEMS);
+  __bang_active_gelu(buf, buf, CHUNK_ELEMS);
   __memcpy(ptr, buf, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
 }
 
