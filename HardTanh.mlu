@@ -45,7 +45,7 @@ static torch::Tensor g0 = []() {
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
   {
-    auto t = torch::empty({10737418240LL}, opt);
+    auto t = torch::empty({8589934592LL}, opt);
   }
   return torch::empty({1}, opt);
 }();
