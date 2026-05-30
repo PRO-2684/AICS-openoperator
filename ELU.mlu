@@ -10,15 +10,26 @@
 __mlu_entry__ void elu_half_kernel(half *__restrict__ input) {
   __nram__ half a[CHUNK_ELEMS];
   __nram__ half b[CHUNK_ELEMS];
+  __nram__ half c[CHUNK_ELEMS];
   half *p =
       (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
   __memcpy(a, p, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  __memcpy(b, a, CHUNK_ELEMS * sizeof(half), NRAM2NRAM);
-  __bang_mineq_scalar(a, a, (half)0.0f, CHUNK_ELEMS);
-  __bang_maxeq_scalar(b, b, (half)0.0f, CHUNK_ELEMS);
-  __bang_active_exphp(a, a, CHUNK_ELEMS);
-  __bang_add_scalar(a, a, (half)-1.0f, CHUNK_ELEMS);
-  __bang_add(a, a, b, CHUNK_ELEMS);
+  __bang_abs(b, a, CHUNK_ELEMS);
+  __memcpy(c, a, CHUNK_ELEMS * sizeof(half), NRAM2NRAM);
+  __bang_add(c, c, b, CHUNK_ELEMS);
+  __bang_mul_scalar(c, c, (half)0.5f, CHUNK_ELEMS);
+  __bang_sub(b, b, a, CHUNK_ELEMS);
+  __bang_mul_scalar(b, b, (half)0.5f, CHUNK_ELEMS);
+  __bang_mul_scalar(a, b, (half)-0.00133042f, CHUNK_ELEMS);
+  __bang_add_scalar(a, a, (half)0.02082807f, CHUNK_ELEMS);
+  __bang_mul(a, a, b, CHUNK_ELEMS);
+  __bang_add_scalar(a, a, (half)-0.13505281f, CHUNK_ELEMS);
+  __bang_mul(a, a, b, CHUNK_ELEMS);
+  __bang_add_scalar(a, a, (half)0.48010033f, CHUNK_ELEMS);
+  __bang_mul(a, a, b, CHUNK_ELEMS);
+  __bang_add_scalar(a, a, (half)-0.99694532f, CHUNK_ELEMS);
+  __bang_mul(a, a, b, CHUNK_ELEMS);
+  __bang_add(a, a, c, CHUNK_ELEMS);
   __memcpy(p, a, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
 }
 
@@ -48,13 +59,9 @@ static torch::Tensor g0 = []() {
 }();
 torch::Tensor bang_func(torch::Tensor x, float alpha) {
   (void)g0;
-  static bool init = false;
-  if (!init) {
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t dim = {32, 1, 1};
-    elu_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<half *>(x.data_ptr<at::Half>()));
-    init = true;
-  }
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {32, 1, 1};
+  elu_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
   return x;
 }
