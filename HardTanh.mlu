@@ -37,8 +37,8 @@ __mlu_entry__ void hardtanh_half_kernel(half *__restrict__ input) {
   __bang_gt_scalar((int16_t *)m, (int16_t *)m, (int16_t)0x3c00, CHUNK_ELEMS);
   __bang_mul_scalar((int16_t *)m, (int16_t *)m, (int16_t)-1, CHUNK_ELEMS);
   __bang_band_scalar((uint16_t *)b, (uint16_t *)b, (uint16_t)0x8000, CHUNK_ELEMS);
-  __bang_bor((int8_t *)b, (int8_t *)b, (int8_t *)m, CHUNK_ELEMS * sizeof(half));
-  __bang_band_scalar((uint16_t *)b, (uint16_t *)b, (uint16_t)0xbc00, CHUNK_ELEMS);
+  __bang_add_scalar((int16_t *)b, (int16_t *)b, (int16_t)0x3c00, CHUNK_ELEMS);
+  __bang_band((int8_t *)b, (int8_t *)b, (int8_t *)m, CHUNK_ELEMS * sizeof(half));
   __bang_not((int16_t *)m, (int16_t *)m, CHUNK_ELEMS);
   __bang_band((int8_t *)a, (int8_t *)a, (int8_t *)m, CHUNK_ELEMS * sizeof(half));
   __bang_bor((int8_t *)a, (int8_t *)a, (int8_t *)b, CHUNK_ELEMS * sizeof(half));
