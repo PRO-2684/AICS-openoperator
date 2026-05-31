@@ -1,4 +1,5 @@
 #include <bang.h>
+#include <cnnl.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
@@ -21,7 +22,17 @@ static torch::Tensor g0 = []() {
   auto b = torch::empty({1}, opt);
   return a + b;
 }();
+
+static cnnlHandle_t g_h = nullptr;
+static bool g_c = []() {
+  if (cnnlCreate(&g_h) == CNNL_STATUS_SUCCESS) {
+    cnnlSetQueue(g_h, torch_mlu::getCurMLUStream());
+  }
+  return true;
+}();
+
 torch::Tensor bang_func(torch::Tensor x) {
+  (void)g_c;
   (void)g0;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {32, 1, 1};
