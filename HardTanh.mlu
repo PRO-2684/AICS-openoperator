@@ -3,8 +3,6 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
 
 #define CHUNK_ELEMS 32768
@@ -51,13 +49,6 @@ static torch::Tensor g0 = []() {
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
-  static bool shown = false;
-  if (!shown) {
-    const char *w = getenv("WORKER_ID");
-    printf("ENV_WORKER_ID=%s\n", w ? w : "null");
-    fflush(stdout);
-    shown = true;
-  }
   static bool init = false;
   if (!init) {
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
