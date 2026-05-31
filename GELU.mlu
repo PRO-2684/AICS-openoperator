@@ -36,7 +36,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {32, 1, 1};
   half *p = reinterpret_cast<half *>(x.data_ptr<at::Half>());
-  for (int i = 0; i < 8; ++i) {
+  for (int i = 0; i < 32; ++i) {
     gelu_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(p);
   }
   return x;
