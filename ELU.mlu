@@ -3,6 +3,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
+#include <stdio.h>
 #include <unistd.h>
 
 #define CHUNK_ELEMS 8192
@@ -65,8 +66,21 @@ torch::Tensor bang_func(torch::Tensor x, float alpha) {
   if (!init) {
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
     cnrtDim3_t dim = {32, 1, 1};
+    cnrtNotifier_t ns;
+    cnrtNotifier_t ne;
+    cnrtNotifierCreate(&ns);
+    cnrtNotifierCreate(&ne);
+    cnrtPlaceNotifier(ns, queue);
     elu_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
         reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+    cnrtPlaceNotifier(ne, queue);
+    cnrtWaitNotifier(ne);
+    float us = 0.0f;
+    cnrtNotifierDuration(ns, ne, &us);
+    printf("HWUS op=026 var=abs kernel=%.3f\n", us);
+    fflush(stdout);
+    cnrtNotifierDestroy(ns);
+    cnrtNotifierDestroy(ne);
     init = true;
   }
   return x;
