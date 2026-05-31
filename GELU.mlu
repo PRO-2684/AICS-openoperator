@@ -1,7 +1,6 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
-#include <sched.h>
 #include <stdio.h>
 #include <torch/extension.h>
 
@@ -20,29 +19,20 @@ __attribute__((constructor(101))) static void init_hwinfo() {
   cnrtGetLibVersion(&lmaj, &lmin, &lpat);
   cnrtGetDeviceCount(&n);
   cnrtGetDevice(&dev);
-  char bus[64] = {0};
-  cnrtDeviceGetPCIBusId(bus, sizeof(bus), dev < 0 ? 0 : dev);
-  cpu_set_t mask;
-  int ar = sched_getaffinity(0, sizeof(mask), &mask);
-  int cpu = sched_getcpu();
-  int first = -1, last = -1, ac = 0;
-  if (ar == 0) {
-    for (int i = 0; i < CPU_SETSIZE; ++i) {
-      if (CPU_ISSET(i, &mask)) {
-        if (first < 0) first = i;
-        last = i;
-        ++ac;
-      }
-    }
-  }
-  fprintf(stderr, "HWINFO cnrt_driver=%d.%d.%d cnrt_lib=%d.%d.%d count=%u dev=%d kind=cputopo0 cpu=%d aff_first=%d aff_last=%d aff_count=%d bus=%s\n",
-          dmaj, dmin, dpat, lmaj, lmin, lpat, n, dev, cpu, first, last, ac, bus);
+  size_t mf = 0, mt = 0;
+  cnrtMemGetInfo(&mf, &mt);
+  fprintf(stderr, "HWINFO cnrt_driver=%d.%d.%d cnrt_lib=%d.%d.%d count=%u dev=%d kind=gres4g0 mem_free=%zu mem_total=%zu\n",
+          dmaj, dmin, dpat, lmaj, lmin, lpat, n, dev, mf, mt);
 }
 
 static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
                  .dtype(torch::kHalf);
+  {
+    auto reserve = torch::empty({2147483648LL}, opt);
+    (void)reserve;
+  }
   auto a = torch::empty({1}, opt);
   auto b = torch::empty({1}, opt);
   return a + b;
