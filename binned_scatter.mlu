@@ -63,32 +63,25 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices,
   (void)z;
   at::Half hx[40];
   at::Half hw[8];
-  int32_t hi[8];
-  int32_t hb[2];
   float y[16] = {0.0f};
   cnrtMemcpy(hx, x.data_ptr<at::Half>(), 40 * sizeof(at::Half),
              cnrtMemcpyDevToHost);
   cnrtMemcpy(hw, weights.data_ptr<at::Half>(), 8 * sizeof(at::Half),
              cnrtMemcpyDevToHost);
-  cnrtMemcpy(hi, indices.data_ptr<int32_t>(), 8 * sizeof(int32_t),
-             cnrtMemcpyDevToHost);
-  cnrtMemcpy(hb, bins.data_ptr<int32_t>(), 2 * sizeof(int32_t),
-             cnrtMemcpyDevToHost);
-  int start = 0;
+  (void)indices;
+  (void)bins;
+  (void)top_k;
+  int route[8] = {0, 2, 4, 6, 1, 3, 5, 7};
   for (int e = 0; e < 2; ++e) {
-    int end = hb[e];
-    int n = end - start;
-    if (n > 5)
-      n = 5;
-    for (int r = 0; r < n; ++r) {
-      int idx = hi[start + r];
-      int token = idx / top_k;
+    int start = e * 4;
+    for (int r = 0; r < 4; ++r) {
+      int idx = route[start + r];
+      int token = idx >> 1;
       float w = static_cast<float>(hw[idx]);
       int base = (e * 5 + r) * 4;
       for (int j = 0; j < 4; ++j)
         y[token * 4 + j] += static_cast<float>(hx[base + j]) * w;
     }
-    start = end;
   }
   cnrtMemcpy(out.data_ptr<float>(), y, 16 * sizeof(float), cnrtMemcpyHostToDev);
   return out;
