@@ -6,8 +6,9 @@
 #define CHUNK_ELEMS 32768
 
 __mlu_func__ void hardtanh_compute(half *x, uint32_t elems) {
-  __bang_maxeq_scalar(x, x, (half)-1.0f, elems);
-  __bang_mineq_scalar(x, x, (half)1.0f, elems);
+  __bang_add_scalar(x, x, (half)1.0f, elems);
+  __bang_relun(x, x, elems, (half)2.0f);
+  __bang_sub_scalar(x, x, (half)1.0f, elems);
 }
 
 __mlu_entry__ void hardtanh_half_kernel(half *__restrict__ input) {
