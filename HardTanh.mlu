@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 #define CHUNK_ELEMS 32768
-#define BUILD_NONCE 2
+#define BUILD_NONCE 3
 
 static int g_dev = 0;
 
