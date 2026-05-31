@@ -19,10 +19,8 @@ __attribute__((constructor(101))) static void init_hwinfo() {
   cnrtGetLibVersion(&lmaj, &lmin, &lpat);
   cnrtGetDeviceCount(&n);
   cnrtGetDevice(&dev);
-  size_t kbytes = 0;
-  cnrtDeviceQueryKernelMemoryUsage(&kbytes);
-  fprintf(stderr, "HWINFO cnrt_driver=%d.%d.%d cnrt_lib=%d.%d.%d count=%u dev=%d kind=kusagepre0 kbytes=%zu\n",
-          dmaj, dmin, dpat, lmaj, lmin, lpat, n, dev, kbytes);
+  fprintf(stderr, "HWINFO cnrt_driver=%d.%d.%d cnrt_lib=%d.%d.%d count=%u dev=%d kind=cmset1a0\n",
+          dmaj, dmin, dpat, lmaj, lmin, lpat, n, dev);
 }
 
 static torch::Tensor g0 = []() {
@@ -30,6 +28,7 @@ static torch::Tensor g0 = []() {
                  .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
                  .dtype(torch::kHalf);
   auto a = torch::empty({1}, opt);
+  cnrtMemset(a.data_ptr<at::Half>(), 0, 2);
   auto b = torch::empty({1}, opt);
   return a + b;
 }();
