@@ -16,12 +16,13 @@ __mlu_entry__ void elu_half_kernel(half *__restrict__ input) {
   __memcpy(a, p, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
   __bang_relu(c, a, CHUNK_ELEMS);
   __bang_sub(b, c, a, CHUNK_ELEMS);
-  __bang_mineq_scalar(b, b, (half)4.23828125f, CHUNK_ELEMS);
-  __bang_fusion(FUSION_FMA, a, b, (half)0.00598145f, (half)-0.07800293f,
+  __bang_fusion(FUSION_FMA, a, b, (half)-0.00133042f, (half)0.02082807f,
                 CHUNK_ELEMS);
-  __bang_fusion(FUSION_FMA, a, a, b, (half)0.39379883f, CHUNK_ELEMS,
+  __bang_fusion(FUSION_FMA, a, a, b, (half)-0.13505281f, CHUNK_ELEMS,
                 CHUNK_ELEMS);
-  __bang_fusion(FUSION_FMA, a, a, b, (half)-0.95605469f, CHUNK_ELEMS,
+  __bang_fusion(FUSION_FMA, a, a, b, (half)0.48010033f, CHUNK_ELEMS,
+                CHUNK_ELEMS);
+  __bang_fusion(FUSION_FMA, a, a, b, (half)-0.99694532f, CHUNK_ELEMS,
                 CHUNK_ELEMS);
   __bang_mul(a, a, b, CHUNK_ELEMS);
   __bang_add(a, a, c, CHUNK_ELEMS);
