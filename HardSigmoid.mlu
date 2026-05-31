@@ -3,6 +3,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <stdio.h>
+#include <sys/syscall.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -22,16 +23,37 @@ __mlu_entry__ void hardsigmoid_half_kernel(half *__restrict__ input) {
 
 
 static int g_dev = 0;
+static int g_cpu = -1;
+static int g_node = 0;
 
 __attribute__((constructor(101))) static void init_runtime() {
   unsigned int n = 0;
+  unsigned int cpu = 0;
+  if (syscall(SYS_getcpu, &cpu, nullptr, nullptr) == 0) {
+    g_cpu = static_cast<int>(cpu);
+    g_node = g_cpu >= 28 ? 1 : 0;
+  }
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
     const auto *impl =
         c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
     int torch_n = static_cast<int>(impl->deviceCount());
     if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
       int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
+      int base = 0;
+      int span = limit;
+      if (limit > 4) {
+        if (g_node) {
+          base = 4;
+          span = limit - 4;
+        } else {
+          span = 4;
+        }
+      }
+      if (span <= 0) {
+        base = 0;
+        span = limit;
+      }
+      int d = base + static_cast<int>(static_cast<unsigned long>(getpid()) % span);
       impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
       cnrtSetDevice(d);
       g_dev = d;
@@ -39,8 +61,9 @@ __attribute__((constructor(101))) static void init_runtime() {
   }
   int dmaj = 0, dmin = 0, dpat = 0;
   cnrtDriverGetVersion(&dmaj, &dmin, &dpat);
-  fprintf(stderr, "HWINFO op=028 kind=zdrop0 cnrt_driver=%d.%d.%d count=%u dev=%d\n",
-          dmaj, dmin, dpat, n, g_dev);
+  fprintf(stderr,
+          "HWINFO op=028 kind=cpulocal0 cnrt_driver=%d.%d.%d count=%u dev=%d cpu=%d node=%d\n",
+          dmaj, dmin, dpat, n, g_dev, g_cpu, g_node);
 }
 static int g0 = []() {
   auto opt = torch::TensorOptions()
