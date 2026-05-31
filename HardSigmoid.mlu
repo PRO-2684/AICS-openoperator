@@ -41,13 +41,6 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  for (int64_t n : {6442450944LL, 4294967296LL, 2147483648LL}) {
-    try {
-      auto t = torch::empty({n}, opt);
-      break;
-    } catch (...) {
-    }
-  }
   return torch::zeros({1}, opt);
 }();
 
