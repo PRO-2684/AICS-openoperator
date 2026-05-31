@@ -84,10 +84,9 @@ __mlu_entry__ void k0(const int64_t *__restrict__ idx,
                       float *__restrict__ out) {
   for (int p = taskId; p < 8192; p += taskDim) {
     int64_t r = idx[p];
-    __memcpy_async(out + p * 512, weight + r * 512, 512 * sizeof(float),
-                   GDRAM2GDRAM);
+    __memcpy(out + p * 512, weight + r * 512, 512 * sizeof(float),
+             GDRAM2GDRAM);
   }
-  __sync_io();
 }
 
 torch::Tensor bang_func(torch::Tensor indices, int num_embeddings,
