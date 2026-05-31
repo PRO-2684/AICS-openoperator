@@ -48,8 +48,8 @@ torch::Tensor bang_func(torch::Tensor x) {
   static bool init = false;
   if (!init) {
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t dim = {4, 8, 1};
-    hardsigmoid_half_kernel<<<dim, cnrtFuncTypeUnion1, queue>>>(
+    cnrtDim3_t dim = {32, 1, 1};
+    hardsigmoid_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
         reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
     init = true;
   }
