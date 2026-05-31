@@ -2,6 +2,7 @@
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
+#include <stdio.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -21,6 +22,11 @@ __attribute__((constructor(101))) static void init_runtime() {
       impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
       cnrtSetDevice(d);
       g_dev = d;
+      char bdf[32] = {0};
+      cnrtDeviceGetPCIBusId(bdf, sizeof(bdf), d);
+      printf("DEVSEL op=029 n=%u dev=%d bdf=%s pid=%ld\n", n, d, bdf,
+             (long)getpid());
+      fflush(stdout);
     }
   }
 }
