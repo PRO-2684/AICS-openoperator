@@ -10,33 +10,18 @@ __mlu_entry__ void gelu_half_kernel(half *__restrict__ input) {
   (void)input;
 }
 
-struct TopoState {
-  cnrtTaskTopo_t topo;
-  cnrtTaskTopoEntity_t entity;
-  half *arg;
-  int ok;
-};
-
-static TopoState ts = []() {
-  TopoState s{};
-  cnrtQueue_t q = nullptr;
-  cnrtDim3_t dim = {32, 1, 1};
-  s.arg = nullptr;
-  cnrtRet_t r0 = cnrtQueueCreate(&q);
-  cnrtRet_t r1 = r0 == cnrtSuccess ? cnrtQueueBeginCapture(q, cnrtQueueCaptureModeRelaxed) : r0;
-  if (r1 == cnrtSuccess) {
-    gelu_half_kernel<<<dim, cnrtFuncTypeBlock, q>>>(s.arg);
-  }
-  cnrtRet_t r2 = r1 == cnrtSuccess ? cnrtQueueEndCapture(q, &s.topo) : r1;
-  cnrtRet_t r3 = r2 == cnrtSuccess ? cnrtTaskTopoInstantiate(&s.entity, s.topo, nullptr, nullptr, 0) : r2;
-  if (q) {
-    cnrtQueueDestroy(q);
-  }
-  s.ok = (r0 == cnrtSuccess && r1 == cnrtSuccess && r2 == cnrtSuccess && r3 == cnrtSuccess);
-  fprintf(stderr, "TINFO kind=capture_empty r0=%d r1=%d r2=%d r3=%d ok=%d\n",
-          (int)r0, (int)r1, (int)r2, (int)r3, s.ok);
-  return s;
-}();
+__attribute__((constructor(101))) static void init_hwinfo() {
+  int dmaj = 0, dmin = 0, dpat = 0;
+  int lmaj = 0, lmin = 0, lpat = 0;
+  unsigned int n = 0;
+  int dev = -1;
+  cnrtDriverGetVersion(&dmaj, &dmin, &dpat);
+  cnrtGetLibVersion(&lmaj, &lmin, &lpat);
+  cnrtGetDeviceCount(&n);
+  cnrtGetDevice(&dev);
+  fprintf(stderr, "HWINFO cnrt_driver=%d.%d.%d cnrt_lib=%d.%d.%d count=%u dev=%d kind=kinfo1\n",
+          dmaj, dmin, dpat, lmaj, lmin, lpat, n, dev);
+}
 
 static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
@@ -49,8 +34,8 @@ static torch::Tensor g0 = []() {
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  if (ts.ok) {
-    cnrtTaskTopoEntityInvoke(ts.entity, queue);
-  }
+  cnrtDim3_t dim = {32, 1, 1};
+  gelu_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
   return x;
 }
