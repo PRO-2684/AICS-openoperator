@@ -30,7 +30,7 @@ __attribute__((constructor(101))) static void init_runtime() {
     int torch_n = static_cast<int>(impl->deviceCount());
     int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
     if (limit > 0) {
-      int span = limit < 4 ? limit : 4;
+      int span = limit < 8 ? limit : 8;
       int d = static_cast<int>(static_cast<unsigned long>(getpid()) % span);
       impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
       cnrtSetDevice(d);
