@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #define CHUNK_ELEMS 32768
+#define BUILD_NONCE 0
 
 static int g_dev = 0;
 
@@ -49,6 +50,7 @@ static torch::Tensor g0 = []() {
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
+  (void)BUILD_NONCE;
   static bool init = false;
   if (!init) {
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
