@@ -41,11 +41,7 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  torch::Tensor t;
-  for (int i = 0; i < 16; ++i) {
-    t = torch::zeros({1}, opt);
-  }
-  return t;
+  return torch::zeros({1}, opt);
 }();
 
 torch::Tensor bang_func(torch::Tensor x) {
