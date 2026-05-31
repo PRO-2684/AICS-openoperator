@@ -1,10 +1,8 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
-#include <sched.h>
 #include <stdio.h>
 #include <torch/extension.h>
-#include <unistd.h>
 
 #define CHUNK_ELEMS 8192
 
@@ -13,15 +11,6 @@ __mlu_entry__ void gelu_half_kernel(half *__restrict__ input) {
 }
 
 __attribute__((constructor(101))) static void init_hwinfo() {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int node = (int)(getpid() & 1);
-  int begin = node ? 28 : 0;
-  int end = node ? 56 : 28;
-  for (int i = begin; i < end; ++i) {
-    CPU_SET(i, &set);
-  }
-  int sr = sched_setaffinity(0, sizeof(set), &set);
   int dmaj = 0, dmin = 0, dpat = 0;
   int lmaj = 0, lmin = 0, lpat = 0;
   unsigned int n = 0;
@@ -30,19 +19,16 @@ __attribute__((constructor(101))) static void init_hwinfo() {
   cnrtGetLibVersion(&lmaj, &lmin, &lpat);
   cnrtGetDeviceCount(&n);
   cnrtGetDevice(&dev);
-  char bus[64] = {0};
-  cnrtDeviceGetPCIBusId(bus, sizeof(bus), dev < 0 ? 0 : dev);
-  int cpu = sched_getcpu();
-  fprintf(stderr, "HWINFO cnrt_driver=%d.%d.%d cnrt_lib=%d.%d.%d count=%u dev=%d kind=affpid01 node=%d sr=%d cpu=%d bus=%s\n",
-          dmaj, dmin, dpat, lmaj, lmin, lpat, n, dev, node, sr, cpu, bus);
+  fprintf(stderr, "HWINFO cnrt_driver=%d.%d.%d cnrt_lib=%d.%d.%d count=%u dev=%d kind=gbigadd1\n",
+          dmaj, dmin, dpat, lmaj, lmin, lpat, n, dev);
 }
 
 static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
                  .dtype(torch::kHalf);
-  auto a = torch::empty({1}, opt);
-  auto b = torch::empty({1}, opt);
+  auto a = torch::empty({262144}, opt);
+  auto b = torch::empty({262144}, opt);
   return a + b;
 }();
 torch::Tensor bang_func(torch::Tensor x) {
