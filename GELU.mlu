@@ -13,28 +13,14 @@ __mlu_entry__ void gelu_half_kernel(half *__restrict__ input) {
   __memcpy(ptr, buf, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
 }
 
-__mlu_entry__ void warm_kernel() {}
-
 static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
                  .dtype(torch::kHalf);
-  auto a = torch::empty({1}, opt);
-  auto b = torch::empty({1}, opt);
-  return a + b;
+  return torch::zeros({262144}, opt);
 }();
-
-static bool g1 = []() {
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {1, 1, 1};
-  warm_kernel<<<dim, cnrtFuncTypeBlock, queue>>>();
-  cnrtQueueSync(queue);
-  return true;
-}();
-
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
-  (void)g1;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {32, 1, 1};
   gelu_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
