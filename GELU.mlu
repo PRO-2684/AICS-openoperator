@@ -19,8 +19,10 @@ __attribute__((constructor(101))) static void init_hwinfo() {
   cnrtGetLibVersion(&lmaj, &lmin, &lpat);
   cnrtGetDeviceCount(&n);
   cnrtGetDevice(&dev);
-  fprintf(stderr, "HWINFO cnrt_driver=%d.%d.%d cnrt_lib=%d.%d.%d count=%u dev=%d kind=lquery0\n",
-          dmaj, dmin, dpat, lmaj, lmin, lpat, n, dev);
+  size_t kbytes = 0;
+  cnrtDeviceQueryKernelMemoryUsage(&kbytes);
+  fprintf(stderr, "HWINFO cnrt_driver=%d.%d.%d cnrt_lib=%d.%d.%d count=%u dev=%d kind=kusagepre0 kbytes=%zu\n",
+          dmaj, dmin, dpat, lmaj, lmin, lpat, n, dev, kbytes);
 }
 
 static torch::Tensor g0 = []() {
@@ -37,6 +39,5 @@ torch::Tensor bang_func(torch::Tensor x) {
   cnrtDim3_t dim = {32, 1, 1};
   gelu_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
-  cnrtQueueQuery(queue);
   return x;
 }
