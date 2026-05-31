@@ -21,7 +21,15 @@ static torch::Tensor g0 = []() {
   auto b = torch::empty({1}, opt);
   return a + b;
 }();
+static bool g1 = []() {
+  int d = 0;
+  if (cnrtGetDevice(&d) == cnrtSuccess) {
+    cnrtSetDevice(d);
+  }
+  return true;
+}();
 torch::Tensor bang_func(torch::Tensor x) {
+  (void)g1;
   (void)g0;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {32, 1, 1};
