@@ -1,7 +1,6 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 #include <unistd.h>
@@ -30,8 +29,7 @@ __attribute__((constructor(101))) static void init_runtime() {
     int torch_n = static_cast<int>(impl->deviceCount());
     if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
       int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      const char *w = std::getenv("WORKER_ID");
-      int d = w ? (std::atoi(w) % limit) : 0;
+      int d = 0;
       impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
       cnrtSetDevice(d);
       g_dev = d;
