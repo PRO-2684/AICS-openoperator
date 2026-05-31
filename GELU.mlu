@@ -14,7 +14,7 @@ __mlu_entry__ void gelu_half_kernel(half *__restrict__ input) {
 __attribute__((constructor(101))) static void init_hwinfo() {
   cpu_set_t set;
   CPU_ZERO(&set);
-  for (int i = 0; i < 28; ++i) {
+  for (int i = 28; i < 56; ++i) {
     CPU_SET(i, &set);
   }
   int sr = sched_setaffinity(0, sizeof(set), &set);
@@ -29,7 +29,7 @@ __attribute__((constructor(101))) static void init_hwinfo() {
   char bus[64] = {0};
   cnrtDeviceGetPCIBusId(bus, sizeof(bus), dev < 0 ? 0 : dev);
   int cpu = sched_getcpu();
-  fprintf(stderr, "HWINFO cnrt_driver=%d.%d.%d cnrt_lib=%d.%d.%d count=%u dev=%d kind=affnode0 sr=%d cpu=%d bus=%s\n",
+  fprintf(stderr, "HWINFO cnrt_driver=%d.%d.%d cnrt_lib=%d.%d.%d count=%u dev=%d kind=affnode1 sr=%d cpu=%d bus=%s\n",
           dmaj, dmin, dpat, lmaj, lmin, lpat, n, dev, sr, cpu, bus);
 }
 
