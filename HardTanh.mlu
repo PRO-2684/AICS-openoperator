@@ -3,7 +3,7 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-#define CHUNK_ELEMS 65536
+#define CHUNK_ELEMS 32768
 
 __mlu_func__ void hardtanh_compute(half *x, uint32_t elems) {
   __bang_maxeq_scalar(x, x, (half)-1.0f, elems);
@@ -31,7 +31,7 @@ static torch::Tensor g0 = []() {
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {4, 1, 1};
+  cnrtDim3_t dim = {8, 1, 1};
   hardtanh_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
   return x;
