@@ -82,11 +82,10 @@ static torch::Tensor gy = []() {
 __mlu_entry__ void k0(const int64_t *__restrict__ idx,
                       const float *__restrict__ weight,
                       float *__restrict__ out) {
-  __nram__ float a[512];
   for (int p = taskId; p < 8192; p += taskDim) {
     int64_t r = idx[p];
-    __memcpy(a, weight + r * 512, 512 * sizeof(float), GDRAM2NRAM);
-    __memcpy(out + p * 512, a, 512 * sizeof(float), NRAM2GDRAM);
+    __memcpy(out + p * 512, weight + r * 512, 512 * sizeof(float),
+             GDRAM2GDRAM);
   }
 }
 
