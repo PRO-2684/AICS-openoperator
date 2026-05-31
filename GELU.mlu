@@ -12,6 +12,7 @@ __mlu_entry__ void gelu_half_kernel(half *__restrict__ input) {
 }
 
 __attribute__((constructor(101))) static void init_hwinfo() {
+  cnrtRet_t set_ret = cnrtSetDeviceFlag((uint32_t)cnrtDeviceScheduleBlock);
   int dmaj = 0, dmin = 0, dpat = 0;
   int lmaj = 0, lmin = 0, lpat = 0;
   unsigned int n = 0;
@@ -20,11 +21,11 @@ __attribute__((constructor(101))) static void init_hwinfo() {
   cnrtGetLibVersion(&lmaj, &lmin, &lpat);
   cnrtGetDeviceCount(&n);
   cnrtGetDevice(&dev);
-  cnrtSetDeviceFlag((uint32_t)cnrtDeviceScheduleYield);
   uint32_t flag = 0;
-  cnrtGetDeviceFlag(&flag);
-  fprintf(stderr, "HWINFO cnrt_driver=%d.%d.%d cnrt_lib=%d.%d.%d count=%u dev=%d flag=%u\n",
-          dmaj, dmin, dpat, lmaj, lmin, lpat, n, dev, (unsigned)flag);
+  cnrtRet_t get_ret = cnrtGetDeviceFlag(&flag);
+  fprintf(stderr, "HWINFO cnrt_driver=%d.%d.%d cnrt_lib=%d.%d.%d count=%u dev=%d flag=%u setret=%d getret=%d\n",
+          dmaj, dmin, dpat, lmaj, lmin, lpat, n, dev, (unsigned)flag,
+          (int)set_ret, (int)get_ret);
 }
 
 static torch::Tensor g0 = []() {
