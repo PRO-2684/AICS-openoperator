@@ -8,7 +8,6 @@
 #define CHUNK_ELEMS 32768
 
 static int g_dev = 0;
-static int g_run = 0;
 
 __attribute__((constructor(101))) static void init_runtime() {
   unsigned int n = 0;
@@ -17,9 +16,6 @@ __attribute__((constructor(101))) static void init_runtime() {
         c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
     int torch_n = static_cast<int>(impl->deviceCount());
     if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int dmaj = 0, dmin = 0, dpat = 0;
-      cnrtDriverGetVersion(&dmaj, &dmin, &dpat);
-      g_run = n == 8 && dmaj == 6 && dmin == 2;
       int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
       int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
       impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
@@ -53,8 +49,6 @@ static torch::Tensor g0 = []() {
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
-  if (!g_run)
-    return x;
   static bool init = false;
   if (!init) {
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
