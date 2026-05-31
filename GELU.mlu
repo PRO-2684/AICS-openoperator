@@ -19,9 +19,11 @@ __attribute__((constructor(101))) static void init_hwinfo() {
   cnrtGetLibVersion(&lmaj, &lmin, &lpat);
   cnrtGetDeviceCount(&n);
   cnrtGetDevice(&dev);
-  fprintf(stderr, "HWINFO cnrt_driver=%d.%d.%d cnrt_lib=%d.%d.%d count=%u dev=%d kind=meminfo0\n",
+  fprintf(stderr, "HWINFO cnrt_driver=%d.%d.%d cnrt_lib=%d.%d.%d count=%u dev=%d kind=hostfn0\n",
           dmaj, dmin, dpat, lmaj, lmin, lpat, n, dev);
 }
+
+static void host_noop(void *) {}
 
 static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
@@ -33,8 +35,7 @@ static torch::Tensor g0 = []() {
 }();
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
-  size_t free_bytes = 0;
-  size_t total_bytes = 0;
-  cnrtMemGetInfo(&free_bytes, &total_bytes);
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtInvokeHostFunc(queue, host_noop, nullptr);
   return x;
 }
