@@ -6,7 +6,10 @@
 #define CHUNK_ELEMS 8192
 
 __mlu_entry__ void gelu_half_kernel(half *__restrict__ input) {
-  (void)input;
+  __nram__ half buf[CHUNK_ELEMS];
+  half *ptr = (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
+  __memcpy(buf, ptr, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
+  __memcpy(ptr, buf, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
 }
 
 static torch::Tensor g0 = []() {
