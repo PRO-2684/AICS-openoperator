@@ -13,31 +13,28 @@ __mlu_entry__ void gelu_half_kernel(half *__restrict__ input) {
 struct TopoState {
   cnrtTaskTopo_t topo;
   cnrtTaskTopoEntity_t entity;
-  cnrtTaskTopoNode_t node;
   half *arg;
   int ok;
 };
 
 static TopoState ts = []() {
   TopoState s{};
-  cnrtRet_t r0 = cnrtTaskTopoCreate(&s.topo, 0);
-  cnrtKernelNodeParams_t p{};
+  cnrtQueue_t q = nullptr;
   cnrtDim3_t dim = {32, 1, 1};
   s.arg = nullptr;
-  void *params[] = {&s.arg};
-  p.func = (void *)gelu_half_kernel;
-  p.dim = dim;
-  p.type = cnrtFuncTypeBlock;
-  p.kernelParams = params;
-  cnrtRet_t r1 = r0 == cnrtSuccess
-                      ? cnrtTaskTopoAddKernelNode(&s.node, s.topo, nullptr, 0, &p)
-                      : r0;
-  cnrtRet_t r2 = r1 == cnrtSuccess
-                      ? cnrtTaskTopoInstantiate(&s.entity, s.topo, nullptr, nullptr, 0)
-                      : r1;
-  s.ok = (r0 == cnrtSuccess && r1 == cnrtSuccess && r2 == cnrtSuccess);
-  fprintf(stderr, "TINFO kind=kernel_empty r0=%d r1=%d r2=%d ok=%d\n",
-          (int)r0, (int)r1, (int)r2, s.ok);
+  cnrtRet_t r0 = cnrtQueueCreate(&q);
+  cnrtRet_t r1 = r0 == cnrtSuccess ? cnrtQueueBeginCapture(q, cnrtQueueCaptureModeRelaxed) : r0;
+  if (r1 == cnrtSuccess) {
+    gelu_half_kernel<<<dim, cnrtFuncTypeBlock, q>>>(s.arg);
+  }
+  cnrtRet_t r2 = r1 == cnrtSuccess ? cnrtQueueEndCapture(q, &s.topo) : r1;
+  cnrtRet_t r3 = r2 == cnrtSuccess ? cnrtTaskTopoInstantiate(&s.entity, s.topo, nullptr, nullptr, 0) : r2;
+  if (q) {
+    cnrtQueueDestroy(q);
+  }
+  s.ok = (r0 == cnrtSuccess && r1 == cnrtSuccess && r2 == cnrtSuccess && r3 == cnrtSuccess);
+  fprintf(stderr, "TINFO kind=capture_empty r0=%d r1=%d r2=%d r3=%d ok=%d\n",
+          (int)r0, (int)r1, (int)r2, (int)r3, s.ok);
   return s;
 }();
 
