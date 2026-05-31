@@ -1,6 +1,7 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <stdio.h>
 #include <torch/extension.h>
 
 #define CHUNK_ELEMS 8192
@@ -21,11 +22,25 @@ static torch::Tensor g0 = []() {
   auto b = torch::empty({1}, opt);
   return a + b;
 }();
+static cnrtNotifier_t gs;
+static cnrtNotifier_t ge;
+static bool gn = []() {
+  cnrtNotifierCreate(&gs);
+  cnrtNotifierCreate(&ge);
+  return true;
+}();
 torch::Tensor bang_func(torch::Tensor x) {
+  (void)gn;
   (void)g0;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {32, 1, 1};
+  cnrtPlaceNotifier(gs, queue);
   gelu_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+  cnrtPlaceNotifier(ge, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(gs, ge, &us);
+  fprintf(stderr, "NTIME kernel_us=%.3f\n", us);
   return x;
 }
