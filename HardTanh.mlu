@@ -3,7 +3,6 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <stdio.h>
 #include <unistd.h>
 
 #define CHUNK_ELEMS 32768
@@ -27,9 +26,8 @@ __attribute__((constructor(101))) static void init_runtime() {
 }
 
 __mlu_func__ void hardtanh_compute(half *x, uint32_t elems) {
-  __bang_add_scalar(x, x, (half)1.0f, elems);
-  __bang_relun(x, x, elems, (half)2.0f);
-  __bang_add_scalar(x, x, (half)-1.0f, elems);
+  __bang_maxeq_scalar(x, x, (half)-1.0f, elems);
+  __bang_mineq_scalar(x, x, (half)1.0f, elems);
 }
 
 __mlu_entry__ void hardtanh_half_kernel(half *__restrict__ input) {
@@ -55,21 +53,8 @@ torch::Tensor bang_func(torch::Tensor x) {
   if (!init) {
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
     cnrtDim3_t dim = {8, 1, 1};
-    cnrtNotifier_t ns;
-    cnrtNotifier_t ne;
-    cnrtNotifierCreate(&ns);
-    cnrtNotifierCreate(&ne);
-    cnrtPlaceNotifier(ns, queue);
     hardtanh_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
         reinterpret_cast<half *>(x.data_ptr<at::Half>()));
-    cnrtPlaceNotifier(ne, queue);
-    cnrtWaitNotifier(ne);
-    float us = 0.0f;
-    cnrtNotifierDuration(ns, ne, &us);
-    printf("HWUS op=029 var=relun kernel=%.3f\n", us);
-    fflush(stdout);
-    cnrtNotifierDestroy(ns);
-    cnrtNotifierDestroy(ne);
     init = true;
   }
   return x;
