@@ -105,8 +105,8 @@ torch::Tensor bang_func(torch::Tensor indices, int num_embeddings,
   py::object emb = model.attr("emb");
   torch::Tensor weight = as_tensor(emb.attr("weight"));
 
-  cnrtDim3_t dim = {16, 1, 1};
-  k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t dim = {4, 8, 1};
+  k0<<<dim, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const int64_t *>(indices.data_ptr<int64_t>()),
       reinterpret_cast<const float *>(weight.data_ptr<float>()),
       reinterpret_cast<float *>(y.data_ptr<float>()));
