@@ -1,26 +1,17 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
-#include <stdio.h>
 #include <torch/extension.h>
 
 #define CHUNK_ELEMS 8192
 
 __mlu_entry__ void gelu_half_kernel(half *__restrict__ input) {
-  (void)input;
-}
-
-__attribute__((constructor(101))) static void init_hwinfo() {
-  int dmaj = 0, dmin = 0, dpat = 0;
-  int lmaj = 0, lmin = 0, lpat = 0;
-  unsigned int n = 0;
-  int dev = -1;
-  cnrtDriverGetVersion(&dmaj, &dmin, &dpat);
-  cnrtGetLibVersion(&lmaj, &lmin, &lpat);
-  cnrtGetDeviceCount(&n);
-  cnrtGetDevice(&dev);
-  fprintf(stderr, "HWINFO cnrt_driver=%d.%d.%d cnrt_lib=%d.%d.%d count=%u dev=%d kind=tadd1p0\n",
-          dmaj, dmin, dpat, lmaj, lmin, lpat, n, dev);
+  __nram__ half buf[CHUNK_ELEMS];
+  half *ptr =
+      (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
+  __memcpy(buf, ptr, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
+  __bang_active_gelu(buf, buf, CHUNK_ELEMS);
+  __memcpy(ptr, buf, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
 }
 
 static torch::Tensor g0 = []() {

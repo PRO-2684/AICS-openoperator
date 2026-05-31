@@ -2,8 +2,6 @@
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
-#include <stdio.h>
-#include <sys/syscall.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -37,16 +35,9 @@ __mlu_entry__ void elu_half_kernel(half *__restrict__ input) {
 
 
 static int g_dev = 0;
-static int g_cpu = -1;
-static int g_node = 0;
 
 __attribute__((constructor(101))) static void init_runtime() {
   unsigned int n = 0;
-  unsigned int cpu = 0;
-  if (syscall(SYS_getcpu, &cpu, nullptr, nullptr) == 0) {
-    g_cpu = static_cast<int>(cpu);
-    g_node = g_cpu >= 28 ? 1 : 0;
-  }
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
     const auto *impl =
         c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
@@ -59,36 +50,15 @@ __attribute__((constructor(101))) static void init_runtime() {
       g_dev = d;
     }
   }
-  int dmaj = 0, dmin = 0, dpat = 0;
-  cnrtDriverGetVersion(&dmaj, &dmin, &dpat);
-  fprintf(stderr,
-          "HWINFO op=026 kind=gmem18hold0 cnrt_driver=%d.%d.%d count=%u dev=%d cpu=%d node=%d\n",
-          dmaj, dmin, dpat, n, g_dev, g_cpu, g_node);
 }
-static torch::Tensor g_reserve = []() {
+static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  size_t f0 = 0, t0 = 0, f1 = 0, t1 = 0;
-  cnrtMemGetInfo(&f0, &t0);
-  auto a = torch::empty({9663676416LL}, opt);
-  cnrtMemGetInfo(&f1, &t1);
-  fprintf(stderr,
-          "RESINFO op=026 kind=gmem18hold0 free0=%zu total0=%zu free1=%zu total1=%zu\n",
-          f0, t0, f1, t1);
-  return a;
-}();
-static int g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  auto a = torch::zeros({1}, opt);
-  (void)a;
-  return 0;
+  return torch::zeros({1}, opt);
 }();
 torch::Tensor bang_func(torch::Tensor x, float alpha) {
   (void)g0;
-  (void)g_reserve;
   static bool init = false;
   if (!init) {
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
