@@ -35,6 +35,21 @@ __mlu_entry__ void elu_half_kernel(half *__restrict__ input) {
 
 static int g_dev = 0;
 
+static void warm_runtime_path() {
+  void *p = nullptr;
+  cnrtQueue_t q = nullptr;
+  if (cnrtMalloc(&p, 256) == cnrtSuccess) {
+    if (cnrtQueueCreate(&q) == cnrtSuccess) {
+      cnrtMemsetAsync(p, 0, 256, q);
+      cnrtQueueSync(q);
+      cnrtQueueDestroy(q);
+    } else {
+      cnrtMemset(p, 0, 256);
+    }
+    cnrtFree(p);
+  }
+}
+
 __attribute__((constructor(101))) static void init_runtime() {
   unsigned int n = 0;
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
@@ -47,6 +62,7 @@ __attribute__((constructor(101))) static void init_runtime() {
       impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
       cnrtSetDevice(d);
       g_dev = d;
+      warm_runtime_path();
     }
   }
 }
