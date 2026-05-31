@@ -1,7 +1,6 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
-#include <stdio.h>
 #include <torch/extension.h>
 
 #define CHUNK_ELEMS 8192
@@ -12,19 +11,6 @@ __mlu_entry__ void gelu_half_kernel(half *__restrict__ input) {
   __memcpy(buf, ptr, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
   __bang_active_gelu(buf, buf, CHUNK_ELEMS);
   __memcpy(ptr, buf, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
-}
-
-__attribute__((constructor(101))) static void init_hwinfo() {
-  int dmaj = 0, dmin = 0, dpat = 0;
-  int lmaj = 0, lmin = 0, lpat = 0;
-  unsigned int n = 0;
-  int dev = -1;
-  cnrtDriverGetVersion(&dmaj, &dmin, &dpat);
-  cnrtGetLibVersion(&lmaj, &lmin, &lpat);
-  cnrtGetDeviceCount(&n);
-  cnrtGetDevice(&dev);
-  fprintf(stderr, "HWINFO cnrt_driver=%d.%d.%d cnrt_lib=%d.%d.%d count=%u dev=%d\n",
-          dmaj, dmin, dpat, lmaj, lmin, lpat, n, dev);
 }
 
 static torch::Tensor g0 = []() {
