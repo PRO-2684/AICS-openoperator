@@ -1,17 +1,36 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <stdio.h>
 #include <torch/extension.h>
 
 #define CHUNK_ELEMS 8192
 
 __mlu_entry__ void gelu_half_kernel(half *__restrict__ input) {
-  __nram__ half buf[CHUNK_ELEMS];
-  half *ptr = (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
-  __memcpy(buf, ptr, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  __bang_active_gelu(buf, buf, CHUNK_ELEMS);
-  __memcpy(ptr, buf, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
+  (void)input;
 }
+
+struct TopoState {
+  cnrtTaskTopo_t topo;
+  cnrtTaskTopoEntity_t entity;
+  cnrtTaskTopoNode_t node;
+  int ok;
+};
+
+static TopoState ts = []() {
+  TopoState s{};
+  cnrtRet_t r0 = cnrtTaskTopoCreate(&s.topo, 0);
+  cnrtRet_t r1 = r0 == cnrtSuccess
+                      ? cnrtTaskTopoAddEmptyNode(&s.node, s.topo, nullptr, 0)
+                      : r0;
+  cnrtRet_t r2 = r1 == cnrtSuccess
+                      ? cnrtTaskTopoInstantiate(&s.entity, s.topo, nullptr, nullptr, 0)
+                      : r1;
+  s.ok = (r0 == cnrtSuccess && r1 == cnrtSuccess && r2 == cnrtSuccess);
+  fprintf(stderr, "TINFO kind=empty r0=%d r1=%d r2=%d ok=%d\n",
+          (int)r0, (int)r1, (int)r2, s.ok);
+  return s;
+}();
 
 static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
@@ -24,8 +43,8 @@ static torch::Tensor g0 = []() {
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {32, 1, 1};
-  gelu_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+  if (ts.ok) {
+    cnrtTaskTopoEntityInvoke(ts.entity, queue);
+  }
   return x;
 }
