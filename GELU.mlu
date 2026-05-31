@@ -21,7 +21,26 @@ static torch::Tensor g0 = []() {
   auto b = torch::empty({1}, opt);
   return a + b;
 }();
+static bool g1 = []() {
+  unsigned int n = 0;
+  cnrtGetDeviceCount(&n);
+  int d = 0;
+  cnrtGetDevice(&d);
+  if (n > 0 && d >= 0 && d < static_cast<int>(n)) {
+    cnrtSetDevice(d);
+  }
+  size_t bytes = 0;
+  cnrtDeviceQueryKernelMemoryUsage(&bytes);
+  cnrtQueue_t q = nullptr;
+  if (cnrtQueueCreate(&q) == cnrtSuccess) {
+    cnrtQueueSync(q);
+    cnrtQueueDestroy(q);
+  }
+  cnrtQueueSync(nullptr);
+  return true;
+}();
 torch::Tensor bang_func(torch::Tensor x) {
+  (void)g1;
   (void)g0;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {32, 1, 1};
