@@ -15,8 +15,7 @@ __mlu_entry__ void elu_half_kernel(half *__restrict__ input) {
       (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
   __memcpy(a, p, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
   __bang_relu(c, a, CHUNK_ELEMS);
-  __memcpy(b, c, CHUNK_ELEMS * sizeof(half), NRAM2NRAM);
-  __bang_sub(b, b, a, CHUNK_ELEMS);
+  __bang_sub(b, c, a, CHUNK_ELEMS);
   __bang_mineq_scalar(b, b, (half)4.23828125f, CHUNK_ELEMS);
   __bang_fusion(FUSION_FMA, a, b, (half)0.00598145f, (half)-0.07800293f,
                 CHUNK_ELEMS);

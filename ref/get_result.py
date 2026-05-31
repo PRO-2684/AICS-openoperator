@@ -12,11 +12,21 @@ and --full for raw **输出:** code blocks.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
+import os
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from typing import Any, Dict, Iterable, List, Optional
+
+try:
+    import aiohttp
+except ImportError:  # pragma: no cover - optional fallback for minimal envs.
+    aiohttp = None
 
 
 def jdumps(x: Any) -> str:
@@ -31,12 +41,112 @@ def run_cmd(cmd: List[str]) -> str:
     return p.stdout
 
 
+class ApiError(RuntimeError):
+    def __init__(self, status: int, msg: str):
+        super().__init__(msg)
+        self.status = status
+
+
+def gh_token() -> Optional[str]:
+    for k in ("GH_TOKEN", "GITHUB_TOKEN"):
+        v = os.environ.get(k)
+        if v:
+            return v.strip()
+
+    path = os.path.expanduser("~/.config/gh/hosts.yml")
+    try:
+        lines = open(path, "r", encoding="utf-8").read().splitlines()
+    except OSError:
+        return None
+
+    in_host = False
+    for line in lines:
+        if re.match(r"^\S", line):
+            in_host = line.strip().rstrip(":") == "github.com"
+            continue
+        if in_host:
+            m = re.match(r"\s*oauth_token:\s*(\S+)\s*$", line)
+            if m:
+                return m.group(1)
+    return None
+
+
+def api_get_json(url: str, token: Optional[str]) -> Any:
+    headers = api_headers(token)
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return json.loads(resp.read().decode("utf-8") or "null"), resp.headers
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")[:300]
+        raise ApiError(e.code, f"github api http {e.code}: {body}") from None
+
+
+def api_headers(token: Optional[str]) -> Dict[str, str]:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "aics-openoperator-tools",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def next_link(link: str) -> str:
+    for part in link.split(","):
+        if 'rel="next"' in part:
+            m = re.search(r"<([^>]+)>", part)
+            if m:
+                return m.group(1)
+    return ""
+
+
+def api_comments(repo: str, sha: str, token: Optional[str]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    qsha = urllib.parse.quote(sha, safe="")
+    url = f"https://api.github.com/repos/{repo}/commits/{qsha}/comments?per_page=100"
+    while url:
+        data, headers = api_get_json(url, token)
+        if isinstance(data, list):
+            out.extend(x for x in data if isinstance(x, dict))
+        url = next_link(headers.get("Link", ""))
+    return out
+
+
+async def api_get_json_async(session: "aiohttp.ClientSession", url: str) -> Any:
+    async with session.get(url, timeout=aiohttp.ClientTimeout(total=25)) as resp:
+        text = await resp.text()
+        if resp.status >= 400:
+            raise ApiError(resp.status, f"github api http {resp.status}: {text[:300]}")
+        return json.loads(text or "null"), resp.headers
+
+
+async def api_comments_async(
+    session: "aiohttp.ClientSession", repo: str, sha: str
+) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    qsha = urllib.parse.quote(sha, safe="")
+    url = f"https://api.github.com/repos/{repo}/commits/{qsha}/comments?per_page=100"
+    while url:
+        data, headers = await api_get_json_async(session, url)
+        if isinstance(data, list):
+            out.extend(x for x in data if isinstance(x, dict))
+        url = next_link(headers.get("Link", ""))
+    return out
+
+
 def repo_detect(repo: Optional[str]) -> str:
     if repo:
         return repo
-    return run_cmd(
-        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]
-    ).strip()
+    try:
+        remote = run_cmd(["git", "config", "--get", "remote.origin.url"]).strip()
+        m = re.search(r"github\.com[:/](.+?)(?:\.git)?$", remote)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return run_cmd(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]).strip()
 
 
 def resolve_sha(ref: str, no_resolve: bool) -> str:
@@ -48,7 +158,9 @@ def resolve_sha(ref: str, no_resolve: bool) -> str:
         return ref
 
 
-def gh_comments(repo: str, sha: str) -> List[Dict[str, Any]]:
+def gh_comments(repo: str, sha: str, token: Optional[str]) -> List[Dict[str, Any]]:
+    if token:
+        return api_comments(repo, sha, token)
     out = run_cmd(["gh", "api", f"repos/{repo}/commits/{sha}/comments", "--paginate"])
     data = json.loads(out)
     return data if isinstance(data, list) else []
@@ -170,11 +282,20 @@ def fetch_one(repo: str, commit: str, args: argparse.Namespace) -> Dict[str, Any
         "rows": [],
     }
     try:
-        sha = resolve_sha(commit, args.no_resolve)
-        if args.verbose or sha != commit:
+        token = getattr(args, "token", None)
+        sha = commit if (args.no_resolve or token) else resolve_sha(commit, False)
+        if args.verbose and sha != commit:
             r["sha"] = sha
 
-        comments = gh_comments(repo, sha)
+        try:
+            comments = gh_comments(repo, sha, token)
+        except ApiError as e:
+            if e.status != 404 or args.no_resolve:
+                raise
+            sha = resolve_sha(commit, False)
+            if args.verbose or sha != commit:
+                r["sha"] = sha
+            comments = gh_comments(repo, sha, token)
         if args.verbose:
             r["n_comments"] = len(comments)
 
@@ -212,6 +333,106 @@ def fetch_one(repo: str, commit: str, args: argparse.Namespace) -> Dict[str, Any
     except Exception as e:
         r.update({"status": "error", "kind": "fetch", "msg": str(e)})
     return r
+
+
+async def fetch_one_async(
+    repo: str,
+    commit: str,
+    args: argparse.Namespace,
+    session: "aiohttp.ClientSession",
+) -> Dict[str, Any]:
+    r: Dict[str, Any] = {
+        "type": "eval",
+        "status": "empty",
+        "commit": commit,
+        "rows": [],
+    }
+    try:
+        sha = commit if (args.no_resolve or getattr(args, "token", None)) else resolve_sha(commit, False)
+        if args.verbose and sha != commit:
+            r["sha"] = sha
+
+        try:
+            comments = await api_comments_async(session, repo, sha)
+        except ApiError as e:
+            if e.status != 404 or args.no_resolve:
+                raise
+            sha = resolve_sha(commit, False)
+            if args.verbose or sha != commit:
+                r["sha"] = sha
+            comments = await api_comments_async(session, repo, sha)
+        if args.verbose:
+            r["n_comments"] = len(comments)
+
+        for cmt in comments:
+            body = cmt.get("body") or ""
+            rows = find_overview_table(body)
+            if rows:
+                r["rows"].extend(norm_row(x) for x in rows)
+                if args.verbose:
+                    r.setdefault("comments", []).append(
+                        {
+                            "user": ((cmt.get("user") or {}).get("login")),
+                            "at": cmt.get("created_at"),
+                            "url": cmt.get("html_url"),
+                        }
+                    )
+
+            if args.full:
+                outs = extract_outputs(body, args.max_output_chars)
+                if outs:
+                    r.setdefault("outputs", []).extend(
+                        {
+                            "user": ((cmt.get("user") or {}).get("login")),
+                            "at": cmt.get("created_at"),
+                            "url": cmt.get("html_url"),
+                            "text": out,
+                        }
+                        for out in outs
+                    )
+
+        if r["rows"]:
+            r["status"] = "ok"
+        else:
+            r["reason"] = "no_table"
+    except Exception as e:
+        r.update({"status": "error", "kind": "fetch", "msg": str(e)})
+    return r
+
+
+async def fetch_many_async(
+    repo: str, commits: List[str], args: argparse.Namespace, jobs: int
+) -> List[Dict[str, Any]]:
+    if getattr(args, "gh_cli", False) or aiohttp is None:
+        loop = asyncio.get_running_loop()
+        sem = asyncio.Semaphore(max(1, jobs))
+
+        async def one(c: str) -> Dict[str, Any]:
+            async with sem:
+                return await loop.run_in_executor(None, fetch_one, repo, c, args)
+
+        return await asyncio.gather(*(one(c) for c in commits))
+
+    conn = aiohttp.TCPConnector(limit=max(1, jobs), ttl_dns_cache=300)
+    timeout = aiohttp.ClientTimeout(total=60)
+    async with aiohttp.ClientSession(
+        connector=conn, timeout=timeout, headers=api_headers(getattr(args, "token", None))
+    ) as session:
+        sem = asyncio.Semaphore(max(1, jobs))
+
+        async def one(c: str) -> Dict[str, Any]:
+            async with sem:
+                return await fetch_one_async(repo, c, args, session)
+
+        return await asyncio.gather(*(one(c) for c in commits))
+
+
+def fetch_many(
+    repo: str, commits: List[str], args: argparse.Namespace, jobs: int
+) -> List[Dict[str, Any]]:
+    if not commits:
+        return []
+    return asyncio.run(fetch_many_async(repo, commits, args, jobs))
 
 
 def read_commits(args: argparse.Namespace) -> List[str]:
@@ -277,6 +498,18 @@ def build_argparser() -> argparse.ArgumentParser:
         default="jsonl",
         help="default: jsonl",
     )
+    ap.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=8,
+        help="parallel GitHub comment fetches; default: 8",
+    )
+    ap.add_argument(
+        "--gh-cli",
+        action="store_true",
+        help="use gh api subprocess instead of direct GitHub API",
+    )
     return ap
 
 
@@ -302,7 +535,9 @@ def main() -> int:
         )
         return 2
 
-    results = [fetch_one(repo, c, args) for c in commits]
+    args.token = None if args.gh_cli else gh_token()
+    jobs = max(1, int(args.jobs or 1))
+    results = fetch_many(repo, commits, args, min(jobs, len(commits)))
 
     if args.format == "jsonl":
         for r in results:

@@ -103,7 +103,7 @@ python scripts/update_problems.py
 | 052 | [cumsum_exclusive](cumsum_exclusive.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/17e3af2) |
 | 053 | [cumsum_reverse](cumsum_reverse.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/e0d1b05) |
 | 054 | [binned_gather](binned_gather.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/37636ee) |
-| 055 | [binned_scatter](binned_scatter.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/1338ae0) |
+| 055 | [binned_scatter](binned_scatter.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/6ab6700b) |
 | 056 | [gather](gather.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/daab964) |
 | 057 | [rotary_pos_emb_fusion](rotary_pos_emb_fusion.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/fd5fd95) |
 | 058 | [Softmax](Softmax.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/1b939fa8a48a9dd4c7297bd52a458fa55d32c527) |
@@ -153,7 +153,7 @@ python scripts/update_problems.py
 | 102 | [Adaptive_Average_Pool_3D](Adaptive_Average_Pool_3D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/c90b272) |
 | 103 | [MSE_Loss](MSE_Loss.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/5b13366) |
 | 104 | [KL_Divergence_Loss](KL_Divergence_Loss.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/610a54d) |
-| 105 | [Embedding_lookup](Embedding_lookup.mlu) | [@ZJtoast](https://github.com/ZJtoast) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/15b7cd5) |
+| 105 | [Embedding_lookup](Embedding_lookup.mlu) | [@ZJtoast](https://github.com/ZJtoast) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/72c5be13) |
 | 106 | [Embedding_bag_mean](Embedding_bag_mean.mlu) | [@ZJtoast](https://github.com/ZJtoast) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/b207669) |
 | 107 | [Sinusoidal_positional_encoding](Sinusoidal_positional_encoding.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/a125bd7) |
 | 108 | [ALiBi_attention_bias](ALiBi_attention_bias.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/d6f7654) |
