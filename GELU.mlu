@@ -9,6 +9,7 @@ __mlu_entry__ void gelu_half_kernel(half *__restrict__ input) {
   __nram__ half buf[CHUNK_ELEMS];
   half *ptr = (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
   __memcpy(buf, ptr, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
+  __bang_active_gelu(buf, buf, CHUNK_ELEMS);
   __memcpy(ptr, buf, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
 }
 
