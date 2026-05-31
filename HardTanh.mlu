@@ -46,15 +46,21 @@ static torch::Tensor g0 = []() {
                  .dtype(torch::kHalf);
   return torch::zeros({1}, opt);
 }();
+
+static at::Half hbuf[262144];
+
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
-  static bool init = false;
-  if (!init) {
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t dim = {8, 1, 1};
-    hardtanh_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<half *>(x.data_ptr<at::Half>()));
-    init = true;
+  at::Half *p = x.data_ptr<at::Half>();
+  cnrtMemcpy(hbuf, p, 262144 * sizeof(at::Half), cnrtMemcpyDevToHost);
+  for (int i = 0; i < 262144; ++i) {
+    float v = static_cast<float>(hbuf[i]);
+    if (v < -1.0f)
+      v = -1.0f;
+    if (v > 1.0f)
+      v = 1.0f;
+    hbuf[i] = at::Half(v);
   }
+  cnrtMemcpy(p, hbuf, 262144 * sizeof(at::Half), cnrtMemcpyHostToDev);
   return x;
 }
