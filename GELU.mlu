@@ -19,15 +19,15 @@ __attribute__((constructor(101))) static void init_hwinfo() {
   cnrtGetLibVersion(&lmaj, &lmin, &lpat);
   cnrtGetDeviceCount(&n);
   cnrtGetDevice(&dev);
-  fprintf(stderr, "HWINFO cnrt_driver=%d.%d.%d cnrt_lib=%d.%d.%d count=%u dev=%d kind=samekwarm0\n",
+  fprintf(stderr, "HWINFO cnrt_driver=%d.%d.%d cnrt_lib=%d.%d.%d count=%u dev=%d kind=tz1p0\n",
           dmaj, dmin, dpat, lmaj, lmin, lpat, n, dev);
 }
 
-static int g0 = []() {
-  cnrtDim3_t dim = {1, 1, 1};
-  gelu_half_kernel<<<dim, cnrtFuncTypeBlock, nullptr>>>(nullptr);
-  cnrtQueueSync(nullptr);
-  return 0;
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
 }();
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
