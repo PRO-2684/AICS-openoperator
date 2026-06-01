@@ -20,6 +20,7 @@ __attribute__((constructor(101))) static void init_runtime() {
       int d = limit > 8 ? 8 : 0;
       impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
       cnrtSetDevice(d);
+      cnrtSetDeviceFlag(static_cast<uint32_t>(cnrtDeviceScheduleSpin));
       g_dev = d;
     }
   }
