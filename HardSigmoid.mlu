@@ -2,10 +2,6 @@
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
-#include <sched.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -48,48 +44,10 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 
-static void print_probe() {
-  int dev = -1;
-  unsigned int count = 0;
-  uint32_t flags = 0;
-  int drv0 = 0, drv1 = 0, drv2 = 0;
-  int lib0 = 0, lib1 = 0, lib2 = 0;
-  char host[128] = {0};
-  char pci[64] = {0};
-  cnrtDeviceProp_t prop;
-  memset(&prop, 0, sizeof(prop));
-  gethostname(host, sizeof(host) - 1);
-  cnrtGetDevice(&dev);
-  cnrtGetDeviceCount(&count);
-  cnrtGetDeviceFlag(&flags);
-  cnrtDriverGetVersion(&drv0, &drv1, &drv2);
-  cnrtGetLibVersion(&lib0, &lib1, &lib2);
-  if (dev >= 0) {
-    cnrtGetDeviceProperties(&prop, dev);
-    cnrtDeviceGetPCIBusId(pci, sizeof(pci), dev);
-  }
-  const char *worker = getenv("WORKER_ID");
-  const char *env_host = getenv("HOSTNAME");
-  printf("OJPROBE worker=%s host=%s envhost=%s pid=%d cpu=%d dev=%d gdev=%d "
-         "count=%u flags=%u drv=%d.%d.%d lib=%d.%d.%d pci=%s name=%s "
-         "bus=%d device=%d domain=%d cluster=%d mcore=%d nram=%d wram=%d "
-         "gmem=%llu avail=%d qprio=%d isa=%d\n",
-         worker ? worker : "", host, env_host ? env_host : "", (int)getpid(),
-         sched_getcpu(), dev, g_dev, count, flags, drv0, drv1, drv2, lib0, lib1,
-         lib2, pci, prop.name, prop.pciBusID, prop.pciDeviceID,
-         prop.pciDomainID, prop.clusterCount, prop.McorePerCluster,
-         prop.NramSizePerMcore, prop.WramSizePerMcore,
-         (unsigned long long)prop.totalGlobalMemSize,
-         prop.availableGlobalMemorySize, prop.queuePrioritiesSupported,
-         prop.ISAVersion);
-  fflush(stdout);
-}
-
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
   static bool init = false;
   if (!init) {
-    print_probe();
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
     cnrtDim3_t dim = {32, 1, 1};
     hardsigmoid_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
