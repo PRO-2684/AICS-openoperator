@@ -14,6 +14,8 @@ import requests
 
 BASE = "http://43.143.241.66:13000/api"
 SECRET_FILE = Path(__file__).with_name("webhook_secrets.json")
+SESSION = requests.Session()
+SESSION.trust_env = False
 
 LAT_CONST = {
     "026_ELU": 0.09486 * 304.996191,
@@ -48,7 +50,7 @@ def latency(name: str, score: Any) -> float | None:
 
 
 def post_json(path: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
-    r = requests.post(f"{BASE}/{path}", json=payload, timeout=timeout)
+    r = SESSION.post(f"{BASE}/{path}", json=payload, timeout=timeout)
     try:
         data = r.json()
     except Exception:
@@ -59,7 +61,7 @@ def post_json(path: str, payload: dict[str, Any], timeout: float) -> dict[str, A
 
 
 def snapshot(timeout: float) -> dict[str, Any]:
-    r = requests.get(f"{BASE}/snapshot", timeout=timeout)
+    r = SESSION.get(f"{BASE}/snapshot", timeout=timeout)
     r.raise_for_status()
     return r.json()
 

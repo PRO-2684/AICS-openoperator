@@ -102,6 +102,51 @@ Likely contributors, ordered by evidence strength:
 6. CPU affinity and host NUMA placement, small and inconsistent.
 7. Device kernel arithmetic/body for `~10us` pointwise kernels.
 
+## Host Runtime Breakdown Probe
+
+The 2026-06-01 host probe `b01ae226` kept correctness invalid on purpose but
+returned the input tensor, so the worker still emitted a full timing row while
+printing a host segment trace from inside `bang_func`.
+
+Across 10 raw runs extracted from the OJ comments, the printed segment medians
+were:
+
+| segment | median us | min us | max us |
+| --- | ---: | ---: | ---: |
+| `torch_mlu::getCurMLUStream()` | `0.390` | `0.306` | `0.613` |
+| `cnrtQueueSync(current_queue)` on an empty queue | `0.946` | `0.813` | `1.352` |
+
+Observed affinity/context labels in the same sample:
+
+- worker ids spanned `3,4,5,6,7,10,18,22,24`
+- current CPU ids spanned `2,19,21,27,35,44,52,71,91`
+- affinity counts were only `56` or `112`, matching the known worker-class split
+- device id printed as `0` in all sampled runs
+
+Interpretation:
+
+- `getCurMLUStream` plus an empty `cnrtQueueSync` explain only about
+  `1-1.5us` of host work inside the operator body.
+- Therefore the `35-40us` no-op floor seen in `e84c999d` / `2346be54` is not
+  dominated by those CNRT calls.
+- The probe's own `fprintf`/logging and extra sync step lift the raw
+  `bangc_us` rows into the `~51-63us` band, so its table rows should not be
+  used as the base floor; use the segment numbers above instead.
+- The remaining gap is mostly upstream: Python entry, C++/PyBind dispatch,
+  `ModelNew.forward` wrapper work, and the outer `torch.mlu.synchronize()`
+  calls that bracket the timer in `bangc_torch_tester.py`.
+- The measured CPU affinity counts change with worker class, but the current CPU
+  ids do not map cleanly to faster rows. So CPU affinity is a distribution
+  shaper, not a single-step gate.
+
+Practical use:
+
+- Keep using `torch.mlu.synchronize`-bracketed timings for leaderboard work.
+- Use host-segment probes only to decide where micro-optimizations are futile.
+- For 026-029, the only plausible leverage left is to change the warm launch
+  distribution or the worker/queue state, not to shave another microsecond off
+  `getCurMLUStream` or empty `cnrtQueueSync`.
+
 The `085_Linear` stdout probe sharpened the worker classes:
 
 ```text

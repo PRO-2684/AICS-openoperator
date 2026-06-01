@@ -9,10 +9,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-import requests
-
 import redis_q
-from oj_api import LAT_CONST, secret_for
+from oj_api import LAT_CONST, SESSION, secret_for
 
 
 BASE = "http://43.143.241.66:13000/api"
@@ -92,7 +90,7 @@ def annotate_worker(item: dict[str, Any]) -> dict[str, Any]:
 
 def post_rerun(team: str, sha: str, timeout: float) -> dict[str, Any]:
     payload = {"secret": secret_for(team), "commit_sha": sha}
-    r = requests.post(f"{BASE}/rerun", json=payload, timeout=timeout)
+    r = SESSION.post(f"{BASE}/rerun", json=payload, timeout=timeout)
     try:
         data = r.json()
     except Exception:

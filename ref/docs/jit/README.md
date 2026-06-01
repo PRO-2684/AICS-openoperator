@@ -17,6 +17,10 @@ Primary files:
   OJ hardware topology.
 - `worker_hardware_mapping.md`: `WORKER_ID` to visible CNRT hardware class
   mapping, evidence levels, and safe use rules for `wc` labels.
+- `code_profile_028.md`: additive/subtractive 028 probes separating no-op,
+  tiny torch-mlu warmup, empty custom-kernel launch, and warmed empty launch.
+- `webhook_tail_batch.py`: low-output tail sampler that uses repeated webhook
+  seeds plus Redis leaderboard rows instead of waiting on GitHub comments.
 
 Evidence source of truth:
 
@@ -31,3 +35,10 @@ For tiny pointwise kernels whose CNRT notifier hardware duration is only about
 `7-13 us`, algorithm-body micro-optimization is usually below OJ wall-time
 jitter. Require same-window, at least 8-row distribution evidence before using
 sub-10us arithmetic changes as an optimization direction.
+
+Tooling note:
+
+- Local HTTP/SOCKS proxy environment variables can break high-frequency
+  `requests` calls with `Missing dependencies for SOCKS support`. The active
+  OJ helper scripts use `requests.Session(trust_env=False)` for webhook/rerun
+  requests so sampling does not depend on shell proxy state.

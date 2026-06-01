@@ -22,6 +22,8 @@ DEFAULT_REPO = "PRO-2684/AICS-openoperator"
 DEFAULT_BRANCH = "main"
 SCRIPT_DIR = Path(__file__).resolve().parent
 SECRET_FILE = SCRIPT_DIR / "webhook_secrets.json"
+SESSION = requests.Session()
+SESSION.trust_env = False
 
 
 def run(cmd: List[str], *, check: bool = True, echo: bool = False) -> str:
@@ -272,7 +274,7 @@ def send_one(sha: str, secret: str, args: argparse.Namespace) -> bool:
         print(f"dry c={short(meta['sha'])} repo={payload['repository']['full_name']} ref={payload['ref']}")
         return True
 
-    r = requests.post(args.url, data=body, headers=h, timeout=args.timeout)
+    r = SESSION.post(args.url, data=body, headers=h, timeout=args.timeout)
     text = r.text.strip()
     ok = 200 <= r.status_code < 300
     mark = "ok" if ok else "err"
