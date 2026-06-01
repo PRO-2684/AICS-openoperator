@@ -3,6 +3,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
+#include <cstdio>
 #include <unistd.h>
 
 #define CHUNK_ELEMS 32768
@@ -18,8 +19,17 @@ __attribute__((constructor(101))) static void init_runtime() {
     if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
       int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
       int d = limit > 8 ? 8 : 0;
+      uint32_t f0 = 0xffffffffu;
+      uint32_t f1 = 0xffffffffu;
       impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
+      cnrtRet_t sd = cnrtSetDevice(d);
+      cnrtRet_t g0r = cnrtGetDeviceFlag(&f0);
+      cnrtRet_t sr =
+          cnrtSetDeviceFlag(static_cast<uint32_t>(cnrtDeviceScheduleSpin));
+      cnrtRet_t g1r = cnrtGetDeviceFlag(&f1);
+      std::printf("CNRT_FLAG_PROBE d=%d sd=%d g0=%d f0=%u set=%d g1=%d f1=%u\n",
+                  d, static_cast<int>(sd), static_cast<int>(g0r), f0,
+                  static_cast<int>(sr), static_cast<int>(g1r), f1);
       g_dev = d;
     }
   }
