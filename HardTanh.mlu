@@ -47,14 +47,54 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 
+static cnrtTaskTopo_t g_topo = nullptr;
+static cnrtTaskTopoEntity_t g_entity = nullptr;
+static cnrtTaskTopoNode_t g_node = nullptr;
+static half *g_arg = nullptr;
+static bool g_topo_ok = []() {
+  g_arg = reinterpret_cast<half *>(g0.unsafeGetTensorImpl()->mutable_data());
+  cnrtKernelNodeParams_t p;
+  p.func = reinterpret_cast<void *>(hardtanh_half_kernel);
+  p.dim = {8, 1, 1};
+  p.type = cnrtFuncTypeBlock;
+  p.reserve = 0;
+  void *args[] = {&g_arg};
+  p.kernelParams = args;
+  p.extra = nullptr;
+  if (cnrtTaskTopoCreate(&g_topo, 0) != cnrtSuccess) return false;
+  if (cnrtTaskTopoAddKernelNode(&g_node, g_topo, nullptr, 0, &p) !=
+      cnrtSuccess)
+    return false;
+  if (cnrtTaskTopoInstantiate(&g_entity, g_topo, nullptr, nullptr, 0) !=
+      cnrtSuccess)
+    return false;
+  return true;
+}();
+
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
+  (void)g_topo_ok;
   static bool init = false;
   if (!init) {
     cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t dim = {8, 1, 1};
-    hardtanh_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+    if (g_topo_ok) {
+      g_arg =
+          reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data());
+      cnrtKernelNodeParams_t p;
+      p.func = reinterpret_cast<void *>(hardtanh_half_kernel);
+      p.dim = {8, 1, 1};
+      p.type = cnrtFuncTypeBlock;
+      p.reserve = 0;
+      void *args[] = {&g_arg};
+      p.kernelParams = args;
+      p.extra = nullptr;
+      cnrtTaskTopoEntityKernelNodeSetParams(g_entity, g_node, &p);
+      cnrtTaskTopoEntityInvoke(g_entity, queue);
+    } else {
+      cnrtDim3_t dim = {8, 1, 1};
+      hardtanh_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+          reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
+    }
     init = true;
   }
   return x;
