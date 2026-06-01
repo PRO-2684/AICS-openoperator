@@ -15,6 +15,8 @@ Primary files:
   kernels have hundreds of microseconds of wall time.
 - `linear_stdout_probe.md`: op 085 stdout probe plan and hashes for collecting
   OJ hardware topology.
+- `worker_hardware_mapping.md`: `WORKER_ID` to visible CNRT hardware class
+  mapping, evidence levels, and safe use rules for `wc` labels.
 
 Evidence source of truth:
 

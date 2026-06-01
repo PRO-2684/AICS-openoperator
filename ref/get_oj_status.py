@@ -33,6 +33,35 @@ LAT_CONST = {
     "029_HardTanh": 0.107052 * 268.123113,
 }
 
+WORKER_CLASS = {
+    "16": "10x56",
+    "17": "10x56",
+    "18": "10x56",
+    "19": "10x56",
+    "20": "10x56",
+    "21": "10x56",
+    "22": "10x56",
+    "23": "10x56",
+    "24": "10x56",
+    "25": "10x56",
+    "8": "8x56",
+    "9": "8x56",
+    "10": "8x56",
+    "11": "8x56",
+    "12": "8x56",
+    "13": "8x56",
+    "14": "8x56",
+    "15": "8x56",
+    "0": "8x112",
+    "1": "8x112",
+    "2": "8x112",
+    "3": "8x112",
+    "4": "8x112",
+    "5": "8x112",
+    "6": "8x112",
+    "7": "8x112",
+}
+
 
 def jdumps(x: Any) -> str:
     return json.dumps(x, ensure_ascii=False, separators=(",", ":"))
@@ -88,6 +117,12 @@ def score_latency(name: str, score: Any) -> Optional[float]:
     return c / s
 
 
+def worker_class(w: Any) -> Optional[str]:
+    if w in (None, ""):
+        return None
+    return WORKER_CLASS.get(str(w), "unknown")
+
+
 def pick_fields(x: Dict[str, Any]) -> Dict[str, Any]:
     # Keep common useful fields but avoid dumping huge payloads by default.
     out: Dict[str, Any] = {}
@@ -108,6 +143,9 @@ def pick_fields(x: Dict[str, Any]) -> Dict[str, Any]:
                 v = x.get(k)
                 out[dst] = short_sha(v) if dst in ("c", "task") else v
                 break
+    cls = worker_class(out.get("w"))
+    if cls:
+        out["wc"] = cls
     t = x.get("started_at") or x.get("timestamp") or x.get("created_at")
     a = age_s(t)
     if a is not None:

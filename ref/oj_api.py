@@ -107,7 +107,9 @@ def wait_idle(args: argparse.Namespace) -> None:
 
 
 def cmd_rerun(args: argparse.Namespace) -> int:
-    teams = [x.strip() for x in str(args.team).replace("team_", "").split(",") if x.strip()]
+    teams = [
+        x.strip() for x in str(args.team).replace("team_", "").split(",") if x.strip()
+    ]
     commits = [x.strip() for x in args.commits if x.strip()]
     for i in range(args.count):
         for team in teams:
@@ -133,7 +135,9 @@ def cmd_rerun(args: argparse.Namespace) -> int:
                     "team": f"team_{team}",
                     "commit": sha[:8],
                     "i": i + 1,
-                    "status": data.get("status") or data.get("message") or data.get("ok"),
+                    "status": data.get("status")
+                    or data.get("message")
+                    or data.get("ok"),
                 }
                 if not ok:
                     obj["error"] = str(last_err)
@@ -194,7 +198,9 @@ def cmd_history(args: argparse.Namespace) -> int:
 
     if args.summary and args.format == "text":
         print("SUMMARY")
-        for (sha, name), xs in sorted(grouped.items(), key=lambda kv: (kv[0][1], min(kv[1]))):
+        for (sha, name), xs in sorted(
+            grouped.items(), key=lambda kv: (kv[0][1], min(kv[1]))
+        ):
             print(
                 f"{sha}\t{name}\tn={len(xs)}\tmin={min(xs):.3f}us\t"
                 f"med={statistics.median(xs):.3f}us\tmax={max(xs):.3f}us"
@@ -214,7 +220,11 @@ def main() -> int:
     r.add_argument("--timeout", type=float, default=10.0)
     r.add_argument("--retry", type=int, default=3)
     r.add_argument("--retry-sleep", type=float, default=1.0)
-    r.add_argument("--max-processing", type=int, help="wait before enqueue until processing is at most this value")
+    r.add_argument(
+        "--max-processing",
+        type=int,
+        help="wait before enqueue until processing is at most this value",
+    )
     r.add_argument("--max-task-queue", type=int, default=0)
     r.add_argument("--idle-poll", type=float, default=2.0)
     r.add_argument("--idle-timeout", type=float, default=300.0)

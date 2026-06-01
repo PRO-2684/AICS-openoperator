@@ -16,6 +16,16 @@
 
 需要注意：`.40` 的截图里有一次 `lscpu` 显示 **112 CPUs / 2 threads per core**，但之前的 `lscpu -e` 与另一些环境里看到的是 **56 CPUs / 1 thread per core**。这说明 `.40` 可能存在不同容器/namespace/cgroup 暴露 CPU 不一致，或者不同测评容器配置不一致。实际对算子测评而言，应以**当前容器内可见 CPU 集合**为准。
 
+2026-06-01 的 OJ stdout 探针补充确认：BangC 扩展进程内可以直接读取 `WORKER_ID`，并且它与 Redis `bangc:processing` 中的 worker id 一致。探针提交 `b5900e7d/fd0ca525/c4ed5c37/a56aaf13`、`a8a504a8/2f2afba0/3d98b4f6/39b3524f/1c3f1d47/8dd78cd8`、batch2 `9e20b42c..4b609ce1` 以及 batch3 `cc01c269..c746bd6a` 显示，实际评测容器至少分成三类；分层索引见 `ref/docs/jit/worker_hardware_mapping.md`。
+
+| 容器可见形态 | 可见 CPU affinity | 可见 MLU BDF | 样本 worker | 样本 028 均值范围 |
+| --- | ---: | --- | --- | ---: |
+| 10 卡 | 56 CPU | `4f,50,53,57,9c,9d,a0,a1,a4,b1` | `16,17,18,19,20,21,22,23,24,25` | `343.994-416.463 us` |
+| 8 卡 A | 56 CPU | `4f,50,53,57,9c,9d,a0,a4` | `8,9,10,11,12,13,14,15` | `360.102-411.674 us` |
+| 8 卡 B | 112 CPU | `4f,50,53,57,9c,9d,a0,a4` | `0,1,2,3,4,5,6,7` | `368.751-395.860 us` |
+
+所有这些 stdout 样本中的设备属性一致为 MLU370、8 cluster、4 mcore/cluster、NRAM/core `786432` bytes、WRAM/core `1048576` bytes、CNRT lib `6.14.1`；driver 在 8 卡 B 类为 `5.10.22`，其他两类为 `6.2.10`。单次探针样本仍处在冷窗口和 stdout 开销下，不能证明某个 worker/机器稳定更快；目前只能作为被动分层信号，不能作为硬性 gating 结论。
+
 ---
 
 ## 2. CPU / NUMA 拓扑
@@ -453,6 +463,9 @@ Bang intrinsic 微调上。更有效的方向是：
 1. 保留有效 static warmup，避免 2ms+ cold start。
 2. 避免多 kernel launch，能一核完成就一核完成。
 3. 探索合法的 metadata/view 路径或无需 custom kernel 的语义特例。
+4. 用 active-age queue gate 和低/中阈值 boost 做概率尾部采样，而不是按
+   worker id 硬路由；`f3d2e5be` 的 `026,027,028,029` joint config
+   确认多题可进入同一个 OJ task，但没有产生稳定的后续题预热收益。
 4. 对已知 launch-bound 的正确实现做批量低尾采样。
 5. 对真正大 kernel/大 IO 题，再回到 tiling、访存流水、NRAM/SRAM 优化。
 ```

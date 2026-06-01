@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import time
 import uuid
@@ -18,6 +19,35 @@ BASE = "http://43.143.241.66:13000/api"
 LEADERBOARD = "bangc:leaderboard_queue"
 PROCESSING = "bangc:processing"
 TASK_Q = "bangc:task_queue"
+
+WORKER_CLASS = {
+    "16": "10x56",
+    "17": "10x56",
+    "18": "10x56",
+    "19": "10x56",
+    "20": "10x56",
+    "21": "10x56",
+    "22": "10x56",
+    "23": "10x56",
+    "24": "10x56",
+    "25": "10x56",
+    "8": "8x56",
+    "9": "8x56",
+    "10": "8x56",
+    "11": "8x56",
+    "12": "8x56",
+    "13": "8x56",
+    "14": "8x56",
+    "15": "8x56",
+    "0": "8x112",
+    "1": "8x112",
+    "2": "8x112",
+    "3": "8x112",
+    "4": "8x112",
+    "5": "8x112",
+    "6": "8x112",
+    "7": "8x112",
+}
 
 
 def jdumps(x: Any) -> str:
@@ -47,6 +77,19 @@ def score_us(p: str, score: Any) -> float | None:
     return LAT_CONST[name] / s
 
 
+def worker_class(w: Any) -> str | None:
+    if w is None:
+        return None
+    return WORKER_CLASS.get(str(w), "unknown")
+
+
+def annotate_worker(item: dict[str, Any]) -> dict[str, Any]:
+    cls = worker_class(item.get("w"))
+    if cls:
+        item["wc"] = cls
+    return item
+
+
 def post_rerun(team: str, sha: str, timeout: float) -> dict[str, Any]:
     payload = {"secret": secret_for(team), "commit_sha": sha}
     r = requests.post(f"{BASE}/rerun", json=payload, timeout=timeout)
@@ -59,26 +102,132 @@ def post_rerun(team: str, sha: str, timeout: float) -> dict[str, Any]:
     return data
 
 
-def counts(r) -> tuple[int, int]:
+def _active_processing_count(r, max_age: float | None) -> int:
+    if max_age is None:
+        return int(r.hlen(PROCESSING))
+    now = time.time()
+    n = 0
+    for raw in r.hgetall(PROCESSING).values():
+        try:
+            obj = json.loads(raw)
+            started = obj.get("started_at") or obj.get("timestamp")
+            if not started:
+                n += 1
+                continue
+            ts = datetime.fromisoformat(str(started).replace("Z", "+00:00")).timestamp()
+            if now - ts <= max_age:
+                n += 1
+        except Exception:
+            n += 1
+    return n
+
+
+def _active_workers(r, max_age: float | None, limit: int) -> list[dict[str, Any]]:
+    rows = []
+    now = time.time()
+    for raw in r.hgetall(PROCESSING).values():
+        try:
+            obj = json.loads(raw)
+        except Exception:
+            continue
+        started = obj.get("started_at") or obj.get("timestamp")
+        if max_age is not None and started:
+            try:
+                ts = datetime.fromisoformat(str(started).replace("Z", "+00:00")).timestamp()
+            except Exception:
+                ts = None
+            if ts is not None and now - ts > max_age:
+                continue
+        wid = str(obj.get("worker_id") or obj.get("w") or "")
+        if not wid:
+            continue
+        age = obj.get("age")
+        if age is None and started:
+            try:
+                age = int(now - datetime.fromisoformat(str(started).replace("Z", "+00:00")).timestamp())
+            except Exception:
+                age = None
+        rows.append(annotate_worker({"w": wid, "age": age}))
+    rows.sort(key=lambda x: (x["age"] is None, x["age"] if x["age"] is not None else 10**9, x["w"]))
+    out = []
+    seen = set()
+    for item in rows:
+        key = item["w"]
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def counts(r, max_age: float | None = None) -> tuple[int, int]:
     pipe = r.pipeline()
-    pipe.hlen(PROCESSING)
     pipe.llen(TASK_Q)
-    nproc, ntask = pipe.execute()
-    return int(nproc), int(ntask)
+    (ntask,) = pipe.execute()
+    return _active_processing_count(r, max_age), int(ntask)
 
 
-def wait_gate(r, max_processing: int, max_task_queue: int, poll: float, timeout: float) -> bool:
+def update_task_workers(r, task_workers: dict[str, dict[str, Any]], max_age: float | None) -> None:
+    now = time.time()
+    for task_id, raw in r.hgetall(PROCESSING).items():
+        try:
+            obj = json.loads(raw)
+        except Exception:
+            continue
+        started = obj.get("started_at") or obj.get("timestamp")
+        age = None
+        if started:
+            try:
+                age = int(now - datetime.fromisoformat(str(started).replace("Z", "+00:00")).timestamp())
+            except Exception:
+                age = None
+        if max_age is not None and age is not None and age > max_age:
+            continue
+        wid = obj.get("worker_id") or obj.get("w")
+        if wid is None:
+            continue
+        task_workers[str(task_id)[:8]] = annotate_worker({
+            "w": str(wid),
+            "age": age,
+            "team": short_team(obj.get("team_name") or obj.get("team_id") or ""),
+            "c": str(obj.get("commit_sha") or "")[:8],
+        })
+
+
+def wait_gate(
+    r,
+    max_processing: int,
+    max_task_queue: int,
+    poll: float,
+    timeout: float,
+    processing_max_age: float | None,
+    require_workers: set[str] | None,
+) -> bool:
     end = time.time() + timeout
     while True:
-        nproc, ntask = counts(r)
-        if nproc <= max_processing and ntask <= max_task_queue:
+        nproc, ntask = counts(r, processing_max_age)
+        workers = _active_workers(r, processing_max_age, 64)
+        worker_ids = {str(x.get("w")) for x in workers if x.get("w")}
+        if (
+            nproc <= max_processing
+            and ntask <= max_task_queue
+            and (not require_workers or worker_ids.intersection(require_workers))
+        ):
             return True
         if time.time() >= end:
             return False
         time.sleep(poll)
 
 
-def read_new_lb(r, seen: set[str], teams: set[str], commit: str) -> list[dict[str, Any]]:
+def read_new_lb(
+    r,
+    seen: set[str],
+    teams: set[str],
+    commit: str,
+    task_workers: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     rows = []
     for raw in r.lrange(LEADERBOARD, 0, 199):
         try:
@@ -95,6 +244,8 @@ def read_new_lb(r, seen: set[str], teams: set[str], commit: str) -> list[dict[st
         if key in seen:
             continue
         seen.add(key)
+        task_short = str(obj.get("task_id") or "")[:8]
+        worker = (task_workers or {}).get(task_short)
         for name, info in (obj.get("scores") or {}).items():
             if not isinstance(info, dict) or not info.get("passed"):
                 continue
@@ -106,10 +257,19 @@ def read_new_lb(r, seen: set[str], teams: set[str], commit: str) -> list[dict[st
                 {
                     "type": "row",
                     "team": team,
-                    "task": str(obj.get("task_id") or "")[:8],
+                    "task": task_short,
                     "c": sha[:8],
                     "p": p,
                     "us": round(us, 3),
+                    **(
+                        {
+                            "w": worker.get("w"),
+                            "wc": worker.get("wc"),
+                            "w_age": worker.get("age"),
+                        }
+                        if worker
+                        else {}
+                    ),
                 }
             )
     return rows
@@ -139,6 +299,12 @@ def main() -> int:
     ap.add_argument("--max-task-queue", type=int, default=0)
     ap.add_argument("--idle-poll", type=float, default=1.0)
     ap.add_argument("--idle-timeout", type=float, default=180.0)
+    ap.add_argument(
+        "--processing-max-age",
+        type=float,
+        default=None,
+        help="count only processing tasks younger than this many seconds; ignores stale worker records",
+    )
     ap.add_argument("--between", type=float, default=0.0, help="sleep after each enqueue")
     ap.add_argument("--collect", type=float, default=45.0, help="seconds to collect after enqueue")
     ap.add_argument("--target", action="append", default=[], help="op:us, e.g. 028:272.4")
@@ -147,6 +313,24 @@ def main() -> int:
         action="append",
         default=[],
         help="op:us:count; when a live row is below us, immediately enqueue count extra reruns for that team",
+    )
+    ap.add_argument("--boost-between", type=float, default=0.0, help="sleep between boost rerun API calls")
+    ap.add_argument(
+        "--emit-workers",
+        action="store_true",
+        help="include active worker snapshot on gate/boost events",
+    )
+    ap.add_argument(
+        "--worker-snapshot-limit",
+        type=int,
+        default=6,
+        help="max workers to emit when --emit-workers is set",
+    )
+    ap.add_argument(
+        "--require-worker",
+        action="append",
+        default=[],
+        help="only pass gate when an active worker id matches one of these ids; repeatable",
     )
     ap.add_argument("--timeout", type=float, default=10.0)
     ap.add_argument("--out", help="optional jsonl log path")
@@ -177,17 +361,22 @@ def main() -> int:
             out_f.flush()
 
     best: dict[str, float] = {}
+    require_workers = {str(x).strip() for x in (args.require_worker or []) if str(x).strip()}
+    task_workers: dict[str, dict[str, Any]] = {}
     try:
         for i in range(1, args.count + 1):
             for team in teams:
+                update_task_workers(r, task_workers, args.processing_max_age)
                 ok_gate = wait_gate(
                     r,
                     args.max_processing,
                     args.max_task_queue,
                     args.idle_poll,
                     args.idle_timeout,
+                    args.processing_max_age,
+                    require_workers,
                 )
-                nproc, ntask = counts(r)
+                nproc, ntask = counts(r, args.processing_max_age)
                 emit(
                     {
                         "type": "gate",
@@ -196,6 +385,11 @@ def main() -> int:
                         "team": team,
                         "processing": nproc,
                         "task_queue": ntask,
+                        **(
+                            {"workers": _active_workers(r, args.processing_max_age, args.worker_snapshot_limit)}
+                            if args.emit_workers
+                            else {}
+                        ),
                     }
                 )
                 try:
@@ -218,7 +412,8 @@ def main() -> int:
                 end = time.time() + args.collect
                 while time.time() < end:
                     hit = False
-                    for row in read_new_lb(r, seen, set(teams), args.commit[:8]):
+                    update_task_workers(r, task_workers, args.processing_max_age)
+                    for row in read_new_lb(r, seen, set(teams), args.commit[:8], task_workers):
                         p = row["p"]
                         us = float(row["us"])
                         if p not in best or us < best[p]:
@@ -239,9 +434,20 @@ def main() -> int:
                                         "threshold": threshold,
                                         "team": row.get("team"),
                                         "count": extra,
+                                        **(
+                                            {
+                                                "workers": _active_workers(
+                                                    r, args.processing_max_age, args.worker_snapshot_limit
+                                                )
+                                            }
+                                            if args.emit_workers
+                                            else {}
+                                        ),
                                     }
                                 )
                                 for bi in range(extra):
+                                    if bi and args.boost_between:
+                                        time.sleep(args.boost_between)
                                     try:
                                         data = post_rerun(
                                             str(row.get("team", team)).replace("team_", ""),
