@@ -2,21 +2,18 @@
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
+#include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define CHUNK_ELEMS 8192
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 
-__mlu_entry__ void hardsigmoid_half_kernel(half *__restrict__ input) {
-  __nram__ half a[CHUNK_ELEMS];
-  half *p =
-      (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
-  __memcpy(a, p, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  __bang_add_scalar(a, a, (half)3.0f, CHUNK_ELEMS);
-  __bang_maxeq_scalar(a, a, (half)0.0f, CHUNK_ELEMS);
-  __bang_mineq_scalar(a, a, (half)6.0f, CHUNK_ELEMS);
-  __bang_mul_scalar(a, a, (half)(1.0f / 6.0f), CHUNK_ELEMS);
-  __memcpy(p, a, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
+static inline long long now_ns() {
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
 }
 
 static int g_dev = 0;
@@ -46,13 +43,36 @@ static torch::Tensor g0 = []() {
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
-  static bool init = false;
-  if (!init) {
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t dim = {32, 1, 1};
-    hardsigmoid_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
-    init = true;
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  int aff = -1;
+  if (sched_getaffinity(0, sizeof(set), &set) == 0) {
+    aff = 0;
+    for (int i = 0; i < CPU_SETSIZE; ++i) {
+      if (CPU_ISSET(i, &set)) {
+        ++aff;
+      }
+    }
   }
+  int cpu = sched_getcpu();
+  int dev = -1;
+  cnrtGetDevice(&dev);
+  auto t0 = now_ns();
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  auto t1 = now_ns();
+  cnrtRet_t err = cnrtQueueSync(q);
+  auto t2 = now_ns();
+  const char *wid = std::getenv("WORKER_ID");
+  std::fprintf(
+      stdout,
+      "@@HOST@@ worker=%s cpu=%d aff=%d dev=%d getCur=%.3f sync=%.3f err=%d\n",
+      wid ? wid : "",
+      cpu,
+      aff,
+      dev,
+      (t1 - t0) / 1000.0,
+      (t2 - t1) / 1000.0,
+      static_cast<int>(err));
+  std::fflush(stdout);
   return x;
 }
