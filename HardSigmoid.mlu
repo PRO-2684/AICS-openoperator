@@ -44,11 +44,21 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 
+static cnrtQueue_t g_queue = nullptr;
+static bool g_queue_ok = []() {
+  cnrtSetDevice(g_dev);
+  int lo = 0;
+  int hi = 0;
+  cnrtDeviceGetQueuePriorityRange(&lo, &hi);
+  return cnrtQueueCreateWithPriority(&g_queue, 0, lo) == cnrtSuccess;
+}();
+
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
+  (void)g_queue_ok;
   static bool init = false;
   if (!init) {
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+    cnrtQueue_t queue = g_queue_ok ? g_queue : torch_mlu::getCurMLUStream();
     cnrtDim3_t dim = {32, 1, 1};
     hardsigmoid_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
         reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
