@@ -1,0 +1,166 @@
+#include <bang.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include "../utils.h"
+
+// =============================================================================
+// 配置宏定义
+// =============================================================================
+#define M 128    // 左矩阵行数
+#define N 128    // 右矩阵列数
+#define K 128    // 公共维度
+#define FIX_POSITION 0  // 用于 int16_t 输入的固定点位置
+
+// =============================================================================
+// Kernel: MatmulMinimalKernel
+// 功能：矩阵乘法 C = A * B
+// 数据类型：int16_t 输入，float 输出
+// 布局：行主序 [M, N] = [M, K] * [K, N]
+// 注意：__bang_matmul 要求 src1（右矩阵）必须是列主序布局
+// =============================================================================
+__mlu_entry__ void MatmulMinimalKernel(float* dst,
+                                        const int16_t* src0,
+                                        const int16_t* src1,
+                                        int m, int n, int k) {
+  // NRAM 缓冲区
+  __nram__ int16_t nram_src0[M * K];    // 左矩阵 (行主序)
+  __nram__ int16_t nram_src1[K * N];    // 右矩阵 (临时缓冲区)
+  __nram__ int16_t nram_src1_col[K * N]; // 右矩阵 (列主序)
+  __nram__ float nram_dst[M * N];       // 结果矩阵
+
+  // WRAM 缓冲区：用于存储右矩阵（列主序）
+  __wram__ int16_t wram_src1[K * N];
+
+  // 加载左矩阵到 NRAM（行主序）
+  __memcpy(nram_src0, src0, m * k * sizeof(int16_t), GDRAM2NRAM);
+
+  // 加载右矩阵到 NRAM（行主序）
+  __memcpy(nram_src1, src1, k * n * sizeof(int16_t), GDRAM2NRAM);
+
+  // 将右矩阵从行主序转换为列主序
+  // 行主序: src1[k][n] => src1[i * n + j]
+  // 列主序: src1_col[n][k] => src1_col[j * k + i]
+  for (int i = 0; i < k; ++i) {
+    for (int j = 0; j < n; ++j) {
+      nram_src1_col[j * k + i] = nram_src1[i * n + j];
+    }
+  }
+
+  // 将列主序右矩阵复制到 WRAM
+  __memcpy(wram_src1, nram_src1_col, k * n * sizeof(int16_t), NRAM2WRAM);
+
+  // 使用 __bang_matmul 计算矩阵乘法
+  // dst[M][N] = src0[M][K] * src1[K][N]
+  // src0: 行主序, src1: 列主序
+  __bang_matmul(nram_dst, nram_src0, wram_src1, m, k, n, FIX_POSITION);
+
+  // 将结果写回 GDRAM
+  __memcpy(dst, nram_dst, m * n * sizeof(float), NRAM2GDRAM);
+}
+
+// =============================================================================
+// CPU 参考实现：用于验证 MLU 计算结果
+// =============================================================================
+static inline void cpu_matmul(const int16_t* src0,
+                               const int16_t* src1,
+                               float* dst,
+                               int m, int n, int k) {
+  // 矩阵乘法：C[i][j] = sum(A[i][l] * B[l][j]) for l in [0, k)
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < n; ++j) {
+      float sum = 0.0f;
+      for (int l = 0; l < k; ++l) {
+        sum += (float)src0[i * k + l] * (float)src1[l * n + j];
+      }
+      dst[i * n + j] = sum;
+    }
+  }
+}
+
+// =============================================================================
+// Host 主函数
+// 执行流程：
+// 1. 设备初始化和队列创建
+// 2. 主机和设备内存分配
+// 3. 数据准备（生成随机输入）
+// 4. 主机到设备（H2D）数据拷贝
+// 5. Kernel 启动配置和执行
+// 6. 设备到主机（D2H）数据拷贝
+// 7. 性能测量（使用 Notifier）
+// 8. 结果验证（与 CPU 参考结果对比）
+// 9. 资源清理
+// =============================================================================
+int main(void) {
+  // 设备初始化和队列创建
+  cnrtQueue_t queue;
+  CNRT_CHECK(cnrtSetDevice(0));
+  CNRT_CHECK(cnrtQueueCreate(&queue));
+
+  // 问题规模
+  const int m = M, n = N, k = K;
+  const int src0_size = m * k;
+  const int src1_size = k * n;
+  const int dst_size = m * n;
+
+  // 主机端内存分配
+  int16_t* host_src0 = (int16_t*)malloc(src0_size * sizeof(int16_t));
+  int16_t* host_src1 = (int16_t*)malloc(src1_size * sizeof(int16_t));
+  float* host_dst = (float*)malloc(dst_size * sizeof(float));
+  float* host_ref = (float*)malloc(dst_size * sizeof(float));
+  if (!host_src0 || !host_src1 || !host_dst || !host_ref) {
+    fprintf(stderr, "Host malloc failed\n");
+    free(host_src0); free(host_src1); free(host_dst); free(host_ref);
+    return -1;
+  }
+  memset(host_dst, 0, dst_size * sizeof(float));
+
+  // 生成随机输入数据（行主序矩阵）
+  generate_random_matrix_row_major_int16(host_src0, m, k, 7);
+  generate_random_matrix_row_major_int16(host_src1, k, n, 8);
+
+  // 设备端内存分配
+  int16_t* mlu_src0 = NULL;
+  int16_t* mlu_src1 = NULL;
+  float* mlu_dst = NULL;
+  CNRT_CHECK(cnrtMalloc((void**)&mlu_src0, src0_size * sizeof(int16_t)));
+  CNRT_CHECK(cnrtMalloc((void**)&mlu_src1, src1_size * sizeof(int16_t)));
+  CNRT_CHECK(cnrtMalloc((void**)&mlu_dst, dst_size * sizeof(float)));
+
+  // 主机到设备（H2D）数据拷贝
+  CNRT_CHECK(cnrtMemcpy(mlu_src0, host_src0, src0_size * sizeof(int16_t), cnrtMemcpyHostToDev));
+  CNRT_CHECK(cnrtMemcpy(mlu_src1, host_src1, src1_size * sizeof(int16_t), cnrtMemcpyHostToDev));
+
+  // Kernel 启动配置：使用单个任务
+  cnrtDim3_t dim = { 1, 1, 1 };
+  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
+
+  // 性能测量：创建 Notifier 用于记录 Kernel 执行时间
+  cnrtNotifier_t start, end;
+  CNRT_CHECK(cnrtNotifierCreate(&start));
+  CNRT_CHECK(cnrtNotifierCreate(&end));
+
+  // 启动 Kernel 并记录执行时间
+  CNRT_CHECK(cnrtPlaceNotifier(start, queue));
+  MatmulMinimalKernel<<<dim, ktype, queue>>>(mlu_dst, mlu_src0, mlu_src1, m, n, k);
+  CNRT_CHECK(cnrtPlaceNotifier(end, queue));
+
+  // 同步队列并执行设备到主机（D2H）数据拷贝
+  CNRT_CHECK(cnrtQueueSync(queue));
+  CNRT_CHECK(cnrtMemcpy(host_dst, mlu_dst, dst_size * sizeof(float), cnrtMemcpyDevToHost));
+
+  // 计算并输出执行时间
+  float timeTotal = 0.0f;
+  CNRT_CHECK(cnrtNotifierDuration(start, end, &timeTotal));
+  printf("[Matmul_01] Total Time: %.3f ms\n", timeTotal / 1000.0f);
+
+  // CPU 参考计算和结果验证
+  cpu_matmul(host_src0, host_src1, host_ref, m, n, k);
+  (void)verify_matmul(host_dst, host_ref, dst_size, "matmul_01", 1e-6f, 1e-6f);
+
+  // 资源清理
+  CNRT_CHECK(cnrtQueueDestroy(queue));
+  cnrtFree(mlu_src0); cnrtFree(mlu_src1); cnrtFree(mlu_dst);
+  free(host_src0); free(host_src1); free(host_dst); free(host_ref);
+  return 0;
+}

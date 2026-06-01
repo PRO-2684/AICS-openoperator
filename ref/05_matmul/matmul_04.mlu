@@ -1,0 +1,113 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include "../utils.h"
+
+// =====================================================================
+// 矩阵乘法使用 __bang_conv 实现（调试版本）
+// 注意：输出是转置的 [k, m]，验证函数会自动处理
+// =====================================================================
+#define N 64
+
+__mlu_entry__ void MatMulKernel(float* dst,
+                                 const float* A,
+                                 const float* B,
+                                 int n) {
+  // NRAM buffers
+  __nram__ float nram_A[N * N];        // A 矩阵
+  __wram__ float wram_B[N * N];        // B 矩阵（作为 kernel）
+  __nram__ float nram_result[N * N];   // 结果矩阵
+
+  // 加载 A 到 NRAM
+  __memcpy(nram_A, A, n * n * sizeof(float), GDRAM2NRAM);
+
+  // 加载 B 到 WRAM
+  __memcpy(wram_B, B, n * n * sizeof(float), GDRAM2WRAM);
+
+  // 使用 __bang_conv 计算 C = A * B
+  // 参数：dst, src, kernel, channel_input, height, width,
+  //       kernel_height, kernel_width, stride_height, stride_width, channel_output
+  // src 布局: [n, n, 1], kernel 布局: [1*1*n, n], dst 布局: [n, n*1]
+  __bang_conv(nram_result, nram_A, wram_B,
+             n, n, 1, 1, 1, 1, 1, n);
+
+  // 写回结果
+  __memcpy(dst, nram_result, n * n * sizeof(float), NRAM2GDRAM);
+}
+
+// CPU 参考实现
+static inline void cpu_matmul(const float* a, const float* b, float* c,
+                              int m, int n, int k) {
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < k; ++j) {
+      float sum = 0.0f;
+      for (int l = 0; l < n; ++l) {
+        sum += a[i * n + l] * b[l * k + j];
+      }
+      c[i * k + j] = sum;
+    }
+  }
+}
+
+int main(void) {
+  cnrtQueue_t queue;
+  CNRT_CHECK(cnrtSetDevice(0));
+  CNRT_CHECK(cnrtQueueCreate(&queue));
+
+  const int n = N;
+  float* host_A = (float*)malloc(n * n * sizeof(float));
+  float* host_B = (float*)malloc(n * n * sizeof(float));
+  float* host_C = (float*)malloc(n * n * sizeof(float));
+  float* host_ref = (float*)malloc(n * n * sizeof(float));
+  if (!host_A || !host_B || !host_C || !host_ref) {
+    fprintf(stderr, "Host malloc failed\n");
+    free(host_A); free(host_B); free(host_C); free(host_ref);
+    return -1;
+  }
+
+  // 初始化输入矩阵
+  for (int i = 0; i < n; i++) {
+    for (int j = 0; j < n; j++) {
+      host_A[i * n + j] = (float)(i * n + j + 1);
+      host_B[i * n + j] = (float)(i + j + 1);
+    }
+  }
+
+  float* mlu_A = NULL;
+  float* mlu_B = NULL;
+  float* mlu_C = NULL;
+  CNRT_CHECK(cnrtMalloc((void**)&mlu_A, n * n * sizeof(float)));
+  CNRT_CHECK(cnrtMalloc((void**)&mlu_B, n * n * sizeof(float)));
+  CNRT_CHECK(cnrtMalloc((void**)&mlu_C, n * n * sizeof(float)));
+
+  CNRT_CHECK(cnrtMemcpy(mlu_A, host_A, n * n * sizeof(float), cnrtMemcpyHostToDev));
+  CNRT_CHECK(cnrtMemcpy(mlu_B, host_B, n * n * sizeof(float), cnrtMemcpyHostToDev));
+
+  cnrtDim3_t dim = {1, 1, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
+
+  cnrtNotifier_t start, end;
+  CNRT_CHECK(cnrtNotifierCreate(&start));
+  CNRT_CHECK(cnrtNotifierCreate(&end));
+
+  CNRT_CHECK(cnrtPlaceNotifier(start, queue));
+  MatMulKernel<<<dim, ktype, queue>>>(mlu_C, mlu_A, mlu_B, n);
+  CNRT_CHECK(cnrtPlaceNotifier(end, queue));
+
+  CNRT_CHECK(cnrtQueueSync(queue));
+  CNRT_CHECK(cnrtMemcpy(host_C, mlu_C, n * n * sizeof(float), cnrtMemcpyDevToHost));
+
+  float timeTotal = 0.0f;
+  CNRT_CHECK(cnrtNotifierDuration(start, end, &timeTotal));
+  printf("[Conv-Debug] Total Time: %.3f ms\n", timeTotal / 1000.0f);
+
+  cpu_matmul(host_A, host_B, host_ref, n, n, n);
+  (void)verify_matmul(host_C, host_ref, n * n, "matmul_conv_debug", 1e-6f, 1e-6f);
+
+  CNRT_CHECK(cnrtQueueDestroy(queue));
+  cnrtFree(mlu_A); cnrtFree(mlu_B); cnrtFree(mlu_C);
+  free(host_A); free(host_B); free(host_C); free(host_ref);
+  return 0;
+}

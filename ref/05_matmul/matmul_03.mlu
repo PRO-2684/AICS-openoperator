@@ -1,0 +1,179 @@
+#include <bang.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include "../utils.h"
+
+// =====================================================================
+// Tiling 版本：使用 __bang_matmul 完成矩阵乘法 C = A * B
+// 支持大矩阵（1024x1024）通过三层循环分块
+// Level 1: 按 K 维度分块（输出列维度）
+// Level 2: 按 M 维度分块（输出行维度）+ 任务并行
+// Level 3: 按 N 维度分块（规约维度）+ 累加
+// =====================================================================
+#define M 1024
+#define N 1024
+#define K 1024
+
+#define TILE_SIZE 128      // K 和 N 维度的 tile 大小
+#define M_PER_LOOP 16     // 每次内层循环处理的 M 行数
+#define LOOPS 8           // 外层循环的次数 (M_PER_LOOP * LOOPS = 128)
+#define M_PER_BLOCK (M_PER_LOOP * LOOPS) // 每个 task 处理的 M 行数
+
+// fix_position 用于 int16_t 输入的矩阵乘法
+#define FIX_POSITION 0
+
+__mlu_entry__ void MatrixMulKernel(float* dst,
+                                 const int16_t* a,
+                                 const int16_t* b,
+                                 int m, int n, int k) {
+  // NRAM 缓冲区：用于存储 A tile 和结果
+  __nram__ int16_t nram_a[M_PER_LOOP * TILE_SIZE];      // 16 * 128 * 2 = 4KB
+  __nram__ float nram_c[M_PER_LOOP * TILE_SIZE];         // 16 * 128 * 4 = 8KB，结果累加器
+  
+  // WRAM 缓冲区：用于存储右矩阵 B tile（列主序）
+  __wram__ int16_t wram_b[TILE_SIZE * TILE_SIZE];          // 128 * 128 * 2 = 32KB
+  
+  // 计算 task 的 M 范围
+  int m_per_block = m / taskDim;
+  if (m_per_block == 0) m_per_block = n;
+  int m_per_loop = m_per_block / LOOPS;
+  if (m_per_loop == 0) m_per_loop = 1;
+  
+  // 初始化结果矩阵为 0（只初始化当前 task 负责的部分）
+  for (int i = 0; i < m_per_block * k; i++) {
+    dst[m_per_block * k * taskId + i] = 0.0f;
+  }
+  
+  // Level 1: 按 K 维度分块（输出列维度）
+  for (int tile_k = 0; tile_k < (k + TILE_SIZE - 1) / TILE_SIZE; tile_k++) {
+    int k_start = tile_k * TILE_SIZE;
+    int k_end = (tile_k + 1) * TILE_SIZE;
+    if (k_end > k) k_end = k;
+    int k_size = k_end - k_start;
+    
+    // Level 2: 按 M 维度分块（输出行维度）
+    for (int loop = 0; loop < LOOPS; loop++) {
+      int m_start = m_per_block * taskId + loop * m_per_loop;
+      
+      // 初始化累加器为 0
+      __bang_write_value(nram_c, M_PER_LOOP * k_size, 0.0f);
+      
+      // Level 3: 按 N 维度分块（规约维度），使用 matmul 累加
+      for (int tile_n = 0; tile_n < (n + TILE_SIZE - 1) / TILE_SIZE; tile_n++) {
+        int n_start = tile_n * TILE_SIZE;
+        int n_end = (tile_n + 1) * TILE_SIZE;
+        if (n_end > n) n_end = n;
+        int n_size = n_end - n_start;
+        
+        // 加载右矩阵 B tile 到 WRAM（按列存储为列主序）
+        // 方法：直接按列构造列主序布局
+        // 目标：wram_b[col][row] 其中 col = k_size 维度，row = n_size 维度
+        // 源：B[row][col] 其中 row = n_size 维度，col = k_size 维度
+        // 映射关系：wram_b[j][i] = B[i][j]
+        // 地址计算：
+        //   - wram_b[j * n_size + i] = B[i * k + j]
+        //   - i = n_start 到 n_end-1（n_size 行）
+        //   - j = k_start 到 k_end-1（k_size 列）
+        for (int i = 0; i < n_size; ++i) {
+          for (int j = 0; j < k_size; ++j) {
+            wram_b[j * n_size + i] = b[(size_t)(n_start + i) * k + k_start + j];
+          }
+        }
+        
+        // 加载左矩阵 A tile 到 NRAM（行主序）
+        __memcpy_async(nram_a,
+                       a + (size_t)m_start * n + n_start,
+                       M_PER_LOOP * n_size * sizeof(int16_t),
+                       GDRAM2NRAM);
+        __sync();
+        
+        // 使用 __bang_matmul 计算并累加：C_tile = A_tile * B_tile
+        // __bang_matmul(dst, src0, src1, M, K, N, fix_position)
+        // 计算：dst[M][K] = src0[M][N] * src1[N][K]
+        // 这里：
+        //   - nram_c 是列主序布局 [M_PER_LOOP, k_size]
+        //   - nram_a 是行主序布局 [M_PER_LOOP, n_size]
+        //   - wram_b 是列主序布局 [k_size, n_size]
+        __bang_matmul(nram_c, nram_a, wram_b, M_PER_LOOP, n_size, k_size, FIX_POSITION);
+      }
+      
+      // 将累加结果写回全局结果矩阵
+      // nram_c[M_PER_LOOP][k_size] -> dst[m_start:m_start+M_PER_LOOP][k_start:k_start+k_size]
+      for (int i = 0; i < M_PER_LOOP; i++) {
+        __memcpy(dst + (size_t)(m_start + i) * k + k_start,
+                 nram_c + i * k_size,
+                 k_size * sizeof(float),
+                 NRAM2GDRAM);
+      }
+    }
+  }
+}
+
+static inline void cpu_matmul(const int16_t* a, const int16_t* b, float* c,
+                         int m, int n, int k) {
+  // 矩阵乘法：C[i][j] = sum(A[i][l] * B[l][j]) for l in [0, n)
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < k; ++j) {
+      float sum = 0.0f;
+      for (int l = 0; l < n; ++l) {
+        sum += (float)a[i * n + l] * (float)b[l * k + j];
+      }
+      c[i * k + j] = sum;
+    }
+  }
+}
+
+int main(void) {
+  cnrtQueue_t queue;
+  CNRT_CHECK(cnrtSetDevice(0));
+  CNRT_CHECK(cnrtQueueCreate(&queue));
+
+  const int m = M, n = N, k = K;
+  int16_t* host_a = (int16_t*)malloc(m * n * sizeof(int16_t));
+  int16_t* host_b = (int16_t*)malloc(n * k * sizeof(int16_t));
+  float* host_c = (float*)malloc(m * k * sizeof(float));
+  float* host_ref = (float*)malloc(m * k * sizeof(float));
+  if (!host_a || !host_b || !host_c || !host_ref) {
+    fprintf(stderr, "Host malloc failed\n");
+    free(host_a); free(host_b); free(host_c); free(host_ref);
+    return -1;
+  }
+  generate_random_matrix_row_major_int16(host_a, m, n, 7);
+  generate_random_matrix_column_major_int16(host_b, n, k, 8);
+
+  int16_t* mlu_a = NULL;
+  int16_t* mlu_b = NULL;
+  float* mlu_c = NULL;
+  CNRT_CHECK(cnrtMalloc((void**)&mlu_a, m * n * sizeof(int16_t)));
+  CNRT_CHECK(cnrtMalloc((void**)&mlu_b, n * k * sizeof(int16_t)));
+  CNRT_CHECK(cnrtMalloc((void**)&mlu_c, m * k * sizeof(float)));
+
+  CNRT_CHECK(cnrtMemcpy(mlu_a, host_a, m * n * sizeof(int16_t), cnrtMemcpyHostToDev));
+  CNRT_CHECK(cnrtMemcpy(mlu_b, host_b, n * k * sizeof(int16_t), cnrtMemcpyHostToDev));
+
+  cnrtDim3_t dim = {8, 1, 1 };
+  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
+
+  cnrtNotifier_t start, end;
+  CNRT_CHECK(cnrtNotifierCreate(&start));
+  CNRT_CHECK(cnrtNotifierCreate(&end));
+
+  CNRT_CHECK(cnrtPlaceNotifier(start, queue));
+  MatrixMulKernel<<<dim, ktype, queue>>>(mlu_c, mlu_a, mlu_b, m, n, k);
+  CNRT_CHECK(cnrtPlaceNotifier(end, queue));
+
+  CNRT_CHECK(cnrtQueueSync(queue));
+  CNRT_CHECK(cnrtMemcpy(host_c, mlu_c, m * k * sizeof(float), cnrtMemcpyDevToHost));
+
+  float timeTotal = 0.0f;
+  CNRT_CHECK(cnrtNotifierDuration(start, end, &timeTotal));
+  printf("[MatMul-Tiling] Total Time: %.3f ms\n", timeTotal / 1000.0f);
+
+  cpu_matmul(host_a, host_b, host_ref, m, n, k);
+  (void)verify_matmul(host_c, host_ref, m * k, "matmul_tiling", 1e-6f, 1e-6f);
+
+  CNRT_CHECK(cnrtQueueDestroy(queue));
+  cnrtFree(mlu_a); cnrtFree(mlu_b); cnrtFree(mlu_c);
+  free(host_a); free(host_b); free(host_c); free(host_ref);
+  return 0;
+}

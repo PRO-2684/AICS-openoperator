@@ -1,0 +1,110 @@
+{
+    "general_rules": [
+        {
+            "flags": 2,
+            "id": "FORBIDDEN_CNNL_HEADER",
+            "message": "禁止包含 CNNL 头文件（如 cnnl.h）；比赛要求不得直接调用 CNNL 高级算子。",
+            "pattern": "#\\s*include\\s*<\\s*cnnl(?:/[\\w.\\-]+)?\\.h\\s*>"
+        },
+        {
+            "flags": 2,
+            "id": "FORBIDDEN_ATEN_CNNL_HEADER",
+            "message": "禁止包含 aten/cnnl/* 头文件；不得通过 ATen/CNNL 封装间接调用现成算子。",
+            "pattern": "#\\s*include\\s*<\\s*aten/cnnl/[^>]+\\s*>"
+        },
+        {
+            "flags": 0,
+            "id": "FORBIDDEN_TORCH_MODULE_API",
+            "message": "禁止直接使用高层 torch 模块 API：torch::nn:: / torch::jit:: / torch::autograd:: / torch::optim::。",
+            "pattern": "\\btorch::(nn|jit|autograd|optim)::"
+        },
+        {
+            "flags": 0,
+            "id": "FORBIDDEN_TORCH_HIGH_LEVEL_OP",
+            "message": "禁止直接调用 torch:: / at:: 下的现成算子实现，例如 at::conv(...)、torch::conv(...)。",
+            "pattern": "\\b(?:torch::|at::)(?:[A-Za-z_]\\w*::)*(?!(?:getCurrentMLUStream|getCurMLUStream|SymIntArrayRef|TensorOptions|MemoryFormat|IntArrayRef|manual_seed|ScalarType|empty_like|ArrayRef|Dimname|Device|Layout|Scalar|SymInt|Tensor|empty|zeros|ones|rand)\\s*\\()[A-Za-z_]\\w*\\s*\\("
+        },
+        {
+            "flags": 0,
+            "id": "FORBIDDEN_DYNAMIC_LOADING",
+            "message": "禁止在选手 .mlu 中动态加载外部符号。",
+            "pattern": "\\b(dlopen|dlsym|dlmopen)\\b"
+        },
+        {
+            "flags": 0,
+            "id": "FORBIDDEN_PROCESS_SPAWN",
+            "message": "禁止在选手 .mlu 中启动进程或执行 shell。",
+            "pattern": "\\b(system|popen|fork|execve|execv|execl|posix_spawn)\\b"
+        },
+        {
+            "flags": 0,
+            "id": "FORBIDDEN_CNRT_QUEUE_CREATE",
+            "message": "请使用cnrtQueue tqueue =torch mlu::getCurMLustream();获取当前队列环境，禁止重新创建任务队列。",
+            "pattern": "\\bcnrtQueueCreate\\s*\\("
+        },
+        {
+            "flags": 0,
+            "id": "FORBIDDEN_CNNL_ADVANCED_OP",
+            "message": "禁止直接调用 CNNL 高级算子或相关 API；涉及计算的实现只能使用 BangC 允许的 API 与基础数学库。",
+            "pattern": "\\bcnnl[A-Z_]\\w*\\s*\\("
+        }
+    ],
+    "generated_at": "2026-05-14T16:25:37.554261+00:00",
+    "problem_rules": {
+        "001_LeakyReLU": {
+            "flags": 0,
+            "id": "FORBIDDEN_PROBLEM_SPECIFIC_OP_001",
+            "message": "题目 001_LeakyReLU 对应算子禁止直接调库实现；命中词汇示例: leaky_relu",
+            "operators": [
+                "leaky_relu"
+            ],
+            "pattern": "(?:\\b(?:torch::|at::)(?:[A-Za-z_]\\w*::)*(?:leaky_relu)\\s*\\()|(?:(?:\\.|->)\\s*(?:leaky_relu)\\s*\\()",
+            "torch_model": "001_LeakyReLU.py"
+        },
+        "003_LogSoftmax": {
+            "flags": 0,
+            "id": "FORBIDDEN_PROBLEM_SPECIFIC_OP_003",
+            "message": "题目 003_LogSoftmax 对应算子禁止直接调库实现；命中词汇示例: log_softmax",
+            "operators": [
+                "log_softmax"
+            ],
+            "pattern": "(?:\\b(?:torch::|at::)(?:[A-Za-z_]\\w*::)*(?:log_softmax)\\s*\\()|(?:(?:\\.|->)\\s*(?:log_softmax)\\s*\\()",
+            "torch_model": "003_LogSoftmax.py"
+        },
+        "004_batched_matrix_multiplication": {
+            "flags": 0,
+            "id": "FORBIDDEN_PROBLEM_SPECIFIC_OP_004",
+            "message": "题目 004_batched_matrix_multiplication 对应算子禁止直接调库实现；命中词汇示例: bmm",
+            "operators": [
+                "bmm"
+            ],
+            "pattern": "(?:\\b(?:torch::|at::)(?:[A-Za-z_]\\w*::)*(?:bmm)\\s*\\()|(?:(?:\\.|->)\\s*(?:bmm)\\s*\\()",
+            "torch_model": "004_batched_matrix_multiplication.py"
+        },
+        "005_average_pooling_2d": {
+            "flags": 0,
+            "id": "FORBIDDEN_PROBLEM_SPECIFIC_OP_005",
+            "message": "题目 005_average_pooling_2d 对应算子禁止直接调库实现；命中词汇示例: avg_pool2d, AvgPool2d, avg_pool",
+            "operators": [
+                "avg_pool2d",
+                "AvgPool2d",
+                "avg_pool"
+            ],
+            "pattern": "(?:\\b(?:torch::|at::)(?:[A-Za-z_]\\w*::)*(?:avg_pool2d|AvgPool2d|avg_pool)\\s*\\()|(?:(?:\\.|->)\\s*(?:avg_pool2d|AvgPool2d|avg_pool)\\s*\\()",
+            "torch_model": "005_average_pooling_2d.py"
+        },
+        "006_conv_depthwise_2D_square_input_square_kernel": {
+            "flags": 0,
+            "id": "FORBIDDEN_PROBLEM_SPECIFIC_OP_006",
+            "message": "题目 006_conv_depthwise_2D_square_input_square_kernel 对应算子禁止直接调库实现；命中词汇示例: Conv2d, conv2d, conv",
+            "operators": [
+                "Conv2d",
+                "conv2d",
+                "conv"
+            ],
+            "pattern": "(?:\\b(?:torch::|at::)(?:[A-Za-z_]\\w*::)*(?:Conv2d|conv2d|conv)\\s*\\()|(?:(?:\\.|->)\\s*(?:Conv2d|conv2d|conv)\\s*\\()",
+            "torch_model": "006_conv_depthwise_2D_square_input_square_kernel.py"
+        },
+        "__note__": "每个题目都有，规则用AI生成的，下面省略"
+    }
+}

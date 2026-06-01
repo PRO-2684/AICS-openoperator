@@ -1,0 +1,6 @@
+{
+  "clangd.arguments": [
+    "--query-driver=/usr/local/neuware/bin/cncc",
+    "--compile-commands-dir=/workspace/algorithm/AICS-openoperator"
+  ]
+}

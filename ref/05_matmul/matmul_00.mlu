@@ -1,0 +1,156 @@
+#include <bang.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include "../utils.h"
+
+// =============================================================================
+// 配置宏定义
+// =============================================================================
+#define M 64   // 矩阵 A 的行数
+#define N 64   // 矩阵 A 的列数（矩阵 B 的行数）
+#define K 64   // 矩阵 B 的列数
+// 矩阵乘法：C = A * B，其中 A 是 [M, N]，B 是 [N, K]，C 是 [M, K]
+// 注意：使用朴素三重循环实现，不使用向量化指令
+
+// =============================================================================
+// Kernel: MatMulMinimalKernel
+// 功能：矩阵乘法 C = A * B
+// 数据类型：float32；布局：行主序连续数组
+// 说明：使用和 CPU 相同的三重循环实现，不使用向量化指令
+// 矩阵乘法 C = A * B 的计算：C[i][j] = sum(A[i][l] * B[l][j]) for l in [0, n)
+// =============================================================================
+__mlu_entry__ void MatMulMinimalKernel(float* C,
+                                      const float* A,
+                                      const float* B,
+                                      int m, int n, int k) {
+  // NRAM 缓冲区：用于存储矩阵数据
+  __nram__ float nram_A[M * N];      // 矩阵 A [M, N]
+  __nram__ float nram_B[N * K];      // 矩阵 B [N, K]
+  __nram__ float nram_C[M * K];      // 结果矩阵 C [M, K]
+
+  // 从 GDRAM 加载矩阵 A 和 B 到 NRAM
+  __memcpy(nram_A, A, m * n * sizeof(float), GDRAM2NRAM);
+  __memcpy(nram_B, B, n * k * sizeof(float), GDRAM2NRAM);
+
+  // 初始化结果矩阵为 0
+  __bang_write_value(nram_C, m * k, 0.0f);
+
+  // 使用朴素三重循环实现矩阵乘法（和 CPU 相同的实现方式）
+  // C[i][j] = sum(A[i][l] * B[l][j]) for l in [0, n)
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < k; ++j) {
+      float sum = 0.0f;
+      for (int l = 0; l < n; ++l) {
+        sum += nram_A[i * n + l] * nram_B[l * k + j];
+      }
+      nram_C[i * k + j] = sum;
+    }
+  }
+
+  // 将结果从 NRAM 写回 GDRAM
+  __memcpy(C, nram_C, m * k * sizeof(float), NRAM2GDRAM);
+}
+
+// =============================================================================
+// CPU 参考实现：用于验证 MLU 计算结果
+// =============================================================================
+static inline void cpu_matmul(const float* A, const float* B, float* C,
+                              int m, int n, int k) {
+  // 矩阵乘法：C[i][j] = sum(A[i][l] * B[l][j]) for l in [0, n)
+  for (int i = 0; i < m; ++i) {
+    for (int j = 0; j < k; ++j) {
+      float sum = 0.0f;
+      for (int l = 0; l < n; ++l) {
+        sum += A[i * n + l] * B[l * k + j];
+      }
+      C[i * k + j] = sum;
+    }
+  }
+}
+
+// =============================================================================
+// Host 主函数
+// 执行流程：
+// 1. 设备初始化和队列创建
+// 2. 主机和设备内存分配
+// 3. 数据准备（生成随机输入）
+// 4. 主机到设备（H2D）数据拷贝
+// 5. Kernel 启动配置和执行
+// 6. 设备到主机（D2H）数据拷贝
+// 7. 性能测量（使用 Notifier）
+// 8. 结果验证（与 CPU 参考结果对比）
+// 9. 资源清理
+// =============================================================================
+int main(void) {
+  // 设备初始化和队列创建
+  cnrtQueue_t queue;
+  CNRT_CHECK(cnrtSetDevice(0));
+  CNRT_CHECK(cnrtQueueCreate(&queue));
+
+  // 问题规模
+  const int m = M;
+  const int n = N;
+  const int k = K;
+
+  // 主机端内存分配（纯 float 运算）
+  float* host_A = (float*)malloc(m * n * sizeof(float));
+  float* host_B = (float*)malloc(n * k * sizeof(float));
+  float* host_C = (float*)malloc(m * k * sizeof(float));
+  float* host_ref = (float*)malloc(m * k * sizeof(float));
+  if (!host_A || !host_B || !host_C || !host_ref) {
+    fprintf(stderr, "Host malloc failed\n");
+    free(host_A); free(host_B); free(host_C); free(host_ref);
+    return -1;
+  }
+  memset(host_C, 0, m * k * sizeof(float));
+
+  // 生成随机输入数据（行主序矩阵）
+  generate_random_matrix_row_major(host_A, m, n, 7);
+  generate_random_matrix_row_major(host_B, n, k, 8);
+
+  // 设备端内存分配
+  float* mlu_A = NULL;
+  float* mlu_B = NULL;
+  float* mlu_C = NULL;
+  CNRT_CHECK(cnrtMalloc((void**)&mlu_A, m * n * sizeof(float)));
+  CNRT_CHECK(cnrtMalloc((void**)&mlu_B, n * k * sizeof(float)));
+  CNRT_CHECK(cnrtMalloc((void**)&mlu_C, m * k * sizeof(float)));
+
+  // 主机到设备（H2D）数据拷贝
+  CNRT_CHECK(cnrtMemcpy(mlu_A, host_A, m * n * sizeof(float), cnrtMemcpyHostToDev));
+  CNRT_CHECK(cnrtMemcpy(mlu_B, host_B, n * k * sizeof(float), cnrtMemcpyHostToDev));
+
+  // Kernel 启动配置：使用单个任务
+  cnrtDim3_t dim = { 1, 1, 1 };
+  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
+
+  // 性能测量：创建 Notifier 用于记录 Kernel 执行时间
+  cnrtNotifier_t start, end;
+  CNRT_CHECK(cnrtNotifierCreate(&start));
+  CNRT_CHECK(cnrtNotifierCreate(&end));
+
+  // 启动 Kernel 并记录执行时间
+  CNRT_CHECK(cnrtPlaceNotifier(start, queue));
+  MatMulMinimalKernel<<<dim, ktype, queue>>>(mlu_C, mlu_A, mlu_B, m, n, k);
+  CNRT_CHECK(cnrtPlaceNotifier(end, queue));
+
+  // 同步队列并执行设备到主机（D2H）数据拷贝
+  CNRT_CHECK(cnrtQueueSync(queue));
+  CNRT_CHECK(cnrtMemcpy(host_C, mlu_C, m * k * sizeof(float), cnrtMemcpyDevToHost));
+
+  // 计算并输出执行时间
+  float timeTotal = 0.0f;
+  CNRT_CHECK(cnrtNotifierDuration(start, end, &timeTotal));
+  printf("[Minimal] Total Time: %.3f ms\n", timeTotal / 1000.0f);
+
+  // CPU 参考计算和结果验证
+  cpu_matmul(host_A, host_B, host_ref, m, n, k);
+  (void)verify_rm_rm(host_C, host_ref, m * k, "matmul_minimal", 1e-5f, 1e-5f);
+
+  // 资源清理
+  CNRT_CHECK(cnrtQueueDestroy(queue));
+  cnrtFree(mlu_A); cnrtFree(mlu_B); cnrtFree(mlu_C);
+  free(host_A); free(host_B); free(host_C); free(host_ref);
+  return 0;
+}
