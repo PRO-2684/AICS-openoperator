@@ -1,8 +1,0 @@
-{"type":"gate","ok":1,"i":1,"team":"team_42","processing":0,"task_queue":0,"run":"94b9b377"}
-{"type":"rerun","ok":1,"i":1,"team":"team_42","c":"4c5a825d","status":"已入队，commit_sha=4c5a825d2289e3cba9ebf146a2e975b76712c119","run":"94b9b377"}
-{"type":"gate","ok":1,"i":1,"team":"team_91","processing":0,"task_queue":0,"run":"94b9b377"}
-{"type":"rerun","ok":1,"i":1,"team":"team_91","c":"4c5a825d","status":"已入队，commit_sha=4c5a825d2289e3cba9ebf146a2e975b76712c119","run":"94b9b377"}
-{"type":"row","team":"team_42","task":"8bccdd34","c":"4c5a825d","p":"028","us":337.551,"best":1,"run":"94b9b377"}
-{"type":"row","team":"team_42","task":"8bccdd34","c":"4c5a825d","p":"029","us":324.331,"best":1,"run":"94b9b377"}
-{"type":"gate","ok":1,"i":2,"team":"team_42","processing":0,"task_queue":0,"run":"94b9b377"}
-{"type":"rerun","ok":1,"i":2,"team":"team_42","c":"4c5a825d","status":"已入队，commit_sha=4c5a825d2289e3cba9ebf146a2e975b76712c119","run":"94b9b377"}
