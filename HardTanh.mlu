@@ -2,8 +2,8 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
-#include <torch/extension.h>
 #include <sched.h>
+#include <torch/extension.h>
 #include <unistd.h>
 
 #define CHUNK_ELEMS 32768
@@ -60,15 +60,13 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 
+static cnrtQueue_t queue = []() { return torch_mlu::getCurMLUStream(); }();
+
+static cnrtDim3_t dim = {8, 1, 1};
+
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
-  static bool init = false;
-  if (!init) {
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t dim = {8, 1, 1};
-    hardtanh_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
-    init = true;
-  }
+  hardtanh_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
   return x;
 }

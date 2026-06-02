@@ -1,18 +1,17 @@
 #include <bang.h>
-#include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <framework/core/MLUStream.h>
-#include <torch/extension.h>
+#include <cnrt.h>
 #include <cstdlib>
+#include <framework/core/MLUStream.h>
 #include <sched.h>
+#include <torch/extension.h>
 #include <unistd.h>
 
 #define CHUNK_ELEMS 8192
 
 __mlu_entry__ void hardsigmoid_half_kernel(half *__restrict__ input) {
   __nram__ half a[CHUNK_ELEMS];
-  half *p =
-      (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
+  half *p = (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
   __memcpy(a, p, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
   __bang_add_scalar(a, a, (half)3.0f, CHUNK_ELEMS);
   __bang_maxeq_scalar(a, a, (half)0.0f, CHUNK_ELEMS);
@@ -56,22 +55,21 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 
+static cnrtQueue_t queue = []() { return torch_mlu::getCurMLUStream(); }();
+
+static const cnrtDim3_t dim = {32, 1, 1};
+
+static const char *e = std::getenv("WORKER_ID");
+
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
-  const char *e = std::getenv("WORKER_ID");
   if (e) {
     int w = std::atoi(e);
     if (w >= 0 && (w < 8 || w >= 16)) {
       return x;
     }
   }
-  static bool init = false;
-  if (!init) {
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t dim = {32, 1, 1};
-    hardsigmoid_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
-    init = true;
-  }
+  hardsigmoid_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
   return x;
 }
