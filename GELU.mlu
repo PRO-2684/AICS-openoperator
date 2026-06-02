@@ -28,12 +28,10 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
                  .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
+  auto a = torch::empty({1}, opt);
+  auto b = torch::empty({1}, opt);
+  return a + b;
 }();
-
-static cnrtQueue_t queue = []() { return torch_mlu::getCurMLUStream(); }();
-static cnrtDim3_t dim = {32, 1, 1};
-
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
   const char *e = std::getenv("WORKER_ID");
@@ -43,11 +41,9 @@ torch::Tensor bang_func(torch::Tensor x) {
       return x;
     }
   }
-  static bool init = false;
-  if (!init) {
-    gelu_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<half *>(x.data_ptr<at::Half>()));
-    init = true;
-  }
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {32, 1, 1};
+  gelu_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
   return x;
 }
