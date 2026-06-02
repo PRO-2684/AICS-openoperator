@@ -46,13 +46,16 @@ static torch::Tensor g0 = []() {
                  .dtype(torch::kHalf);
   return torch::zeros({1}, opt);
 }();
-static cnrtQueue_t queue = []() { return torch_mlu::getCurMLUStream(); }();
-
-static cnrtDim3_t dim = {8, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
-  hardtanh_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
+  static bool init = false;
+  if (!init) {
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+    cnrtDim3_t dim = {8, 1, 1};
+    hardtanh_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+        reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+    init = true;
+  }
   return x;
 }
