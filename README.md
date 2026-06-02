@@ -139,7 +139,7 @@ python scripts/update_problems.py
 | 088 | [Matrix_trace](Matrix_trace.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/e2b6718) |
 | 089 | [Diagonal_extraction](Diagonal_extraction.mlu) | N/A | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/b231825) |
 | 090 | [Einsum_4D_contract](Einsum_4D_contract.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/c85a674) |
-| 091 | [Matrix_inverse](Matrix_inverse.mlu) | N/A | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/eab3516bde077f38056d46ed62cfd344a2f22f84) |
+| 091 | [Matrix_inverse](Matrix_inverse.mlu) | N/A | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/15a2472d) |
 | 092 | [SVD_decomposition](SVD_decomposition.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/42b76bf) |
 | 093 | [Batch_triangular_solve](Batch_triangular_solve.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/a29e8c97) |
 | 094 | [LayerNorm](LayerNorm.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/cee95c5) |
