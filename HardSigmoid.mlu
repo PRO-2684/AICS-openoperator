@@ -4,6 +4,7 @@
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 #include <cstdlib>
+#include <sched.h>
 #include <unistd.h>
 
 #define CHUNK_ELEMS 8192
@@ -22,7 +23,17 @@ __mlu_entry__ void hardsigmoid_half_kernel(half *__restrict__ input) {
 
 static int g_dev = 0;
 
+static void bind_host() {
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  for (int i = 0; i < 28; ++i) {
+    CPU_SET(i, &set);
+  }
+  sched_setaffinity(0, sizeof(set), &set);
+}
+
 __attribute__((constructor(101))) static void init_runtime() {
+  bind_host();
   unsigned int n = 0;
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
     const auto *impl =
