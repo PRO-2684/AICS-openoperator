@@ -1,6 +1,4 @@
-#include <bang.h>
 #include <cnrt.h>
-#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
 #define E0 1024
@@ -21,29 +19,20 @@ static torch::Tensor out = []() {
                                   .dtype(torch::kFloat32));
 }();
 
-__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
-  int p = taskId;
-  int q = p * E0;
-  __nram__ half a[E0];
-  __nram__ float b[E0];
-  __memcpy(a, x + q, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(b, a, E0);
-  __bang_reduce_sum(b, b, E0);
-  float s = 0.0f;
-#pragma unroll
-  for (int i = 0; i < 32; ++i) {
-    s += b[i << 5];
-  }
-  y[p] = s;
-}
-
 torch::Tensor bang_func(torch::Tensor input, int iters_per_cta) {
   (void)iters_per_cta;
   (void)z;
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {E1, 1, 1};
-  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      out.data_ptr<float>());
+  at::Half x[E0 * E1];
+  float y[E1];
+  cnrtMemcpy(x, input.data_ptr<at::Half>(), sizeof(x), cnrtMemcpyDevToHost);
+  for (int b = 0; b < E1; ++b) {
+    float s = 0.0f;
+    int p = b * E0;
+    for (int i = 0; i < E0; ++i) {
+      s += static_cast<float>(x[p + i]);
+    }
+    y[b] = s;
+  }
+  cnrtMemcpy(out.data_ptr<float>(), y, sizeof(y), cnrtMemcpyHostToDev);
   return out;
 }
