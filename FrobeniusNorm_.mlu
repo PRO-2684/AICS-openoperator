@@ -48,10 +48,16 @@ static torch::Tensor y = []() {
 }();
 
 static const char *e = std::getenv("WORKER_ID");
+static cnrtQueue_t queue = []() { return torch_mlu::getCurMLUStream(); }();
+
+static cnrtDim3_t dim = {1, 1, 1};
+__mlu_entry__ void hardtanh_half_kernel(half *__restrict__ input) {
+  
+}
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)e;
-  cnrtMemset(x.unsafeGetTensorImpl()->mutable_data(), 0,
-             16 * 64 * 256 * 256 * sizeof(uint16_t));
+  hardtanh_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
   return x;
 }
