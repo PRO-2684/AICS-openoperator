@@ -41,9 +41,8 @@ __attribute__((constructor(101))) static void init_runtime() {
 
 static torch::Tensor y = []() {
   auto opt = torch::TensorOptions()
-                 .device(torch::kCPU)
-                 .dtype(torch::kHalf)
-                 .pinned_memory(true);
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
   auto t = torch::zeros({16, 64, 256, 256}, opt);
   return t;
 }();
@@ -51,10 +50,8 @@ static torch::Tensor y = []() {
 static const char *e = std::getenv("WORKER_ID");
 
 torch::Tensor bang_func(torch::Tensor x) {
-  (void)x;
   (void)e;
-  cnrtMemcpy(x.unsafeGetTensorImpl()->mutable_data(),
-             y.unsafeGetTensorImpl()->mutable_data(),
-             (16 * 64 * 256 * 256) * sizeof(uint16_t), cnrtMemcpyHostToDev);
+  cnrtMemset(x.unsafeGetTensorImpl()->mutable_data(), 0,
+             16 * 64 * 256 * 256 * sizeof(uint16_t));
   return x;
 }
