@@ -36,7 +36,7 @@ static torch::TensorOptions warm_options() {
   return torch::TensorOptions().device(c10::Device(c10::DeviceType::PrivateUse1, g_dev)).dtype(torch::kHalf);
 }
 
-static torch::Tensor g0 = []() { auto t = torch::empty({1}, warm_options()); t.zero_(); return t; }();
+static int g0 = []() { auto t = torch::empty({1}, warm_options()); t.zero_(); return 0; }();
 
 __mlu_entry__ void empty_kernel() {}
 
