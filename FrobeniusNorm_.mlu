@@ -2,7 +2,6 @@
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
-#include <cstdio>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -80,61 +79,16 @@ __mlu_entry__ void k2(half *__restrict__ x, const float *__restrict__ t) {
   }
 }
 
-__mlu_entry__ void k4(half *__restrict__ x, float *__restrict__ t) {
-  __nram__ half h[T1];
-  __nram__ float a[T2];
-  if (taskId == 0) {
-    __bang_write_zero(a, T2);
-    __memcpy(a, t, T0 * sizeof(float), GDRAM2NRAM);
-    __bang_reduce_sum(a, a, T2);
-    float s = a[0] + a[32] + a[64] + a[96] + a[128] + a[160] + a[192] +
-              a[224];
-    t[0] = 1.0f / sqrtf(s);
-  }
-  __sync_all_ipu();
-  half v = (half)t[0];
-  for (int64_t p = (int64_t)taskId * T1; p < T3; p += (int64_t)taskDim * T1) {
-    __memcpy(h, x + p, T1 * sizeof(half), GDRAM2NRAM);
-    __bang_mul_scalar(h, h, v, T1);
-    __memcpy(x + p, h, T1 * sizeof(half), NRAM2GDRAM);
-  }
-}
-
 torch::Tensor bang_func(torch::Tensor x) {
   (void)warm;
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d0 = {T0, 1, 1};
-  static int n = 0;
-  if (n < 8) {
-    cnrtNotifier_t s, m, e;
-    cnrtNotifierCreate(&s);
-    cnrtNotifierCreate(&m);
-    cnrtNotifierCreate(&e);
-    cnrtPlaceNotifier(s, q);
-    k0<<<d0, cnrtFuncTypeUnion1, q>>>(
-        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-        tmp.data_ptr<float>());
-    cnrtPlaceNotifier(m, q);
-    k4<<<d0, cnrtFuncTypeUnion8, q>>>(
-        reinterpret_cast<half *>(x.data_ptr<at::Half>()), tmp.data_ptr<float>());
-    cnrtPlaceNotifier(e, q);
-    cnrtQueueSync(q);
-    float u0 = 0.0f, u1 = 0.0f, ut = 0.0f;
-    cnrtNotifierDuration(s, m, &u0);
-    cnrtNotifierDuration(m, e, &u1);
-    cnrtNotifierDuration(s, e, &ut);
-    fprintf(stdout, "NOTIFY 042m k0 %.3f k4 %.3f total %.3f\n", u0, u1, ut);
-    fflush(stdout);
-    cnrtNotifierDestroy(s);
-    cnrtNotifierDestroy(m);
-    cnrtNotifierDestroy(e);
-    ++n;
-    return x;
-  }
+  cnrtDim3_t d1 = {1, 1, 1};
   k0<<<d0, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       tmp.data_ptr<float>());
-  k4<<<d0, cnrtFuncTypeUnion8, q>>>(
+  k1<<<d1, cnrtFuncTypeBlock, q>>>(tmp.data_ptr<float>());
+  k2<<<d0, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()), tmp.data_ptr<float>());
   return x;
 }
