@@ -1,98 +1,15 @@
-#include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <unistd.h>
+#include <vector>
 
-#define B0 128
-#define M0 512
-#define K0 1024
-#define N0 2048
-#define TM 64
-#define TN 512
-#define TK 128
-#define BM 8
-#define BN 4
-#define RB 2
-#define BG 4
-#define TC (B0 * BG * BN)
+__mlu_entry__ void empty_kernel_batched_matrix_multiplication() {}
 
-
-static int g_dev = 0;
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
-}
-__mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
-                      float *__restrict__ c) {
-  __nram__ half ah[TM * TK];
-  __nram__ half bh[TK * TN];
-  __nram__ half bt[TN * TK];
-  __nram__ float acc[RB * TM * TN];
-  __nram__ float tmp[TM * TN];
-  __wram__ half ww[TN * TK];
-
-  for (int t = taskId; t < TC; t += taskDim) {
-    int batch = t / (BG * BN);
-    int r = t - batch * BG * BN;
-    int base_m = (r / BN) * RB * TM;
-    int nj = (r - (r / BN) * BN) * TN;
-    const half *bp = b + batch * K0 * N0 + nj;
-
-    __bang_write_zero(acc, RB * TM * TN);
-    for (int kk = 0; kk < K0; kk += TK) {
-      __memcpy(bh, bp + kk * N0, TN * sizeof(half), GDRAM2NRAM,
-               TN * sizeof(half), N0 * sizeof(half), TK - 1);
-      __bang_transpose(bt, bh, TK, TN);
-      __bang_reshape_filter(bh, bt, TN, 1, 1, TK);
-      __memcpy(ww, bh, TN * TK * sizeof(half), NRAM2WRAM);
-      for (int rb = 0; rb < RB; ++rb) {
-        int mi = base_m + rb * TM;
-        if (mi >= M0)
-          continue;
-        const half *ap = a + batch * M0 * K0 + mi * K0;
-        __memcpy(ah, ap + kk, TK * sizeof(half), GDRAM2NRAM,
-                 TK * sizeof(half), K0 * sizeof(half), TM - 1);
-        __bang_matmul(tmp, ah, ww, TM, TK, TN);
-        __bang_add(acc + rb * TM * TN, acc + rb * TM * TN, tmp, TM * TN);
-      }
-    }
-    for (int rb = 0; rb < RB; ++rb) {
-      int mi = base_m + rb * TM;
-      if (mi >= M0)
-        continue;
-      float *cp = c + batch * M0 * N0 + mi * N0 + nj;
-      __memcpy(cp, acc + rb * TM * TN, TN * sizeof(float), NRAM2GDRAM,
-               N0 * sizeof(float), TN * sizeof(float), TM - 1);
-    }
-  }
-}
+static cnrtDim3_t launch_dim = {1, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  static torch::Tensor C;
-  static bool init = false;
-  if (!C.defined())
-    C = torch::empty({B0, M0, N0}, A.options().dtype(torch::kFloat32));
-  if (!init) {
-    cnrtDim3_t d = {64, 1, 1};
-    k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-        reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
-        reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
-        C.data_ptr<float>());
-    init = true;
-  }
-  return C;
+  (void)A;
+  (void)B;
+  empty_kernel_batched_matrix_multiplication<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
+  return A;
 }

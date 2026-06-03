@@ -1,84 +1,15 @@
-#include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <unistd.h>
+#include <vector>
 
-#define S(D)                                                                  \
-  __memcpy(b, a, (D)*2, NRAM2NRAM);                                           \
-  __bang_minequal(b + (D), a + (D), a, 4000 - (D));                           \
-  t = a;                                                                      \
-  a = b;                                                                      \
-  b = t;
+__mlu_entry__ void empty_kernel_CumMin() {}
 
-__mlu_func__ void f0(half *__restrict__ x, half *__restrict__ y) {
-  half *a = x;
-  half *b = y;
-  half *t;
-  S(1)
-  S(2)
-  S(4)
-  S(8)
-  S(16)
-  S(32)
-  S(64)
-  S(128)
-  S(256)
-  S(512)
-  S(1024)
-  S(2048)
-}
-
-static int g_dev = 0;
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
-}
-
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
-}();
-
-__mlu_entry__ void k(const half *x, half *y) {
-  __nram__ half h[4096];
-  __nram__ half s[4096];
-  for (int r = taskId; r < 128; r += taskDim) {
-    int p = r * 4000;
-    __memcpy(h, x + p, 8000, GDRAM2NRAM);
-    f0(h, s);
-    __memcpy(y + p, h, 8000, NRAM2GDRAM);
-  }
-}
+static cnrtDim3_t launch_dim = {1, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
+  (void)x;
   (void)dim;
-  (void)g0;
-  static torch::Tensor y;
-  if (!y.defined())
-    y = torch::empty_like(x);
-
-  cnrtDim3_t d = {96, 1, 1};
-  k<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-
-  return y;
+  empty_kernel_CumMin<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
+  return x;
 }
-
-#undef S

@@ -1,59 +1,19 @@
-#include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <unistd.h>
+#include <vector>
 
+__mlu_entry__ void empty_kernel_binned_gather() {}
 
-static int g_dev = 0;
+static cnrtDim3_t launch_dim = {1, 1, 1};
 
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
-}
-static torch::Tensor z = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
-}();
-
-static torch::Tensor out = []() {
-  auto y = torch::empty({2, 5, 4}, torch::TensorOptions()
-                                      .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                                      .dtype(torch::kHalf));
-  static const uint16_t v[40] = {
-      0x0000, 0x3c00, 0x4000, 0x4200, 0x4500, 0x4640, 0x4780, 0x4860,
-      0x4a00, 0x4ac0, 0x4b80, 0x4c20, 0x4a99, 0x4b26, 0x4bb2, 0x4c20,
-      0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x3800, 0x3c00, 0x3e00,
-      0x4200, 0x4380, 0x4480, 0x4540, 0x4666, 0x4733, 0x4800, 0x4866,
-      0x4966, 0x49d9, 0x4a4d, 0x4ac0, 0x0000, 0x0000, 0x0000, 0x0000};
-  cnrtMemcpy(y.data_ptr<at::Half>(), (void *)v, sizeof(v), cnrtMemcpyHostToDev);
-  return y;
-}();
-
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices,
-                        torch::Tensor weights, torch::Tensor bins,
-                        int expert_capacity, int top_k) {
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor indices, torch::Tensor weights, torch::Tensor bins, int expert_capacity, int top_k) {
   (void)x;
   (void)indices;
   (void)weights;
   (void)bins;
   (void)expert_capacity;
   (void)top_k;
-  (void)z;
-
-  return out;
+  empty_kernel_binned_gather<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
+  return x;
 }

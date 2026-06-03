@@ -1,66 +1,15 @@
-#include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <unistd.h>
+#include <vector>
 
+__mlu_entry__ void empty_kernel_One_hot_encoding() {}
 
-static int g_dev = 0;
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
-}
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  auto a = torch::empty({1024, 512}, opt);
-  auto b = torch::empty({1024, 512}, opt);
-  return a + b;
-}();
-
-static torch::Tensor gy = []() {
-  return torch::empty({1024, 512},
-                      torch::TensorOptions()
-                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                          .dtype(torch::kUInt8));
-}();
-
-__mlu_entry__ void k0(const int64_t *__restrict__ x, unsigned int *__restrict__ y) {
-  __nram__ unsigned int a[2048];
-  int p = taskId * 16;
-  __bang_write_zero(a, 2048);
-#pragma unroll
-  for (int r = 0; r < 16; ++r) {
-    int c = (int)x[p + r];
-    a[r * 128 + (c >> 2)] = 1u << ((c & 3) << 3);
-  }
-  __memcpy(y + p * 128, a, 2048 * sizeof(unsigned int), NRAM2GDRAM);
-}
+static cnrtDim3_t launch_dim = {1, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor x, int n) {
+  (void)x;
   (void)n;
-  (void)g0;
-  static bool init = false;
-  auto &y = gy;
-  if (!init) {
-    cnrtDim3_t d = {64, 1, 1};
-    k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-        x.data_ptr<int64_t>(), reinterpret_cast<unsigned int *>(y.data_ptr<unsigned char>()));
-    init = true;
-  }
-  return y;
+  empty_kernel_One_hot_encoding<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
+  return x;
 }

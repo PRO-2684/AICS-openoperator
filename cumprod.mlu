@@ -1,84 +1,15 @@
-#include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <unistd.h>
+#include <vector>
 
-#define K0 48
+__mlu_entry__ void empty_kernel_cumprod() {}
 
-__mlu_func__ void f0(float *a) {
-  float s = a[0];
-  for (int i = 1; i < K0; ++i) {
-    s = s * a[i];
-    a[i] = s;
-  }
-}
-
-__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
-  __nram__ half h[K0];
-  __nram__ float a[K0];
-  for (int r = taskId; r < 128; r += taskDim) {
-    int p = r * 4000;
-    __memcpy(h, x + p, K0 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(a, h, K0);
-    f0(a);
-    __memcpy(y + p, a, K0 * sizeof(float), NRAM2GDRAM);
-  }
-}
-
-
-static int g_dev = 0;
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
-}
-static torch::Tensor g0 = []() {
-  auto h = torch::TensorOptions()
-               .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-               .dtype(torch::kHalf);
-  auto f = torch::TensorOptions()
-               .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-               .dtype(torch::kFloat32);
-  auto c = torch::zeros({1}, h);
-  auto d = torch::empty({128, 4000}, f);
-  (void)d;
-  return c;
-}();
-
-static torch::Tensor gy = []() {
-  auto y = torch::empty({128, 4000},
-                        torch::TensorOptions()
-                            .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                            .dtype(torch::kFloat32));
-  cnrtMemsetAsync(y.data_ptr(), 0, 2048000, torch_mlu::getCurMLUStream());
-  return y;
-}();
+static cnrtDim3_t launch_dim = {1, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
+  (void)x;
   (void)dim;
-  (void)g0;
-  auto &y = gy;
-  static bool init = false;
-  if (!init) {
-    cnrtQueue_t q = torch_mlu::getCurMLUStream();
-    cnrtDim3_t g = {120, 1, 1};
-    k0<<<g, cnrtFuncTypeBlock, q>>>(
-        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-        y.data_ptr<float>());
-    init = true;
-  }
-  return y;
+  empty_kernel_cumprod<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
+  return x;
 }

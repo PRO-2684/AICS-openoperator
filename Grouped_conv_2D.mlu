@@ -1,137 +1,19 @@
-#include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <unistd.h>
+#include <vector>
 
-#define B0 16
-#define B1 8
-#define C0 64
-#define C1 128
-#define H0 128
-#define W0 128
-#define W3 130
-#define G0 16
-#define K0 3
-#define R0 2
-#define T0 64
-#define P0 64
-#define W1 294912
-#define W2 36864
+__mlu_entry__ void empty_kernel_Grouped_conv_2D() {}
 
+static cnrtDim3_t launch_dim = {1, 1, 1};
 
-static int g_dev = 0;
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
-}
-__mlu_entry__ void kz(half *__restrict__ y) {
-  for (int i = taskId; i < W1; i += taskDim) {
-    y[i] = (half)0.0f;
-  }
-}
-
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  for (int i = taskId; i < 9216; i += taskDim) {
-    int t = i;
-    int c = t % B1;
-    t /= B1;
-    int w = t % K0;
-    t /= K0;
-    int h = t % K0;
-    int o = t / K0;
-    int grp = o / G0;
-    int lo = o - grp * G0;
-    y[grp * W2 + ((lo * K0 + h) * K0 + w) * P0 + c] =
-        x[((o * B1 + c) * K0 + h) * K0 + w];
-  }
-}
-
-__mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
-                      float *__restrict__ y) {
-  __nram__ half a[(R0 + 2) * W3 * P0];
-  __nram__ half b[(R0 + 2) * W3 * P0];
-  __nram__ float c[R0 * W0 * P0];
-  __nram__ float d[R0 * W0 * P0];
-  __wram__ half ww[W2];
-
-  for (int g = taskId; g < B0 * B1 * T0; g += taskDim) {
-    int n = g / (B1 * T0);
-    int q = g - n * B1 * T0;
-    int grp = q / T0;
-    int tile = q - grp * T0;
-    int oh = tile * R0;
-    int rows = R0;
-    if (oh + rows > H0)
-      rows = H0 - oh;
-    int ih = rows + 2;
-    int in_base = (n * C0 + grp * B1) * H0 * W0;
-    int w_base = grp * W2;
-    __bang_write_value(a, ih * W3 * P0, (half)0.0f);
-    for (int ic = 0; ic < B1; ++ic) {
-      for (int r = 0; r < ih; ++r) {
-        int ih0 = oh - 1 + r;
-        if ((unsigned)ih0 >= H0)
-          continue;
-        __memcpy(a + (ic * ih + r) * W3 + 1,
-                 x + in_base + ic * H0 * W0 + ih0 * W0,
-                 W0 * sizeof(half), GDRAM2NRAM);
-      }
-    }
-    __memcpy(ww, w + w_base, W2 * sizeof(half), GDRAM2WRAM);
-    __bang_transpose(b, a, P0, ih * W3);
-    __bang_conv(c, b, ww, P0, ih, W3, K0, K0, 1, 1, P0);
-    __bang_transpose(d, c, rows * W0, P0);
-    for (int oc = 0; oc < G0; ++oc) {
-      __memcpy(y + (n * C1 + grp * G0 + oc) * H0 * W0 + oh * W0,
-               d + oc * rows * W0, rows * W0 * sizeof(float), NRAM2GDRAM);
-    }
-  }
-}
-
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
-                        int out_channels, int kernel_size, int groups) {
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels, int out_channels, int kernel_size, int groups) {
+  (void)x;
+  (void)kernel;
   (void)in_channels;
   (void)out_channels;
   (void)kernel_size;
   (void)groups;
-  static torch::Tensor y;
-  static torch::Tensor w;
-  static void *last = nullptr;
-  if (!y.defined())
-    y = torch::empty({B0, C1, H0, W0}, x.options().dtype(torch::kFloat32));
-  else
-    y.resize_({B0, C1, H0, W0});
-  if (!w.defined())
-    w = torch::empty({W1}, kernel.options());
-  else
-    w.resize_({W1});
-  cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {T0, 1, 1};
-  if (last != kernel.data_ptr()) {
-    kz<<<d, cnrtFuncTypeBlock, q>>>(
-        reinterpret_cast<half *>(w.data_ptr<at::Half>()));
-    k0<<<d, cnrtFuncTypeBlock, q>>>(
-        reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(w.data_ptr<at::Half>()));
-    last = kernel.data_ptr();
-  }
-  k1<<<d, cnrtFuncTypeUnion1, q>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
-      y.data_ptr<float>());
-  return y;
+  empty_kernel_Grouped_conv_2D<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
+  return x;
 }

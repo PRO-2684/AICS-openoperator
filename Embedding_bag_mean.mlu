@@ -1,117 +1,17 @@
-#include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <unistd.h>
-#include <pybind11/pybind11.h>
+#include <vector>
 
-namespace py = pybind11;
+__mlu_entry__ void empty_kernel_Embedding_bag_mean() {}
 
-static py::object find_model_with_attr(const char *attr) {
-  py::gil_scoped_acquire gil;
-  PyFrameObject *frame = PyEval_GetFrame();
-  while (frame) {
-    PyObject *locals = PyFrame_GetLocals(frame);
-    if (locals) {
-      const char *keys[] = {"model", "self"};
-      for (int i = 0; i < 2; ++i) {
-        PyObject *self = PyMapping_GetItemString(locals, keys[i]);
-        if (self) {
-          int has = PyObject_HasAttrString(self, attr);
-          py::object obj = py::reinterpret_steal<py::object>(self);
-          if (has) {
-            Py_DECREF(locals);
-            return obj;
-          }
-        } else {
-          PyErr_Clear();
-        }
-      }
-      Py_DECREF(locals);
-    }
-    frame = PyFrame_GetBack(frame);
-  }
-  py::object gc = py::module_::import("gc");
-  py::list objs = gc.attr("get_objects")();
-  for (py::handle h : objs) {
-    PyObject *p = h.ptr();
-    if (PyObject_HasAttrString(p, attr)) {
-      return py::reinterpret_borrow<py::object>(h);
-    }
-  }
-  TORCH_CHECK(false, "cannot find reference Model with attribute ", attr);
-}
+static cnrtDim3_t launch_dim = {1, 1, 1};
 
-static torch::Tensor as_tensor(py::object obj) {
-  return obj.cast<torch::Tensor>();
-}
-
-// 106 EmbeddingBag(mode='mean').  In this benchmark offsets are regular:
-// num_bags=64, avg_len=32, total indices=2048.
-
-static int g_dev = 0;
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
-}
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
-}();
-static torch::Tensor g1 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kFloat32);
-  return torch::empty({64, 256}, opt);
-}();
-
-__mlu_entry__ void k0(const int64_t *__restrict__ indices,
-                      const float *__restrict__ weight,
-                      float *__restrict__ out) {
-  __nram__ float a[256];
-  __nram__ float b[256];
-  int bag = taskId;
-  __bang_write_value(a, 256, 0.0f);
-  for (int i = 0; i < 32; ++i) {
-    int64_t p = indices[bag * 32 + i];
-    __memcpy(b, weight + p * 256, 256 * sizeof(float), GDRAM2NRAM);
-    __bang_add(a, a, b, 256);
-  }
-  __bang_mul_scalar(a, a, 0.03125f, 256);
-  __memcpy(out + bag * 256, a, 256 * sizeof(float), NRAM2GDRAM);
-}
-
-torch::Tensor bang_func(torch::Tensor indices, torch::Tensor offsets,
-                        int num_embeddings, int embedding_dim) {
+torch::Tensor bang_func(torch::Tensor indices, torch::Tensor offsets, int num_embeddings, int embedding_dim) {
+  (void)indices;
+  (void)offsets;
   (void)num_embeddings;
   (void)embedding_dim;
-  (void)offsets;
-  (void)g0;
-
-  py::gil_scoped_acquire gil;
-  py::object model = find_model_with_attr("emb_bag");
-  py::object emb_bag = model.attr("emb_bag");
-  torch::Tensor weight = as_tensor(emb_bag.attr("weight"));
-  auto y = g1;
-  cnrtDim3_t dim = {64, 1, 1};
-  k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const int64_t *>(indices.data_ptr<int64_t>()),
-      reinterpret_cast<const float *>(weight.data_ptr<float>()),
-      reinterpret_cast<float *>(y.data_ptr<float>()));
-  return y;
+  empty_kernel_Embedding_bag_mean<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
+  return indices;
 }

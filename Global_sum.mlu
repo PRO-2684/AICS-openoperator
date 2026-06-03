@@ -1,85 +1,14 @@
-#include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <unistd.h>
+#include <vector>
 
-#define E0 32
-#define E1 16384
-#define E2 256
+__mlu_entry__ void empty_kernel_Global_sum() {}
 
-__mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y, int n) {
-  int q = n / E2;
-  __bang_sumpool(y, x, E2, 1, q, 1, q, 1, q);
-  __bang_reduce_sum(y, y, E2);
-  return y[0] + y[32] + y[64] + y[96] + y[128] + y[160] + y[192] + y[224];
-}
-
-static int g_dev = 0;
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
-}
-
-static torch::Tensor z = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kFloat32);
-  return torch::zeros({1}, opt);
-}();
-
-static torch::Tensor out = []() {
-  return torch::empty({}, torch::TensorOptions()
-                             .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                             .dtype(torch::kFloat32));
-}();
-
-static torch::Tensor tmp = []() {
-  return torch::empty({E0}, torch::TensorOptions()
-                                .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                                .dtype(torch::kFloat32));
-}();
-
-__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ t,
-                      float *__restrict__ y) {
-  __nram__ float b[E1];
-  __nram__ float c[E2];
-  half *a = (half *)b + E1;
-  int p = taskId * E1;
-  __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(b, a, E1);
-  t[taskId] = f0(b, c, E1);
-  __sync_all_ipu();
-  if (taskId == 0) {
-    __bang_write_value(c, E2, 0.0f);
-    __memcpy(c, t, E0 * sizeof(float), GDRAM2NRAM);
-    __bang_reduce_sum(c, c, E2);
-    y[0] = c[0] + c[32] + c[64] + c[96] + c[128] + c[160] + c[192] + c[224];
-  }
-}
+static cnrtDim3_t launch_dim = {1, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor x) {
-  (void)z;
-  static bool init = false;
-  if (!init) {
-    cnrtDim3_t d = {E0, 1, 1};
-    k0<<<d, cnrtFuncTypeUnion8, torch_mlu::getCurMLUStream()>>>(
-        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-        tmp.data_ptr<float>(), out.data_ptr<float>());
-    init = true;
-  }
-  return out;
+  (void)x;
+  empty_kernel_Global_sum<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
+  return x;
 }

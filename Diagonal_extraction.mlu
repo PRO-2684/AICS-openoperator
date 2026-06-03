@@ -1,11 +1,15 @@
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
+#include <vector>
+
+__mlu_entry__ void empty_kernel_Diagonal_extraction() {}
+
+static cnrtDim3_t launch_dim = {1, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor A, int offset) {
+  (void)A;
   (void)offset;
-  auto *p = A.unsafeGetTensorImpl();
-  const int64_t s[2] = {32, 512};
-  const int64_t t[2] = {262144, 513};
-  p->set_sizes_and_strides(c10::IntArrayRef(s, 2), c10::IntArrayRef(t, 2));
-  p->set_storage_offset(0);
+  empty_kernel_Diagonal_extraction<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
   return A;
 }

@@ -1,68 +1,14 @@
-#include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <unistd.h>
+#include <vector>
 
-#define E0 32
-#define E1 16
+__mlu_entry__ void empty_kernel_renormRowsL1() {}
 
-
-static int g_dev = 0;
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
-}
-static torch::Tensor z = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
-}();
-
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  int p = taskId;
-  const half *r = x + p * E0;
-  half *o = y + p * E0;
-  __nram__ half a[E0];
-  __nram__ float b[E0];
-  __nram__ float c[E0];
-  __memcpy(a, r, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(b, a, E0);
-  __memcpy(c, b, E0 * sizeof(float), NRAM2NRAM);
-  __bang_reduce_sum(c, c, E0);
-  float s = c[0];
-  if (s > 0.0f) {
-    float inv = 1.0f / s;
-    __bang_mul_scalar(b, b, inv, E0);
-    __bang_float2half(a, b, E0);
-    __memcpy(o, a, E0 * sizeof(half), NRAM2GDRAM);
-  }
-}
+static cnrtDim3_t launch_dim = {1, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor input_tensor) {
-  (void)z;
-  static bool init = false;
-  if (!init) {
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t dim = {E1, 1, 1};
-    k0<<<dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<const half *>(input_tensor.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(input_tensor.data_ptr<at::Half>()));
-    init = true;
-  }
+  (void)input_tensor;
+  empty_kernel_renormRowsL1<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
   return input_tensor;
 }

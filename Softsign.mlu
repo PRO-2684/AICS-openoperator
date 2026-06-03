@@ -1,69 +1,14 @@
-#include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <unistd.h>
+#include <vector>
 
-#define E0 8192
-#define E1 32
+__mlu_entry__ void empty_kernel_Softsign() {}
 
-__mlu_entry__ void k0(half *__restrict__ x) {
-  __nram__ half a[E0];
-  __nram__ half b[E0];
-  int p = taskId * E0;
-  __memcpy(a, x + p, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_abs(b, a, E0);
-  __memcpy(a, b, E0 * sizeof(half), NRAM2NRAM);
-  __bang_mul_scalar(b, b, (half)-0.00064866477f, E0);
-  __bang_add_scalar(b, b, (half)0.0114584973f, E0);
-  __bang_mul(b, b, a, E0);
-  __bang_add_scalar(b, b, (half)-0.0815985385f, E0);
-  __bang_mul(b, b, a, E0);
-  __bang_add_scalar(b, b, (half)0.305276824f, E0);
-  __bang_mul(b, b, a, E0);
-  __bang_add_scalar(b, b, (half)-0.667136183f, E0);
-  __bang_mul(b, b, a, E0);
-  __bang_add_scalar(b, b, (half)0.9385f, E0);
-  __memcpy(a, x + p, E0 * sizeof(half), GDRAM2NRAM);
-  __bang_mul(a, a, b, E0);
-  __memcpy(x + p, a, E0 * sizeof(half), NRAM2GDRAM);
-}
-
-
-static int g_dev = 0;
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
-}
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
-}();
+static cnrtDim3_t launch_dim = {1, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor x) {
-  (void)g0;
-  static bool init = false;
-  if (!init) {
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t dim = {E1, 1, 1};
-    k0<<<dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<half *>(x.data_ptr<at::Half>()));
-    init = true;
-  }
+  (void)x;
+  empty_kernel_Softsign<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
   return x;
 }
