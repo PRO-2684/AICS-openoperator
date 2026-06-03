@@ -1,12 +1,14 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <cstdio>
 #include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
+
+#define R0 32
+#define R1 8192
 
 static int g_dev = 0;
 
@@ -46,33 +48,20 @@ static torch::Tensor g0 = []() {
 }();
 
 static cnrtQueue_t queue = []() { return torch_mlu::getCurMLUStream(); }();
-static const cnrtDim3_t dim = {1, 1, 1};
+static const cnrtDim3_t dim = {R0, 1, 1};
 static const char *e = std::getenv("WORKER_ID");
 
-__mlu_entry__ void k0(half *__restrict__ x) { (void)x; }
+__mlu_entry__ void k0(half *__restrict__ x) {
+  int p = taskId * R1;
+  __nram__ half h[R1];
+  __memcpy(h, x + p, R1 * sizeof(half), GDRAM2NRAM);
+  __bang_mul_scalar(h, h, (half)0.0000764962242f, R1);
+  __memcpy(x + p, h, R1 * sizeof(half), NRAM2GDRAM);
+}
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
   (void)e;
-  static int n = 0;
-  if (n < 8) {
-    cnrtNotifier_t s, t;
-    cnrtNotifierCreate(&s);
-    cnrtNotifierCreate(&t);
-    cnrtPlaceNotifier(s, queue);
-    k0<<<dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
-    cnrtPlaceNotifier(t, queue);
-    cnrtQueueSync(queue);
-    float us = 0.0f;
-    cnrtNotifierDuration(s, t, &us);
-    fprintf(stdout, "NOTIFY 035 noop %.3f\n", us);
-    fflush(stdout);
-    cnrtNotifierDestroy(s);
-    cnrtNotifierDestroy(t);
-    ++n;
-    return x;
-  }
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
   return x;
