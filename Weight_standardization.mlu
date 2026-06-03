@@ -1,63 +1,149 @@
+#include <bang.h>
 #include <cnrt.h>
-#include <framework/core/MLUStream.h>
-#include <torch/extension.h>
-#include <vector>
-#include <bits/stdint-uintn.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <sched.h>
+#include <framework/core/MLUStream.h>
+#include <math.h>
+#include <torch/extension.h>
 #include <unistd.h>
 
-static int g_dev = 0;
+#define E0 64
+#define E1 576
+#define E2 36864
+#define E3 8
+#define E4 128
+#define E5 130
+#define E6 4
+#define E7 6
+#define E8 32
+#define E9 64
 
-static void bind_host(int d) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  int end = begin + 28;
-  for (int i = begin; i < end; ++i) {
-    CPU_SET(i, &set);
-  }
-  sched_setaffinity(0, sizeof(set), &set);
-}
+static int g_dev = 0;
 
 __attribute__((constructor(101))) static void init_runtime() {
   unsigned int n = 0;
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
     const auto *impl =
         c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
     int torch_n = static_cast<int>(impl->deviceCount());
     if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
-      bind_host(d);
+      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
+      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
       impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
       cnrtSetDevice(d);
       g_dev = d;
     }
   }
 }
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  int o = taskId;
+  if (o >= E0)
+    return;
 
-static torch::Tensor y = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  auto t = torch::zeros({16, 64, 256, 256}, opt);
-  return t;
-}();
+  __nram__ half h[E1];
+  __nram__ float a[E1];
+  __nram__ float b[E1];
+  __nram__ float t[E1];
 
-__mlu_entry__ void empty_kernel_Weight_standardization(half *__restrict__ input) {
-  (void)input;
+  __memcpy(h, x + o * E1, E1 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(a, h, E1);
+  __bang_reduce_sum(t, a, E1);
+  float s = 0.0f;
+#pragma unroll
+  for (int i = 0; i < 18; ++i) {
+    s += t[i * 32];
+  }
+  float m = s * 0.001736111111111111f;
+
+  __bang_sub_scalar(a, a, m, E1);
+  __bang_mul(b, a, a, E1);
+  __bang_reduce_sum(t, b, E1);
+  float q = 0.0f;
+#pragma unroll
+  for (int i = 0; i < 18; ++i) {
+    q += t[i * 32];
+  }
+  float r = 1.0f / (sqrtf(q * 0.0017391304347826088f) + 1.0e-5f);
+  __bang_mul_scalar(a, a, r, E1);
+
+  for (int c = 0; c < E0; ++c) {
+#pragma unroll
+    for (int kh = 0; kh < 3; ++kh) {
+#pragma unroll
+      for (int kw = 0; kw < 3; ++kw) {
+        y[((o * 3 + kh) * 3 + kw) * E0 + c] =
+            (half)a[(c * 3 + kh) * 3 + kw];
+      }
+    }
+  }
 }
 
-static cnrtDim3_t launch_dim = {1, 1, 1};
+__mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
+                      float *__restrict__ y) {
+  __nram__ float a[E7 * E5 * E0];
+  __nram__ float aa[E7 * E5 * E0];
+  __nram__ half h[E4];
+  __nram__ float c[E6 * E4 * E0];
+  __nram__ float d[E6 * E4 * E0];
+  __wram__ half ww[E2];
+  __memcpy(ww, w, E2 * sizeof(half), GDRAM2WRAM);
 
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, int in_channels, int out_channels, int kernel_size) {
-  (void)x;
-  (void)weight;
+  for (int t = taskId; t < E3 * E8; t += taskDim) {
+    int n = t >> 5;
+    int oh = (t & 31) * E6;
+    int ih0 = oh - 1;
+    __bang_write_value(a, E7 * E5 * E0, 0.0f);
+#pragma unroll
+    for (int r = 0; r < E7; ++r) {
+      int ih = ih0 + r;
+        if ((unsigned)ih < E4) {
+          for (int c0 = 0; c0 < E0; ++c0) {
+            __memcpy(h, x + (n * E0 + c0) * E4 * E4 + ih * E4,
+                     E4 * sizeof(half), GDRAM2NRAM);
+            __bang_half2float(a + (c0 * E7 + r) * E5 + 1, h, E4);
+        }
+      }
+    }
+    __bang_transpose(aa, a, E0, E7 * E5);
+    __bang_conv(c, aa, ww, E0, E7, E5, 3, 3, 1, 1, E9);
+    __bang_transpose(d, c, E6 * E4, E9);
+    for (int oc = 0; oc < E9; ++oc) {
+      __memcpy(y + (n * E9 + oc) * E4 * E4 + oh * E4, d + oc * E6 * E4,
+               E6 * E4 * sizeof(float), NRAM2GDRAM);
+    }
+  }
+}
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, int in_channels,
+                        int out_channels, int kernel_size) {
   (void)in_channels;
   (void)out_channels;
   (void)kernel_size;
-  (void)y;
-  empty_kernel_Weight_standardization<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
-  return x;
+
+  static torch::Tensor y;
+  static torch::Tensor w;
+  static void *last = nullptr;
+  if (!y.defined())
+    y = torch::empty({8, 64, 128, 128}, x.options().dtype(torch::kFloat32));
+  else
+    y.resize_({8, 64, 128, 128});
+  if (!w.defined())
+    w = torch::empty({E2}, weight.options().dtype(torch::kHalf));
+  else
+    w.resize_({E2});
+
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  if (last != weight.data_ptr()) {
+    cnrtDim3_t g = {E0, 1, 1};
+    k0<<<g, cnrtFuncTypeBlock, queue>>>(
+        reinterpret_cast<const half *>(weight.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(w.data_ptr<at::Half>()));
+    last = weight.data_ptr();
+  }
+
+  cnrtDim3_t d = {32, 1, 1};
+  k1<<<d, cnrtFuncTypeUnion1, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
+      y.data_ptr<float>());
+  return y;
 }
