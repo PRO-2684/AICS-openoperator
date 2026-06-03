@@ -52,7 +52,7 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  return torch::empty({16, 64, 256, 256}, opt);
+  return torch::zeros({8192}, opt);
 }();
 
 __mlu_entry__ void empty_kernel() {}
