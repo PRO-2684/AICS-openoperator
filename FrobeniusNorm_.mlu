@@ -44,7 +44,7 @@ static torch::Tensor y = []() {
                  .device(torch::kCPU)
                  .dtype(torch::kHalf)
                  .pinned_memory(true);
-  auto t = torch::empty({16, 64, 256, 256}, opt);
+  auto t = torch::zeros({16, 64, 256, 256}, opt);
   return t;
 }();
 
