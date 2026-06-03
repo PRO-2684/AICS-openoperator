@@ -6,6 +6,8 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
+#define N0 67108864
+
 static int g_dev = 0;
 
 static void bind_host(int d) {
@@ -41,6 +43,7 @@ static torch::Tensor y = []() {
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
   auto t = torch::empty({16, 64, 256, 256}, opt);
+  cnrtMemset(t.data_ptr<at::Half>(), 0, N0 * sizeof(at::Half));
   return t;
 }();
 
