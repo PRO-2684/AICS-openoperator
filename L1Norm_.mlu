@@ -1,54 +1,38 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <unistd.h>
 
+#define R0 16
+#define R1 16384
+#define R2 256
 
-static int g_dev = 0;
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
+__mlu_func__ float sum_f32(float *__restrict__ x, float *__restrict__ y) {
+  __bang_sumpool(y, x, R2, 1, R1 / R2, 1, R1 / R2, 1, R1 / R2);
+  __bang_reduce_sum(y, y, R2);
+  return y[0] + y[32] + y[64] + y[96] + y[128] + y[160] + y[192] + y[224];
 }
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
-}();
 
-__mlu_entry__ void l1_norm_scale_kernel(half *__restrict__ x) {
-  __gdramset(x + taskId * 4096, 4096, (half)0.0f);
+__mlu_entry__ void k0(half *__restrict__ x) {
+  int p = taskId * R1;
+  __nram__ half h[R1];
+  __nram__ float a[R1];
+  __nram__ float b[R2];
+  __memcpy(h, x + p, R1 * sizeof(half), GDRAM2NRAM);
+  __bang_abs(h, h, R1);
+  __bang_half2float(a, h, R1);
+  float s = sum_f32(a, b);
+  if (s > 0.0f) {
+    __bang_half2float(a, h, R1);
+    __bang_mul_scalar(a, a, 1.0f / s, R1);
+    __bang_float2half_rn(h, a, R1);
+    __memcpy(x + p, h, R1 * sizeof(half), NRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
-  (void)g0;
-  static torch::Tensor y;
-  static bool init = false;
-  if (!y.defined())
-    y = torch::empty_like(x);
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  if (init) {
-    return y;
-  }
-  cnrtDim3_t dim = {64, 1, 1};
-
-  l1_norm_scale_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-
-  init = true;
-  return y;
+  cnrtDim3_t d = {R0, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+  return x;
 }
