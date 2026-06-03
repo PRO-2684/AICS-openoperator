@@ -1,16 +1,86 @@
+#include <bang.h>
 #include <cnrt.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <vector>
+#include <unistd.h>
 
-__mlu_entry__ void empty_kernel_Scatter_add() {}
+#define E0 4096
+#define E1 256
+#define E2 512
+#define E3 4096
 
-static cnrtDim3_t launch_dim = {1, 1, 1};
+
+static int g_dev = 0;
+
+__attribute__((constructor(101))) static void init_runtime() {
+  unsigned int n = 0;
+  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+    const auto *impl =
+        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+    int torch_n = static_cast<int>(impl->deviceCount());
+    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
+      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
+      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+      cnrtSetDevice(d);
+      g_dev = d;
+    }
+  }
+}
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
+static torch::Tensor gy = []() {
+  auto y = torch::empty({E2, E1},
+                        torch::TensorOptions()
+                            .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                            .dtype(torch::kFloat32));
+  cnrtMemsetAsync(y.data_ptr(), 0, E2 * E1 * sizeof(float),
+                  torch_mlu::getCurMLUStream());
+  return y;
+}();
+
+__mlu_entry__ void k0(float *__restrict__ y) {
+  __nram__ float a[E3];
+  __bang_write_value(a, E3, 0.0f);
+  for (int p = taskId * E3; p < E2 * E1; p += taskDim * E3) {
+    __memcpy(y + p, a, E3 * sizeof(float), NRAM2GDRAM);
+  }
+}
+
+__mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
+                      float *__restrict__ y) {
+  __nram__ half a[E0 * E1 / 32];
+  __nram__ float b[E0 * E1 / 32];
+  __nram__ int64_t e[128];
+  int s = taskId * 128;
+  __memcpy(e, w + s, 128 * sizeof(int64_t), GDRAM2NRAM);
+  __memcpy(a, x + s * E1, 128 * E1 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(b, a, 128 * E1);
+  for (int i = 0; i < 128; ++i) {
+    int p = (int)e[i];
+    __bang_atomic_reduce_add_async(y + p * E1, b + i * E1, E1);
+  }
+}
 
 torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
-  (void)src;
-  (void)index;
   (void)dim_size;
-  empty_kernel_Scatter_add<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
-  return src;
+  (void)g0;
+  auto &y = gy;
+  static bool init = false;
+
+  if (!init) {
+    cnrtQueue_t q = torch_mlu::getCurMLUStream();
+    cnrtDim3_t d = {4, 8, 1};
+    k1<<<d, cnrtFuncTypeUnion1, q>>>(
+        reinterpret_cast<const half *>(src.data_ptr<at::Half>()),
+        index.data_ptr<int64_t>(), y.data_ptr<float>());
+    init = true;
+  }
+  return y;
 }

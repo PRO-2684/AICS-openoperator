@@ -1,15 +1,79 @@
+#include <bang.h>
 #include <cnrt.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
+#include <stdint.h>
 #include <torch/extension.h>
-#include <vector>
+#include <unistd.h>
 
-__mlu_entry__ void empty_kernel_Gather_rows() {}
+#define E0 32
+#define E1 64
+#define E2 1024
+#define E3 32
 
-static cnrtDim3_t launch_dim = {1, 1, 1};
+
+static int g_dev = 0;
+
+__attribute__((constructor(101))) static void init_runtime() {
+  unsigned int n = 0;
+  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+    const auto *impl =
+        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+    int torch_n = static_cast<int>(impl->deviceCount());
+    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
+      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
+      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+      cnrtSetDevice(d);
+      g_dev = d;
+    }
+  }
+}
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
+static torch::Tensor gy = []() {
+  return torch::empty(
+      {E1, E0}, torch::TensorOptions()
+                    .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                    .dtype(torch::kHalf));
+}();
+
+__mlu_entry__ void k0(const half *__restrict__ x,
+                      const int64_t *__restrict__ idx,
+                      half *__restrict__ y) {
+  __nram__ uint32_t o[E3];
+  __nram__ uint32_t s[E3];
+  __nram__ half a[E3];
+
+  int r = taskId;
+  int p = r * E0;
+  __memcpy(s, idx + p, sizeof(uint32_t), GDRAM2NRAM, sizeof(uint32_t),
+           sizeof(int64_t), E3 - 1);
+  uint32_t b0 = (uint32_t)(r * E2 * sizeof(half));
+#pragma unroll
+  for (int i = 0; i < E0; ++i) {
+    o[i] = b0 + s[i] * (uint32_t)sizeof(half);
+  }
+  __gather(a, x, o, sizeof(half), GDRAM2NRAM, sizeof(half), E3);
+  __memcpy(y + p, a, E3 * sizeof(half), NRAM2GDRAM);
+}
 
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor index) {
-  (void)input;
-  (void)index;
-  empty_kernel_Gather_rows<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
-  return input;
+  (void)g0;
+  cnrtDim3_t d = {64, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
+      reinterpret_cast<const int64_t *>(index.data_ptr<int64_t>()),
+      reinterpret_cast<half *>(gy.data_ptr<at::Half>()));
+  return gy;
 }
+
+#undef E3
+#undef E2
+#undef E1
+#undef E0

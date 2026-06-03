@@ -1,17 +1,34 @@
+#include <bang.h>
 #include <cnrt.h>
-#include <framework/core/MLUStream.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <torch/extension.h>
-#include <vector>
+#include <unistd.h>
 
-__mlu_entry__ void empty_kernel_LSTM_forward() {}
+// Task: 137 137_LSTM_forward
+// Category: fused
+// Difficulty: hard
+// DType: float16
+// Description: 实现一个 BangC 算子，计算多层长短期记忆网络（LSTM）的前向传播并输出所有时间步的隐藏状态序列。输入包括形状为 `[batch, seq, input_size]` 的张量 `x`，以及定义网络结构的标量参数输入维度 `input_size`、隐藏层维度 `hidden_size` 和循环层数 `num_layers`；输出张量的形状为 `[batch, seq, hidden_size]`。
+// Wrapper: 
+static int g_dev = 0;
 
-static cnrtDim3_t launch_dim = {1, 1, 1};
+__attribute__((constructor(101))) static void init_runtime() {
+  unsigned int n = 0;
+  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+    const auto *impl =
+        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+    int torch_n = static_cast<int>(impl->deviceCount());
+    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
+      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
+      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+      cnrtSetDevice(d);
+      g_dev = d;
+    }
+  }
+}
+torch::Tensor bang_func(torch::Tensor x, int input_size, int hidden_size, int num_layers);
 
 torch::Tensor bang_func(torch::Tensor x, int input_size, int hidden_size, int num_layers) {
-  (void)x;
-  (void)input_size;
-  (void)hidden_size;
-  (void)num_layers;
-  empty_kernel_LSTM_forward<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
-  return x;
+  TORCH_CHECK(false, "TODO: implement LSTM_forward");
 }

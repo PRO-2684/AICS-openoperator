@@ -1,15 +1,119 @@
+#include <bang.h>
 #include <cnrt.h>
-#include <framework/core/MLUStream.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <torch/extension.h>
-#include <vector>
+#include <unistd.h>
+#include <framework/core/MLUStream.h>
 
-__mlu_entry__ void empty_kernel_matrix_scalar_multiplication() {}
+#define CHUNK_SIZE 65536
+#define TASK_COUNT 32
 
-static cnrtDim3_t launch_dim = {1, 1, 1};
+__mlu_entry__ void matrix_scalar_mul_float_kernel(const float *input,
+                                                  float *output,
+                                                  uint32_t total,
+                                                  float scalar) {
+  if (__is_mpu()) return;
+
+  uint32_t task_id = taskId;
+  uint32_t task_num = taskDim;
+  uint32_t per_task = total / task_num;
+  uint32_t remainder = total % task_num;
+  uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
+  uint32_t count = per_task + (task_id < remainder ? 1 : 0);
+
+  __nram__ float nram_buf[CHUNK_SIZE];
+
+  for (uint32_t offset = 0; offset < count; offset += CHUNK_SIZE) {
+    uint32_t len = (offset + CHUNK_SIZE <= count) ? CHUNK_SIZE : (count - offset);
+    uint32_t aligned_len = (len + 63) & ~63;
+
+    __memcpy(nram_buf, input + start + offset, len * sizeof(float), GDRAM2NRAM);
+    if (aligned_len > len) {
+      __bang_write_value(nram_buf + len, aligned_len - len, 0.0f);
+    }
+
+    __bang_mul_scalar(nram_buf, nram_buf, scalar, aligned_len);
+
+    __memcpy(output + start + offset, nram_buf, len * sizeof(float), NRAM2GDRAM);
+  }
+}
+
+__mlu_entry__ void matrix_scalar_mul_half_kernel(const half *input,
+                                                 half *output,
+                                                 uint32_t total,
+                                                 float scalar) {
+  if (__is_mpu()) return;
+
+  uint32_t task_id = taskId;
+  uint32_t task_num = taskDim;
+  uint32_t per_task = total / task_num;
+  uint32_t remainder = total % task_num;
+  uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
+  uint32_t count = per_task + (task_id < remainder ? 1 : 0);
+
+  __nram__ half nram_buf[CHUNK_SIZE * 2];
+
+  for (uint32_t offset = 0; offset < count; offset += CHUNK_SIZE) {
+    uint32_t len = (offset + CHUNK_SIZE <= count) ? CHUNK_SIZE : (count - offset);
+    uint32_t aligned_len = (len + 63) & ~63;
+
+    __memcpy(nram_buf, input + start + offset, len * sizeof(half), GDRAM2NRAM);
+    if (aligned_len > len) {
+      __bang_write_value(nram_buf + len, aligned_len - len, (half)0.0f);
+    }
+
+    __bang_mul_scalar(nram_buf, nram_buf, scalar, aligned_len);
+
+    __memcpy(output + start + offset, nram_buf, len * sizeof(half), NRAM2GDRAM);
+  }
+}
+
+
+static int g_dev = 0;
+
+__attribute__((constructor(101))) static void init_runtime() {
+  unsigned int n = 0;
+  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+    const auto *impl =
+        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+    int torch_n = static_cast<int>(impl->deviceCount());
+    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
+      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
+      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+      cnrtSetDevice(d);
+      g_dev = d;
+    }
+  }
+}
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
 
 torch::Tensor bang_func(torch::Tensor input, double scalar) {
-  (void)input;
-  (void)scalar;
-  empty_kernel_matrix_scalar_multiplication<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
+  (void)g0;
+  uint32_t total = static_cast<uint32_t>(input.numel());
+  float scalar_f = static_cast<float>(scalar);
+
+  if (total == 0) {
+    return input;
+  }
+
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {TASK_COUNT, 1, 1};
+  cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
+
+  if (input.scalar_type() == at::kFloat) {
+    matrix_scalar_mul_float_kernel<<<dim, ktype, queue>>>(
+        input.data_ptr<float>(), input.data_ptr<float>(), total, scalar_f);
+  } else {
+    matrix_scalar_mul_half_kernel<<<dim, ktype, queue>>>(
+        reinterpret_cast<half *>(input.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(input.data_ptr<at::Half>()), total, scalar_f);
+  }
+
   return input;
 }

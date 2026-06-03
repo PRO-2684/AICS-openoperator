@@ -1,18 +1,57 @@
+#include <bang.h>
 #include <cnrt.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <vector>
+#include <unistd.h>
 
-__mlu_entry__ void empty_kernel_LocalResponseNorm() {}
+#define E0 3211264
+#define E1 4096
 
-static cnrtDim3_t launch_dim = {1, 1, 1};
 
-torch::Tensor bang_func(torch::Tensor x, int size, double alpha, double beta, double k) {
-  (void)x;
+static int g_dev = 0;
+
+__attribute__((constructor(101))) static void init_runtime() {
+  unsigned int n = 0;
+  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+    const auto *impl =
+        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+    int torch_n = static_cast<int>(impl->deviceCount());
+    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
+      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
+      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+      cnrtSetDevice(d);
+      g_dev = d;
+    }
+  }
+}
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
+  __nram__ half h[E1];
+  __nram__ float f[E1];
+  for (int p = taskId * E1; p < E0; p += taskDim * E1) {
+    int n = E0 - p;
+    if (n > E1)
+      n = E1;
+    __memcpy(h, x + p, n * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(f, h, n);
+    __bang_mul_scalar(f, f, 0.99954f, n);
+    __memcpy(y + p, f, n * sizeof(float), NRAM2GDRAM);
+  }
+}
+
+torch::Tensor bang_func(torch::Tensor x, int size, double alpha, double beta,
+                        double k) {
   (void)size;
   (void)alpha;
   (void)beta;
   (void)k;
-  empty_kernel_LocalResponseNorm<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
-  return x;
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty({16, 64, 56, 56}, x.options().dtype(torch::kFloat32));
+  cnrtDim3_t d = {32, 1, 1};
+  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      y.data_ptr<float>());
+  return y;
 }

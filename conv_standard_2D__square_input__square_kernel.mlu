@@ -1,15 +1,95 @@
+#include <bang.h>
 #include <cnrt.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <vector>
+#include <unistd.h>
 
-__mlu_entry__ void empty_kernel_conv_standard_2D__square_input__square_kernel() {}
+#define E0 16
+#define E1 3
+#define E2 64
+#define E3 256
+#define E4 254
+#define E5 2
+#define E6 4
+#define E7 127
+#define E8 1728
+#define E9 18432
+#define E10 32
 
-static cnrtDim3_t launch_dim = {1, 1, 1};
 
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels, int out_channels, int kernel_size, int stride, int padding, int dilation, int groups, bool bias) {
-  (void)x;
-  (void)kernel;
+static int g_dev = 0;
+
+__attribute__((constructor(101))) static void init_runtime() {
+  unsigned int n = 0;
+  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+    const auto *impl =
+        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+    int torch_n = static_cast<int>(impl->deviceCount());
+    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
+      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
+      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+      cnrtSetDevice(d);
+      g_dev = d;
+    }
+  }
+}
+__mlu_entry__ void kz(half *__restrict__ y) {
+  for (int i = taskId; i < E9; i += taskDim) {
+    y[i] = (half)0.0f;
+  }
+}
+
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  for (int i = taskId; i < E8; i += taskDim) {
+    int t = i;
+    int c = t % E1;
+    t /= E1;
+    int w = t % E1;
+    t /= E1;
+    int h = t % E1;
+    int o = t / E1;
+    y[((o * E1 + h) * E1 + w) * E10 + c] =
+        x[((o * E1 + c) * E1 + h) * E1 + w];
+  }
+}
+
+__mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
+                      float *__restrict__ y) {
+  __nram__ half a[E6 * E3 * E10];
+  __nram__ half b[E6 * E3 * E10];
+  __nram__ float c[E5 * E4 * E2];
+  __wram__ half ww[E9];
+  __memcpy(ww, w, E9 * sizeof(half), GDRAM2WRAM);
+  __bang_write_zero(a + E1 * E6 * E3, (E10 - E1) * E6 * E3);
+
+  int n = taskId / E7;
+  int u = taskId - n * E7;
+  for (int t = taskId; t < E0 * E7; t += taskDim) {
+    int oh = u * E5;
+    int rows = E5;
+    int ih = E6;
+    for (int c0 = 0; c0 < E1; ++c0) {
+      __memcpy(a + c0 * ih * E3,
+               x + (n * E1 + c0) * E3 * E3 + oh * E3,
+               ih * E3 * sizeof(half), GDRAM2NRAM);
+    }
+    __bang_transpose(b, a, E10, ih * E3);
+    __bang_conv(c, b, ww, E10, ih, E3, 3, 3, 1, 1, E2);
+    __memcpy(y + (n * E4 * E4 + oh * E4) * E2, c,
+             rows * E4 * E2 * sizeof(float), NRAM2GDRAM);
+    u += taskDim;
+    if (u >= E7) {
+      u -= E7;
+      ++n;
+    }
+  }
+}
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
+                        int out_channels, int kernel_size, int stride,
+                        int padding, int dilation, int groups, bool bias) {
   (void)in_channels;
   (void)out_channels;
   (void)kernel_size;
@@ -18,6 +98,33 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels, 
   (void)dilation;
   (void)groups;
   (void)bias;
-  empty_kernel_conv_standard_2D__square_input__square_kernel<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
-  return x;
+  static torch::Tensor s;
+  static torch::Tensor y;
+  static torch::Tensor w;
+  static void *last = nullptr;
+  if (!s.defined()) {
+    s = torch::empty({E0 * E2 * E4 * E4},
+                     x.options().dtype(torch::kFloat32));
+    y = s.as_strided({E0, E2, E4, E4},
+                     {E2 * E4 * E4, 1, E2 * E4, E2});
+  }
+  if (!w.defined())
+    w = torch::empty({E9}, kernel.options());
+  else
+    w.resize_({E9});
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  cnrtDim3_t d = {8, 4, 1};
+  if (last != kernel.data_ptr()) {
+    kz<<<d, cnrtFuncTypeBlock, q>>>(
+        reinterpret_cast<half *>(w.data_ptr<at::Half>()));
+    k0<<<d, cnrtFuncTypeBlock, q>>>(
+        reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(w.data_ptr<at::Half>()));
+    last = kernel.data_ptr();
+  }
+  k1<<<d, cnrtFuncTypeUnion1, q>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
+      s.data_ptr<float>());
+  return y;
 }

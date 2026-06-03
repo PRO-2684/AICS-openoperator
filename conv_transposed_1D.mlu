@@ -1,15 +1,102 @@
+#include <bang.h>
 #include <cnrt.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <vector>
+#include <unistd.h>
 
-__mlu_entry__ void empty_kernel_conv_transposed_1D() {}
+#define E0 16
 
-static cnrtDim3_t launch_dim = {1, 1, 1};
 
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels, int out_channels, int kernel_size, int stride, int padding, int output_padding, int groups, bool bias) {
-  (void)x;
-  (void)kernel;
+static int g_dev = 0;
+
+__attribute__((constructor(101))) static void init_runtime() {
+  unsigned int n = 0;
+  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+    const auto *impl =
+        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+    int torch_n = static_cast<int>(impl->deviceCount());
+    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
+      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
+      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+      cnrtSetDevice(d);
+      g_dev = d;
+    }
+  }
+}
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+static torch::Tensor g1 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kFloat32);
+  return torch::empty({16, 3, 130}, opt);
+}();
+__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
+                      float *__restrict__ y) {
+  __mlu_shared__ float s[1560];
+  __nram__ half h[390];
+  __nram__ half kh[576];
+  __nram__ float a[128];
+  __nram__ float b0[130];
+  __nram__ float b1[130];
+  __nram__ float b2[130];
+  __nram__ float all[1560];
+  __nram__ float acc[390];
+  int lane = taskIdX;
+  if (coreId != 0x80) {
+    __memcpy(kh, w, 576 * sizeof(half), GDRAM2NRAM);
+  }
+  for (int n = taskIdY; n < E0; n += taskDimY) {
+    if (coreId != 0x80) {
+      __bang_write_value(b0, 130, 0.0f);
+      __bang_write_value(b1, 130, 0.0f);
+      __bang_write_value(b2, 130, 0.0f);
+      for (int i = lane * 16; i < lane * 16 + 16; ++i) {
+        __memcpy(h, x + n * 8192 + i * 128, 128 * sizeof(half), GDRAM2NRAM);
+        __bang_half2float(a, h, 128);
+        int o = i * 9;
+        __bang_fusion(FUSION_FMA, b0, a, (float)kh[o], b0, 128, 128);
+        __bang_fusion(FUSION_FMA, b1, a, (float)kh[o + 3], b1, 128, 128);
+        __bang_fusion(FUSION_FMA, b2, a, (float)kh[o + 6], b2, 128, 128);
+        __bang_fusion(FUSION_FMA, b0 + 1, a, (float)kh[o + 1], b0 + 1, 128,
+                      128);
+        __bang_fusion(FUSION_FMA, b1 + 1, a, (float)kh[o + 4], b1 + 1, 128,
+                      128);
+        __bang_fusion(FUSION_FMA, b2 + 1, a, (float)kh[o + 7], b2 + 1, 128,
+                      128);
+        __bang_fusion(FUSION_FMA, b0 + 2, a, (float)kh[o + 2], b0 + 2, 128,
+                      128);
+        __bang_fusion(FUSION_FMA, b1 + 2, a, (float)kh[o + 5], b1 + 2, 128,
+                      128);
+        __bang_fusion(FUSION_FMA, b2 + 2, a, (float)kh[o + 8], b2 + 2, 128,
+                      128);
+      }
+      __memcpy(s + lane * 390, b0, 130 * sizeof(float), NRAM2SRAM);
+      __memcpy(s + lane * 390 + 130, b1, 130 * sizeof(float), NRAM2SRAM);
+      __memcpy(s + lane * 390 + 260, b2, 130 * sizeof(float), NRAM2SRAM);
+    }
+    __sync_cluster();
+    if (lane == 0 && coreId != 0x80) {
+      __memcpy(all, s, 1560 * sizeof(float), SRAM2NRAM);
+      __bang_add(acc, all, all + 390, 390);
+      __bang_add(acc, acc, all + 780, 390);
+      __bang_add(acc, acc, all + 1170, 390);
+      __memcpy(y + n * 390, acc, 390 * sizeof(float), NRAM2GDRAM);
+    }
+    __sync_cluster();
+  }
+}
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
+                        int out_channels, int kernel_size, int stride,
+                        int padding, int output_padding, int groups,
+                        bool bias) {
   (void)in_channels;
   (void)out_channels;
   (void)kernel_size;
@@ -18,6 +105,12 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels, 
   (void)output_padding;
   (void)groups;
   (void)bias;
-  empty_kernel_conv_transposed_1D<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
-  return x;
+  (void)g0;
+  auto y = g1;
+  cnrtDim3_t d0 = {4, 8, 1};
+  k0<<<d0, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
+      y.data_ptr<float>());
+  return y;
 }

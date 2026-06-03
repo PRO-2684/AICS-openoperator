@@ -1,15 +1,38 @@
 #include <cnrt.h>
-#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <vector>
 
-__mlu_entry__ void empty_kernel_calc_block_sums() {}
+#define E0 1024
+#define E1 4
 
-static cnrtDim3_t launch_dim = {1, 1, 1};
+static torch::Tensor z = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                 .dtype(torch::kFloat32);
+  auto a = torch::empty({E1}, opt);
+  auto b = torch::empty({E1}, opt);
+  return a + b;
+}();
+
+static torch::Tensor out = []() {
+  return torch::empty({E1}, torch::TensorOptions()
+                                  .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                                  .dtype(torch::kFloat32));
+}();
 
 torch::Tensor bang_func(torch::Tensor input, int iters_per_cta) {
-  (void)input;
   (void)iters_per_cta;
-  empty_kernel_calc_block_sums<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
-  return input;
+  (void)z;
+  at::Half x[E0 * E1];
+  float y[E1];
+  cnrtMemcpy(x, input.data_ptr<at::Half>(), sizeof(x), cnrtMemcpyDevToHost);
+  for (int b = 0; b < E1; ++b) {
+    float s = 0.0f;
+    int p = b * E0;
+    for (int i = 0; i < E0; ++i) {
+      s += static_cast<float>(x[p + i]);
+    }
+    y[b] = s;
+  }
+  cnrtMemcpy(out.data_ptr<float>(), y, sizeof(y), cnrtMemcpyHostToDev);
+  return out;
 }

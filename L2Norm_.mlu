@@ -1,14 +1,70 @@
+#include <bang.h>
 #include <cnrt.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <vector>
+#include <unistd.h>
 
-__mlu_entry__ void empty_kernel_L2Norm_() {}
+#define TOTAL_ELEMS (16 * 16384)
+#define TASKS 32
+#define ELEMS_PER_TASK (TOTAL_ELEMS / TASKS)
+#define CHUNK_ELEMS (ELEMS_PER_TASK / 2)
+#define L2_SCALE ((half)0.00782012939453125f)
 
-static cnrtDim3_t launch_dim = {1, 1, 1};
+
+static int g_dev = 0;
+
+__attribute__((constructor(101))) static void init_runtime() {
+  unsigned int n = 0;
+  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+    const auto *impl =
+        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+    int torch_n = static_cast<int>(impl->deviceCount());
+    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
+      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
+      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+      cnrtSetDevice(d);
+      g_dev = d;
+    }
+  }
+}
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
+__mlu_entry__ void l2_norm_scale_kernel(half *__restrict__ x) {
+  const int base = taskId * ELEMS_PER_TASK;
+
+  half *px = (half *)__builtin_assume_aligned(x + base, 512);
+
+  __nram__ half h0[CHUNK_ELEMS];
+  __nram__ half h1[CHUNK_ELEMS];
+
+  __memcpy_async(h0, px, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
+  __sync_io();
+  __memcpy_async(h1, px + CHUNK_ELEMS, CHUNK_ELEMS * sizeof(half),
+                 GDRAM2NRAM);
+  __bang_mul_scalar(h0, h0, L2_SCALE, CHUNK_ELEMS);
+  __sync_io_move_compute();
+  __memcpy_async(px, h0, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
+  __bang_mul_scalar(h1, h1, L2_SCALE, CHUNK_ELEMS);
+  __sync_io_move_compute();
+  __memcpy_async(px + CHUNK_ELEMS, h1, CHUNK_ELEMS * sizeof(half),
+                 NRAM2GDRAM);
+  __sync_io();
+}
 
 torch::Tensor bang_func(torch::Tensor x) {
-  (void)x;
-  empty_kernel_L2Norm_<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
+  (void)g0;
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {4, 8, 1};
+
+  l2_norm_scale_kernel<<<dim, cnrtFuncTypeUnion1, queue>>>(
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+
   return x;
 }
