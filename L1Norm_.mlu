@@ -1,6 +1,7 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <cstdio>
 #include <torch/extension.h>
 
 #define R0 16
@@ -31,8 +32,29 @@ __mlu_entry__ void k0(half *__restrict__ x) {
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
+  static int n = 0;
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  if (n < 16) {
+    cnrtNotifier_t s, e;
+    cnrtNotifierCreate(&s);
+    cnrtNotifierCreate(&e);
+    cnrtPlaceNotifier(s, q);
+    cnrtDim3_t d = {R0, 1, 1};
+    k0<<<d, cnrtFuncTypeBlock, q>>>(
+        reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+    cnrtPlaceNotifier(e, q);
+    cnrtQueueSync(q);
+    float us = 0.0f;
+    cnrtNotifierDuration(s, e, &us);
+    fprintf(stdout, "NOTIFY 035 k0 %.3f\n", us);
+    fflush(stdout);
+    cnrtNotifierDestroy(s);
+    cnrtNotifierDestroy(e);
+    ++n;
+    return x;
+  }
   cnrtDim3_t d = {R0, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  k0<<<d, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
   return x;
 }

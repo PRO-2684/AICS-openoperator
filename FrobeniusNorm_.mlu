@@ -2,6 +2,7 @@
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
+#include <cstdio>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -87,6 +88,39 @@ torch::Tensor bang_func(torch::Tensor x) {
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d0 = {T0, 1, 1};
   cnrtDim3_t d1 = {1, 1, 1};
+  static int n = 0;
+  if (n < 16) {
+    cnrtNotifier_t s, a, b, e;
+    cnrtNotifierCreate(&s);
+    cnrtNotifierCreate(&a);
+    cnrtNotifierCreate(&b);
+    cnrtNotifierCreate(&e);
+    cnrtPlaceNotifier(s, q);
+    k0<<<d0, cnrtFuncTypeUnion1, q>>>(
+        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+        tmp.data_ptr<float>());
+    cnrtPlaceNotifier(a, q);
+    k1<<<d1, cnrtFuncTypeBlock, q>>>(tmp.data_ptr<float>());
+    cnrtPlaceNotifier(b, q);
+    k2<<<d0, cnrtFuncTypeUnion1, q>>>(
+        reinterpret_cast<half *>(x.data_ptr<at::Half>()), tmp.data_ptr<float>());
+    cnrtPlaceNotifier(e, q);
+    cnrtQueueSync(q);
+    float u0 = 0.0f, u1 = 0.0f, u2 = 0.0f, ut = 0.0f;
+    cnrtNotifierDuration(s, a, &u0);
+    cnrtNotifierDuration(a, b, &u1);
+    cnrtNotifierDuration(b, e, &u2);
+    cnrtNotifierDuration(s, e, &ut);
+    fprintf(stdout, "NOTIFY 042 k0 %.3f k1 %.3f k2 %.3f total %.3f\n", u0,
+            u1, u2, ut);
+    fflush(stdout);
+    cnrtNotifierDestroy(s);
+    cnrtNotifierDestroy(a);
+    cnrtNotifierDestroy(b);
+    cnrtNotifierDestroy(e);
+    ++n;
+    return x;
+  }
   k0<<<d0, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       tmp.data_ptr<float>());
