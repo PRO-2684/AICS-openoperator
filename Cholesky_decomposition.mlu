@@ -48,11 +48,14 @@ struct RuntimeInit {
 
 static RuntimeInit runtime_init;
 
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::zeros({8192}, opt);
+static void *g0 = []() {
+  void *p = nullptr;
+  cnrtSetDevice(g_dev);
+  if (cnrtMalloc(&p, 134217728) == cnrtSuccess) {
+    cnrtMemset(p, 0, 134217728);
+    cnrtSyncDevice();
+  }
+  return p;
 }();
 
 __mlu_entry__ void empty_kernel() {}
