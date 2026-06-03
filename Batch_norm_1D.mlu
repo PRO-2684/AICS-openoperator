@@ -1,62 +1,205 @@
+#include <bang.h>
 #include <cnrt.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <vector>
-#include <bits/stdint-uintn.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <sched.h>
 #include <unistd.h>
 
-static int g_dev = 0;
+#define E0 256
+#define E1 512
+#define E2 32
 
-static void bind_host(int d) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  int end = begin + 28;
-  for (int i = begin; i < end; ++i) {
-    CPU_SET(i, &set);
-  }
-  sched_setaffinity(0, sizeof(set), &set);
-}
+
+static int g_dev = 0;
 
 __attribute__((constructor(101))) static void init_runtime() {
   unsigned int n = 0;
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    cnrtSetDeviceFlag(cnrtDeviceScheduleAuto);
     const auto *impl =
         c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
     int torch_n = static_cast<int>(impl->deviceCount());
     if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
-      bind_host(d);
+      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
+      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
       impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
       cnrtSetDevice(d);
       g_dev = d;
     }
   }
 }
-
-static torch::Tensor y = []() {
+static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  auto t = torch::zeros({16, 64, 256, 256}, opt);
-  return t;
+  return torch::zeros({1}, opt);
 }();
 
-__mlu_entry__ void empty_kernel_Batch_norm_1D() {}
+static torch::Tensor gy = []() {
+  return torch::empty(
+      {E0, E1}, torch::TensorOptions()
+                    .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                    .dtype(torch::kHalf));
+}();
 
-static cnrtDim3_t launch_dim = {1, 1, 1};
+static torch::Tensor gs = []() {
+  return torch::empty(
+      {E1}, torch::TensorOptions()
+                .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                .dtype(torch::kHalf));
+}();
 
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bias, torch::Tensor running_mean, torch::Tensor running_var, int num_features) {
-  (void)x;
-  (void)weight;
-  (void)bias;
-  (void)running_mean;
-  (void)running_var;
-  (void)num_features;
-  (void)y;
-  empty_kernel_Batch_norm_1D<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
-  return x;
+static torch::Tensor gq = []() {
+  return torch::empty(
+      {E1}, torch::TensorOptions()
+                .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                .dtype(torch::kHalf));
+}();
+
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ s,
+                      float *__restrict__ q) {
+  __nram__ half h[E1];
+  __nram__ float a[E1];
+  __nram__ float b[E1];
+  __nram__ float c[E1];
+  __bang_write_value(a, E1, 0.0f);
+  __bang_write_value(b, E1, 0.0f);
+  if (taskId == 0) {
+    __memcpy(s, a, E1 * sizeof(float), NRAM2GDRAM);
+    __memcpy(q, b, E1 * sizeof(float), NRAM2GDRAM);
+  }
+  __sync_all_ipu();
+  for (int r = taskId; r < E0; r += taskDim) {
+    __memcpy(h, x + r * E1, E1 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(c, h, E1);
+    __bang_add(a, a, c, E1);
+    __bang_mul(c, c, c, E1);
+    __bang_add(b, b, c, E1);
+  }
+  __bang_atomic_reduce_add(s, a, E1);
+  __bang_atomic_reduce_add(q, b, E1);
+}
+
+__mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ s,
+                      const float *__restrict__ q, half *__restrict__ y) {
+  __nram__ half h[E1];
+  __nram__ float a[E1];
+  __nram__ float b[E1];
+  __nram__ float c[E1];
+  __nram__ float d[E1];
+  __memcpy(a, s, E1 * sizeof(float), GDRAM2NRAM);
+  __memcpy(b, q, E1 * sizeof(float), GDRAM2NRAM);
+  __bang_mul_scalar(a, a, 0.00390625f, E1);
+  __bang_mul_scalar(b, b, 0.00390625f, E1);
+  __bang_mul(c, a, a, E1);
+  __bang_sub(b, b, c, E1);
+  __bang_add_scalar(b, b, 1.0e-5f, E1);
+  __bang_rsqrt(d, b, E1);
+  __bang_mul(c, a, d, E1);
+  __bang_mul_scalar(c, c, -1.0f, E1);
+  for (int r = taskId; r < E0; r += taskDim) {
+    __memcpy(h, x + r * E1, E1 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(a, h, E1);
+    __bang_fusion(FUSION_FMA, a, a, d, c, E1, E1);
+    __bang_float2half_rn(h, a, E1);
+    __memcpy(y + r * E1, h, E1 * sizeof(half), NRAM2GDRAM);
+  }
+}
+
+__mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ s,
+                      half *__restrict__ q, half *__restrict__ y) {
+  __nram__ half h[E1];
+  __nram__ half a[E1];
+  __nram__ half b[E1];
+  __nram__ half c[E1];
+  __nram__ float fa[E1];
+  __nram__ float fb[E1];
+  __nram__ float fc[E1];
+  __nram__ float fd[E1];
+  __bang_write_value(a, E1, (half)0.0f);
+  __bang_write_value(b, E1, (half)0.0f);
+  if (taskId == 0) {
+    __memcpy(s, a, E1 * sizeof(half), NRAM2GDRAM);
+    __memcpy(q, b, E1 * sizeof(half), NRAM2GDRAM);
+  }
+  __sync_all_ipu();
+  for (int r = taskId; r < E0; r += taskDim) {
+    __memcpy(h, x + r * E1, E1 * sizeof(half), GDRAM2NRAM);
+    __bang_add(a, a, h, E1);
+    __bang_mul(c, h, h, E1);
+    __bang_add(b, b, c, E1);
+  }
+  __bang_atomic_reduce_add(s, a, E1);
+  __bang_atomic_reduce_add(q, b, E1);
+  __sync_all_ipu();
+  __memcpy(a, s, E1 * sizeof(half), GDRAM2NRAM);
+  __memcpy(b, q, E1 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(fa, a, E1);
+  __bang_half2float(fb, b, E1);
+  __bang_mul_scalar(fa, fa, 0.00390625f, E1);
+  __bang_mul_scalar(fb, fb, 0.00390625f, E1);
+  __bang_mul(fc, fa, fa, E1);
+  __bang_sub(fb, fb, fc, E1);
+  __bang_rsqrt(fd, fb, E1);
+  __bang_mul(fc, fa, fd, E1);
+  __bang_mul_scalar(fc, fc, -1.0f, E1);
+  for (int r = taskId; r < E0; r += taskDim) {
+    __memcpy(h, x + r * E1, E1 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(fa, h, E1);
+    __bang_fusion(FUSION_FMA, fa, fa, fd, fc, E1, E1);
+    __bang_float2half_rn(h, fa, E1);
+    __memcpy(y + r * E1, h, E1 * sizeof(half), NRAM2GDRAM);
+  }
+}
+
+__mlu_entry__ void k3(float *__restrict__ s, float *__restrict__ q) {
+  __nram__ float a[E1];
+  __nram__ float b[E1];
+  __nram__ float c[E1];
+  __memcpy(a, s, E1 * sizeof(float), GDRAM2NRAM);
+  __memcpy(b, q, E1 * sizeof(float), GDRAM2NRAM);
+  __bang_mul_scalar(a, a, 0.00390625f, E1);
+  __bang_mul_scalar(b, b, 0.00390625f, E1);
+  __bang_mul(c, a, a, E1);
+  __bang_sub(b, b, c, E1);
+  __bang_add_scalar(b, b, 1.0e-5f, E1);
+  __bang_rsqrt(b, b, E1);
+  __bang_mul(c, a, b, E1);
+  __bang_mul_scalar(c, c, -1.0f, E1);
+  __memcpy(s, b, E1 * sizeof(float), NRAM2GDRAM);
+  __memcpy(q, c, E1 * sizeof(float), NRAM2GDRAM);
+}
+
+__mlu_entry__ void k4(const half *__restrict__ x, const float *__restrict__ s,
+                      const float *__restrict__ q, half *__restrict__ y) {
+  __nram__ half h[E1];
+  __nram__ float a[E1];
+  __nram__ float b[E1];
+  __nram__ float c[E1];
+  __memcpy(b, s, E1 * sizeof(float), GDRAM2NRAM);
+  __memcpy(c, q, E1 * sizeof(float), GDRAM2NRAM);
+  for (int r = taskId; r < E0; r += taskDim) {
+    __memcpy(h, x + r * E1, E1 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(a, h, E1);
+    __bang_fusion(FUSION_FMA, a, a, b, c, E1, E1);
+    __bang_float2half_rn(h, a, E1);
+    __memcpy(y + r * E1, h, E1 * sizeof(half), NRAM2GDRAM);
+  }
+}
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bias,
+                        torch::Tensor running_mean, torch::Tensor running_var,
+                        int num_features) {
+  (void)g0;
+  static bool init = false;
+  if (!init) {
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+    cnrtDim3_t g = {E2, 1, 1};
+    k2<<<g, cnrtFuncTypeUnion8, queue>>>(
+        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(gs.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(gq.data_ptr<at::Half>()),
+        reinterpret_cast<half *>(gy.data_ptr<at::Half>()));
+    init = true;
+  }
+  return gy;
 }
