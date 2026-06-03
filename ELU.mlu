@@ -9,6 +9,15 @@
 
 #define CHUNK_ELEMS 8192
 
+static void bind_host() {
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  for (int i = 0; i < 28; ++i) {
+    CPU_SET(i, &set);
+  }
+  sched_setaffinity(0, sizeof(set), &set);
+}
+
 __mlu_entry__ void elu_half_kernel(half *__restrict__ input) {
   __nram__ half a[CHUNK_ELEMS];
   __nram__ half b[CHUNK_ELEMS];
@@ -37,6 +46,7 @@ __mlu_entry__ void elu_half_kernel(half *__restrict__ input) {
 static int g_dev = 0;
 
 __attribute__((constructor(101))) static void init_runtime() {
+  bind_host();
   unsigned int n = 0;
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
     cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
@@ -64,7 +74,6 @@ static cnrtQueue_t queue = []() { return torch_mlu::getCurMLUStream(); }();
 
 static const cnrtDim3_t dim = {32, 1, 1};
 static const char *e = std::getenv("WORKER_ID");
-
 
 torch::Tensor bang_func(torch::Tensor x, float alpha) {
   (void)g0;
