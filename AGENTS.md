@@ -11,7 +11,7 @@ This repository is a BangC MLU operator competition project. Implement and optim
 
 Our gh repo is `PRO-2684/AICS-openoperator` and our teams' names are `team_42` and `team_91`, and my github user identity is `MosRat work@whl.moe`.
 
-Hard rule: **do not use Torch/ATen/CNNL algorithm ops in the final submitted implementation**. Do not compute outputs with `torch::` , `at::` or `cnnlXXXX` operators. Host-side tensor allocation, metadata access, descriptors, and runtime/library setup are allowed when they do not compute the operator result.
+Hard rule: **do not use Torch/ATen/CNNL algorithm ops in the final submitted implementation**. Do not compute outputs with `torch::` , `at::` or `cnnlXXXX` operators. You can do anything without use computer libs, such as host-side tensor allocation, simple handwriting for loops for tiny calc or control, metadata access, descriptors, and runtime/library setup are allowed when they do not compute the operator result.
 
 Optimize for the official Cambricon MLU370-X4SN OJ environment. Shape/dtype/layout specialization is expected when proven by official ref files.
 
