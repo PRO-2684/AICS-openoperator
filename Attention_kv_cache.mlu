@@ -43,7 +43,7 @@ static torch::Tensor g0 = []() {
 
 __mlu_entry__ void empty_kernel() {}
 
-static cnrtQueue_t queue = []() { return torch_mlu::getStreamFromPool(0, g_dev).stream(); }();
+static cnrtQueue_t queue = []() { return torch_mlu::getStreamFromPool(-1, g_dev).stream(); }();
 static cnrtDim3_t dim = {1, 1, 1};
 
 static void run_empty() { empty_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(); }
