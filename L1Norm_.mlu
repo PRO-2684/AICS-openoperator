@@ -1,6 +1,7 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <cstdio>
 #include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
@@ -10,6 +11,7 @@
 #define R0 16
 #define R1 16384
 #define R2 256
+#define R3 8192
 
 static int g_dev = 0;
 
@@ -50,38 +52,64 @@ static torch::Tensor g0 = []() {
 }();
 
 static cnrtQueue_t queue = []() { return torch_mlu::getCurMLUStream(); }();
-static const cnrtDim3_t dim = {R0, 1, 1};
+static const cnrtDim3_t dim = {4, 8, 1};
 static const char *e = std::getenv("WORKER_ID");
 
 __mlu_func__ float sum_f32(float *__restrict__ x, float *__restrict__ y) {
-  __bang_sumpool(y, x, R2, 1, R1 / R2, 1, R1 / R2, 1, R1 / R2);
+  __bang_sumpool(y, x, R2, 1, R3 / R2, 1, R3 / R2, 1, R3 / R2);
   __bang_reduce_sum(y, y, R2);
   return y[0] + y[32] + y[64] + y[96] + y[128] + y[160] + y[192] + y[224];
 }
 
 __mlu_entry__ void k0(half *__restrict__ x) {
-  int p = taskId * R1;
-  __nram__ half h[R1];
-  __nram__ half g[R1];
-  __nram__ float a[R1];
+  int c = coreId;
+  int r = taskIdY * 2 + (c >> 1);
+  int p = r * R1 + (c & 1) * R3;
+  __mlu_shared__ float s0[4];
+  __nram__ half h[R3];
+  __nram__ half g[R3];
+  __nram__ float a[R3];
   __nram__ float b[R2];
-  __memcpy(h, x + p, R1 * sizeof(half), GDRAM2NRAM);
-  __memcpy(g, h, R1 * sizeof(half), NRAM2NRAM);
-  __bang_abs(g, g, R1);
-  __bang_half2float(a, g, R1);
+  __memcpy(h, x + p, R3 * sizeof(half), GDRAM2NRAM);
+  __memcpy(g, h, R3 * sizeof(half), NRAM2NRAM);
+  __bang_abs(g, g, R3);
+  __bang_half2float(a, g, R3);
   float s = sum_f32(a, b);
+  s0[c] = s;
+  __sync_cluster();
+  int q = c & 2;
+  s = s0[q] + s0[q + 1];
   if (s > 0.0f) {
-    __bang_half2float(a, h, R1);
-    __bang_mul_scalar(a, a, 1.0f / s, R1);
-    __bang_float2half_rn(h, a, R1);
-    __memcpy(x + p, h, R1 * sizeof(half), NRAM2GDRAM);
+    __bang_half2float(a, h, R3);
+    __bang_mul_scalar(a, a, 1.0f / s, R3);
+    __bang_float2half_rn(h, a, R3);
+    __memcpy(x + p, h, R3 * sizeof(half), NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
   (void)e;
-  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+  static int n = 0;
+  if (n < 8) {
+    cnrtNotifier_t s, t;
+    cnrtNotifierCreate(&s);
+    cnrtNotifierCreate(&t);
+    cnrtPlaceNotifier(s, queue);
+    k0<<<dim, cnrtFuncTypeUnion1, queue>>>(
+        reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
+    cnrtPlaceNotifier(t, queue);
+    cnrtQueueSync(queue);
+    float us = 0.0f;
+    cnrtNotifierDuration(s, t, &us);
+    fprintf(stdout, "NOTIFY 035u k0 %.3f\n", us);
+    fflush(stdout);
+    cnrtNotifierDestroy(s);
+    cnrtNotifierDestroy(t);
+    ++n;
+    return x;
+  }
+  k0<<<dim, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
   return x;
 }
