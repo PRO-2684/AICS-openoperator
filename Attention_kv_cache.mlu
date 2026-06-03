@@ -32,7 +32,10 @@ static void init_runtime_impl() {
 struct RuntimeInit { RuntimeInit() { init_runtime_impl(); } };
 static RuntimeInit runtime_init;
 
-static int g0 = 0;
+static int g0 = []() {
+  (void)torch_mlu::getCurMLUStream(g_dev);
+  return 0;
+}();
 
 __mlu_entry__ void empty_kernel() {}
 
