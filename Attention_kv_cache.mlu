@@ -35,6 +35,13 @@ __attribute__((constructor(101))) static void init_runtime() {
   }
 }
 
+static torch::Tensor warmup_tensor = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::empty({1}, opt);
+}();
+
 __mlu_entry__ void empty_kernel_Attention_kv_cache() {}
 
 static cnrtDim3_t launch_dim = {1, 1, 1};
@@ -45,6 +52,7 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor kc, torch::Tensor vc, tor
   (void)vc;
   (void)kn;
   (void)vn;
+  (void)warmup_tensor;
   empty_kernel_Attention_kv_cache<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
   return q;
 }
