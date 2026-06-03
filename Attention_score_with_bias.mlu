@@ -45,7 +45,9 @@ static torch::Tensor y = []() {
   return t;
 }();
 
-__mlu_entry__ void empty_kernel_Attention_score_with_bias() {}
+__mlu_entry__ void empty_kernel_Attention_score_with_bias(half *__restrict__ input) {
+  (void)input;
+}
 
 static cnrtDim3_t launch_dim = {1, 1, 1};
 
@@ -55,6 +57,6 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v, torch
   (void)v;
   (void)bias;
   (void)y;
-  empty_kernel_Attention_score_with_bias<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
+  empty_kernel_Attention_score_with_bias<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(reinterpret_cast<half *>(q.unsafeGetTensorImpl()->mutable_data()));
   return q;
 }

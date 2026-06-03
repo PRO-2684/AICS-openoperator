@@ -45,7 +45,9 @@ static torch::Tensor y = []() {
   return t;
 }();
 
-__mlu_entry__ void empty_kernel_Scaled_masked_softmax() {}
+__mlu_entry__ void empty_kernel_Scaled_masked_softmax(half *__restrict__ input) {
+  (void)input;
+}
 
 static cnrtDim3_t launch_dim = {1, 1, 1};
 
@@ -54,6 +56,6 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, double scale) {
   (void)mask;
   (void)scale;
   (void)y;
-  empty_kernel_Scaled_masked_softmax<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
+  empty_kernel_Scaled_masked_softmax<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
   return x;
 }
