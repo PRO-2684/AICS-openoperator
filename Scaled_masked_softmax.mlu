@@ -37,7 +37,10 @@ static void init_runtime_impl() {
 struct RuntimeInit { RuntimeInit() { init_runtime_impl(); } };
 static RuntimeInit runtime_init;
 
-static int g0 = []() { at::globalContext().lazyInitPrivateUse1(); return 0; }();
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions().device(c10::Device(c10::DeviceType::PrivateUse1, g_dev)).dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
 
 __mlu_entry__ void empty_kernel() {}
 
