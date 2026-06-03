@@ -1,7 +1,6 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <cstdio>
 #include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
@@ -90,25 +89,6 @@ __mlu_entry__ void k0(half *__restrict__ x) {
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
   (void)e;
-  static int n = 0;
-  if (n < 8) {
-    cnrtNotifier_t s, t;
-    cnrtNotifierCreate(&s);
-    cnrtNotifierCreate(&t);
-    cnrtPlaceNotifier(s, queue);
-    k0<<<dim, cnrtFuncTypeUnion1, queue>>>(
-        reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
-    cnrtPlaceNotifier(t, queue);
-    cnrtQueueSync(queue);
-    float us = 0.0f;
-    cnrtNotifierDuration(s, t, &us);
-    fprintf(stdout, "NOTIFY 035u k0 %.3f\n", us);
-    fflush(stdout);
-    cnrtNotifierDestroy(s);
-    cnrtNotifierDestroy(t);
-    ++n;
-    return x;
-  }
   k0<<<dim, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
   return x;
