@@ -71,13 +71,10 @@ __mlu_entry__ void k1(float *__restrict__ t) {
 
 __mlu_entry__ void k2(half *__restrict__ x, const float *__restrict__ t) {
   __nram__ half h[T1];
-  __nram__ float a[T1];
-  float v = t[0];
+  half v = (half)t[0];
   for (int64_t p = (int64_t)taskId * T1; p < T3; p += (int64_t)taskDim * T1) {
     __memcpy(h, x + p, T1 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(a, h, T1);
-    __bang_mul_scalar(a, a, v, T1);
-    __bang_float2half_rn(h, a, T1);
+    __bang_mul_scalar(h, h, v, T1);
     __memcpy(x + p, h, T1 * sizeof(half), NRAM2GDRAM);
   }
 }
