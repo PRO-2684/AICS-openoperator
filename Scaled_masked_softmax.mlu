@@ -22,7 +22,7 @@ static void bind_host(int d) {
 
 static void init_runtime_impl() {
   unsigned int n = 0;
-  
+  setenv("CN_MODULE_LOADING", "EAGER", 1);
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
     cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
     const auto *impl =
