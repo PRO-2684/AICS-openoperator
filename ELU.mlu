@@ -1,28 +1,18 @@
 #include <bang.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
-#include <cstdio>
-#include <cstdlib>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
 #define CHUNK_ELEMS 8192
 
-static void bind_host() {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  for (int i = 0; i < 28; ++i) {
-    CPU_SET(i, &set);
-  }
-  sched_setaffinity(0, sizeof(set), &set);
-}
-
 __mlu_entry__ void elu_half_kernel(half *__restrict__ input) {
   __nram__ half a[CHUNK_ELEMS];
   __nram__ half b[CHUNK_ELEMS];
   __nram__ half c[CHUNK_ELEMS];
-  half *p = (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
+  half *p =
+      (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
   __memcpy(a, p, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
   __bang_abs(b, a, CHUNK_ELEMS);
   __memcpy(c, a, CHUNK_ELEMS * sizeof(half), NRAM2NRAM);
@@ -46,10 +36,8 @@ __mlu_entry__ void elu_half_kernel(half *__restrict__ input) {
 static int g_dev = 0;
 
 __attribute__((constructor(101))) static void init_runtime() {
-  bind_host();
   unsigned int n = 0;
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
     const auto *impl =
         c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
     int torch_n = static_cast<int>(impl->deviceCount());
@@ -67,19 +55,19 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  return torch::zeros({8192}, opt);
+  return torch::zeros({1}, opt);
 }();
-
-static cnrtQueue_t queue = []() { return torch_mlu::getCurMLUStream(); }();
-
-static const cnrtDim3_t dim = {32, 1, 1};
-static const char *e = std::getenv("WORKER_ID");
 
 torch::Tensor bang_func(torch::Tensor x, float alpha) {
   (void)g0;
   (void)alpha;
-
-  elu_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
+  static bool init = false;
+  if (!init) {
+    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+    cnrtDim3_t dim = {32, 1, 1};
+    elu_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+        reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+    init = true;
+  }
   return x;
 }
