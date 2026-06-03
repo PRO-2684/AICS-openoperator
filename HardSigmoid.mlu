@@ -64,12 +64,7 @@ static const char *e = std::getenv("WORKER_ID");
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
-  if (e) {
-    int w = std::atoi(e);
-    if (w >= 0 && (w < 8 || w >= 16)) {
-      return x;
-    }
-  }
+
   hardsigmoid_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
   return x;
