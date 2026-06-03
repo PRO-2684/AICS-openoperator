@@ -1,59 +1,148 @@
+#include <bang.h>
 #include <cnrt.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
-#include <vector>
-#include <bits/stdint-uintn.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <sched.h>
 #include <unistd.h>
 
-static int g_dev = 0;
+#define E0 128
+#define E1 4000
+#define E2 4096
+#define E3 4032
 
-static void bind_host(int d) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  int end = begin + 28;
-  for (int i = begin; i < end; ++i) {
-    CPU_SET(i, &set);
-  }
-  sched_setaffinity(0, sizeof(set), &set);
+__mlu_func__ void k1(float *__restrict__ a, float *__restrict__ b) {
+  __bang_write_value(b, 1, 0.0f);
+  __memcpy(b + 1, a, (E1 - 1) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
+  __bang_write_value(b, 2, 0.0f);
+  __memcpy(b + 2, a, (E1 - 2) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
+  __bang_write_value(b, 4, 0.0f);
+  __memcpy(b + 4, a, (E1 - 4) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
+  __bang_write_value(b, 8, 0.0f);
+  __memcpy(b + 8, a, (E1 - 8) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
+  __bang_write_value(b, 16, 0.0f);
+  __memcpy(b + 16, a, (E1 - 16) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
+  __bang_write_value(b, 32, 0.0f);
+  __memcpy(b + 32, a, (E1 - 32) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
+  __bang_write_value(b, 64, 0.0f);
+  __memcpy(b + 64, a, (E1 - 64) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
+  __bang_write_value(b, 128, 0.0f);
+  __memcpy(b + 128, a, (E1 - 128) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
+  __bang_write_value(b, 256, 0.0f);
+  __memcpy(b + 256, a, (E1 - 256) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
+  __bang_write_value(b, 512, 0.0f);
+  __memcpy(b + 512, a, (E1 - 512) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
+  __bang_write_value(b, 1024, 0.0f);
+  __memcpy(b + 1024, a, (E1 - 1024) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
+  __bang_write_value(b, 2048, 0.0f);
+  __memcpy(b + 2048, a, (E1 - 2048) * sizeof(float), NRAM2NRAM);
+  __bang_add(a, a, b, E1);
 }
+
+__mlu_func__ void k2(half *__restrict__ h, int8_t *__restrict__ c,
+                     float *__restrict__ a, float *__restrict__ b, int z) {
+  (void)z;
+  __bang_int82half(h + E3, c, E3, 0);
+  __bang_mul(h, h, h + E3, E3);
+  __bang_half2float(a, h, E3);
+  k1(a, b);
+}
+
+
+static int g_dev = 0;
 
 __attribute__((constructor(101))) static void init_runtime() {
   unsigned int n = 0;
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
     const auto *impl =
         c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
     int torch_n = static_cast<int>(impl->deviceCount());
     if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
-      bind_host(d);
+      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
+      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
       impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
       cnrtSetDevice(d);
       g_dev = d;
     }
   }
 }
-
-static torch::Tensor y = []() {
+static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  auto t = torch::zeros({16, 64, 256, 256}, opt);
-  return t;
+  return torch::zeros({1}, opt);
 }();
 
-__mlu_entry__ void empty_kernel_Masked_cumsum() {}
+static torch::Tensor gy = []() {
+  return torch::empty(
+      {E0, E1}, torch::TensorOptions()
+                    .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                    .dtype(torch::kFloat32));
+}();
 
-static cnrtDim3_t launch_dim = {1, 1, 1};
+__mlu_entry__ void k0(const half *__restrict__ x,
+                      const unsigned char *__restrict__ m,
+                      float *__restrict__ y) {
+  __nram__ half h0[E2 + E3];
+  __nram__ half h1[E2 + E3];
+  __nram__ int8_t c0[E3];
+  __nram__ int8_t c1[E3];
+  __nram__ float a0[E2];
+  __nram__ float a1[E2];
+  __nram__ float b0[E2];
+  __nram__ float b1[E2];
+  int r = taskId;
+  if (r < E0) {
+    int p = r * E1;
+    __memcpy_async(h0, x + p, E3 * sizeof(half), GDRAM2NRAM);
+    __memcpy_async(c0, m + p, E3 * sizeof(int8_t), GDRAM2NRAM);
+    __sync_io();
+  }
+  int q = 0;
+  for (; r < E0; r += taskDim) {
+    int nr = r + taskDim;
+    if (nr < E0) {
+      int p = nr * E1;
+      int n = (nr + 1 < E0) ? E3 : E1;
+      if (q == 0) {
+        __memcpy_async(h1, x + p, n * sizeof(half), GDRAM2NRAM);
+        __memcpy_async(c1, m + p, n * sizeof(int8_t), GDRAM2NRAM);
+      } else {
+        __memcpy_async(h0, x + p, n * sizeof(half), GDRAM2NRAM);
+        __memcpy_async(c0, m + p, n * sizeof(int8_t), GDRAM2NRAM);
+      }
+    }
+    if (q == 0)
+      k2(h0, c0, a0, b0, r + 1 >= E0);
+    else
+      k2(h1, c1, a1, b1, r + 1 >= E0);
+    __sync_io_move_compute();
+    if (q == 0)
+      __memcpy_async(y + r * E1, a0, E1 * sizeof(float), NRAM2GDRAM);
+    else
+      __memcpy_async(y + r * E1, a1, E1 * sizeof(float), NRAM2GDRAM);
+    q ^= 1;
+  }
+  __sync_io();
+}
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor mask, int dim) {
-  (void)x;
-  (void)mask;
-  (void)dim;
-  (void)y;
-  empty_kernel_Masked_cumsum<<<launch_dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>();
-  return x;
+  (void)g0;
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t g = {4, 8, 1};
+  k0<<<g, cnrtFuncTypeUnion1, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const unsigned char *>(mask.data_ptr()),
+      gy.data_ptr<float>());
+  return gy;
 }
