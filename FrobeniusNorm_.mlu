@@ -2,7 +2,6 @@
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
-#include <cstdio>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -113,25 +112,6 @@ torch::Tensor bang_func(torch::Tensor x) {
   (void)warm;
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d0 = {T0, 1, 1};
-  static int n = 0;
-  if (n < 8) {
-    cnrtNotifier_t s, e;
-    cnrtNotifierCreate(&s);
-    cnrtNotifierCreate(&e);
-    cnrtPlaceNotifier(s, q);
-    k3<<<d0, cnrtFuncTypeUnion8, q>>>(
-        reinterpret_cast<half *>(x.data_ptr<at::Half>()), tmp.data_ptr<float>());
-    cnrtPlaceNotifier(e, q);
-    cnrtQueueSync(q);
-    float us = 0.0f;
-    cnrtNotifierDuration(s, e, &us);
-    fprintf(stdout, "NOTIFY 042f k3 %.3f\n", us);
-    fflush(stdout);
-    cnrtNotifierDestroy(s);
-    cnrtNotifierDestroy(e);
-    ++n;
-    return x;
-  }
   k3<<<d0, cnrtFuncTypeUnion8, q>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()), tmp.data_ptr<float>());
   return x;
