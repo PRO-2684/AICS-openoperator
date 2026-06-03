@@ -41,11 +41,11 @@ __mlu_entry__ void empty_kernel() {}
 
 static cnrtQueue_t queue = []() { return torch_mlu::getCurMLUStream(); }();
 
-static cnrtDim3_t dim = {32, 1, 1};
+static cnrtDim3_t dim = {4, 8, 1};
 
 static void run_empty() {
   
-  empty_kernel<<<dim, cnrtFuncTypeBlock, queue>>>();
+  empty_kernel<<<dim, cnrtFuncTypeUnion1, queue>>>();
   
 }
 
