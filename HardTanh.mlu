@@ -29,7 +29,7 @@ __attribute__((constructor(101))) static void init_runtime() {
     int torch_n = static_cast<int>(impl->deviceCount());
     if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
       int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      int d = 0;
+      int d = limit > 8 ? 8 : 0;
       bind_host(d);
       impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
       cnrtSetDevice(d);
