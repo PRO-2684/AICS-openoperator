@@ -44,9 +44,9 @@ static cnrtQueue_t queue = []() { return torch_mlu::getCurMLUStream(); }();
 static cnrtDim3_t dim = {1, 1, 1};
 
 static void run_empty() {
-  cnrtSyncDevice();
-  empty_kernel<<<dim, cnrtFuncTypeBlock, queue>>>();
   
+  empty_kernel<<<dim, cnrtFuncTypeBlock, queue>>>();
+  cnrtSyncDevice();
 }
 
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k_cache, torch::Tensor v_cache, torch::Tensor k_new, torch::Tensor v_new) { (void)k_cache; (void)v_cache; (void)k_new; (void)v_new; run_empty(); return q; }
