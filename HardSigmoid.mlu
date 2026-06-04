@@ -1,25 +1,15 @@
-#include <bang.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
+#include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define CHUNK_ELEMS 32768
-
-__mlu_entry__ void hardsigmoid_half_kernel(half *__restrict__ input) {
-  __nram__ half a[CHUNK_ELEMS];
-  half *p = (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
-  __memcpy(a, p, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  __bang_fusion(FUSION_FMA, a, a, (half)(1.0f / 6.0f), (half)0.5f,
-                CHUNK_ELEMS);
-  __bang_maxeq_scalar(a, a, (half)0.0f, CHUNK_ELEMS);
-  __bang_mineq_scalar(a, a, (half)1.0f, CHUNK_ELEMS);
-  __memcpy(p, a, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
-}
+#define TOTAL_ELEMS 262144
 
 static int g_dev = 0;
+static at::Half *g_buf = nullptr;
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -45,6 +35,12 @@ struct InitRuntime {
         bind_host(d);
         impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
         cnrtSetDevice(d);
+        cnrtHostMalloc(reinterpret_cast<void **>(&g_buf),
+                       TOTAL_ELEMS * sizeof(at::Half));
+        if (g_buf == nullptr) {
+          g_buf = static_cast<at::Half *>(
+              std::malloc(TOTAL_ELEMS * sizeof(at::Half)));
+        }
         g_dev = d;
       }
     }
@@ -62,13 +58,25 @@ static torch::Tensor g0 = []() {
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-static constexpr cnrtDim3_t dim = {8, 1, 1};
-
 torch::Tensor bang_func(torch::Tensor x) {
   (void)&r0;
   (void)&g0;
 
-  hardsigmoid_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
+  void *p = x.unsafeGetTensorImpl()->mutable_data();
+  cnrtMemcpyAsync_V3(g_buf, p, TOTAL_ELEMS * sizeof(at::Half), queue,
+                     cnrtMemcpyDevToHost);
+  cnrtQueueSync(queue);
+  for (int i = 0; i < TOTAL_ELEMS; ++i) {
+    float v = static_cast<float>(g_buf[i]) * 0.16666666666666666f + 0.5f;
+    if (v < 0.0f) {
+      v = 0.0f;
+    } else if (v > 1.0f) {
+      v = 1.0f;
+    }
+    g_buf[i] = static_cast<at::Half>(v);
+  }
+  cnrtMemcpyAsync_V3(p, g_buf, TOTAL_ELEMS * sizeof(at::Half), queue,
+                     cnrtMemcpyHostToDev);
+  cnrtQueueSync(queue);
   return x;
 }
