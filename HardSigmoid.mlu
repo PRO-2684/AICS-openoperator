@@ -7,7 +7,7 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define CHUNK_ELEMS 16384
+#define CHUNK_ELEMS 8192
 
 __mlu_entry__ void hardsigmoid_half_kernel(half *__restrict__ input) {
   __nram__ half a[CHUNK_ELEMS];
@@ -63,7 +63,7 @@ static torch::Tensor g0 = []() {
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-static constexpr cnrtDim3_t dim = {16, 1, 1};
+static constexpr cnrtDim3_t dim = {32, 1, 1};
 
 static const char *e = std::getenv("WORKER_ID");
 
