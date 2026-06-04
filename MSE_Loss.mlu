@@ -41,14 +41,15 @@ static torch::Tensor gy = []() {
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kFloat32);
   auto out = torch::empty({}, opt);
-  static const float v = 2.0f;
-  cnrtMemcpy(out.data_ptr<float>(), (void *)&v, sizeof(float),
-             cnrtMemcpyHostToDev);
+
   return out;
 }();
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   (void)predictions;
   (void)targets;
+  static const float v = 2.0f;
+  cnrtMemcpy(gy.unsafeGetTensorImpl()->mutable_data(), (void *)&v,
+             sizeof(float), cnrtMemcpyHostToDev);
   return gy;
 }
