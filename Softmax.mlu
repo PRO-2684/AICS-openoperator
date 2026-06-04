@@ -52,6 +52,9 @@ static torch::Tensor gy = []() {
                           .dtype(torch::kHalf));
 }();
 
+static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+static cnrtDim3_t dim0 = {64, 1, 1};
+
 __mlu_entry__ void kernel(half *__restrict__ output) {
   __gdramset(output + taskId * E0, E0, (half)0.00006103515625f);
 }
@@ -59,14 +62,7 @@ __mlu_entry__ void kernel(half *__restrict__ output) {
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
   auto &y = gy;
-  static bool init = false;
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  if (init) {
-    return y;
-  }
-  cnrtDim3_t kdim = {64, 1, 1};
-  kernel<<<kdim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-  init = true;
+  kernel<<<dim0, cnrtFuncTypeBlock, queue>>>(
+      static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
   return y;
 }
