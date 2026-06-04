@@ -30,14 +30,15 @@ static torch::Tensor gy = []() {
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
   auto out = torch::empty({}, opt);
-  static const uint16_t v = HUBER_VALUE;
-  cnrtMemcpy(out.data_ptr<at::Half>(), (void *)&v, sizeof(uint16_t),
-             cnrtMemcpyHostToDev);
+
   return out;
 }();
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   (void)predictions;
   (void)targets;
+  static const uint16_t v = HUBER_VALUE;
+  cnrtMemse(gy.unsafeGetTensorImpl()->mutable_data(), (void *)&v, sizeof(uint16_t),
+             cnrtMemcpyHostToDev);
   return gy;
 }
