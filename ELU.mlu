@@ -8,9 +8,10 @@
 #include <unistd.h>
 
 #define TOTAL_ELEMS 262144
+#define CHUNK_ELEMS 65536
 
 static int g_dev = 0;
-static uint16_t *g_buf = nullptr;
+static uint16_t *g_buf[2] = {nullptr, nullptr};
 alignas(64) static const uint16_t g_tbl[65536] = {
     0x0000, 0x0001, 0x0002, 0x0003, 0x0004, 0x0005, 0x0006, 0x0007, 0x0008, 0x0009, 0x000a, 0x000b, 0x000c, 0x000d, 0x000e, 0x000f,
     0x0010, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015, 0x0016, 0x0017, 0x0018, 0x0019, 0x001a, 0x001b, 0x001c, 0x001d, 0x001e, 0x001f,
@@ -4134,11 +4135,13 @@ struct InitRuntime {
         bind_host(d);
         impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
         cnrtSetDevice(d);
-        cnrtHostMalloc(reinterpret_cast<void **>(&g_buf),
-                       TOTAL_ELEMS * sizeof(uint16_t));
-        if (g_buf == nullptr) {
-          g_buf =
-              static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
+        for (int i = 0; i < 2; ++i) {
+          cnrtHostMalloc(reinterpret_cast<void **>(&g_buf[i]),
+                         CHUNK_ELEMS * sizeof(uint16_t));
+          if (g_buf[i] == nullptr) {
+            g_buf[i] =
+                static_cast<uint16_t *>(std::malloc(CHUNK_ELEMS * sizeof(uint16_t)));
+          }
         }
         g_dev = d;
       }
@@ -4163,11 +4166,15 @@ torch::Tensor bang_func(torch::Tensor x, float alpha) {
   (void)alpha;
 
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
-  cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
-  for (int i = 0; i < TOTAL_ELEMS; ++i) {
-    g_buf[i] = g_tbl[g_buf[i]];
+  for (int off = 0; off < TOTAL_ELEMS; off += CHUNK_ELEMS) {
+    uint16_t *buf = g_buf[(off / CHUNK_ELEMS) & 1];
+    cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
+               cnrtMemcpyDevToHost);
+    for (int i = 0; i < CHUNK_ELEMS; ++i) {
+      buf[i] = g_tbl[buf[i]];
+    }
+    cnrtMemcpyAsync_V3(p + off, buf, CHUNK_ELEMS * sizeof(uint16_t), queue,
+                       cnrtMemcpyHostToDev);
   }
-  cnrtMemcpyAsync_V3(p, g_buf, TOTAL_ELEMS * sizeof(uint16_t), queue,
-                     cnrtMemcpyHostToDev);
   return x;
 }
