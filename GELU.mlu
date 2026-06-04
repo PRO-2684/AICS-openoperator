@@ -1,7 +1,10 @@
 #include <bang.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <sched.h>
 #include <torch/extension.h>
+#include <unistd.h>
 
 #define CHUNK_ELEMS 8192
 
@@ -30,13 +33,32 @@ __mlu_entry__ void gelu_half_kernel(half *__restrict__ input) {
 }
 static int g_dev = 0;
 
+static void bind_host(int d) {
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  int begin = d >= 4 ? 28 : 0;
+  int end = begin + 28;
+  for (int i = begin; i < end; ++i) {
+    CPU_SET(i, &set);
+  }
+  sched_setaffinity(0, sizeof(set), &set);
+}
+
 struct InitRuntime {
 
   InitRuntime() {
-    int d = 0;
-    cnrtRet_t ret = cnrtGetDevice(&d);
-    if (ret == cnrtSuccess) {
-      g_dev = d;
+    unsigned int n = 0;
+    if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+      const auto *impl =
+          c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+      int torch_n = static_cast<int>(impl->deviceCount());
+      if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+        int d = 0;
+        bind_host(d);
+        impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+        cnrtSetDevice(d);
+        g_dev = d;
+      }
     }
   }
 };
