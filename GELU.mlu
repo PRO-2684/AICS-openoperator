@@ -33,9 +33,6 @@ struct InitRuntime {
         int limit =
             torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
         int d = 0;
-        bind_host(d);
-        impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-        cnrtSetDevice(d);
         g_dev = d;
       }
     }
