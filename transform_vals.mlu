@@ -1,6 +1,6 @@
 #include <bang.h>
-#include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 #include <unistd.h>
@@ -39,6 +39,8 @@ struct InitRuntime {
   }
 };
 
+static const InitRuntime r0 __attribute__((used));
+
 static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
@@ -61,10 +63,11 @@ __mlu_entry__ void k0(half *__restrict__ a, const half *__restrict__ b) {
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
   (void)g0;
   (void)r0;
+
   cnrtDim3_t d = {1, 1, 1};
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   k0<<<d, cnrtFuncTypeBlock, q>>>(
-      reinterpret_cast<half *>(a.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(b.data_ptr<at::Half>()));
+      reinterpret_cast<half *>(a.unsafeGetTensorImpl()->mutable_data()),
+      reinterpret_cast<const half *>(b.unsafeGetTensorImpl()->mutable_data()));
   return a;
 }

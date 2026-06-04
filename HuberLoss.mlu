@@ -42,14 +42,14 @@ struct InitRuntime {
   }
 };
 
+static const InitRuntime r0 __attribute__((used));
+
 static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
   return torch::zeros({1}, opt);
 }();
-
-static const InitRuntime r0 __attribute__((used));
 
 static torch::Tensor gy = []() {
   auto opt = torch::TensorOptions()
