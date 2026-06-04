@@ -6,7 +6,7 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define CHUNK_ELEMS 32768
+#define CHUNK_ELEMS 16384
 
 __mlu_entry__ void gelu_half_kernel(half *__restrict__ input) {
   __nram__ half x[CHUNK_ELEMS];
@@ -74,7 +74,7 @@ static torch::Tensor g0 = []() {
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-static constexpr cnrtDim3_t dim = {8, 1, 1};
+static constexpr cnrtDim3_t dim = {16, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)&r0;
