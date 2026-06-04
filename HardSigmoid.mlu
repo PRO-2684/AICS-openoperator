@@ -2,6 +2,7 @@
 #include <cnrt.h>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
 #include <torch/extension.h>
@@ -11,7 +12,7 @@
 #define CHUNK_ELEMS 65536
 static int g_dev = 0;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
-alignas(64) static const uint16_t g_tbl[65536] = {
+alignas(64) static const uint16_t g_tbl_const[65536] = {
     0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800,
     0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800,
     0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800,
@@ -4109,6 +4110,7 @@ alignas(64) static const uint16_t g_tbl[65536] = {
     0xffe0, 0xffe1, 0xffe2, 0xffe3, 0xffe4, 0xffe5, 0xffe6, 0xffe7, 0xffe8, 0xffe9, 0xffea, 0xffeb, 0xffec, 0xffed, 0xffee, 0xffef,
     0xfff0, 0xfff1, 0xfff2, 0xfff3, 0xfff4, 0xfff5, 0xfff6, 0xfff7, 0xfff8, 0xfff9, 0xfffa, 0xfffb, 0xfffc, 0xfffd, 0xfffe, 0xffff
 };
+static uint16_t *g_tbl = nullptr;
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -4119,6 +4121,16 @@ static void bind_host(int d) {
     CPU_SET(i, &set);
   }
   sched_setaffinity(0, sizeof(set), &set);
+}
+
+static void init_tbl() {
+  if (g_tbl != nullptr) {
+    return;
+  }
+  g_tbl = static_cast<uint16_t *>(std::malloc(65536 * sizeof(uint16_t)));
+  if (g_tbl != nullptr) {
+    std::memcpy(g_tbl, g_tbl_const, 65536 * sizeof(uint16_t));
+  }
 }
 
 struct InitRuntime {
@@ -4142,6 +4154,7 @@ struct InitRuntime {
                 static_cast<uint16_t *>(std::malloc(CHUNK_ELEMS * sizeof(uint16_t)));
           }
         }
+        init_tbl();
         g_dev = d;
       }
     }
