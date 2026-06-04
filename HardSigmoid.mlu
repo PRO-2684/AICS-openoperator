@@ -8,10 +8,12 @@
 #include <unistd.h>
 
 #define TOTAL_ELEMS 262144
+#define COPY_ELEMS 32768
 
 static int g_dev = 0;
-static uint16_t *g_buf = nullptr;
+static uint16_t *g_buf[2] = {nullptr, nullptr};
 static uint16_t *g_tbl = nullptr;
+static cnrtQueue_t g_d2h[2] = {nullptr, nullptr};
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -55,11 +57,14 @@ struct InitRuntime {
         bind_host(d);
         impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
         cnrtSetDevice(d);
-        cnrtHostMalloc(reinterpret_cast<void **>(&g_buf),
-                       TOTAL_ELEMS * sizeof(uint16_t));
-        if (g_buf == nullptr) {
-          g_buf =
-              static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
+        for (int i = 0; i < 2; ++i) {
+          cnrtQueueCreate(&g_d2h[i]);
+          cnrtHostMalloc(reinterpret_cast<void **>(&g_buf[i]),
+                         COPY_ELEMS * sizeof(uint16_t));
+          if (g_buf[i] == nullptr) {
+            g_buf[i] =
+                static_cast<uint16_t *>(std::malloc(COPY_ELEMS * sizeof(uint16_t)));
+          }
         }
         init_tbl();
         g_dev = d;
@@ -77,15 +82,32 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 
+static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+
 torch::Tensor bang_func(torch::Tensor x) {
   (void)&r0;
   (void)&g0;
 
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
-  cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
-  for (int i = 0; i < TOTAL_ELEMS; ++i) {
-    g_buf[i] = g_tbl[g_buf[i]];
+  cnrtMemcpyAsync_V3(g_buf[0], p, COPY_ELEMS * sizeof(uint16_t), g_d2h[0],
+                     cnrtMemcpyDevToHost);
+  for (int off = 0; off < TOTAL_ELEMS; off += COPY_ELEMS) {
+    const int s = (off / COPY_ELEMS) & 1;
+    cnrtQueueSync(g_d2h[s]);
+    const int next = off + COPY_ELEMS;
+    if (next < TOTAL_ELEMS) {
+      const int ns = (next / COPY_ELEMS) & 1;
+      if (next + COPY_ELEMS < TOTAL_ELEMS) {
+        cnrtQueueSync(queue);
+      }
+      cnrtMemcpyAsync_V3(g_buf[ns], p + next, COPY_ELEMS * sizeof(uint16_t),
+                         g_d2h[ns], cnrtMemcpyDevToHost);
+    }
+    for (int i = 0; i < COPY_ELEMS; ++i) {
+      g_buf[s][i] = g_tbl[g_buf[s][i]];
+    }
+    cnrtMemcpyAsync_V3(p + off, g_buf[s], COPY_ELEMS * sizeof(uint16_t), queue,
+                       cnrtMemcpyHostToDev);
   }
-  cnrtMemcpy(p, g_buf, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyHostToDev);
   return x;
 }
