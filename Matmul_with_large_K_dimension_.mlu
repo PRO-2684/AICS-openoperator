@@ -156,21 +156,19 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto &C = gC;
   auto &P = gP;
   auto &W = gW;
-  static bool init = false;
-  if (!init) {
-    cnrtDim3_t d = {32, 1, 1};
-    cnrtDim3_t d1 = {8, 1, 1};
-    cnrtDim3_t p = {64, 1, 1};
-    cnrtQueue_t q = torch_mlu::getCurMLUStream();
-    kprep<<<p, cnrtFuncTypeBlock, q>>>(
-        reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(W.data_ptr<at::Half>()));
-    k0<<<d, cnrtFuncTypeBlock, q>>>(
-        reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
-        reinterpret_cast<const half *>(W.data_ptr<at::Half>()),
-        P.data_ptr<float>());
-    k1<<<d1, cnrtFuncTypeBlock, q>>>(P.data_ptr<float>(), C.data_ptr<float>());
-    init = true;
-  }
+  static cnrtDim3_t d = {32, 1, 1};
+  static cnrtDim3_t d1 = {8, 1, 1};
+  static cnrtDim3_t p = {64, 1, 1};
+  static cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  kprep<<<p, cnrtFuncTypeBlock, q>>>(
+      static_cast<const half *>(B.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(W.unsafeGetTensorImpl()->mutable_data()));
+  k0<<<d, cnrtFuncTypeBlock, q>>>(
+      static_cast<const half *>(A.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const half *>(W.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(P.unsafeGetTensorImpl()->mutable_data()));
+  k1<<<d1, cnrtFuncTypeBlock, q>>>(
+      static_cast<float *>(P.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(C.unsafeGetTensorImpl()->mutable_data()));
   return C;
 }

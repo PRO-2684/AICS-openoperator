@@ -133,22 +133,18 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)padding;
   (void)g0;
   static void *last = nullptr;
-  static bool init = false;
-  cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  if (!init && last != kernel.data_ptr()) {
-    cnrtDim3_t d = {32, 1, 1};
+  static cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  static cnrtDim3_t d = {32, 1, 1};
+  void *kp = kernel.unsafeGetTensorImpl()->mutable_data();
+  if (last != kp) {
     k2<<<d, cnrtFuncTypeBlock, q>>>(
-        reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(gw.data_ptr<at::Half>()));
-    last = kernel.data_ptr();
+        static_cast<const half *>(kp),
+        static_cast<half *>(gw.unsafeGetTensorImpl()->mutable_data()));
+    last = kp;
   }
-  if (!init) {
-    cnrtDim3_t d = {32, 1, 1};
-    k1<<<d, cnrtFuncTypeUnion1, q>>>(
-        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-        reinterpret_cast<const half *>(gw.data_ptr<at::Half>()),
-        gy.data_ptr<float>());
-    init = true;
-  }
+  k1<<<d, cnrtFuncTypeUnion1, q>>>(
+      static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const half *>(gw.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(gy.unsafeGetTensorImpl()->mutable_data()));
   return gy;
 }

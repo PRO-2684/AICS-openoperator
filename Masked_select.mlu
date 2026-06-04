@@ -83,30 +83,26 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   (void)g0;
   static torch::Tensor out;
   static torch::Tensor work2;
-  static bool init = false;
+  static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  static cnrtDim3_t dim = {E2, 1, 1};
   if (!out.defined())
     out = torch::empty({E0}, input.options());
+  else
+    out.resize_({E0});
   if (!work2.defined())
     work2 = torch::empty({34}, input.options().dtype(torch::kInt32));
 
-  if (init)
-    return out;
-
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {E2, 1, 1};
-
   k1<<<dim, cnrtFuncTypeUnion8, queue>>>(
-      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      work2.data_ptr<int>());
+      static_cast<const half *>(input.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<int *>(work2.unsafeGetTensorImpl()->mutable_data()));
 
   int n = 0;
-  cnrtMemcpyAsync(&n, work2.data_ptr<int>() + E2, sizeof(int), queue,
-                  cnrtMemcpyDevToHost);
+  int *w = static_cast<int *>(work2.unsafeGetTensorImpl()->mutable_data());
+  cnrtMemcpyAsync(&n, w + E2, sizeof(int), queue, cnrtMemcpyDevToHost);
   cnrtQueueSync(queue);
   k0<<<dim, cnrtFuncTypeUnion4, queue>>>(
-      reinterpret_cast<const half *>(input.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(out.data_ptr<at::Half>()), work2.data_ptr<int>());
+      static_cast<const half *>(input.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(out.unsafeGetTensorImpl()->mutable_data()), w);
   out.resize_({(int64_t)n});
-  init = true;
   return out;
 }
