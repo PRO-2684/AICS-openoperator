@@ -8,6 +8,7 @@
 #include <unistd.h>
 
 #define TOTAL_ELEMS 262144
+#define CHUNK_ELEMS 65536
 static int g_dev = 0;
 static uint16_t *g_buf = nullptr;
 static uint16_t *g_tbl = nullptr;
@@ -55,10 +56,10 @@ struct InitRuntime {
         impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
         cnrtSetDevice(d);
         cnrtHostMalloc(reinterpret_cast<void **>(&g_buf),
-                       TOTAL_ELEMS * sizeof(uint16_t));
+                       CHUNK_ELEMS * sizeof(uint16_t));
         if (g_buf == nullptr) {
           g_buf =
-              static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
+              static_cast<uint16_t *>(std::malloc(CHUNK_ELEMS * sizeof(uint16_t)));
         }
         init_tbl();
         g_dev = d;
@@ -83,11 +84,14 @@ torch::Tensor bang_func(torch::Tensor x) {
   (void)&g0;
 
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
-  cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
-  for (int i = 0; i < TOTAL_ELEMS; ++i) {
-    g_buf[i] = g_tbl[g_buf[i]];
+  for (int off = 0; off < TOTAL_ELEMS; off += CHUNK_ELEMS) {
+    cnrtMemcpy(g_buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
+               cnrtMemcpyDevToHost);
+    for (int i = 0; i < CHUNK_ELEMS; ++i) {
+      g_buf[i] = g_tbl[g_buf[i]];
+    }
+    cnrtMemcpyAsync_V3(p + off, g_buf, CHUNK_ELEMS * sizeof(uint16_t), queue,
+                       cnrtMemcpyHostToDev);
   }
-  cnrtMemcpyAsync_V3(p, g_buf, TOTAL_ELEMS * sizeof(uint16_t), queue,
-                     cnrtMemcpyHostToDev);
   return x;
 }
