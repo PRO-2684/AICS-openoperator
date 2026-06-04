@@ -57,20 +57,12 @@ __mlu_entry__ void hardtanh_half_kernel(half *__restrict__ input) {
 
 static const InitRuntime r0 __attribute__((used));
 
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
-}();
-
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
 static constexpr cnrtDim3_t dim = {4, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)&r0;
-  (void)&g0;
 
   hardtanh_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
