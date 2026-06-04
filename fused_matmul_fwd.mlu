@@ -16,31 +16,16 @@
 #define TC 8
 #define TT (TR * TC)
 
-__mlu_entry__ void kprep(const half *__restrict__ w, const half *__restrict__ b,
-                         int8_t *__restrict__ wc, float *__restrict__ bc) {
-  int nj = taskId * TN;
+__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
+                      const half *__restrict__ b, half *__restrict__ y) {
+  __nram__ half xh[TM * TK];
   __nram__ half wh[TK * TN];
   __nram__ half bh[TN];
+  __nram__ half yh[TM * TN];
+  __nram__ int8_t xi[TM * TK];
   __nram__ int8_t wi[TK * TN];
   __nram__ int8_t wt[TN * TK];
   __nram__ int8_t wf[TN * TK];
-  __nram__ float bf[TN];
-  __memcpy(wh, w + nj, TN * sizeof(half), GDRAM2NRAM, TN * sizeof(half),
-           N0 * sizeof(half), TK - 1);
-  __bang_half2int8(wi, wh, TK * TN, 0);
-  __bang_transpose(wt, wi, TK, TN);
-  __bang_reshape_filter(wf, wt, TN, 1, 1, TK);
-  __memcpy(wc + taskId * TN * TK, wf, TN * TK * sizeof(int8_t), NRAM2GDRAM);
-  __memcpy(bh, b + nj, TN * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(bf, bh, TN);
-  __memcpy(bc + taskId * TN, bf, TN * sizeof(float), NRAM2GDRAM);
-}
-
-__mlu_entry__ void k0(const half *__restrict__ x, const int8_t *__restrict__ w,
-                      const float *__restrict__ b, half *__restrict__ y) {
-  __nram__ half xh[TM * TK];
-  __nram__ half yh[TM * TN];
-  __nram__ int8_t xi[TM * TK];
   __nram__ float tmp[TM * TN];
   __nram__ float bf[TN];
   __wram__ int8_t ww[TN * TK];
@@ -54,9 +39,14 @@ __mlu_entry__ void k0(const half *__restrict__ x, const int8_t *__restrict__ w,
     __memcpy(xh, xp, TK * sizeof(half), GDRAM2NRAM, TK * sizeof(half),
              K0 * sizeof(half), TM - 1);
     __bang_half2int8(xi, xh, TM * TK, 0);
-    __memcpy(ww, w + (t % TC) * TN * TK, TN * TK * sizeof(int8_t),
-             GDRAM2WRAM);
-    __memcpy(bf, b + (t % TC) * TN, TN * sizeof(float), GDRAM2NRAM);
+    __memcpy(wh, w + nj, TN * sizeof(half), GDRAM2NRAM, TN * sizeof(half),
+             N0 * sizeof(half), TK - 1);
+    __bang_half2int8(wi, wh, TK * TN, 0);
+    __bang_transpose(wt, wi, TK, TN);
+    __bang_reshape_filter(wf, wt, TN, 1, 1, TK);
+    __memcpy(ww, wf, TN * TK * sizeof(int8_t), NRAM2WRAM);
+    __memcpy(bh, b + nj, TN * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(bf, bh, TN);
     __bang_matmul(tmp, xi, ww, TM, TK, TN, 0);
     __bang_cycle_add_tz(tmp, tmp, bf, TM * TN, TN);
     __bang_float2half_rn(yh, tmp, TM * TN);
@@ -114,44 +104,18 @@ static torch::Tensor gy = []() {
                        .dtype(torch::kHalf));
 }();
 
-static torch::Tensor gw = []() {
-  return torch::empty({8, 512 * 128},
-                      torch::TensorOptions()
-                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                          .dtype(torch::kInt8));
-}();
-
-static torch::Tensor gb = []() {
-  return torch::empty({8, 128},
-                      torch::TensorOptions()
-                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                          .dtype(torch::kFloat32));
-}();
-
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-static constexpr cnrtDim3_t prep_dim = {8, 1, 1};
 static constexpr cnrtDim3_t main_dim = {32, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, torch::Tensor b) {
   (void)&r0;
   (void)g0;
   auto &y = gy;
-  auto &pw = gw;
-  auto &pb = gb;
-  static bool init = false;
-  if (!init) {
-    kprep<<<prep_dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<const half *>(w.unsafeGetTensorImpl()->mutable_data()),
-        reinterpret_cast<const half *>(b.unsafeGetTensorImpl()->mutable_data()),
-        reinterpret_cast<int8_t *>(pw.data_ptr<int8_t>()),
-        reinterpret_cast<float *>(pb.data_ptr<float>()));
-    init = true;
-  }
   k0<<<main_dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
-      reinterpret_cast<const int8_t *>(pw.data_ptr<int8_t>()),
-      reinterpret_cast<const float *>(pb.data_ptr<float>()),
+      reinterpret_cast<const half *>(w.unsafeGetTensorImpl()->mutable_data()),
+      reinterpret_cast<const half *>(b.unsafeGetTensorImpl()->mutable_data()),
       reinterpret_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
   return y;
 }
