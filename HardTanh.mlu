@@ -83,9 +83,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   (void)&g0;
 
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
-  cnrtMemcpyAsync_V3(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), queue,
-                     cnrtMemcpyDevToHost);
-  cnrtQueueSync(queue);
+  cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
   for (int i = 0; i < TOTAL_ELEMS; ++i) {
     g_buf[i] = g_tbl[g_buf[i]];
   }
