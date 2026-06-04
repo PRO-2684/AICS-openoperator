@@ -160,9 +160,14 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   static cnrtDim3_t d1 = {8, 1, 1};
   static cnrtDim3_t p = {64, 1, 1};
   static cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  kprep<<<p, cnrtFuncTypeBlock, q>>>(
-      static_cast<const half *>(B.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(W.unsafeGetTensorImpl()->mutable_data()));
+  static void *last = nullptr;
+  void *bp = B.unsafeGetTensorImpl()->mutable_data();
+  if (last != bp) {
+    kprep<<<p, cnrtFuncTypeBlock, q>>>(
+        static_cast<const half *>(bp),
+        static_cast<half *>(W.unsafeGetTensorImpl()->mutable_data()));
+    last = bp;
+  }
   k0<<<d, cnrtFuncTypeBlock, q>>>(
       static_cast<const half *>(A.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(W.unsafeGetTensorImpl()->mutable_data()),
