@@ -1,8 +1,6 @@
 #include <bang.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
-#include <cstdio>
-#include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
@@ -18,10 +16,6 @@ struct InitRuntime {
     if (ret == cnrtSuccess) {
       g_dev = d;
     }
-    const char *e = std::getenv("WORKER_ID");
-    std::printf("OO_PROBE op=029 worker=%s device=%d cnrt=%d\n", e ? e : "",
-                g_dev, static_cast<int>(ret));
-    std::fflush(stdout);
   }
 };
 
