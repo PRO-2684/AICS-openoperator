@@ -171,7 +171,7 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto &W = gW;
   static cnrtQueue_t q = torch_mlu::getCurMLUStream();
   static cnrtDim3_t d = {96, 1, 1};
-  static cnrtDim3_t p = {64, 1, 1};
+  static cnrtDim3_t p = {96, 1, 1};
   kprep<<<p, cnrtFuncTypeBlock, q>>>(
       static_cast<const half *>(B.unsafeGetTensorImpl()->mutable_data()),
       static_cast<half *>(W.unsafeGetTensorImpl()->mutable_data()));
