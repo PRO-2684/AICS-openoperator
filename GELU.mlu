@@ -1,7 +1,5 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <cstdio>
-#include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
@@ -55,6 +53,9 @@ struct InitRuntime {
         int limit =
             torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
         int d = 0;
+        bind_host(d);
+        impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+        cnrtSetDevice(d);
         g_dev = d;
       }
     }
@@ -65,7 +66,7 @@ static const InitRuntime r0 __attribute__((used));
 
 static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1))
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
   return torch::zeros({1}, opt);
 }();
@@ -75,13 +76,6 @@ static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 static constexpr cnrtDim3_t dim = {32, 1, 1};
 
 static const char *e = std::getenv("WORKER_ID");
-static int p0 = []() {
-  int d = -1;
-  cnrtGetDevice(&d);
-  std::printf("WORKER_ID=%s CNRT_DEVICE=%d\n", e ? e : "", d);
-  std::fflush(stdout);
-  return 0;
-}();
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)&r0;
