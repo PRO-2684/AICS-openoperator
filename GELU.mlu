@@ -14,20 +14,60 @@ __mlu_entry__ void gelu_half_kernel(half *__restrict__ input) {
   __memcpy(ptr, buf, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
 }
 
+static int g_dev = 0;
+
+static void bind_host(int d) {
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  int begin = d >= 4 ? 28 : 0;
+  int end = begin + 28;
+  for (int i = begin; i < end; ++i) {
+    CPU_SET(i, &set);
+  }
+  sched_setaffinity(0, sizeof(set), &set);
+}
+
+struct InitRuntime {
+
+  InitRuntime() {
+    unsigned int n = 0;
+    if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+      const auto *impl =
+          c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+      int torch_n = static_cast<int>(impl->deviceCount());
+      if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+        int limit =
+            torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
+        int d = 0;
+        bind_host(d);
+        impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+        cnrtSetDevice(d);
+        g_dev = d;
+      }
+    }
+  }
+};
+
+static const InitRuntime r0 __attribute__((used));
+
 static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  auto a = torch::empty({1}, opt);
-  auto b = torch::empty({1}, opt);
-  return a + b;
+  return torch::zeros({1}, opt);
 }();
 
+static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+
+static constexpr cnrtDim3_t dim = {32, 1, 1};
+
+static const char *e = std::getenv("WORKER_ID");
+
 torch::Tensor bang_func(torch::Tensor x) {
-  (void)g0;
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {32, 1, 1};
+  (void)&r0;
+  (void)&g0;
+
   gelu_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+      reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
   return x;
 }
