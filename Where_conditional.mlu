@@ -41,6 +41,9 @@ static torch::Tensor gout = []() {
                           .dtype(torch::kHalf));
 }();
 
+static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+static cnrtDim3_t dim0 = {TASKS, 1, 1};
+
 __mlu_entry__ void where_half_kernel(const unsigned char *__restrict__ c,
                                      const half *__restrict__ x,
                                      const half *__restrict__ y,
@@ -73,20 +76,13 @@ __mlu_entry__ void where_half_kernel(const unsigned char *__restrict__ c,
 torch::Tensor bang_func(torch::Tensor condition, torch::Tensor x,
                         torch::Tensor y) {
   (void)g0;
-  static bool init = false;
   auto &out = gout;
 
-  if (!init) {
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t dim = {TASKS, 1, 1};
-
-    where_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<const unsigned char *>(condition.data_ptr<bool>()),
-        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-        reinterpret_cast<const half *>(y.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(out.data_ptr<at::Half>()));
-    init = true;
-  }
+  where_half_kernel<<<dim0, cnrtFuncTypeBlock, queue>>>(
+      static_cast<const unsigned char *>(condition.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const half *>(y.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(out.unsafeGetTensorImpl()->mutable_data()));
 
   return out;
 }
