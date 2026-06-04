@@ -1,5 +1,7 @@
 #include <torch/extension.h>
 
+static auto
+
 torch::Tensor bang_func(torch::Tensor A, int offset) {
   (void)offset;
   // auto *p = A.unsafeGetTensorImpl();
