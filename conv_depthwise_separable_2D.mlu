@@ -13,7 +13,7 @@
 #define DO_ONE(dst, ch)                                                        \
   do {                                                                         \
     const half *p = x + n * 196608 + (ch) * 65536 + q * 256;                  \
-    __memcpy(a, p, 18 * 256 * sizeof(half), GDRAM2NRAM);                      \
+    __memcpy(a, p, (rows + 2) * 256 * sizeof(half), GDRAM2NRAM);              \
     int o = (ch) * 9;                                                          \
     __memcpy(h, a, 254 * sizeof(half), NRAM2NRAM, 254 * sizeof(half),          \
              256 * sizeof(half), rows - 1);                                    \
