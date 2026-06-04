@@ -1,7 +1,6 @@
 #include <bang.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
-#include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
 #include <torch/extension.h>
@@ -21,7 +20,6 @@ __mlu_entry__ void hardsigmoid_half_kernel(half *__restrict__ input) {
 }
 
 static int g_dev = 0;
-static constexpr int kDev = 2;
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -43,10 +41,7 @@ struct InitRuntime {
           c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
       int torch_n = static_cast<int>(impl->deviceCount());
       if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-        int limit =
-            torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-        const char *v = std::getenv("MLU_VISIBLE_DEVICES");
-        int d = (v && v[0]) ? 0 : (kDev % limit);
+        int d = 0;
         bind_host(d);
         impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
         cnrtSetDevice(d);
