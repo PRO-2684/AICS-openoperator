@@ -1,6 +1,8 @@
 #include <bang.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
+#include <cstdio>
+#include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 #include <unistd.h>
@@ -77,6 +79,11 @@ static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 static constexpr cnrtDim3_t dim = {8, 1, 1};
 
 static const char *e = std::getenv("WORKER_ID");
+static int p0 = []() {
+  std::printf("WORKER_ID=%s\n", e ? e : "");
+  std::fflush(stdout);
+  return 0;
+}();
 
 torch::Tensor bang_func(torch::Tensor x, float alpha) {
   (void)&r0;
