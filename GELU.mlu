@@ -25,11 +25,17 @@ __mlu_entry__ void gelu_half_kernel(half *__restrict__ input) {
   //            -0.05059267) b)
   //
   // GELU(x) ~= 0.5*x + P(|x|)
-  __bang_fusion(FUSION_FMA, p, b, (half)-0.00272459f, (half)0.04174339f,
-                CHUNK_ELEMS);
-  __bang_fusion(FUSION_FMA, p, p, b, (half)-0.23714304f, CHUNK_ELEMS);
-  __bang_fusion(FUSION_FMA, p, p, b, (half)0.59258549f, CHUNK_ELEMS);
-  __bang_fusion(FUSION_FMA, p, p, b, (half)-0.05059267f, CHUNK_ELEMS);
+  __bang_mul_scalar(p, b, (half)-0.00272459f, CHUNK_ELEMS);
+  __bang_add_scalar(p, p, (half)0.04174339f, CHUNK_ELEMS);
+  __bang_mul(p, p, b, CHUNK_ELEMS);
+
+  __bang_add_scalar(p, p, (half)-0.23714304f, CHUNK_ELEMS);
+  __bang_mul(p, p, b, CHUNK_ELEMS);
+
+  __bang_add_scalar(p, p, (half)0.59258549f, CHUNK_ELEMS);
+  __bang_mul(p, p, b, CHUNK_ELEMS);
+
+  __bang_add_scalar(p, p, (half)-0.05059267f, CHUNK_ELEMS);
   __bang_mul(p, p, b, CHUNK_ELEMS);
 
   // x = 0.5 * x
