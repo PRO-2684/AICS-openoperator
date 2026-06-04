@@ -6,9 +6,9 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define E0 128
-#define E1 8128
-#define E2 8704
+#define E0 64
+#define E1 16256
+#define E2 16896
 
 #define DO_ONE(dst, ch)                                                        \
   do {                                                                         \
@@ -42,9 +42,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ dw,
   __memcpy(kd, dw, 27 * sizeof(half), GDRAM2NRAM);
   __memcpy(kp, pw, 192 * sizeof(half), GDRAM2NRAM);
   for (int g = taskId; g < E0; g += taskDim) {
-    int n = g >> 3;
-    int q = (g & 7) << 5;
-    int rows = q == 224 ? 30 : 32;
+    int n = g >> 2;
+    int q = (g & 3) << 6;
+    int rows = q == 192 ? 62 : 64;
     int m = rows * 254;
     DO_ONE(d0, 0);
     DO_ONE(d1, 1);
