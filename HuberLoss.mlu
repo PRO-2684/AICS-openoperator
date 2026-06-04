@@ -37,8 +37,6 @@ static torch::Tensor gy = []() {
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   (void)predictions;
   (void)targets;
-  static const uint16_t v = HUBER_VALUE;
-  cnrtMemse(gy.unsafeGetTensorImpl()->mutable_data(), (void *)&v, sizeof(uint16_t),
-             cnrtMemcpyHostToDev);
+  cnrtMemset(gy.unsafeGetTensorImpl()->mutable_data(), HUBER_VALUE,sizeof(uint16));
   return gy;
 }
