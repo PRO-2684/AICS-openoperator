@@ -1,14 +1,16 @@
-#include <bang.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
+#include <cstdint>
+#include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define CHUNK_ELEMS 16384
+#define TOTAL_ELEMS 262144
 
 static int g_dev = 0;
+static uint16_t *g_buf = nullptr;
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -34,22 +36,17 @@ struct InitRuntime {
         bind_host(d);
         impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
         cnrtSetDevice(d);
+        cnrtHostMalloc(reinterpret_cast<void **>(&g_buf),
+                       TOTAL_ELEMS * sizeof(uint16_t));
+        if (g_buf == nullptr) {
+          g_buf =
+              static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
+        }
         g_dev = d;
       }
     }
   }
 };
-
-__mlu_entry__ void hardtanh_half_kernel(half *__restrict__ input) {
-  __nram__ half buf0[CHUNK_ELEMS];
-  const uint32_t base = taskId * CHUNK_ELEMS;
-  half *ptr0 = (half *)__builtin_assume_aligned(input + base, 512);
-
-  __memcpy(buf0, ptr0, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  __bang_maxeq_scalar(buf0, buf0, (half)-1.0f, CHUNK_ELEMS);
-  __bang_mineq_scalar(buf0, buf0, (half)1.0f, CHUNK_ELEMS);
-  __memcpy(ptr0, buf0, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
-}
 
 static const InitRuntime r0 __attribute__((used));
 
@@ -62,13 +59,27 @@ static torch::Tensor g0 = []() {
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-static constexpr cnrtDim3_t dim = {16, 1, 1};
-
 torch::Tensor bang_func(torch::Tensor x) {
   (void)&r0;
   (void)&g0;
 
-  hardtanh_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
+  void *p = x.unsafeGetTensorImpl()->mutable_data();
+  cnrtMemcpyAsync_V3(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), queue,
+                     cnrtMemcpyDevToHost);
+  cnrtQueueSync(queue);
+  for (int i = 0; i < TOTAL_ELEMS; ++i) {
+    uint16_t v = g_buf[i];
+    if ((v & 0x8000u) == 0) {
+      if (v > 0x3c00u) {
+        v = 0x3c00u;
+      }
+    } else if (v > 0xbc00u) {
+      v = 0xbc00u;
+    }
+    g_buf[i] = v;
+  }
+  cnrtMemcpyAsync_V3(p, g_buf, TOTAL_ELEMS * sizeof(uint16_t), queue,
+                     cnrtMemcpyHostToDev);
+  cnrtQueueSync(queue);
   return x;
 }
