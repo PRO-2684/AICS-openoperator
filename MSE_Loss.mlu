@@ -1,4 +1,5 @@
 #include <bang.h>
+#include <c10/core/ScalarType.h>
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
@@ -39,8 +40,8 @@ __attribute__((constructor(101))) static void init_runtime() {
 static torch::Tensor gy = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kFloat32);
-  auto out = torch::empty({}, opt);
+                 .dtype(torch::kHalf);
+  auto out = torch::zeros({}, opt);
 
   return out;
 }();
