@@ -43,8 +43,7 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
-                      int sample_elems, float scale) {
+__mlu_entry__ void k0(half *__restrict__ x, int sample_elems, float scale) {
   __nram__ half buf[65536];
   int tid = taskId;
   if (tid >= 32) {
@@ -58,18 +57,16 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
     }
     __memcpy(buf, x + base + p, n * sizeof(half), GDRAM2NRAM);
     __bang_mul_scalar(buf, buf, (half)scale, n);
-    __memcpy(y + base + p, buf, n * sizeof(half), NRAM2GDRAM);
+    __memcpy(x + base + p, buf, n * sizeof(half), NRAM2GDRAM);
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x, double drop_prob) {
-  auto y = torch::empty_like(x);
   float scale = 1.0f / (1.0f - (float)drop_prob);
   int sample_elems = (int)(x.numel() / x.size(0));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t grid = {32, 1, 1};
   k0<<<grid, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()), sample_elems, scale);
-  return y;
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()), sample_elems, scale);
+  return x;
 }
