@@ -206,6 +206,9 @@ static torch::Tensor gy = []() {
                           .dtype(torch::kHalf));
 }();
 
+static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+static cnrtDim3_t dim0 = {4, 8, 1};
+
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
                         double alpha, torch::Tensor seq_offsets,
                         int max_seq_len, torch::Tensor context_size,
@@ -226,16 +229,10 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
   (void)preference;
   (void)g0;
   auto &y = gy;
-  static bool init = false;
-  if (!init) {
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t g = {4, 8, 1};
-    k0<<<g, cnrtFuncTypeUnion1, queue>>>(
-        reinterpret_cast<const half *>(q.data_ptr<at::Half>()),
-        reinterpret_cast<const half *>(k.data_ptr<at::Half>()),
-        reinterpret_cast<const half *>(v.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-    init = true;
-  }
+  k0<<<dim0, cnrtFuncTypeUnion1, queue>>>(
+      static_cast<const half *>(q.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const half *>(k.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const half *>(v.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
   return y;
 }

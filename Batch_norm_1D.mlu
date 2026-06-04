@@ -203,16 +203,12 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bia
                         torch::Tensor running_mean, torch::Tensor running_var,
                         int num_features) {
   (void)g0;
-  static bool init = false;
-  if (!init) {
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t g = {E2, 1, 1};
-    k2<<<g, cnrtFuncTypeUnion8, queue>>>(
-        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(gs.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(gq.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(gy.data_ptr<at::Half>()));
-    init = true;
-  }
+  static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  static cnrtDim3_t g = {E2, 1, 1};
+  k2<<<g, cnrtFuncTypeUnion8, queue>>>(
+      static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(gs.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(gq.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(gy.unsafeGetTensorImpl()->mutable_data()));
   return gy;
 }

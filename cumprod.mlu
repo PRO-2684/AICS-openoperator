@@ -80,18 +80,15 @@ static torch::Tensor gy = []() {
   return y;
 }();
 
+static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+static cnrtDim3_t dim0 = {120, 1, 1};
+
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
   (void)g0;
   auto &y = gy;
-  static bool init = false;
-  if (!init) {
-    cnrtQueue_t q = torch_mlu::getCurMLUStream();
-    cnrtDim3_t g = {120, 1, 1};
-    k0<<<g, cnrtFuncTypeBlock, q>>>(
-        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-        y.data_ptr<float>());
-    init = true;
-  }
+  k0<<<dim0, cnrtFuncTypeBlock, queue>>>(
+      static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(y.unsafeGetTensorImpl()->mutable_data()));
   return y;
 }

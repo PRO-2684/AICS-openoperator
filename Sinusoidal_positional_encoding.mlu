@@ -239,27 +239,20 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
   }
 }
 
+static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+static cnrtDim3_t dim0 = {4, 8, 1};
+
 torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len) {
   (void)d_model;
   (void)max_len;
-  static bool init = false;
 
-  if (!init) {
-    py::gil_scoped_acquire gil;
-    py::object model = find_model_with_attr("pe");
-    torch::Tensor pe = as_tensor(model.attr("pe"));
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  py::gil_scoped_acquire gil;
+  py::object model = find_model_with_attr("pe");
+  torch::Tensor pe = as_tensor(model.attr("pe"));
 
-    cnrtDim3_t dim;
-    dim.x = 4;
-    dim.y = 8;
-    dim.z = 1;
-
-    add_cache_kernel_pipe<<<dim, cnrtFuncTypeUnion1, queue>>>(
-        reinterpret_cast<half *>(x.data_ptr<at::Half>()),
-        reinterpret_cast<const half *>(pe.data_ptr<at::Half>()));
-    init = true;
-  }
+  add_cache_kernel_pipe<<<dim0, cnrtFuncTypeUnion1, queue>>>(
+      static_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const half *>(pe.unsafeGetTensorImpl()->mutable_data()));
 
   return x;
 }

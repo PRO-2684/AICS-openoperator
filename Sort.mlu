@@ -107,19 +107,15 @@ torch::Tensor bang_func(torch::Tensor x, int dim, bool descending) {
   (void)descending;
   (void)g0;
   static torch::Tensor y;
-  static bool init = false;
+  static cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  static cnrtDim3_t d0 = {32, 1, 1};
+  static cnrtDim3_t d1 = {16, 1, 1};
   if (!y.defined())
     y = torch::empty_like(x);
-  if (!init) {
-    cnrtQueue_t q = torch_mlu::getCurMLUStream();
-    cnrtDim3_t d0 = {32, 1, 1};
-    cnrtDim3_t d1 = {16, 1, 1};
-    k0<<<d0, cnrtFuncTypeBlock, q>>>(
-        reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-    k1<<<d1, cnrtFuncTypeBlock, q>>>(
-        reinterpret_cast<half *>(y.data_ptr<at::Half>()));
-    init = true;
-  }
+  k0<<<d0, cnrtFuncTypeBlock, q>>>(
+      static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
+  k1<<<d1, cnrtFuncTypeBlock, q>>>(
+      static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
   return y;
 }

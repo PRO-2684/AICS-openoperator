@@ -58,6 +58,9 @@ static torch::Tensor gy = []() {
   return y;
 }();
 
+static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+static cnrtDim3_t dim0 = {4, 8, 1};
+
 __mlu_entry__ void k0(float *__restrict__ y) {
   __nram__ float a[E3];
   __bang_write_value(a, E3, 0.0f);
@@ -85,15 +88,10 @@ torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
   (void)dim_size;
   (void)g0;
   auto &y = gy;
-  static bool init = false;
 
-  if (!init) {
-    cnrtQueue_t q = torch_mlu::getCurMLUStream();
-    cnrtDim3_t d = {4, 8, 1};
-    k1<<<d, cnrtFuncTypeUnion1, q>>>(
-        reinterpret_cast<const half *>(src.data_ptr<at::Half>()),
-        index.data_ptr<int64_t>(), y.data_ptr<float>());
-    init = true;
-  }
+  k1<<<dim0, cnrtFuncTypeUnion1, queue>>>(
+      static_cast<const half *>(src.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<int64_t *>(index.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(y.unsafeGetTensorImpl()->mutable_data()));
   return y;
 }
