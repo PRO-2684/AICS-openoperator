@@ -9,7 +9,7 @@
 
 #define LOCAL_ELEMS 65536
 #define PART_ELEMS 16384
-#define TASK_COUNT 1024
+#define TASK_COUNT 128
 #define E0 1024
 
 __mlu_func__ float reduce_sum_half(half *buf, half *tmp, int n) {

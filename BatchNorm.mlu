@@ -102,7 +102,7 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
   static torch::Tensor mean;
   static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   static cnrtDim3_t d0 = {E4, 1, 1};
-  static cnrtDim3_t d1 = {32, 4, 1};
+  static cnrtDim3_t d1 = {32, 8, 1};
   if (!output.defined())
     output = torch::empty({16, 64, 256, 256}, x.options());
   if (!mean.defined())
