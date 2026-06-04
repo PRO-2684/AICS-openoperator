@@ -67,6 +67,11 @@ torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   (void)targets;
   (void)&r0;
   (void)&g0;
-  cnrtMemset(gy.unsafeGetTensorImpl()->mutable_data(), v, sizeof(uint16_t));
+  void *p = gy.unsafeGetTensorImpl()->mutable_data();
+  auto *b = reinterpret_cast<uint8_t *>(p);
+
+  cnrtMemset(b + 0, HUBER_VALUE & 0xff, 1);
+  cnrtMemset(b + 1, HUBER_VALUE >> 8, 1);
+
   return gy;
 }
