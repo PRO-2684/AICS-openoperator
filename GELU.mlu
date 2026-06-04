@@ -76,7 +76,9 @@ static constexpr cnrtDim3_t dim = {32, 1, 1};
 
 static const char *e = std::getenv("WORKER_ID");
 static int p0 = []() {
-  std::printf("WORKER_ID=%s\n", e ? e : "");
+  int d = -1;
+  cnrtGetDevice(&d);
+  std::printf("WORKER_ID=%s CNRT_DEVICE=%d\n", e ? e : "", d);
   std::fflush(stdout);
   return 0;
 }();
