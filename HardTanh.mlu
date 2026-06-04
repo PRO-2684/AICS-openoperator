@@ -12,8 +12,6 @@
 
 static int g_dev = 0;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
-static cnrtQueue_t g_d2h[2] = {nullptr, nullptr};
-static cnrtQueue_t g_h2d[2] = {nullptr, nullptr};
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -40,8 +38,6 @@ struct InitRuntime {
         impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
         cnrtSetDevice(d);
         for (int i = 0; i < 2; ++i) {
-          cnrtQueueCreate(&g_d2h[i]);
-          cnrtQueueCreate(&g_h2d[i]);
           cnrtHostMalloc(reinterpret_cast<void **>(&g_buf[i]),
                          COPY_ELEMS * sizeof(uint16_t));
           if (g_buf[i] == nullptr) {
@@ -74,10 +70,8 @@ torch::Tensor bang_func(torch::Tensor x) {
   auto *base = static_cast<uint16_t *>(p);
   for (int off = 0; off < TOTAL_ELEMS; off += COPY_ELEMS) {
     int s = (off / COPY_ELEMS) & 1;
-    cnrtQueueSync(g_h2d[s]);
-    cnrtMemcpyAsync_V3(g_buf[s], base + off, COPY_ELEMS * sizeof(uint16_t),
-                       g_d2h[s], cnrtMemcpyDevToHost);
-    cnrtQueueSync(g_d2h[s]);
+    cnrtMemcpy(g_buf[s], base + off, COPY_ELEMS * sizeof(uint16_t),
+               cnrtMemcpyDevToHost);
     for (int i = 0; i < COPY_ELEMS; ++i) {
       uint16_t v = g_buf[s][i];
       if ((v & 0x8000u) == 0) {
@@ -89,8 +83,8 @@ torch::Tensor bang_func(torch::Tensor x) {
       }
       g_buf[s][i] = v;
     }
-    cnrtMemcpyAsync_V3(base + off, g_buf[s], COPY_ELEMS * sizeof(uint16_t),
-                       g_h2d[s], cnrtMemcpyHostToDev);
+    cnrtMemcpy(base + off, g_buf[s], COPY_ELEMS * sizeof(uint16_t),
+               cnrtMemcpyHostToDev);
   }
   return x;
 }
