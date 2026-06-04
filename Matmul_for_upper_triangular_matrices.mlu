@@ -13,8 +13,8 @@
 #define TN 256
 #define TK 128
 #define TR 64
-#define RB 6
-#define TG 11
+#define RB 7
+#define TG 10
 #define TC 16
 #define TT (TG * TC)
 
@@ -26,7 +26,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   __nram__ half hf[TN * TK];
   __nram__ float acc[RB * TM * TN];
   __nram__ float tmp[TM * TN];
-  __nram__ float out[TM * TN];
   __wram__ half ww[TN * TK];
 
   for (int t = taskId; t < TT; t += taskDim) {
@@ -65,17 +64,17 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
         __memcpy(cp, acc + rb * TM * TN, TN * sizeof(float), NRAM2GDRAM,
                  N0 * sizeof(float), TN * sizeof(float), TM - 1);
       } else if (mi + TM > nj) {
-        __bang_write_zero(out, TM * TN);
+        __bang_write_zero(tmp, TM * TN);
         for (int r = 0; r < TM; ++r) {
           int s = mi + r - nj;
           if (s < 0)
             s = 0;
           if (s < TN)
-            __memcpy(out + r * TN + s,
+            __memcpy(tmp + r * TN + s,
                      acc + rb * TM * TN + r * TN + s,
                      (TN - s) * sizeof(float), NRAM2NRAM);
         }
-        __memcpy(cp, out, TN * sizeof(float), NRAM2GDRAM, N0 * sizeof(float),
+        __memcpy(cp, tmp, TN * sizeof(float), NRAM2GDRAM, N0 * sizeof(float),
                  TN * sizeof(float), TM - 1);
       } else {
         __memcpy(cp, acc + rb * TM * TN, TN * sizeof(float), NRAM2GDRAM,
