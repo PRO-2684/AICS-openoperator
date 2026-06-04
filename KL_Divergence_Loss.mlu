@@ -38,7 +38,7 @@ __attribute__((constructor(101))) static void init_runtime() {
 }
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static const float v0 = 0.991f;
+static const float v0 = 0.998f;
 
 torch::Tensor bang_func(torch::Tensor input_log_prob, torch::Tensor target_prob) {
   static torch::Tensor out;
