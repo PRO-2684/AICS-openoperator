@@ -11,13 +11,13 @@
 #define K0 1024
 #define N0 2048
 #define TM 64
-#define TN 512
+#define TN 256
 #define TK 128
 #define BM 8
-#define BN 4
+#define BN 8
 #define RB 2
 #define BG 4
-#define TC (B0 * BG * BN)
+#define TC (B0 * BN)
 
 
 static int g_dev = 0;
@@ -54,42 +54,43 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   __nram__ half ah[TM * TK];
   __nram__ half bh[TK * TN];
   __nram__ half bt[TN * TK];
-  __nram__ float acc[RB * TM * TN];
+  __nram__ float acc[BG * RB * TM * TN];
   __nram__ float tmp[TM * TN];
   __wram__ half ww[TN * TK];
 
   for (int t = taskId; t < TC; t += taskDim) {
-    int batch = t / (BG * BN);
-    int r = t - batch * BG * BN;
-    int base_m = (r / BN) * RB * TM;
-    int nj = (r - (r / BN) * BN) * TN;
+    int batch = t / BN;
+    int nj = (t - batch * BN) * TN;
     const half *bp = b + batch * K0 * N0 + nj;
 
-    __bang_write_zero(acc, RB * TM * TN);
+    __bang_write_zero(acc, BG * RB * TM * TN);
     for (int kk = 0; kk < K0; kk += TK) {
       __memcpy(bh, bp + kk * N0, TN * sizeof(half), GDRAM2NRAM,
                TN * sizeof(half), N0 * sizeof(half), TK - 1);
       __bang_transpose(bt, bh, TK, TN);
       __bang_reshape_filter(bh, bt, TN, 1, 1, TK);
       __memcpy(ww, bh, TN * TK * sizeof(half), NRAM2WRAM);
-      for (int rb = 0; rb < RB; ++rb) {
-        int mi = base_m + rb * TM;
-        if (mi >= M0)
-          continue;
-        const half *ap = a + batch * M0 * K0 + mi * K0;
-        __memcpy(ah, ap + kk, TK * sizeof(half), GDRAM2NRAM,
-                 TK * sizeof(half), K0 * sizeof(half), TM - 1);
-        __bang_matmul(tmp, ah, ww, TM, TK, TN);
-        __bang_add(acc + rb * TM * TN, acc + rb * TM * TN, tmp, TM * TN);
+      for (int rg = 0; rg < BG; ++rg) {
+        int base_m = rg * RB * TM;
+        for (int rb = 0; rb < RB; ++rb) {
+          int mi = base_m + rb * TM;
+          const half *ap = a + batch * M0 * K0 + mi * K0;
+          __memcpy(ah, ap + kk, TK * sizeof(half), GDRAM2NRAM,
+                   TK * sizeof(half), K0 * sizeof(half), TM - 1);
+          __bang_matmul(tmp, ah, ww, TM, TK, TN);
+          float *dst = acc + (rg * RB + rb) * TM * TN;
+          __bang_add(dst, dst, tmp, TM * TN);
+        }
       }
     }
-    for (int rb = 0; rb < RB; ++rb) {
-      int mi = base_m + rb * TM;
-      if (mi >= M0)
-        continue;
-      float *cp = c + batch * M0 * N0 + mi * N0 + nj;
-      __memcpy(cp, acc + rb * TM * TN, TN * sizeof(float), NRAM2GDRAM,
-               N0 * sizeof(float), TN * sizeof(float), TM - 1);
+    for (int rg = 0; rg < BG; ++rg) {
+      int base_m = rg * RB * TM;
+      for (int rb = 0; rb < RB; ++rb) {
+        int mi = base_m + rb * TM;
+        float *cp = c + batch * M0 * N0 + mi * N0 + nj;
+        __memcpy(cp, acc + (rg * RB + rb) * TM * TN, TN * sizeof(float),
+                 NRAM2GDRAM, N0 * sizeof(float), TN * sizeof(float), TM - 1);
+      }
     }
   }
 }
