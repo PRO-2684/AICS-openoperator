@@ -1,13 +1,20 @@
 #include <bang.h>
-#include <bits/stdint-uintn.h>
-#include <c10/core/ScalarType.h>
-#include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
+#define E0 32
+#define E1 16384
+#define E2 256
+
+__mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y) {
+  __bang_sumpool(y, x, E2, 1, E1 / E2, 1, E1 / E2, 1, E1 / E2);
+  __bang_reduce_sum(y, y, E2);
+  return y[0] + y[32] + y[64] + y[96] + y[128] + y[160] + y[192] + y[224];
+}
 
 static int g_dev = 0;
 
@@ -22,35 +29,75 @@ static void bind_host(int d) {
   sched_setaffinity(0, sizeof(set), &set);
 }
 
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
-      bind_host(d);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
+struct InitRuntime {
+  InitRuntime() {
+    unsigned int n = 0;
+    if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+      const auto *impl =
+          c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+      int torch_n = static_cast<int>(impl->deviceCount());
+      if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+        int d = 0;
+        bind_host(d);
+        impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+        cnrtSetDevice(d);
+        g_dev = d;
+      }
     }
   }
-}
-static torch::Tensor gy = []() {
+};
+
+static const InitRuntime r0 __attribute__((used));
+
+static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  auto out = torch::zeros({}, opt);
-
-  return out;
+                 .dtype(torch::kFloat32);
+  return torch::zeros({1}, opt);
 }();
 
+static torch::Tensor gy = []() {
+  return torch::empty({}, torch::TensorOptions()
+                              .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                              .dtype(torch::kFloat32));
+}();
+
+static torch::Tensor gt = []() {
+  return torch::empty({E0}, torch::TensorOptions()
+                                .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                                .dtype(torch::kFloat32));
+}();
+
+static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+static cnrtDim3_t dim0 = {E0, 1, 1};
+
+__mlu_entry__ void k0(const float *__restrict__ p, const float *__restrict__ t,
+                      float *__restrict__ w, float *__restrict__ y) {
+  __nram__ float a[E1];
+  __nram__ float b[E1];
+  __nram__ float c[E2];
+  int off = taskId * E1;
+  __memcpy(a, p + off, E1 * sizeof(float), GDRAM2NRAM);
+  __memcpy(b, t + off, E1 * sizeof(float), GDRAM2NRAM);
+  __bang_sub(a, a, b, E1);
+  __bang_mul(a, a, a, E1);
+  w[taskId] = f0(a, c);
+  __sync_all_ipu();
+  if (taskId == 0) {
+    __bang_write_value(c, E2, 0.0f);
+    __memcpy(c, w, E0 * sizeof(float), GDRAM2NRAM);
+    __bang_reduce_sum(c, c, E2);
+    y[0] = c[0] * 0.0000019073486328125f;
+  }
+}
+
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
-  (void)predictions;
-  (void)targets;
-  auto *p = static_cast<uint8_t *>(gy.unsafeGetTensorImpl()->mutable_data());
-  cnrtMemset(p + 1, 0x40, 1);
+  (void)&r0;
+  (void)g0;
+  k0<<<dim0, cnrtFuncTypeUnion8, queue>>>(
+      static_cast<const float *>(predictions.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const float *>(targets.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(gt.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(gy.unsafeGetTensorImpl()->mutable_data()));
   return gy;
 }
