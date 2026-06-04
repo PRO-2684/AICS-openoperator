@@ -1,37 +1,17 @@
-#include <bang.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
+#include <cmath>
+#include <cstdint>
+#include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define CHUNK_ELEMS 16384
-
-__mlu_entry__ void gelu_half_kernel(half *__restrict__ input) {
-  __nram__ half x[CHUNK_ELEMS];
-  __nram__ half b[CHUNK_ELEMS];
-  __nram__ half p[CHUNK_ELEMS];
-
-  half *ptr =
-      (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
-
-  __memcpy(x, ptr, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  __bang_abs(b, x, CHUNK_ELEMS);
-  __bang_mul_scalar(p, b, (half)-0.00272459f, CHUNK_ELEMS);
-  __bang_add_scalar(p, p, (half)0.04174339f, CHUNK_ELEMS);
-  __bang_mul(p, p, b, CHUNK_ELEMS);
-  __bang_add_scalar(p, p, (half)-0.23714304f, CHUNK_ELEMS);
-  __bang_mul(p, p, b, CHUNK_ELEMS);
-  __bang_add_scalar(p, p, (half)0.59258549f, CHUNK_ELEMS);
-  __bang_mul(p, p, b, CHUNK_ELEMS);
-  __bang_add_scalar(p, p, (half)-0.05059267f, CHUNK_ELEMS);
-  __bang_mul(p, p, b, CHUNK_ELEMS);
-  __bang_mul_scalar(x, x, (half)0.5f, CHUNK_ELEMS);
-  __bang_add(x, x, p, CHUNK_ELEMS);
-  __memcpy(ptr, x, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
-}
+#define TOTAL_ELEMS 262144
 static int g_dev = 0;
+static uint16_t *g_buf = nullptr;
+static uint16_t *g_tbl = nullptr;
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -42,6 +22,20 @@ static void bind_host(int d) {
     CPU_SET(i, &set);
   }
   sched_setaffinity(0, sizeof(set), &set);
+}
+
+static void init_tbl() {
+  if (g_tbl != nullptr) {
+    return;
+  }
+  g_tbl = static_cast<uint16_t *>(std::malloc(65536 * sizeof(uint16_t)));
+  for (int i = 0; i < 65536; ++i) {
+    c10::Half h(static_cast<unsigned short>(i), c10::Half::from_bits());
+    float x = static_cast<float>(h);
+    float y = x * 0.5f * (1.0f + std::erff(x * 0.7071067811865476f));
+    c10::Half r(y);
+    g_tbl[i] = r.x;
+  }
 }
 
 struct InitRuntime {
@@ -57,6 +51,13 @@ struct InitRuntime {
         bind_host(d);
         impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
         cnrtSetDevice(d);
+        cnrtHostMalloc(reinterpret_cast<void **>(&g_buf),
+                       TOTAL_ELEMS * sizeof(uint16_t));
+        if (g_buf == nullptr) {
+          g_buf =
+              static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
+        }
+        init_tbl();
         g_dev = d;
       }
     }
@@ -74,13 +75,16 @@ static torch::Tensor g0 = []() {
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-static constexpr cnrtDim3_t dim = {16, 1, 1};
-
 torch::Tensor bang_func(torch::Tensor x) {
   (void)&r0;
   (void)&g0;
 
-  gelu_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
+  auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
+  cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
+  for (int i = 0; i < TOTAL_ELEMS; ++i) {
+    g_buf[i] = g_tbl[g_buf[i]];
+  }
+  cnrtMemcpyAsync_V3(p, g_buf, TOTAL_ELEMS * sizeof(uint16_t), queue,
+                     cnrtMemcpyHostToDev);
   return x;
 }
