@@ -50,16 +50,13 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 
+static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+static constexpr cnrtDim3_t dim = {32, 1, 1};
+static constexpr cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
+
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
-  static bool init = false;
-  if (!init) {
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t dim = {32, 1, 1};
-    cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
-    cos_half_kernel<<<dim, ktype, queue>>>(
-        reinterpret_cast<half *>(x.data_ptr<at::Half>()));
-    init = true;
-  }
+  cos_half_kernel<<<dim, ktype, queue>>>(
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
   return x;
 }
