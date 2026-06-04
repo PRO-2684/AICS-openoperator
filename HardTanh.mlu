@@ -6,7 +6,7 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define CHUNK_ELEMS 131072
+#define CHUNK_ELEMS 32768 * 2
 
 static int g_dev = 0;
 
@@ -68,7 +68,7 @@ static torch::Tensor g0 = []() {
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-static constexpr cnrtDim3_t dim = {2, 1, 1};
+static constexpr cnrtDim3_t dim = {4, 1, 1};
 
 static const char *e = std::getenv("WORKER_ID");
 
