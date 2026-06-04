@@ -19,14 +19,14 @@ __mlu_entry__ void elu_half_kernel(half *__restrict__ input) {
   __bang_mul_scalar(c, c, (half)0.5f, CHUNK_ELEMS);
   __bang_sub(b, b, a, CHUNK_ELEMS);
   __bang_mul_scalar(b, b, (half)0.5f, CHUNK_ELEMS);
-  __bang_fusion(FUSION_FMA, a, b, (half)-0.00133042f, (half)0.02082807f,
-                CHUNK_ELEMS);
-  __bang_fusion(FUSION_FMA, a, a, b, (half)-0.13505281f, CHUNK_ELEMS,
-                CHUNK_ELEMS);
-  __bang_fusion(FUSION_FMA, a, a, b, (half)0.48010033f, CHUNK_ELEMS,
-                CHUNK_ELEMS);
-  __bang_fusion(FUSION_FMA, a, a, b, (half)-0.99694532f, CHUNK_ELEMS,
-                CHUNK_ELEMS);
+  __bang_mul_scalar(a, b, (half)-0.00133042f, CHUNK_ELEMS);
+  __bang_add_scalar(a, a, (half)0.02082807f, CHUNK_ELEMS);
+  __bang_mul(a, a, b, CHUNK_ELEMS);
+  __bang_add_scalar(a, a, (half)-0.13505281f, CHUNK_ELEMS);
+  __bang_mul(a, a, b, CHUNK_ELEMS);
+  __bang_add_scalar(a, a, (half)0.48010033f, CHUNK_ELEMS);
+  __bang_mul(a, a, b, CHUNK_ELEMS);
+  __bang_add_scalar(a, a, (half)-0.99694532f, CHUNK_ELEMS);
   __bang_mul(a, a, b, CHUNK_ELEMS);
   __bang_add(a, a, c, CHUNK_ELEMS);
   __memcpy(p, a, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
