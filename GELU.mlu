@@ -91,7 +91,7 @@ static torch::Tensor g0 = []() {
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-static constexpr cnrtDim3_t dim = {32, 1, 1};
+static constexpr cnrtDim3_t dim = {4, 8, 1};
 
 static const char *e = std::getenv("WORKER_ID");
 
@@ -99,7 +99,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   (void)&r0;
   (void)&g0;
 
-  gelu_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+  gelu_half_kernel<<<dim, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
   return x;
 }
