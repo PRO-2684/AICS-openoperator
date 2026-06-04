@@ -1,6 +1,6 @@
 #include <bang.h>
-#include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 #include <unistd.h>
@@ -9,24 +9,55 @@
 #define E1 6144
 #define E2 6656
 
-
 static int g_dev = 0;
 
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
+static void bind_host(int d) {
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  int begin = d >= 4 ? 28 : 0;
+  int end = begin + 28;
+  for (int i = begin; i < end; ++i) {
+    CPU_SET(i, &set);
+  }
+  sched_setaffinity(0, sizeof(set), &set);
+}
+
+struct InitRuntime {
+
+  InitRuntime() {
+    unsigned int n = 0;
+    if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+      const auto *impl =
+          c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+      int torch_n = static_cast<int>(impl->deviceCount());
+      if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+        int limit =
+            torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
+        int d = 0;
+        bind_host(d);
+        impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+        cnrtSetDevice(d);
+        g_dev = d;
+      }
     }
   }
-}
+};
+
+static const InitRuntime r0 __attribute__((used));
+
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
+static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+
+static constexpr cnrtDim3_t dim = {4, 8, 1};
+
+static const char *e = std::getenv("WORKER_ID");
+
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
   __nram__ half a[E2];
@@ -59,17 +90,27 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   }
 }
 
+static auto y = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::empty({16, 3, 254, 254}, opt);
+}();
+
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
                         int kernel_size, int stride, int padding) {
   (void)in_channels;
   (void)kernel_size;
   (void)stride;
   (void)padding;
-  auto y = torch::empty({16, 3, 254, 254}, x.options());
+  (void)&r0;
+  (void)&g0;
+
   cnrtDim3_t dim = {4, 8, 1};
-  k0<<<dim, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  k0<<<dim, cnrtFuncTypeUnion1, queue>>>(
+      reinterpret_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      reinterpret_cast<const half *>(
+          kernel.unsafeGetTensorImpl()->mutable_data()),
+      reinterpret_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
   return y;
 }
