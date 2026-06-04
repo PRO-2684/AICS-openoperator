@@ -33,7 +33,7 @@ static void init_tbl() {
   for (int i = 0; i < 65536; ++i) {
     c10::Half h(static_cast<unsigned short>(i), c10::Half::from_bits());
     float x = static_cast<float>(h);
-    float y = x > 0.0f ? x : std::expf(x) - 1.0f;
+    float y = x > 0.0f ? x : static_cast<float>(std::exp(x)) - 1.0f;
     c10::Half r(y);
     g_tbl[i] = r.x;
   }
