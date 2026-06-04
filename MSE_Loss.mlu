@@ -1,4 +1,5 @@
 #include <bang.h>
+#include <bits/stdint-uintn.h>
 #include <c10/core/ScalarType.h>
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
@@ -49,7 +50,7 @@ static torch::Tensor gy = []() {
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   (void)predictions;
   (void)targets;
-  auto *p = static_cast<char *>(gy.unsafeGetTensorImpl()->mutable_data());
+  auto *p = static_cast<uint8_t *>(gy.unsafeGetTensorImpl()->mutable_data());
   cnrtMemset(p + 1, 0x40, 1);
   return gy;
 }

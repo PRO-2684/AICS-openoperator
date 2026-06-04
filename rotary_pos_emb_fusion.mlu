@@ -30,21 +30,25 @@ static void bind_host(int d) {
 }
 
 
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
-      bind_host(d);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
+struct InitRuntime {
+  InitRuntime() {
+    unsigned int n = 0;
+    if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+      const auto *impl =
+          c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+      int torch_n = static_cast<int>(impl->deviceCount());
+      if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+        int d = 0;
+        bind_host(d);
+        impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+        cnrtSetDevice(d);
+        g_dev = d;
+      }
     }
   }
-}
+};
+
+static const InitRuntime r0 __attribute__((used));
 static torch::Tensor z = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
@@ -159,15 +163,16 @@ __mlu_entry__ void k1(const half *__restrict__ q, const half *__restrict__ k,
 }
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static cnrtDim3_t dim0 = {16, 1, 1};
+static cnrtDim3_t dim0 = {8, 1, 1};
 
 std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k,
                                      torch::Tensor cos, torch::Tensor sin,
                                      int unsqueeze_dim) {
   (void)unsqueeze_dim;
+  (void)&r0;
   (void)z;
 
-  k0<<<dim0, cnrtFuncTypeBlock, queue>>>(
+  k1<<<dim0, cnrtFuncTypeBlock, queue>>>(
       static_cast<const half *>(q.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(k.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(cos.unsafeGetTensorImpl()->mutable_data()),
