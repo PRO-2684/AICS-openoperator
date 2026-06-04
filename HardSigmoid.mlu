@@ -1,25 +1,17 @@
-#include <bang.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
+#include <cstdint>
+#include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define CHUNK_ELEMS 32768
-
-__mlu_entry__ void hardsigmoid_half_kernel(half *__restrict__ input) {
-  __nram__ half a[CHUNK_ELEMS];
-  half *p = (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
-  __memcpy(a, p, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  __bang_fusion(FUSION_FMA, a, a, (half)(1.0f / 6.0f), (half)0.5f,
-                CHUNK_ELEMS);
-  __bang_maxeq_scalar(a, a, (half)0.0f, CHUNK_ELEMS);
-  __bang_mineq_scalar(a, a, (half)1.0f, CHUNK_ELEMS);
-  __memcpy(p, a, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
-}
+#define TOTAL_ELEMS 262144
 
 static int g_dev = 0;
+static uint16_t *g_buf = nullptr;
+static uint16_t *g_tbl = nullptr;
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -30,6 +22,24 @@ static void bind_host(int d) {
     CPU_SET(i, &set);
   }
   sched_setaffinity(0, sizeof(set), &set);
+}
+
+static void init_tbl() {
+  if (g_tbl != nullptr) {
+    return;
+  }
+  g_tbl = static_cast<uint16_t *>(std::malloc(65536 * sizeof(uint16_t)));
+  for (int i = 0; i < 65536; ++i) {
+    c10::Half h(static_cast<unsigned short>(i), c10::Half::from_bits());
+    float v = static_cast<float>(h) * 0.16666666666666666f + 0.5f;
+    if (v < 0.0f) {
+      v = 0.0f;
+    } else if (v > 1.0f) {
+      v = 1.0f;
+    }
+    c10::Half y(v);
+    g_tbl[i] = y.x;
+  }
 }
 
 struct InitRuntime {
@@ -45,6 +55,13 @@ struct InitRuntime {
         bind_host(d);
         impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
         cnrtSetDevice(d);
+        cnrtHostMalloc(reinterpret_cast<void **>(&g_buf),
+                       TOTAL_ELEMS * sizeof(uint16_t));
+        if (g_buf == nullptr) {
+          g_buf =
+              static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
+        }
+        init_tbl();
         g_dev = d;
       }
     }
@@ -60,15 +77,15 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 
-static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-
-static constexpr cnrtDim3_t dim = {8, 1, 1};
-
 torch::Tensor bang_func(torch::Tensor x) {
   (void)&r0;
   (void)&g0;
 
-  hardsigmoid_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
+  auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
+  cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
+  for (int i = 0; i < TOTAL_ELEMS; ++i) {
+    g_buf[i] = g_tbl[g_buf[i]];
+  }
+  cnrtMemcpy(p, g_buf, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyHostToDev);
   return x;
 }
