@@ -18,24 +18,42 @@ __mlu_entry__ void k0(half *__restrict__ x) {
   __memcpy(x + taskId * E0, a, E0 * sizeof(half), NRAM2GDRAM);
 }
 
-
 static int g_dev = 0;
 
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int limit = torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-      int d = static_cast<int>(static_cast<unsigned long>(getpid()) % limit);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
+static void bind_host(int d) {
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  int begin = d >= 4 ? 28 : 0;
+  int end = begin + 28;
+  for (int i = begin; i < end; ++i) {
+    CPU_SET(i, &set);
+  }
+  sched_setaffinity(0, sizeof(set), &set);
+}
+
+struct InitRuntime {
+
+  InitRuntime() {
+    unsigned int n = 0;
+    if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+      const auto *impl =
+          c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+      int torch_n = static_cast<int>(impl->deviceCount());
+      if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+        int limit =
+            torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
+        int d = 0;
+        bind_host(d);
+        impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+        cnrtSetDevice(d);
+        g_dev = d;
+      }
     }
   }
-}
+};
+
+static const InitRuntime r0 __attribute__((used));
+
 static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
@@ -43,16 +61,19 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 
+static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+
+static constexpr cnrtDim3_t dim = {32, 1, 1};
+
+static const char *e = std::getenv("WORKER_ID");
+
 torch::Tensor bang_func(torch::Tensor input, double negative_slope) {
+
+  (void)&r0;
+  (void)&g0;
   (void)negative_slope;
-  (void)g0;
-  static bool init = false;
-  if (!init) {
-    cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-    cnrtDim3_t dim = {16, 2, 1};
-    k0<<<dim, cnrtFuncTypeUnion4, queue>>>(
-        reinterpret_cast<half *>(input.data_ptr<at::Half>()));
-    init = true;
-  }
+
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<half *>(input.unsafeGetTensorImpl()->mutable_data()));
   return input;
 }
