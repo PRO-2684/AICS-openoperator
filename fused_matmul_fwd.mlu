@@ -113,7 +113,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, torch::Tensor b) {
   (void)g0;
   auto &y = gy;
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {8, 4, 1};
+  cnrtDim3_t d = {4, 8, 1};
   k0<<<d, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
