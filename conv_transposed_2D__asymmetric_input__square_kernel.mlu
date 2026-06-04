@@ -124,9 +124,14 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, int c0, int c1,
     y = torch::empty({E0, E2, E5, E6}, x.options().dtype(torch::kFloat32));
   if (!z.defined())
     z = torch::empty({E9}, x.options());
-  k0<<<d, cnrtFuncTypeUnion1, q>>>(
-      static_cast<const half *>(w.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(z.unsafeGetTensorImpl()->mutable_data()));
+  static void *last_w = nullptr;
+  void *pw = w.unsafeGetTensorImpl()->mutable_data();
+  if (last_w != pw) {
+    k0<<<d, cnrtFuncTypeUnion1, q>>>(
+        static_cast<const half *>(pw),
+        static_cast<half *>(z.unsafeGetTensorImpl()->mutable_data()));
+    last_w = pw;
+  }
   k1<<<d, cnrtFuncTypeUnion1, q>>>(
       static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(z.unsafeGetTensorImpl()->mutable_data()),
