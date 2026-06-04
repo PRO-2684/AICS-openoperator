@@ -121,6 +121,8 @@ __mlu_entry__ void inst_norm_split_kernel(const half *__restrict__ x,
   __nram__ half hpack[256];
 
   int c = coreId;
+  if (c == 0x80)
+    return;
   for (int idx = taskIdY; idx < E0; idx += taskDimY) {
     const half *px = x + (int64_t)idx * LOCAL_ELEMS + c * PART_ELEMS;
     half *py = y + (int64_t)idx * LOCAL_ELEMS + c * PART_ELEMS;
@@ -132,7 +134,7 @@ __mlu_entry__ void inst_norm_split_kernel(const half *__restrict__ x,
 
     s[c] = sum;
     s[c + 4] = sq_sum;
-    __sync_cluster();
+    __sync_all_ipu_within_cluster();
 
     if (c == 0) {
       float mean = (s[0] + s[1] + s[2] + s[3]) * 0.0000152587890625f;
@@ -142,14 +144,14 @@ __mlu_entry__ void inst_norm_split_kernel(const half *__restrict__ x,
       s[0] = mean;
       s[1] = 1.0f + d * -0.5f + d2 * (0.375f - 0.3125f * d);
     }
-    __sync_cluster();
+    __sync_all_ipu_within_cluster();
 
     float mean = s[0];
     float inv_std = s[1];
     __bang_fusion(FUSION_FMA, hbuf, hbuf, (half)inv_std,
                   (half)(-mean * inv_std), PART_ELEMS);
     __memcpy(py, hbuf, PART_ELEMS * sizeof(half), NRAM2GDRAM);
-    __sync_cluster();
+    __sync_all_ipu_within_cluster();
   }
 }
 
@@ -197,8 +199,8 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-  cnrtDim3_t dim = {TASK_COUNT, 1, 1};
-  inst_norm_vec_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
+  cnrtDim3_t dim = {4, 8, 1};
+  inst_norm_split_kernel<<<dim, cnrtFuncTypeUnion1, queue>>>(
       (const half *)x.data_ptr<at::Half>(), (half *)y.data_ptr<at::Half>());
 
   return y;
