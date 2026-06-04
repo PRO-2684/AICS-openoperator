@@ -11,9 +11,9 @@
 #define E2 64
 #define E3 256
 #define E4 254
-#define E5 6
-#define E6 8
-#define E7 43
+#define E5 2
+#define E6 4
+#define E7 127
 #define E8 1728
 #define E9 18432
 #define E10 32
@@ -75,17 +75,17 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ float c[E5 * E4 * E2];
   __wram__ half ww[E9];
   __memcpy(ww, w, E9 * sizeof(half), GDRAM2WRAM);
+  __bang_write_zero(a + E1 * E6 * E3, (E10 - E1) * E6 * E3);
   int n = taskId / E7;
   int u = taskId - n * E7;
   for (int t = taskId; t < E0 * E7; t += taskDim) {
     int oh = u * E5;
-    int rows = u == E7 - 1 ? 2 : E5;
+    int rows = E5;
     int ih = E6;
-    __bang_write_zero(a, E6 * E3 * E10);
     for (int c0 = 0; c0 < E1; ++c0) {
-      __memcpy(a + c0 * E6 * E3,
+      __memcpy(a + c0 * ih * E3,
                x + (n * E1 + c0) * E3 * E3 + oh * E3,
-               (rows + 2) * E3 * sizeof(half), GDRAM2NRAM);
+               ih * E3 * sizeof(half), GDRAM2NRAM);
     }
     __bang_transpose(b, a, E10, ih * E3);
     __bang_conv(c, b, ww, E10, ih, E3, 3, 3, 1, 1, E2);
