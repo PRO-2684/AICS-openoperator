@@ -64,7 +64,7 @@ torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
   (void)g0;
   (void)r0;
 
-  cnrtDim3_t d = {1, 1, 1};
+  constexpr cnrtDim3_t d = {1, 1, 1};
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   k0<<<d, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<half *>(a.unsafeGetTensorImpl()->mutable_data()),
