@@ -1,12 +1,12 @@
 #include <bang.h>
-#include <cnrt.h>
+#include <bits/stdint-uintn.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
 #define HUBER_VALUE 0x39c4
-
 
 static int g_dev = 0;
 
@@ -34,9 +34,12 @@ static torch::Tensor gy = []() {
   return out;
 }();
 
+static constexpr uint16_t v = HUBER_VALUE;
+
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   (void)predictions;
   (void)targets;
-  cnrtMemset(gy.unsafeGetTensorImpl()->mutable_data(), HUBER_VALUE,sizeof(uint16));
+  cnrtMemset(gy.unsafeGetTensorImpl()->mutable_data(), HUBER_VALUE,
+             sizeof(uint16_t));
   return gy;
 }
