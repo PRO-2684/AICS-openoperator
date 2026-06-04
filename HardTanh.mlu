@@ -6,7 +6,7 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define CHUNK_ELEMS 16384
+#define CHUNK_ELEMS 262144
 
 static int g_dev = 0;
 
@@ -66,7 +66,7 @@ static torch::Tensor g0 = []() {
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-static constexpr cnrtDim3_t dim = {16, 1, 1};
+static constexpr cnrtDim3_t dim = {1, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)&r0;
