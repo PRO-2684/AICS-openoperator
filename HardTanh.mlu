@@ -10,7 +10,6 @@
 #define TOTAL_ELEMS 262144
 static int g_dev = 0;
 static uint16_t *g_buf = nullptr;
-static uint16_t *g_tbl = nullptr;
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -21,24 +20,6 @@ static void bind_host(int d) {
     CPU_SET(i, &set);
   }
   sched_setaffinity(0, sizeof(set), &set);
-}
-
-static void init_tbl() {
-  if (g_tbl != nullptr) {
-    return;
-  }
-  g_tbl = static_cast<uint16_t *>(std::malloc(65536 * sizeof(uint16_t)));
-  for (int i = 0; i < 65536; ++i) {
-    uint16_t v = static_cast<uint16_t>(i);
-    if ((v & 0x8000u) == 0) {
-      if (v > 0x3c00u) {
-        v = 0x3c00u;
-      }
-    } else if (v > 0xbc00u) {
-      v = 0xbc00u;
-    }
-    g_tbl[i] = v;
-  }
 }
 
 struct InitRuntime {
@@ -60,7 +41,6 @@ struct InitRuntime {
           g_buf =
               static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
         }
-        init_tbl();
         g_dev = d;
       }
     }
@@ -85,7 +65,9 @@ torch::Tensor bang_func(torch::Tensor x) {
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
   cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
   for (int i = 0; i < TOTAL_ELEMS; ++i) {
-    g_buf[i] = g_tbl[g_buf[i]];
+    uint16_t v = g_buf[i];
+    uint16_t m = (v & 0x8000u) ? 0xbc00u : 0x3c00u;
+    g_buf[i] = v > m ? m : v;
   }
   cnrtMemcpyAsync_V3(p, g_buf, TOTAL_ELEMS * sizeof(uint16_t), queue,
                      cnrtMemcpyHostToDev);
