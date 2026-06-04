@@ -8,8 +8,8 @@
 
 #define E0 64
 #define E1 65536
-#define E2 32768
-#define E3 2048
+#define E2 65536
+#define E3 1024
 #define E4 32
 
 __mlu_func__ float fsum(float *__restrict__ x, float *__restrict__ y) {
@@ -19,7 +19,7 @@ __mlu_func__ float fsum(float *__restrict__ x, float *__restrict__ y) {
 }
 
 __mlu_func__ float fsumh(const half *__restrict__ x, half *__restrict__ y) {
-  __bang_sumpool(y, x, 64, 1, 512, 1, 512, 512, 1);
+  __bang_sumpool(y, x, 64, 1, 1024, 1, 1024, 1024, 1);
   float s = 0.0f;
 #pragma unroll
   for (int i = 0; i < 64; ++i)
@@ -66,12 +66,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ m) {
     m[taskId + E4] = 0.0f;
   }
   __sync_all_ipu();
-  for (int p = taskId; p < 1024; p += taskDim) {
-    int n = p >> 7;
-    int r = p & 127;
-    int c = r >> 1;
-    int g = r & 1;
-    int off = ((n << 1) * E0 + c) * E1 + g * E2;
+  for (int p = taskId; p < E3; p += taskDim) {
+    int n = p >> 6;
+    int c = p & 63;
+    int off = (n * E0 + c) * E1;
     __memcpy(h, x + off, E2 * sizeof(half), GDRAM2NRAM);
     s[0] = fsumh(h, t);
     __bang_atomic_reduce_add(m + c, s, 1);
@@ -85,10 +83,9 @@ __mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ m,
   __memcpy(mm, m, E0 * sizeof(float), GDRAM2NRAM);
   __bang_mul_scalar(mm, mm, 0.0000019073486328125f, E0);
   for (int p = taskId; p < E3; p += taskDim) {
-    int c = (p >> 1) & 63;
-    int n = p >> 7;
-    int g = p & 1;
-    int off = (n * E0 + c) * E1 + g * E2;
+    int n = p >> 6;
+    int c = p & 63;
+    int off = (n * E0 + c) * E1;
     __memcpy(h, x + off, E2 * sizeof(half), GDRAM2NRAM);
     __bang_fusion(FUSION_FMA, h, h, (half)1.001f, (half)(-mm[c] * 1.001f),
                   E2);
