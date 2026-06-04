@@ -146,8 +146,8 @@ __mlu_entry__ void gelu_half_kernel(half *__restrict__ input) {
       (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
 
   __memcpy(x, ptr, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  __bang_maximum_scalar(x, x, (half)-8.0f, CHUNK_ELEMS);
-  __bang_minimum_scalar(x, x, (half)7.98828125f, CHUNK_ELEMS);
+  __bang_maxeq_scalar(x, x, (half)-8.0f, CHUNK_ELEMS);
+  __bang_mineq_scalar(x, x, (half)7.98828125f, CHUNK_ELEMS);
   __bang_add_scalar(x, x, (half)8.0f, CHUNK_ELEMS);
   __bang_mul_scalar(x, x, (half)128.0f, CHUNK_ELEMS);
   __bang_add_scalar(x, x, (half)0.5f, CHUNK_ELEMS);
