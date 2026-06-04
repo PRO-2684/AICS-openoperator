@@ -58,25 +58,41 @@ static torch::Tensor gC = []() {
                           .dtype(torch::kFloat32));
 }();
 
+static torch::Tensor gW = []() {
+  return torch::empty({TC * TN * K0},
+                      torch::TensorOptions()
+                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                          .dtype(torch::kHalf));
+}();
+
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 static cnrtDim3_t dim0 = {32, 1, 1};
+static cnrtDim3_t dim1 = {3, 1, 1};
+static const void *gB = nullptr;
+
+__mlu_entry__ void kprep(const half *__restrict__ b, half *__restrict__ w) {
+  __nram__ half bh[K0 * TN];
+  __nram__ half bt[TN * K0];
+  __nram__ half hf[TN * K0];
+
+  int col = taskId;
+  int nj = col * TN;
+  __memcpy(bh, b + nj, TN * sizeof(half), GDRAM2NRAM, TN * sizeof(half),
+           N0 * sizeof(half), K0 - 1);
+  __bang_transpose(bt, bh, K0, TN);
+  __bang_reshape_filter(hf, bt, TN, 1, 1, K0);
+  __memcpy(w + col * TN * K0, hf, TN * K0 * sizeof(half), NRAM2GDRAM);
+}
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       float *__restrict__ c) {
   __nram__ half ah[TM * K0];
-  __nram__ half bh[K0 * TN];
-  __nram__ half bt[TN * K0];
-  __nram__ half hf[TN * K0];
   __nram__ float tmp[TM * TN];
   __wram__ half ww[TC * TN * K0];
 
   for (int col = 0; col < TC; ++col) {
-    int nj = col * TN;
-    __memcpy(bh, b + nj, TN * sizeof(half), GDRAM2NRAM, TN * sizeof(half),
-             N0 * sizeof(half), K0 - 1);
-    __bang_transpose(bt, bh, K0, TN);
-    __bang_reshape_filter(hf, bt, TN, 1, 1, K0);
-    __memcpy(ww + col * TN * K0, hf, TN * K0 * sizeof(half), NRAM2WRAM);
+    __memcpy(ww + col * TN * K0, b + col * TN * K0, TN * K0 * sizeof(half),
+             GDRAM2WRAM);
   }
 
   for (int row = taskId; row < TR; row += taskDim) {
@@ -94,9 +110,17 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   (void)g0;
   auto &C = gC;
+  auto &W = gW;
+  const void *bp = B.unsafeGetTensorImpl()->mutable_data();
+  if (gB != bp) {
+    kprep<<<dim1, cnrtFuncTypeBlock, queue>>>(
+        static_cast<const half *>(bp),
+        static_cast<half *>(W.unsafeGetTensorImpl()->mutable_data()));
+    gB = bp;
+  }
   k0<<<dim0, cnrtFuncTypeBlock, queue>>>(
       static_cast<const half *>(A.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<const half *>(B.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const half *>(W.unsafeGetTensorImpl()->mutable_data()),
       static_cast<float *>(C.unsafeGetTensorImpl()->mutable_data()));
   return C;
 }
