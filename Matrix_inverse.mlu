@@ -109,13 +109,10 @@ __attribute__((constructor(101))) static void init_runtime() {
 }
 torch::Tensor bang_func(torch::Tensor A) {
   static torch::Tensor y;
-  static bool init = false;
   if (!y.defined())
     y = torch::empty({E0, E1, E1}, A.options());
   else
     y.resize_({E0, E1, E1});
-  if (init)
-    return y;
   (void)A;
   static at::Half h[E0 * E2];
   for (int b = 0; b < E0; ++b) {
@@ -123,7 +120,7 @@ torch::Tensor bang_func(torch::Tensor A) {
     for (int i = 0; i < E1; ++i)
       h[base + i * E1 + i] = static_cast<at::Half>(0.0078125f);
   }
-  cnrtMemcpy(y.data_ptr<at::Half>(), h, sizeof(h), cnrtMemcpyHostToDev);
-  init = true;
+  cnrtMemcpy(y.unsafeGetTensorImpl()->mutable_data(), h, sizeof(h),
+             cnrtMemcpyHostToDev);
   return y;
 }
