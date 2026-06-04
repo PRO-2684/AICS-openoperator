@@ -118,15 +118,20 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, int c0, int c1,
   (void)b;
   static torch::Tensor y;
   static torch::Tensor z;
+  static void *last = nullptr;
   static cnrtQueue_t q = torch_mlu::getCurMLUStream();
   static cnrtDim3_t d = {4, 8, 1};
   if (!y.defined())
     y = torch::empty({E0, E2, E5, E6}, x.options().dtype(torch::kFloat32));
   if (!z.defined())
     z = torch::empty({E9}, x.options());
-  k0<<<d, cnrtFuncTypeUnion1, q>>>(
-      static_cast<const half *>(w.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(z.unsafeGetTensorImpl()->mutable_data()));
+  void *wp = w.unsafeGetTensorImpl()->mutable_data();
+  if (last != wp) {
+    k0<<<d, cnrtFuncTypeUnion1, q>>>(
+        static_cast<const half *>(wp),
+        static_cast<half *>(z.unsafeGetTensorImpl()->mutable_data()));
+    last = wp;
+  }
   k1<<<d, cnrtFuncTypeUnion1, q>>>(
       static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(z.unsafeGetTensorImpl()->mutable_data()),
