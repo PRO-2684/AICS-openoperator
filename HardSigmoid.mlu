@@ -63,9 +63,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   (void)&g0;
 
   void *p = x.unsafeGetTensorImpl()->mutable_data();
-  cnrtMemcpyAsync_V3(g_buf, p, TOTAL_ELEMS * sizeof(at::Half), queue,
-                     cnrtMemcpyDevToHost);
-  cnrtQueueSync(queue);
+  cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(at::Half), cnrtMemcpyDevToHost);
   for (int i = 0; i < TOTAL_ELEMS; ++i) {
     float v = static_cast<float>(g_buf[i]) * 0.16666666666666666f + 0.5f;
     if (v < 0.0f) {
@@ -77,6 +75,5 @@ torch::Tensor bang_func(torch::Tensor x) {
   }
   cnrtMemcpyAsync_V3(p, g_buf, TOTAL_ELEMS * sizeof(at::Half), queue,
                      cnrtMemcpyHostToDev);
-  cnrtQueueSync(queue);
   return x;
 }
