@@ -6,9 +6,9 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define E0 256
-#define E1 4064
-#define E2 4608
+#define E0 128
+#define E1 8128
+#define E2 8704
 
 #define DO_ONE(dst, ch)                                                        \
   do {                                                                         \
@@ -42,9 +42,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ dw,
   __memcpy(kd, dw, 27 * sizeof(half), GDRAM2NRAM);
   __memcpy(kp, pw, 192 * sizeof(half), GDRAM2NRAM);
   for (int g = taskId; g < E0; g += taskDim) {
-    int n = g >> 4;
-    int q = (g & 15) << 4;
-    int rows = q == 240 ? 14 : 16;
+    int n = g >> 3;
+    int q = (g & 7) << 5;
+    int rows = q == 224 ? 30 : 32;
     int m = rows * 254;
     DO_ONE(d0, 0);
     DO_ONE(d1, 1);
@@ -104,6 +104,9 @@ static torch::Tensor gy = []() {
                           .dtype(torch::kFloat32));
 }();
 
+static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+static cnrtDim3_t dim = {4, 8, 1};
+
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor depthwise_kernel,
                         torch::Tensor pointwise_kernel, int in_channels,
                         int out_channels, int kernel_size, int stride,
@@ -116,11 +119,12 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor depthwise_kernel,
   (void)dilation;
   (void)g0;
   auto &y = gy;
-  cnrtDim3_t dim = {4, 8, 1};
-  k0<<<dim, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(depthwise_kernel.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(pointwise_kernel.data_ptr<at::Half>()),
-      y.data_ptr<float>());
+  k0<<<dim, cnrtFuncTypeUnion1, queue>>>(
+      reinterpret_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      reinterpret_cast<const half *>(
+          depthwise_kernel.unsafeGetTensorImpl()->mutable_data()),
+      reinterpret_cast<const half *>(
+          pointwise_kernel.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(y.unsafeGetTensorImpl()->mutable_data()));
   return y;
 }
