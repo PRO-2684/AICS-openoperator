@@ -1,6 +1,7 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
