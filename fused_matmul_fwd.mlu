@@ -106,13 +106,13 @@ static torch::Tensor gy = []() {
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-static constexpr cnrtDim3_t main_dim = {4, 8, 1};
+static constexpr cnrtDim3_t main_dim = {16, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, torch::Tensor b) {
   (void)&r0;
   (void)g0;
   auto &y = gy;
-  k0<<<main_dim, cnrtFuncTypeUnion1, queue>>>(
+  k0<<<main_dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
       reinterpret_cast<const half *>(w.unsafeGetTensorImpl()->mutable_data()),
       reinterpret_cast<const half *>(b.unsafeGetTensorImpl()->mutable_data()),
