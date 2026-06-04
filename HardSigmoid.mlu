@@ -10,7 +10,14 @@
 #define CHUNK_ELEMS 32768
 
 __mlu_entry__ void hardsigmoid_half_kernel(half *__restrict__ input) {
-  (void)input;
+  __nram__ half a[CHUNK_ELEMS];
+  half *p = (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
+  __memcpy(a, p, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
+  __bang_add_scalar(a, a, (half)3.0f, CHUNK_ELEMS);
+  __bang_maxeq_scalar(a, a, (half)0.0f, CHUNK_ELEMS);
+  __bang_mineq_scalar(a, a, (half)6.0f, CHUNK_ELEMS);
+  __bang_mul_scalar(a, a, (half)(1.0f / 6.0f), CHUNK_ELEMS);
+  __memcpy(p, a, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
 }
 
 static int g_dev = 0;
@@ -53,7 +60,7 @@ static torch::Tensor g0 = []() {
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-static constexpr cnrtDim3_t dim = {1, 1, 1};
+static constexpr cnrtDim3_t dim = {8, 1, 1};
 
 static const char *e = std::getenv("WORKER_ID");
 
