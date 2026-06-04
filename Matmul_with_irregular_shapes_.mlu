@@ -165,8 +165,6 @@ static torch::Tensor gW = []() {
                           .dtype(torch::kHalf));
 }();
 
-static const void *gB = nullptr;
-
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   (void)g0;
   auto &C = gC;
@@ -174,13 +172,9 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   static cnrtQueue_t q = torch_mlu::getCurMLUStream();
   static cnrtDim3_t d = {96, 1, 1};
   static cnrtDim3_t p = {96, 1, 1};
-  const void *bp = B.unsafeGetTensorImpl()->mutable_data();
-  if (gB != bp) {
-    kprep<<<p, cnrtFuncTypeBlock, q>>>(
-        static_cast<const half *>(bp),
-        static_cast<half *>(W.unsafeGetTensorImpl()->mutable_data()));
-    gB = bp;
-  }
+  kprep<<<p, cnrtFuncTypeBlock, q>>>(
+      static_cast<const half *>(B.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(W.unsafeGetTensorImpl()->mutable_data()));
   k0<<<d, cnrtFuncTypeBlock, q>>>(
       static_cast<const half *>(A.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(W.unsafeGetTensorImpl()->mutable_data()),
