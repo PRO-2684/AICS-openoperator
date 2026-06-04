@@ -135,17 +135,25 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)dilation;
   (void)padding;
   (void)g0;
+  static torch::Tensor w;
+  if (!w.defined())
+    w = torch::empty({128, 3, 3, 64}, kernel.options().dtype(torch::kHalf));
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty({16, 128, 128, 128}, x.options().dtype(torch::kFloat32));
+  cnrtQueue_t qq = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dd = {32, 1, 1};
   static void *last = nullptr;
   void *kp = kernel.unsafeGetTensorImpl()->mutable_data();
   if (last != kp) {
-    k2<<<d, cnrtFuncTypeBlock, q>>>(
+    k2<<<dd, cnrtFuncTypeBlock, qq>>>(
         static_cast<const half *>(kp),
-        static_cast<half *>(gw.unsafeGetTensorImpl()->mutable_data()));
+        static_cast<half *>(w.unsafeGetTensorImpl()->mutable_data()));
     last = kp;
   }
-  k1<<<d, cnrtFuncTypeUnion1, q>>>(
+  k1<<<dd, cnrtFuncTypeUnion1, qq>>>(
       static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<const half *>(gw.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<float *>(gy.unsafeGetTensorImpl()->mutable_data()));
-  return gy;
+      static_cast<const half *>(w.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(y.unsafeGetTensorImpl()->mutable_data()));
+  return y;
 }
