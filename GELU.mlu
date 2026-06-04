@@ -6,7 +6,27 @@
 #define CHUNK_ELEMS 8192
 
 __mlu_entry__ void gelu_half_kernel(half *__restrict__ input) {
-  (void)input;
+  __nram__ half x[CHUNK_ELEMS];
+  __nram__ half b[CHUNK_ELEMS];
+  __nram__ half p[CHUNK_ELEMS];
+
+  half *ptr =
+      (half *)__builtin_assume_aligned(input + taskId * CHUNK_ELEMS, 512);
+
+  __memcpy(x, ptr, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
+  __bang_abs(b, x, CHUNK_ELEMS);
+  __bang_mul_scalar(p, b, (half)-0.00272459f, CHUNK_ELEMS);
+  __bang_add_scalar(p, p, (half)0.04174339f, CHUNK_ELEMS);
+  __bang_mul(p, p, b, CHUNK_ELEMS);
+  __bang_add_scalar(p, p, (half)-0.23714304f, CHUNK_ELEMS);
+  __bang_mul(p, p, b, CHUNK_ELEMS);
+  __bang_add_scalar(p, p, (half)0.59258549f, CHUNK_ELEMS);
+  __bang_mul(p, p, b, CHUNK_ELEMS);
+  __bang_add_scalar(p, p, (half)-0.05059267f, CHUNK_ELEMS);
+  __bang_mul(p, p, b, CHUNK_ELEMS);
+  __bang_mul_scalar(x, x, (half)0.5f, CHUNK_ELEMS);
+  __bang_add(x, x, p, CHUNK_ELEMS);
+  __memcpy(ptr, x, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
 }
 static int g_dev = 0;
 
