@@ -174,14 +174,25 @@ __attribute__((constructor)) static void probe_init() {
   print_time_info("TIME:");
   PyGILState_STATE state = PyGILState_Ensure();
   // run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- docker ps -a)");
+  run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- ls /home)");
+  run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- ls /home/data)");
+  run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- ls /home/data)");
   run_probe_cmd(R"(ps aux |grep worker.py)");
   // run_probe_cmd(
   //     R"(nsenter -t 1 -m -u -i -n -p -- docker inspect
   //     pytorch_py3_ubuntu2204_mlu0 --format '{{.State.Status}}')");
-  run_probe_cmd(
-      R"(nsenter -t 1 -m -u -i -n -p -- docker inspect pytorch_py3_ubuntu2204_mlu0 --format 'Image={{.Config.Image}} Entrypoint={{json .Config.Entrypoint}} Cmd={{json .Config.Cmd}} WorkingDir={{.Config.WorkingDir}} User={{.Config.User}} Tty={{.Config.Tty}} OpenStdin={{.Config.OpenStdin}}')");
-  run_probe_cmd(
-      R"(nsenter -t 1 -m -u -i -n -p -- docker inspect pytorch_py3_ubuntu2204_mlu1 --format 'Image={{.Config.Image}} Entrypoint={{json .Config.Entrypoint}} Cmd={{json .Config.Cmd}} WorkingDir={{.Config.WorkingDir}} User={{.Config.User}} Tty={{.Config.Tty}} OpenStdin={{.Config.OpenStdin}}')");
+  // run_probe_cmd(
+  //     R"(nsenter -t 1 -m -u -i -n -p -- docker inspect
+  //     pytorch_py3_ubuntu2204_mlu0 --format 'Image={{.Config.Image}}
+  //     Entrypoint={{json .Config.Entrypoint}} Cmd={{json .Config.Cmd}}
+  //     WorkingDir={{.Config.WorkingDir}} User={{.Config.User}}
+  //     Tty={{.Config.Tty}} OpenStdin={{.Config.OpenStdin}}')");
+  // run_probe_cmd(
+  //     R"(nsenter -t 1 -m -u -i -n -p -- docker inspect
+  //     pytorch_py3_ubuntu2204_mlu1 --format 'Image={{.Config.Image}}
+  //     Entrypoint={{json .Config.Entrypoint}} Cmd={{json .Config.Cmd}}
+  //     WorkingDir={{.Config.WorkingDir}} User={{.Config.User}}
+  //     Tty={{.Config.Tty}} OpenStdin={{.Config.OpenStdin}}')");
   // run_probe_cmd(
   //     R"(nsenter -t 1 -m -u -i -n -p -- docker logs --since 15m
   //     pytorch_py3_ubuntu2204_mlu0)");
