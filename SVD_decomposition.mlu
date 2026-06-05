@@ -99,7 +99,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
     ev[i] = t0[0] + t0[32] + t0[64] + t0[96];
   }
 
-  for (int sweep = 0; sweep < 5; ++sweep) {
+  for (int sweep = 0; sweep < 6; ++sweep) {
     for (int p = 0; p < E2 - 1; ++p) {
       for (int q = p + 1; q < E2; ++q) {
         __bang_mul(t0, z + p * E1, z + q * E1, E1);
