@@ -12,8 +12,8 @@
 #define H 512
 #define G 64
 #define N 192
-#define BM 16
-#define C 16
+#define BM 32
+#define C 8
 #define O0 0
 #define O1 393216
 #define O2 1179648
