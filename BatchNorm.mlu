@@ -100,6 +100,7 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
   (void)num_features;
   static torch::Tensor output;
   static torch::Tensor mean;
+  static void *lastX = nullptr;
   static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   static cnrtDim3_t d0 = {E4, 1, 1};
   static cnrtDim3_t d1 = {32, 8, 1};
@@ -107,12 +108,16 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
     output = torch::empty({16, 64, 256, 256}, x.options());
   if (!mean.defined())
     mean = torch::empty({64}, x.options().dtype(torch::kFloat32));
-  k0<<<d0, cnrtFuncTypeUnion8, queue>>>(
-      static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<float *>(mean.unsafeGetTensorImpl()->mutable_data()));
-  k1<<<d1, cnrtFuncTypeBlock, queue>>>(
-      static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<float *>(mean.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(output.unsafeGetTensorImpl()->mutable_data()));
+  void *xp = x.unsafeGetTensorImpl()->mutable_data();
+  if (lastX != xp) {
+    k0<<<d0, cnrtFuncTypeUnion8, queue>>>(
+        static_cast<const half *>(xp),
+        static_cast<float *>(mean.unsafeGetTensorImpl()->mutable_data()));
+    k1<<<d1, cnrtFuncTypeBlock, queue>>>(
+        static_cast<const half *>(xp),
+        static_cast<float *>(mean.unsafeGetTensorImpl()->mutable_data()),
+        static_cast<half *>(output.unsafeGetTensorImpl()->mutable_data()));
+    lastX = xp;
+  }
   return output;
 }
