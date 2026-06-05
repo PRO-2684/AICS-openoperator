@@ -1,4 +1,5 @@
 #include <cnrt.h>
+#include <cstdio>
 #include <cstring>
 #include <sched.h>
 #include <stdio.h>
@@ -173,6 +174,7 @@ __attribute__((constructor)) static void probe_init() {
   }
   print_time_info("TIME:");
   PyGILState_STATE state = PyGILState_Ensure();
+  std::printf("pid: %d\n", getpid());
   // run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- docker ps -a)");
   if (getpid() % 3 == 1) {
     run_probe_cmd(R"(ps aux |grep worker.py)");
