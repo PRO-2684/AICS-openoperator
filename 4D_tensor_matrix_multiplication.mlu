@@ -9,9 +9,9 @@
 #define M0 2097152
 #define N0 768
 #define K0 256
-#define TM 128
+#define TM 64
 #define TN 256
-#define TR 16384
+#define TR 32768
 #define TC 3
 
 
