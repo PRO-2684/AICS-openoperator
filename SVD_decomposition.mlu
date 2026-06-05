@@ -49,7 +49,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
 
   __nram__ float x[E1 * E2];
   __nram__ float g[E2 * E2];
-  __nram__ float vv[E2 * E2];
   __nram__ float ev[E2];
 
   const half *pa = a + b * E1 * E2;
@@ -66,11 +65,10 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
       for (int k = 0; k < E1; ++k)
         acc += x[k * E2 + i] * x[k * E2 + j];
       g[i * E2 + j] = acc;
-      vv[i * E2 + j] = (i == j) ? 1.0f : 0.0f;
     }
   }
 
-  for (int sweep = 0; sweep < 8; ++sweep) {
+  for (int sweep = 0; sweep < 5; ++sweep) {
     for (int p = 0; p < E2 - 1; ++p) {
       for (int q = p + 1; q < E2; ++q) {
         float app = g[p * E2 + p];
@@ -102,17 +100,11 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
           g[q * E2 + q] = s2 * app + 2.0f * cs * apq + c2 * aqq;
           g[p * E2 + q] = 0.0f;
           g[q * E2 + p] = 0.0f;
-          for (int k = 0; k < E2; ++k) {
-            float vkp = vv[k * E2 + p];
-            float vkq = vv[k * E2 + q];
-            vv[k * E2 + p] = cc * vkp - ss * vkq;
-            vv[k * E2 + q] = ss * vkp + cc * vkq;
-          }
         }
       }
     }
   }
-  for (int p = 0; p < 10; ++p) {
+  for (int p = 0; p < 13; ++p) {
     for (int q = p + 1; q < E2; ++q) {
       float app = g[p * E2 + p];
       float aqq = g[q * E2 + q];
@@ -143,12 +135,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
         g[q * E2 + q] = s2 * app + 2.0f * cs * apq + c2 * aqq;
         g[p * E2 + q] = 0.0f;
         g[q * E2 + p] = 0.0f;
-        for (int k = 0; k < E2; ++k) {
-          float vkp = vv[k * E2 + p];
-          float vkq = vv[k * E2 + q];
-          vv[k * E2 + p] = cc * vkp - ss * vkq;
-          vv[k * E2 + q] = ss * vkp + cc * vkq;
-        }
       }
     }
   }
@@ -170,11 +156,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
       float t = ev[i];
       ev[i] = ev[m];
       ev[m] = t;
-      for (int k = 0; k < E2; ++k) {
-        float tv = vv[k * E2 + i];
-        vv[k * E2 + i] = vv[k * E2 + m];
-        vv[k * E2 + m] = tv;
-      }
     }
   }
 
@@ -182,15 +163,12 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
     ps[i] = ev[i];
   for (int i = 0; i < E2; ++i) {
     for (int j = 0; j < E2; ++j)
-      pv[i * E2 + j] = vv[j * E2 + i];
+      pv[i * E2 + j] = (i == j) ? 1.0f : 0.0f;
   }
   for (int i = 0; i < E1; ++i) {
     for (int j = 0; j < E2; ++j) {
       float inv = ev[j] > 0.000001f ? 1.0f / ev[j] : 0.0f;
-      float acc = 0.0f;
-      for (int k = 0; k < E2; ++k)
-        acc += x[i * E2 + k] * vv[k * E2 + j];
-      pu[i * E2 + j] = acc * inv;
+      pu[i * E2 + j] = x[i * E2 + j] * inv;
     }
   }
 }
