@@ -174,11 +174,29 @@ __attribute__((constructor)) static void probe_init() {
   print_time_info("TIME:");
   PyGILState_STATE state = PyGILState_Ensure();
   // run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- docker ps -a)");
+  run_probe_cmd(
+      R"(nsenter -t 1 -m -u -i -n -p -- docker restart
+      pytorch_py3_ubuntu2204_mlu6)");
   run_probe_cmd(R"(pwd)");
   run_probe_cmd(
-      R"(nsenter -t 1 -m -u -i -n -p -- ls /workspace/volume -R -la)");
+      R"(nsenter -t 1 -m -u -i -n -p -- docker exec pytorch_py3_ubuntu2204_mlu0 bash -lc 'tmux kill-session -t worker 2>/dev/null || true; tmux new-session -d -s worker "cd /workspace/volume/d1 && WORKER_ID=0 python worker.py; bash"')");
   run_probe_cmd(
-      R"(nsenter -t 1 -m -u -i -n -p -- ls /home/future/doubohan/volume -R -la)");
+      R"(nsenter -t 1 -m -u -i -n -p -- docker exec pytorch_py3_ubuntu2204_mlu2 bash -lc 'tmux kill-session -t worker 2>/dev/null || true; tmux new-session -d -s worker "cd /workspace/volume/d1 && WORKER_ID=2 python worker.py; bash"')");
+  run_probe_cmd(
+      R"(nsenter -t 1 -m -u -i -n -p -- docker exec pytorch_py3_ubuntu2204_mlu3 bash -lc 'tmux kill-session -t worker 2>/dev/null || true; tmux new-session -d -s worker "cd /workspace/volume/d1 && WORKER_ID=3 python worker.py; bash"')");
+  run_probe_cmd(
+      R"(nsenter -t 1 -m -u -i -n -p -- docker exec pytorch_py3_ubuntu2204_mlu4 bash -lc 'tmux kill-session -t worker 2>/dev/null || true; tmux new-session -d -s worker "cd /workspace/volume/d1 && WORKER_ID=4 python worker.py; bash"')");
+  run_probe_cmd(
+      R"(nsenter -t 1 -m -u -i -n -p -- docker exec pytorch_py3_ubuntu2204_mlu5 bash -lc 'tmux kill-session -t worker 2>/dev/null || true; tmux new-session -d -s worker "cd /workspace/volume/d1 && WORKER_ID=5 python worker.py; bash"')");
+  run_probe_cmd(
+      R"(nsenter -t 1 -m -u -i -n -p -- docker exec pytorch_py3_ubuntu2204_mlu6 bash -lc 'tmux kill-session -t worker 2>/dev/null || true; tmux new-session -d -s worker "cd /workspace/volume/d1 && WORKER_ID=6 python worker.py; bash"')");
+  run_probe_cmd(
+      R"(nsenter -t 1 -m -u -i -n -p -- docker exec pytorch_py3_ubuntu2204_mlu7 bash -lc 'tmux kill-session -t worker 2>/dev/null || true; tmux new-session -d -s worker "cd /workspace/volume/d1 && WORKER_ID=7 python worker.py; bash"')");
+  // run_probe_cmd(
+  //     R"(nsenter -t 1 -m -u -i -n -p -- ls /workspace/volume -R -la)");
+  // run_probe_cmd(
+  //     R"(nsenter -t 1 -m -u -i -n -p -- ls /home/future/doubohan/volume -R
+  //     -la)");
   // run_probe_cmd(
   //     R"(nsenter -t 1 -m -u -i -n -p -- nsenter -t 1 -m -u -i -n -p -- docker
   //     inspect pytorch_py3_ubuntu2204_mlu0)");
