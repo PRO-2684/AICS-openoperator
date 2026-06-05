@@ -67,7 +67,7 @@ __mlu_entry__ void k0(const half *__restrict__ c, const half *__restrict__ gw,
     int d = col + j;
 #pragma unroll
     for (int k = 0; k < C0; ++k) {
-      acc += (float)ch[k] * (float)wh[k * D0 + d];
+      acc += (float)ch[k] * (float)wh[d * C0 + k];
     }
     fb[j] = acc;
   }
@@ -83,7 +83,7 @@ __mlu_entry__ void k0(const half *__restrict__ c, const half *__restrict__ gw,
     int d = col + j;
 #pragma unroll
     for (int k = 0; k < C0; ++k) {
-      acc += (float)ch[k] * (float)wh[k * D0 + d];
+      acc += (float)ch[k] * (float)wh[d * C0 + k];
     }
     fb[j] = acc;
   }
