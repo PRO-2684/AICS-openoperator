@@ -12,7 +12,7 @@
 #define H 512
 #define G 64
 #define N 192
-#define BM 32
+#define BM 8
 #define C 8
 #define O0 0
 #define O1 393216
@@ -289,11 +289,11 @@ __mlu_entry__ void k3(const half *__restrict__ x, const half *__restrict__ ip0,
     half *n0 = (t & 1) ? h0 : h2;
     half *p1 = (t & 1) ? h3 : h1;
     half *n1 = (t & 1) ? h1 : h3;
-    if (taskId < C) {
+    if (taskId < 32) {
       kc(taskId, x, ip0, wp0, b0, c0, mid, p0, n0, mid, t, I0, 1, 0);
     }
     __sync_all_ipu();
-    if (taskId < C) {
+    if (taskId < 32) {
       kc(taskId, x, ip1, wp1, b1, c1, mid, p1, n1, out, t, H, 0, 1);
     }
   }
