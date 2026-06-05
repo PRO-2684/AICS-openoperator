@@ -7,7 +7,7 @@
 #include <unistd.h>
 
 #define TOTAL_ELEMS (1024 * 1024)
-#define TASKS 32
+#define TASKS 16
 #define ELEMS_PER_TASK (TOTAL_ELEMS / TASKS)
 
 
