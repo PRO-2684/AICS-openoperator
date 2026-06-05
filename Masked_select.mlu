@@ -81,6 +81,31 @@ __mlu_entry__ void k1(const half *__restrict__ x, int *__restrict__ y) {
   }
 }
 
+__mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ z,
+                      int *__restrict__ y) {
+  __nram__ half a[E1 + 2];
+  int p = taskId * E1;
+  __memcpy(a, x + p, E1 * sizeof(half), GDRAM2NRAM);
+  __bang_fcmpfilter(CMP_GT, a, a, (half)0.0f, E1);
+  int n = *((int *)a);
+  y[taskId] = n;
+  __sync_all_ipu();
+
+  if (taskId == E2 - 1) {
+    int q = 0;
+    for (int i = 0; i < E2; ++i) {
+      int t = y[i];
+      y[i] = q;
+      q += t;
+    }
+    y[E2] = q;
+  }
+  __sync_all_ipu();
+
+  int q = y[taskId];
+  __memcpy(z + q, a + 2, n * sizeof(half), NRAM2GDRAM);
+}
+
 torch::Tensor bang_func(torch::Tensor input, double v) {
   (void)v;
   (void)g0;
@@ -93,17 +118,15 @@ torch::Tensor bang_func(torch::Tensor input, double v) {
   if (!work2.defined())
     work2 = torch::empty({34}, input.options().dtype(torch::kInt32));
 
-  k1<<<dim, cnrtFuncTypeUnion8, queue>>>(
+  k2<<<dim, cnrtFuncTypeUnion8, queue>>>(
       static_cast<const half *>(input.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(out.unsafeGetTensorImpl()->mutable_data()),
       static_cast<int *>(work2.unsafeGetTensorImpl()->mutable_data()));
 
   int n = 0;
   int *w = static_cast<int *>(work2.unsafeGetTensorImpl()->mutable_data());
   cnrtMemcpyAsync(&n, w + E2, sizeof(int), queue, cnrtMemcpyDevToHost);
   cnrtQueueSync(queue);
-  k0<<<dim, cnrtFuncTypeUnion4, queue>>>(
-      static_cast<const half *>(input.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(out.unsafeGetTensorImpl()->mutable_data()), w);
   out.resize_({(int64_t)n});
   return out;
 }
