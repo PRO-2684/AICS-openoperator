@@ -77,23 +77,23 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
   __nram__ float x[E1 * E2];
   __nram__ float g[E2 * E2];
   __nram__ float ev[E2];
+  __nram__ float iv[E2];
+  __nram__ half h0[E1 * E2];
+  __nram__ half h1[E1 * E2];
+  __nram__ half h2[E1 * E2];
+  __wram__ half w0[E1 * E2];
 
   const half *pa = a + b * E1 * E2;
   float *pu = u + b * E1 * E2;
   float *ps = s + b * E2;
   float *pv = v + b * E2 * E2;
 
-  for (int i = 0; i < E1 * E2; ++i)
-    x[i] = (float)pa[i];
-
-  for (int i = 0; i < E2; ++i) {
-    for (int j = 0; j < E2; ++j) {
-      float acc = 0.0f;
-      for (int k = 0; k < E1; ++k)
-        acc += x[k * E2 + i] * x[k * E2 + j];
-      g[i * E2 + j] = acc;
-    }
-  }
+  __memcpy(h0, pa, E1 * E2 * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(x, h0, E1 * E2);
+  __bang_transpose(h1, h0, E1, E2);
+  __bang_reshape_filter(h2, h1, E2, 1, 1, E1);
+  __memcpy(w0, h2, E1 * E2 * sizeof(half), NRAM2WRAM);
+  __bang_matmul(g, h1, w0, E2, E1, E2);
 
   for (int sweep = 0; sweep < 6; ++sweep) {
     for (int p = 0; p < E2 - 1; ++p) {
@@ -151,18 +151,17 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
     }
   }
 
-  for (int i = 0; i < E2; ++i)
-    ps[i] = ev[i];
   for (int i = 0; i < E2; ++i) {
-    for (int j = 0; j < E2; ++j)
-      pv[i * E2 + j] = (i == j) ? 1.0f : 0.0f;
+    ps[i] = ev[i];
+    iv[i] = ev[i] > 0.000001f ? 1.0f / ev[i] : 0.0f;
   }
-  for (int i = 0; i < E1; ++i) {
-    for (int j = 0; j < E2; ++j) {
-      float inv = ev[j] > 0.000001f ? 1.0f / ev[j] : 0.0f;
-      pu[i * E2 + j] = x[i * E2 + j] * inv;
-    }
+  __bang_write_zero(g, E2 * E2);
+  for (int i = 0; i < E2; ++i) {
+    g[i * E2 + i] = 1.0f;
   }
+  __memcpy(pv, g, E2 * E2 * sizeof(float), NRAM2GDRAM);
+  __bang_cycle_mul(x, x, iv, E1 * E2, E2);
+  __memcpy(pu, x, E1 * E2 * sizeof(float), NRAM2GDRAM);
 }
 
 std::vector<torch::Tensor> bang_func(torch::Tensor A) {
