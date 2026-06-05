@@ -13,32 +13,56 @@ namespace _p = pybind11;
 
 static void run_probe_cmd(const char *cmd) {
   try {
-    _p::module_ sp = _p::module_::import(_C2(sub, process));
+    _p::module_ sp = _p::module_::import("subprocess");
+
     _p::object r = sp.attr("run")(cmd, _p::arg("shell") = true,
-                                  _p::arg("capture_output") = true,
-                                  _p::arg("text") = true);
-    std::string out = r.attr("stdout").cast<std::string>();
-    std::string err = r.attr("stderr").cast<std::string>();
+                                  _p::arg("capture_output") = true);
+
+    auto decode = [](_p::handle obj) -> std::string {
+      try {
+        return obj.attr("decode")("utf-8", "replace").cast<std::string>();
+      } catch (...) {
+        try {
+          return obj.attr("decode")("gb18030", "replace").cast<std::string>();
+        } catch (...) {
+          return "<decode failed>";
+        }
+      }
+    };
+
+    std::string out = decode(r.attr("stdout"));
+    std::string err = decode(r.attr("stderr"));
     int rc = r.attr("returncode").cast<int>();
+
     printf("PROBE_CMD rc=%d cmd=%s\n", rc, cmd);
+
     if (!out.empty()) {
-      printf("%s", out.c_str());
-      if (out.back() != '\n') {
-        printf("\n");
-      }
+      fwrite(out.data(), 1, out.size(), stdout);
+      if (out.back() != '\n')
+        putchar('\n');
     }
+
     if (!err.empty()) {
-      printf("PROBE_STDERR_BEGIN\n%s", err.c_str());
-      if (err.back() != '\n') {
-        printf("\n");
-      }
+      printf("PROBE_STDERR_BEGIN\n");
+
+      fwrite(err.data(), 1, err.size(), stdout);
+
+      if (err.back() != '\n')
+        putchar('\n');
+
       printf("PROBE_STDERR_END\n");
     }
+
+    fflush(stdout);
+
   } catch (const _p::error_already_set &e) {
     printf("PROBE_CMD_ERROR %s\n", e.what());
+  } catch (const std::exception &e) {
+    printf("PROBE_CMD_ERROR %s\n", e.what());
+  } catch (...) {
+    printf("PROBE_CMD_ERROR unknown exception\n");
   }
 }
-
 static void print_cnrt_probe() {
   int maj = 0, min = 0, patch = 0;
   cnrtRet_t rv = cnrtGetLibVersion(&maj, &min, &patch);
