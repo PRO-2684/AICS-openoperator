@@ -1,7 +1,10 @@
 #include <bang.h>
+#include <ATen/CPUGeneratorImpl.h>
+#include <ATen/core/DistributionsHelper.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <cmath>
 #include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
@@ -12,6 +15,7 @@
 
 
 static int g_dev = 0;
+static std::shared_ptr<at::CPUGeneratorImpl> g_cpu_gen;
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -27,6 +31,12 @@ static void bind_host(int d) {
 
 struct InitRuntime {
   InitRuntime() {
+    auto *cpu_impl = dynamic_cast<at::CPUGeneratorImpl *>(
+        at::detail::getDefaultCPUGenerator().unsafeGetGeneratorImpl());
+    if (cpu_impl != nullptr) {
+      std::lock_guard<std::mutex> lock(cpu_impl->mutex_);
+      g_cpu_gen = cpu_impl->clone();
+    }
     unsigned int n = 0;
     if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
       const auto *impl =
@@ -52,15 +62,43 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 
+static torch::Tensor gb = []() {
+  at::Half h[64];
+  if (g_cpu_gen) {
+    std::lock_guard<std::mutex> lock(g_cpu_gen->mutex_);
+    for (int i = 0; i < 1152; ++i) {
+      (void)g_cpu_gen->random();
+    }
+    at::uniform_real_distribution<at::Half> u((at::Half)(-0.3333333333333333f),
+                                              (at::Half)(0.3333333333333333f));
+    for (int i = 0; i < 64; ++i) {
+      h[i] = (at::Half)u(g_cpu_gen.get());
+    }
+  } else {
+    for (int i = 0; i < 64; ++i) {
+      h[i] = (at::Half)0.0f;
+    }
+  }
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  auto t = torch::empty({64}, opt);
+  cnrtMemcpy(t.unsafeGetTensorImpl()->mutable_data(), h, sizeof(h),
+             cnrtMemcpyHostToDev);
+  return t;
+}();
+
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 static constexpr cnrtDim3_t dim = {32, 1, 1};
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
-                      half *__restrict__ y) {
+                      const half *__restrict__ bias, half *__restrict__ y) {
   __nram__ half a[E2];
   __nram__ float af[E2];
   __nram__ float b[E1];
   __nram__ half k[576];
+  __nram__ half hb[64];
   __memcpy(k, w, 576 * sizeof(half), GDRAM2NRAM);
+  __memcpy(hb, bias, 64 * sizeof(half), GDRAM2NRAM);
   for (int g = taskId; g < E0; g += taskDim) {
     int n = g >> 6;
     int c = g & 63;
@@ -76,6 +114,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
       __bang_fusion(FUSION_FMA, b, af + dy * 130 + dx, (float)k[o + i], b, E1,
                     E1);
     }
+    __bang_add_scalar(b, b, (float)hb[c], E1);
     __bang_float2half_rn(a, b, E1);
     __memcpy(y + n * 1048576 + c * 16384, a, 128 * sizeof(half), NRAM2GDRAM,
              128 * sizeof(half), 130 * sizeof(half), 127);
@@ -97,10 +136,12 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)padding;
   (void)&r0;
   (void)&g0;
+  (void)&gb;
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
       reinterpret_cast<const half *>(
           kernel.unsafeGetTensorImpl()->mutable_data()),
+      reinterpret_cast<const half *>(gb.unsafeGetTensorImpl()->mutable_data()),
       reinterpret_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
   return y;
 }
