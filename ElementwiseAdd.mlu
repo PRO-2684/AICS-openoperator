@@ -57,7 +57,7 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 static constexpr cnrtDim3_t d = {32, 1, 1};
-static torch_mlu::getCurMLUStream();
+static auto q = torch_mlu::getCurMLUStream();
 
 torch::Tensor bang_func(torch::Tensor a, torch::Tensor b) {
   (void)g0;
