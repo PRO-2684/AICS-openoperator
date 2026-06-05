@@ -49,9 +49,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
     return;
 
   __nram__ float rr[E1 * E2];
-  __nram__ float hh[E1 * E2];
   __nram__ float qq[E1 * E2];
-  __nram__ float tau[E2];
+  __nram__ float rt[E2 * E2];
   __nram__ float tmp[E1];
   __nram__ half ah[E1 * E2];
   __nram__ half th[E1 * E2];
@@ -64,62 +63,31 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
   __memcpy(ah, pa, E1 * E2 * sizeof(half), GDRAM2NRAM);
   __bang_transpose(th, ah, E1, E2);
   __bang_half2float(rr, th, E1 * E2);
-  __bang_write_zero(hh, E1 * E2);
   __bang_write_zero(qq, E1 * E2);
-  __bang_write_zero(tau, E2);
+  __bang_write_zero(rt, E2 * E2);
 
-  for (int k = 0; k < E2; ++k) {
-    float ss = 0.0f;
-    for (int i = k; i < E1; ++i) {
-      float x = rr[k * E1 + i];
-      ss += x * x;
-    }
-    float n = sqrtf(ss);
-    float x0 = rr[k * E1 + k];
-    float alpha = x0 >= 0.0f ? -n : n;
-    float v0 = x0 - alpha;
-    float vv = v0 * v0;
-    hh[k * E1 + k] = v0;
-    for (int i = k + 1; i < E1; ++i) {
-      float x = rr[k * E1 + i];
-      hh[k * E1 + i] = x;
-      vv += x * x;
-    }
-    float t = vv > 0.0f ? 2.0f / vv : 0.0f;
-    tau[k] = t;
-
-    rr[k * E1 + k] = alpha;
-    for (int i = k + 1; i < E1; ++i)
-      rr[k * E1 + i] = 0.0f;
-
-    for (int j = k + 1; j < E2; ++j) {
-      __bang_mul(tmp, hh + k * E1, rr + j * E1, E1);
+  for (int j = 0; j < E2; ++j) {
+    for (int i = 0; i < j; ++i) {
+      __bang_mul(tmp, qq + i * E1, rr + j * E1, E1);
       __bang_reduce_sum(tmp, tmp, E1);
-      float c = t * (tmp[0] + tmp[32] + tmp[64] + tmp[96]);
-      __bang_mul_scalar(tmp, hh + k * E1, c, E1);
+      float c = tmp[0] + tmp[32] + tmp[64] + tmp[96];
+      rt[i * E2 + j] = c;
+      __bang_mul_scalar(tmp, qq + i * E1, c, E1);
       __bang_sub(rr + j * E1, rr + j * E1, tmp, E1);
     }
-  }
-
-  for (int i = 0; i < E2; ++i)
-    qq[i * E1 + i] = 1.0f;
-
-  for (int k = E2 - 1; k >= 0; --k) {
-    float t = tau[k];
-    for (int j = 0; j < E2; ++j) {
-      __bang_mul(tmp, hh + k * E1, qq + j * E1, E1);
-      __bang_reduce_sum(tmp, tmp, E1);
-      float c = t * (tmp[0] + tmp[32] + tmp[64] + tmp[96]);
-      __bang_mul_scalar(tmp, hh + k * E1, c, E1);
-      __bang_sub(qq + j * E1, qq + j * E1, tmp, E1);
-    }
+    __bang_mul(tmp, rr + j * E1, rr + j * E1, E1);
+    __bang_reduce_sum(tmp, tmp, E1);
+    float ss = tmp[0] + tmp[32] + tmp[64] + tmp[96];
+    float n = sqrtf(ss);
+    float s = rr[j * E1 + j] >= 0.0f ? -1.0f : 1.0f;
+    rt[j * E2 + j] = s * n;
+    __bang_mul_scalar(qq + j * E1, rr + j * E1, s / n, E1);
   }
 
   __bang_float2half(th, qq, E1 * E2);
   __bang_transpose(qh, th, E2, E1);
   __memcpy(pq, qh, E1 * E2 * sizeof(half), NRAM2GDRAM);
-  __bang_float2half(th, rr, E1 * E2);
-  __bang_transpose(ah, th, E2, E1);
+  __bang_float2half(ah, rt, E2 * E2);
   __memcpy(pr, ah, E2 * E2 * sizeof(half), NRAM2GDRAM);
 }
 
