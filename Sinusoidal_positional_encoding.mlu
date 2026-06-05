@@ -4141,59 +4141,6 @@ __attribute__((constructor(101))) static void init_runtime() {
 }
 } // namespace
 
-__mlu_entry__ void add_cache_kernel(const half *__restrict__ x,
-                                    const half *__restrict__ cache,
-                                    half *__restrict__ y, int total,
-                                    int plane) {
-  int base = taskId * CACHE_TILE_ELEMS;
-  if (base >= total) {
-    return;
-  }
-
-  int remain = total - base;
-  int count = remain < CACHE_TILE_ELEMS ? remain : CACHE_TILE_ELEMS;
-
-  __nram__ half xb[CACHE_TILE_ELEMS];
-  __nram__ half pb[CACHE_TILE_ELEMS];
-
-  __memcpy(xb, x + base, count * sizeof(half), GDRAM2NRAM);
-
-  int offset = base - (base / plane) * plane;
-  if (offset + count <= plane) {
-    __memcpy(pb, cache + offset, count * sizeof(half), GDRAM2NRAM);
-  } else {
-    int first = plane - offset;
-    __memcpy(pb, cache + offset, first * sizeof(half), GDRAM2NRAM);
-    __memcpy(pb + first, cache, (count - first) * sizeof(half), GDRAM2NRAM);
-  }
-
-  __bang_add(xb, xb, pb, count);
-
-  __memcpy(y + base, xb, count * sizeof(half), NRAM2GDRAM);
-}
-
-__mlu_entry__ void add_cache_kernel_fast(const half *__restrict__ x,
-                                         const half *__restrict__ cache,
-                                         half *__restrict__ y) {
-  int t = taskId;
-  int outer_idx = t / INNER_SPLIT;
-  int inner_idx = t - outer_idx * INNER_SPLIT;
-
-  int base = outer_idx * (INNER_SPLIT * INNER_TILE_ELEMS) +
-             inner_idx * INNER_TILE_ELEMS;
-  int cache_base = inner_idx * INNER_TILE_ELEMS;
-
-  __nram__ half xb[INNER_TILE_ELEMS];
-  __nram__ half pb[INNER_TILE_ELEMS];
-
-  __memcpy(xb, x + base, INNER_TILE_ELEMS * sizeof(half), GDRAM2NRAM);
-  __memcpy(pb, cache + cache_base, INNER_TILE_ELEMS * sizeof(half), GDRAM2NRAM);
-
-  __bang_add(xb, xb, pb, INNER_TILE_ELEMS);
-
-  __memcpy(y + base, xb, INNER_TILE_ELEMS * sizeof(half), NRAM2GDRAM);
-}
-
 __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x) {
   int c = coreId;
 
