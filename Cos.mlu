@@ -70,6 +70,6 @@ static constexpr cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
   cos_half_kernel<<<dim, ktype, queue>>>(
-      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+      reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
   return x;
 }
