@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include <cmath>
+#include <vector>
 
 #define THREADS_PER_JOB 32
 #define CACHE_TILE_ELEMS 65536
@@ -71,12 +72,18 @@ static torch::Tensor g_cache = []() {
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
   auto t = torch::empty({128, 512}, opt);
-  cnrtDim3_t dim;
-  dim.x = THREADS_PER_JOB;
-  dim.y = 1;
-  dim.z = 1;
-  make_cache_kernel<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<half *>(t.data_ptr<at::Half>()), 128, 512);
+  std::vector<at::Half> h(128 * 512);
+  for (int p = 0; p < 128; ++p) {
+    for (int k = 0; k < 256; ++k) {
+      float exponent = (2.0f * (float)k) * (-9.210340371976184f / 512.0f);
+      float v = (float)p * expf(exponent);
+      int o = p * 512 + (k << 1);
+      h[o] = (at::Half)sinf(v);
+      h[o + 1] = (at::Half)cosf(v);
+    }
+  }
+  cnrtMemcpy(t.data_ptr<at::Half>(), h.data(), h.size() * sizeof(at::Half),
+             cnrtMemcpyHostToDev);
   return t;
 }();
 
