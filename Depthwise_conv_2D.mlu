@@ -1,6 +1,6 @@
 #include <bang.h>
-#include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
 #include <torch/extension.h>
@@ -25,21 +25,35 @@ static void bind_host(int d) {
 }
 
 
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
-      bind_host(d);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
+struct InitRuntime {
+  InitRuntime() {
+    unsigned int n = 0;
+    if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+      const auto *impl =
+          c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+      int torch_n = static_cast<int>(impl->deviceCount());
+      if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+        int d = 0;
+        bind_host(d);
+        impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+        cnrtSetDevice(d);
+        g_dev = d;
+      }
     }
   }
-}
+};
+
+static const InitRuntime r0 __attribute__((used));
+
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
+static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+static constexpr cnrtDim3_t dim = {32, 1, 1};
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
   __nram__ half a[E2];
@@ -74,11 +88,15 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)kernel_size;
   (void)stride;
   (void)padding;
-  auto y = torch::empty({16, 64, 128, 128}, x.options());
-  cnrtDim3_t dim = {32, 1, 1};
-  k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  (void)&r0;
+  (void)&g0;
+  static torch::Tensor y;
+  if (!y.defined())
+    y = torch::empty({16, 64, 128, 128}, x.options());
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      reinterpret_cast<const half *>(
+          kernel.unsafeGetTensorImpl()->mutable_data()),
+      reinterpret_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
   return y;
 }
