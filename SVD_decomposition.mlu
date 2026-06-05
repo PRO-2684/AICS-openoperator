@@ -95,7 +95,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
   __memcpy(w0, h2, E1 * E2 * sizeof(half), NRAM2WRAM);
   __bang_matmul(g, h1, w0, E2, E1, E2);
 
-  for (int sweep = 0; sweep < 6; ++sweep) {
+  for (int sweep = 0; sweep < 7; ++sweep) {
     for (int p = 0; p < E2 - 1; ++p) {
       for (int q = p + 1; q < E2; ++q) {
         float app = g[p * E2 + p];
