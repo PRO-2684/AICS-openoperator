@@ -55,7 +55,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
   __nram__ half ah[E1 * E2];
   __nram__ half th[E1 * E2];
   __nram__ half qh[E1 * E2];
-  __nram__ half rh[E2 * E2];
 
   const half *pa = a + b * E1 * E2;
   half *pq = q + b * E1 * E2;
@@ -120,12 +119,10 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
 
   __bang_float2half(th, qq, E1 * E2);
   __bang_transpose(qh, th, E2, E1);
-  for (int i = 0; i < E2; ++i) {
-    for (int j = 0; j < E2; ++j)
-      rh[i * E2 + j] = (half)rr[j * E1 + i];
-  }
   __memcpy(pq, qh, E1 * E2 * sizeof(half), NRAM2GDRAM);
-  __memcpy(pr, rh, E2 * E2 * sizeof(half), NRAM2GDRAM);
+  __bang_float2half(th, rr, E1 * E2);
+  __bang_transpose(ah, th, E2, E1);
+  __memcpy(pr, ah, E2 * E2 * sizeof(half), NRAM2GDRAM);
 }
 
 std::vector<torch::Tensor> bang_func(torch::Tensor A) {
