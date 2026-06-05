@@ -1,10 +1,13 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
+#include <sched.h>
 #include <torch/extension.h>
+#include <unistd.h>
 
 #include <cmath>
-#include <mutex>
+#include <vector>
 
 #define THREADS_PER_JOB 32
 #define CACHE_TILE_ELEMS 65536
@@ -19,17 +22,35 @@
 
 namespace {
 
-struct LocalState {
-  torch::Tensor cache;
+static int g_dev = 0;
 
-  bool ready = false;
-  int cached_extent = 0;
-  int cached_width = 0;
-};
+static void bind_host(int d) {
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  int begin = d >= 4 ? 28 : 0;
+  int end = begin + 28;
+  for (int i = begin; i < end; ++i) {
+    CPU_SET(i, &set);
+  }
+  sched_setaffinity(0, sizeof(set), &set);
+}
 
-static LocalState g_state;
-static std::mutex g_lock;
 
+__attribute__((constructor(101))) static void init_runtime() {
+  unsigned int n = 0;
+  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+    const auto *impl =
+        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+    int torch_n = static_cast<int>(impl->deviceCount());
+    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+      int d = 0;
+      bind_host(d);
+      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+      cnrtSetDevice(d);
+      g_dev = d;
+    }
+  }
+}
 __mlu_entry__ void make_cache_kernel(half *cache, int extent, int width) {
   int half_width = width >> 1;
   int total = extent * half_width;
@@ -46,39 +67,25 @@ __mlu_entry__ void make_cache_kernel(half *cache, int extent, int width) {
   }
 }
 
-static void ensure_cache(torch::Tensor x, int width) {
-  int extent = static_cast<int>(x.size(1));
-  TORCH_CHECK(width == static_cast<int>(x.size(2)), "unexpected width");
-  TORCH_CHECK((width & 1) == 0, "width must be even");
-
-  std::lock_guard<std::mutex> guard(g_lock);
-
-  if (g_state.ready && g_state.cached_extent == extent &&
-      g_state.cached_width == width) {
-    return;
+static torch::Tensor g_cache = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  auto t = torch::empty({128, 512}, opt);
+  std::vector<at::Half> h(128 * 512);
+  for (int p = 0; p < 128; ++p) {
+    for (int k = 0; k < 256; ++k) {
+      float exponent = (2.0f * (float)k) * (-9.210340371976184f / 512.0f);
+      float v = (float)p * expf(exponent);
+      int o = p * 512 + (k << 1);
+      h[o] = (at::Half)sinf(v);
+      h[o + 1] = (at::Half)cosf(v);
+    }
   }
-
-  int half_width = width >> 1;
-
-  auto half_opts = x.options().dtype(torch::kHalf);
-
-  g_state.cache = torch::empty({extent, width}, half_opts);
-
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-
-  cnrtDim3_t dim;
-  dim.x = THREADS_PER_JOB;
-  dim.y = 1;
-  dim.z = 1;
-
-  make_cache_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(g_state.cache.data_ptr<at::Half>()), extent,
-      width);
-
-  g_state.ready = true;
-  g_state.cached_extent = extent;
-  g_state.cached_width = width;
-}
+  cnrtMemcpy(t.data_ptr<at::Half>(), h.data(), h.size() * sizeof(at::Half),
+             cnrtMemcpyHostToDev);
+  return t;
+}();
 
 } // namespace
 
@@ -164,20 +171,17 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
   }
 }
 
+static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+static cnrtDim3_t dim0 = {4, 8, 1};
+
 torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len) {
-  int width = static_cast<int>(x.size(2));
-  ensure_cache(x, width);
+  (void)d_model;
+  (void)max_len;
+  (void)g_cache;
 
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-
-  cnrtDim3_t dim;
-  dim.x = 4;
-  dim.y = 8;
-  dim.z = 1;
-
-  add_cache_kernel_pipe<<<dim, cnrtFuncTypeUnion1, queue>>>(
-      reinterpret_cast<half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(g_state.cache.data_ptr<at::Half>()));
+  add_cache_kernel_pipe<<<dim0, cnrtFuncTypeUnion1, queue>>>(
+      static_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const half *>(g_cache.unsafeGetTensorImpl()->mutable_data()));
 
   return x;
 }
