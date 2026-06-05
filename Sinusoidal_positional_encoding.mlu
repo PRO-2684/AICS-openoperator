@@ -173,17 +173,15 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 static cnrtDim3_t dim0 = {4, 8, 1};
-static cnrtDim3_t dim1 = {64, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len) {
   (void)d_model;
   (void)max_len;
   (void)g_cache;
 
-  add_cache_kernel_fast<<<dim1, cnrtFuncTypeBlock, queue>>>(
+  add_cache_kernel_pipe<<<dim0, cnrtFuncTypeUnion1, queue>>>(
       static_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<const half *>(g_cache.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
+      static_cast<const half *>(g_cache.unsafeGetTensorImpl()->mutable_data()));
 
   return x;
 }
