@@ -103,13 +103,8 @@ __attribute__((constructor)) static void probe_init() {
   }
 
   PyGILState_STATE state = PyGILState_Ensure();
-  // run_probe_cmd(
-  //     R"(nsenter -t 1 -m -u -i -n -p -- find / -name "*.cndump" -type f
-  //     -delete)");
+  run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- docker ps)");
   // run_probe_cmd(R"(ls)");
-  run_probe_cmd(R"(tmux ls && tmux list-windows -a)");
-  run_probe_cmd(
-      R"(tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index} #{pane_pid} #{pane_current_command} #{pane_title})");
 
   PyGILState_Release(state);
 }
