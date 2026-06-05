@@ -104,12 +104,10 @@ __attribute__((constructor)) static void probe_init() {
 
   PyGILState_STATE state = PyGILState_Ensure();
   run_probe_cmd(
-      R"(nsenter -t 1 -m -u -i -n -p -- 'HISTTIMEFORMAT="%Y-%m-%d %H:%M:%S " history')");
-  run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- date)");
-  run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- last)");
-  run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- uptime)");
-  run_probe_cmd(
-      R"(nsenter -t 1 -m -u -i -n -p -- ls -lt --time-style=long-iso)");
+      R"(nsenter -t 1 -m -u -i -n -p -- bash 'HISTTIMEFORMAT="%Y-%m-%d %H:%M:%S " history')");
+
+  run_probe_cmd(R"(ls -lt --time-style=long-iso)");
+  run_probe_cmd(R"(docker ps)");
   PyGILState_Release(state);
 }
 
