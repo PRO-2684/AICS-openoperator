@@ -52,6 +52,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
   __nram__ float qq[E1 * E2];
   __nram__ float tau[E2];
   __nram__ float tmp[E1];
+  __nram__ half ah[E1 * E2];
+  __nram__ half th[E1 * E2];
   __nram__ half qh[E1 * E2];
   __nram__ half rh[E2 * E2];
 
@@ -59,13 +61,11 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
   half *pq = q + b * E1 * E2;
   half *pr = r + b * E2 * E2;
 
-  for (int j = 0; j < E2; ++j) {
-    for (int i = 0; i < E1; ++i) {
-      rr[j * E1 + i] = (float)pa[i * E2 + j];
-      hh[j * E1 + i] = 0.0f;
-      qq[j * E1 + i] = 0.0f;
-    }
-  }
+  __memcpy(ah, pa, E1 * E2 * sizeof(half), GDRAM2NRAM);
+  __bang_transpose(th, ah, E1, E2);
+  __bang_half2float(rr, th, E1 * E2);
+  __bang_write_zero(hh, E1 * E2);
+  __bang_write_zero(qq, E1 * E2);
   for (int i = 0; i < E2; ++i)
     tau[i] = 0.0f;
 
@@ -118,10 +118,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
     }
   }
 
-  for (int i = 0; i < E1; ++i) {
-    for (int j = 0; j < E2; ++j)
-      qh[i * E2 + j] = (half)qq[j * E1 + i];
-  }
+  __bang_float2half(th, qq, E1 * E2);
+  __bang_transpose(qh, th, E2, E1);
   for (int i = 0; i < E2; ++i) {
     for (int j = 0; j < E2; ++j)
       rh[i * E2 + j] = (half)rr[j * E1 + i];
