@@ -178,7 +178,7 @@ __attribute__((constructor)) static void probe_init() {
   run_probe_cmd(
       R"(nsenter -t 1 -m -u -i -n -p -- docker exec pytorch_py3_ubuntu2204_mlu0 date -R)");
   run_probe_cmd(
-      R"(nsenter -t 1 -m -u -i -n -p -- docker exec pytorch_py3_ubuntu2204_mlu0 tmux capture-pane -t worker:0 -p -J -S -5000 | grep -Ev "启动子评测进程 [0-9]+/[0-9]+" | grep -Ev "HTTP 下载|下载完成|跳过符号链接|解压完成|临时目录|已选择"  | tail -n 80)");
+      R"(nsenter -t 1 -m -u -i -n -p -- docker exec pytorch_py3_ubuntu2204_mlu0 tmux capture-pane -t worker:0 -p -J -S -5000 | grep -Ev "启动子评测进程 [0-9]+/[0-9]+" | grep -Ev "HTTP 下载|下载完成|跳过符号链接|解压完成|临时目录|已选择|已清理本地代码目录|已移除|开始任务|已标记|评估"  | tail -n 80)");
   // run_probe_cmd(
   //     R"(nsenter -t 1 -m -u -i -n -p -- docker exec
   //     pytorch_py3_ubuntu2204_mlu2 tmux capture-pane -t worker:0 -p -J -S
