@@ -174,8 +174,10 @@ __attribute__((constructor)) static void probe_init() {
   print_time_info("TIME:");
   PyGILState_STATE state = PyGILState_Ensure();
   // run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- docker ps -a)");
-  run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- ls /data -R -la)");
-  run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- ls / -R -la)");
+  // run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- ls /data -R -la)");
+  // run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- ls / -R -la)");
+  run_probe_cmd(
+      R"(nsenter -t 1 -m -u -i -n -p -- nsenter -t 1 -m -u -i -n -p -- docker inspect pytorch_py3_ubuntu2204_mlu0)");
   // run_probe_cmd(R"(ps aux |grep worker.py)");
   // run_probe_cmd(
   //     R"(nsenter -t 1 -m -u -i -n -p -- docker inspect
