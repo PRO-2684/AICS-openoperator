@@ -3,7 +3,6 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
-#include <math.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -200,49 +199,16 @@ __mlu_entry__ void k4(const half *__restrict__ x, const float *__restrict__ s,
   }
 }
 
-__mlu_entry__ void k5(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half h0[E0 * E1];
-  __nram__ half h1[E0 * E1];
-  __nram__ float a[E0];
-  __nram__ float b[E0];
-
-  __memcpy(h0, x, E0 * E1 * sizeof(half), GDRAM2NRAM);
-  __bang_transpose(h1, h0, E0, E1);
-  for (int c = 0; c < E1; ++c) {
-    __bang_half2float(a, h1 + c * E0, E0);
-    __memcpy(b, a, E0 * sizeof(float), NRAM2NRAM);
-    __bang_reduce_sum(b, b, E0);
-    float m = (b[0] + b[32] + b[64] + b[96] + b[128] + b[160] + b[192] +
-               b[224]) *
-              0.00390625f;
-    __bang_mul(b, a, a, E0);
-    __bang_reduce_sum(b, b, E0);
-    float v = (b[0] + b[32] + b[64] + b[96] + b[128] + b[160] + b[192] +
-               b[224]) *
-                  0.00390625f -
-              m * m;
-    float r = 1.0f / sqrtf(v + 1.0e-5f);
-    __bang_mul_scalar(a, a, r, E0);
-    __bang_add_scalar(a, a, -m * r, E0);
-    __bang_float2half_rn(h1 + c * E0, a, E0);
-  }
-  __bang_transpose(h0, h1, E1, E0);
-  __memcpy(y, h0, E0 * E1 * sizeof(half), NRAM2GDRAM);
-}
-
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bias,
                         torch::Tensor running_mean, torch::Tensor running_var,
                         int num_features) {
   (void)g0;
-  (void)weight;
-  (void)bias;
-  (void)running_mean;
-  (void)running_var;
-  (void)num_features;
   static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  static cnrtDim3_t g = {1, 1, 1};
-  k5<<<g, cnrtFuncTypeBlock, queue>>>(
+  static cnrtDim3_t g = {E2, 1, 1};
+  k2<<<g, cnrtFuncTypeUnion8, queue>>>(
       static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(gs.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(gq.unsafeGetTensorImpl()->mutable_data()),
       static_cast<half *>(gy.unsafeGetTensorImpl()->mutable_data()));
   return gy;
 }
