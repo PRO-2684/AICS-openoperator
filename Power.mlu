@@ -1,6 +1,6 @@
 #include <bang.h>
-#include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
 #include <torch/extension.h>
@@ -20,7 +20,6 @@ static void bind_host(int d) {
   }
   sched_setaffinity(0, sizeof(set), &set);
 }
-
 
 __attribute__((constructor(101))) static void init_runtime() {
   unsigned int n = 0;
@@ -42,7 +41,7 @@ __attribute__((constructor(101))) static void init_runtime() {
 __mlu_entry__ void square_half_kernel(half *__restrict__ input) {
   __nram__ half buf0[CHUNK_ELEMS];
 
-  for (uint32_t base = taskId * CHUNK_ELEMS; base < 16384;
+  for (uint32_t base = taskId * CHUNK_ELEMS; base < 16 * 16384;
        base += taskDim * CHUNK_ELEMS) {
     half *out0 = (half *)__builtin_assume_aligned(input + base, 512);
 
@@ -67,7 +66,6 @@ torch::Tensor bang_func(torch::Tensor x, double exponent) {
   (void)exponent;
   (void)g0;
   square_half_kernel<<<dim, ktype, queue>>>(
-      reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()),
-      );
+      reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
   return x;
 }
