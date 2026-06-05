@@ -41,6 +41,33 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
+
+static torch::Tensor gu = []() {
+  return torch::empty(
+      {E0, E1, E2},
+      torch::TensorOptions()
+          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+          .dtype(torch::kFloat32));
+}();
+
+static torch::Tensor gs = []() {
+  return torch::empty(
+      {E0, E2}, torch::TensorOptions()
+                    .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                    .dtype(torch::kFloat32));
+}();
+
+static torch::Tensor gv = []() {
+  return torch::empty(
+      {E0, E2, E2},
+      torch::TensorOptions()
+          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+          .dtype(torch::kFloat32));
+}();
+
+static cnrtDim3_t dim0 = {E0, 1, 1};
+static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+
 __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
                       float *__restrict__ s, float *__restrict__ v) {
   int b = taskId;
@@ -174,12 +201,10 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
 }
 
 std::vector<torch::Tensor> bang_func(torch::Tensor A) {
-  auto u = torch::empty({E0, E1, E2}, A.options().dtype(torch::kFloat32));
-  auto s = torch::empty({E0, E2}, A.options().dtype(torch::kFloat32));
-  auto v = torch::empty({E0, E2, E2}, A.options().dtype(torch::kFloat32));
-  cnrtDim3_t d = {E0, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(A.data_ptr<at::Half>()), u.data_ptr<float>(),
-      s.data_ptr<float>(), v.data_ptr<float>());
-  return {u, s, v};
+  k0<<<dim0, cnrtFuncTypeBlock, queue>>>(
+      static_cast<const half *>(A.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(gu.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(gs.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(gv.unsafeGetTensorImpl()->mutable_data()));
+  return {gu, gs, gv};
 }
