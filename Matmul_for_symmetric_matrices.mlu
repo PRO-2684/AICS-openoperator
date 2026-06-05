@@ -19,15 +19,13 @@
 #define TT (TG * TC)
 
 __mlu_entry__ void kprep(const half *__restrict__ b, half *__restrict__ wbuf) {
-  __nram__ half bh[TK * TN];
   __nram__ half bt[TN * TK];
   __nram__ half hf[TN * TK];
   for (int t = taskId; t < TC * (K0 / TK); t += taskDim) {
     int nj = (t / (K0 / TK)) * TN;
     int kk = (t % (K0 / TK)) * TK;
-    __memcpy(bh, b + kk * N0 + nj, TN * sizeof(half), GDRAM2NRAM,
-             TN * sizeof(half), N0 * sizeof(half), TK - 1);
-    __bang_transpose(bt, bh, TK, TN);
+    __memcpy(bt, b + nj * N0 + kk, TK * sizeof(half), GDRAM2NRAM,
+             TK * sizeof(half), N0 * sizeof(half), TN - 1);
     __bang_reshape_filter(hf, bt, TN, 1, 1, TK);
     __memcpy(wbuf + t * TN * TK, hf, TN * TK * sizeof(half), NRAM2GDRAM);
   }
