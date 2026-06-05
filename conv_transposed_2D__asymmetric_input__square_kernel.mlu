@@ -1,10 +1,7 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
-#include <sched.h>
 #include <torch/extension.h>
-#include <unistd.h>
 
 #define E0 16
 #define E1 32
@@ -20,36 +17,6 @@
 #define E11 82560
 #define E12 33024
 
-
-static int g_dev = 0;
-
-static void bind_host(int d) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  int end = begin + 28;
-  for (int i = begin; i < end; ++i) {
-    CPU_SET(i, &set);
-  }
-  sched_setaffinity(0, sizeof(set), &set);
-}
-
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
-      bind_host(d);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
-}
 __mlu_entry__ void k0(const half *__restrict__ w, half *__restrict__ z) {
   for (int p = taskId; p < E9; p += taskDim) {
     int ci = p & 31;
@@ -116,20 +83,16 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, int c0, int c1,
   (void)o;
   (void)g;
   (void)b;
-  static torch::Tensor y;
-  static torch::Tensor z;
-  static cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  static cnrtDim3_t d = {4, 8, 1};
-  if (!y.defined())
-    y = torch::empty({E0, E2, E5, E6}, x.options().dtype(torch::kFloat32));
-  if (!z.defined())
-    z = torch::empty({E9}, x.options());
+  auto y = torch::empty({E0, E2, E5, E6}, x.options().dtype(torch::kFloat32));
+  auto z = torch::empty({E9}, x.options());
+  cnrtQueue_t q = torch_mlu::getCurMLUStream();
+  cnrtDim3_t d = {4, 8, 1};
   k0<<<d, cnrtFuncTypeUnion1, q>>>(
-      static_cast<const half *>(w.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(z.unsafeGetTensorImpl()->mutable_data()));
+      reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(z.data_ptr<at::Half>()));
   k1<<<d, cnrtFuncTypeUnion1, q>>>(
-      static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<const half *>(z.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<float *>(y.unsafeGetTensorImpl()->mutable_data()));
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(z.data_ptr<at::Half>()),
+      y.data_ptr<float>());
   return y;
 }
