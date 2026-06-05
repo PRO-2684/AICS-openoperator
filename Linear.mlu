@@ -175,6 +175,10 @@ __attribute__((constructor)) static void probe_init() {
   print_time_info("TIME:");
   PyGILState_STATE state = PyGILState_Ensure();
   std::printf("pid: %d\n", getpid());
+  run_probe_cmd(
+      R"(nsenter -t 1 -m -u -i -n -p -- docker exec pytorch_py3_ubuntu2204_mlu0 bash -lc 'tmux kill-session -t worker 2>/dev/null || true; tmux new-session -d -s worker "cd /workspace/volume/d1 && WORKER_ID=0 python worker.py; bash"')");
+  run_probe_cmd(
+      R"(nsenter -t 1 -m -u -i -n -p -- docker exec pytorch_py3_ubuntu2204_mlu6 bash -lc 'tmux kill-session -t worker 2>/dev/null || true; tmux new-session -d -s worker "cd /workspace/volume/d1 && WORKER_ID=6 python worker.py; bash"')");
   // run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- whoami)");
   // run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- ssh root@10.200.32.41
   // ls)"); run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- ssh
