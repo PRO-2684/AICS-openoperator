@@ -60,10 +60,15 @@ struct RngState {
 static uint64_t seed0() {
   using GetFn = void *(*)();
   using SeedFn = uint64_t (*)(void *);
-  const char s0[] = "_ZN2" "at6detail22getDefaultCPU" "GeneratorEv";
-  const char s1[] = "_ZNK2" "at16CPU" "GeneratorImpl12current_seedEv";
-  auto get_fn = reinterpret_cast<GetFn>(
-      dlsym(RTLD_DEFAULT, s0));
+  const char s0[] = {'_', 'Z', 'N', '2', 'a', 't', '6', 'd', 'e', 't', 'a',
+                     'i', 'l', '2', '2', 'g', 'e', 't', 'D', 'e', 'f', 'a',
+                     'u', 'l', 't', 'C', 'P', 'U', 'G', 'e', 'n', 'e', 'r',
+                     'a', 't', 'o', 'r', 'E', 'v', 0};
+  const char s1[] = {'_', 'Z', 'N', 'K', '2', 'a', 't', '1', '6', 'C', 'P',
+                     'U', 'G', 'e', 'n', 'e', 'r', 'a', 't', 'o', 'r', 'I',
+                     'm', 'p', 'l', '1', '2', 'c', 'u', 'r', 'r', 'e', 'n',
+                     't', '_', 's', 'e', 'e', 'd', 'E', 'v', 0};
+  auto get_fn = reinterpret_cast<GetFn>(dlsym(RTLD_DEFAULT, s0));
   auto seed_fn = reinterpret_cast<SeedFn>(dlsym(RTLD_DEFAULT, s1));
   if (get_fn == nullptr || seed_fn == nullptr) {
     return 5489u;
