@@ -66,8 +66,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
   __bang_half2float(rr, th, E1 * E2);
   __bang_write_zero(hh, E1 * E2);
   __bang_write_zero(qq, E1 * E2);
-  for (int i = 0; i < E2; ++i)
-    tau[i] = 0.0f;
+  __bang_write_zero(tau, E2);
 
   for (int k = 0; k < E2; ++k) {
     float ss = 0.0f;
@@ -102,10 +101,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
     }
   }
 
-  for (int i = 0; i < E1; ++i) {
-    for (int j = 0; j < E2; ++j)
-      qq[j * E1 + i] = (i == j) ? 1.0f : 0.0f;
-  }
+  for (int i = 0; i < E2; ++i)
+    qq[i * E1 + i] = 1.0f;
 
   for (int k = E2 - 1; k >= 0; --k) {
     float t = tau[k];
