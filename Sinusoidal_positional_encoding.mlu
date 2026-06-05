@@ -6,16 +6,8 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define THREADS_PER_JOB 32
-#define CACHE_TILE_ELEMS 65536
-
-#define USE_INPLACE 1
-#define INNER_SPLIT 2
-#define INNER_TILE_ELEMS 32768
-
 #define TASKS_PER_LAUNCH 32
 #define PLANE_ELEMS 65536
-#define SEG_ELEMS 32768
 
 namespace {
 
