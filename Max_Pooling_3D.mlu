@@ -87,6 +87,9 @@ static torch::Tensor gy = []() {
                           .dtype(torch::kHalf));
 }();
 
+static cnrtQueue_t q = torch_mlu::getCurMLUStream();
+static cnrtDim3_t d = {32, 1, 1};
+
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
                         int padding, int dilation, bool return_indices,
                         bool ceil_mode) {
@@ -98,10 +101,8 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
   (void)ceil_mode;
   (void)g0;
   auto &y = gy;
-  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {32, 1, 1};
-  k0<<<g, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  k0<<<d, cnrtFuncTypeBlock, q>>>(
+      static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
   return y;
 }
