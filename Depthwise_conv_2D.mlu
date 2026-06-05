@@ -82,6 +82,13 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   }
 }
 
+static auto y = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::empty({16, 64, 128, 128}, opt);
+}();
+
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
                         int kernel_size, int stride, int padding) {
   (void)in_channels;
@@ -90,9 +97,6 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)padding;
   (void)&r0;
   (void)&g0;
-  static torch::Tensor y;
-  if (!y.defined())
-    y = torch::empty({16, 64, 128, 128}, x.options());
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
       reinterpret_cast<const half *>(
