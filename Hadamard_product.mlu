@@ -7,7 +7,7 @@
 #include <unistd.h>
 
 #define A 4194304
-#define B 32768
+#define B 131072
 
 
 static int g_dev = 0;
