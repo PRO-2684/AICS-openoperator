@@ -11,7 +11,7 @@
 
 namespace {
 
-__mlu_const__ unsigned short g_pe_lut[65536] = {
+__nram__ unsigned short g_pe_lut[65536] = {
   0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00,
   0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00,
   0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00,
@@ -4144,26 +4144,17 @@ __attribute__((constructor(101))) static void init_runtime() {
 __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x) {
   int c = coreId;
 
-  __mlu_shared__ half sp[PLANE_ELEMS];
-  const half *p_gdram = (const half *)__builtin_assume_aligned(g_pe_lut, 512);
-
   int tid = taskId;
   bool active = tid < TASKS_PER_LAUNCH && c != 0x80;
 
   const uint32_t base = tid * PLANE_ELEMS;
 
   __nram__ half x0[PLANE_ELEMS];
-  __nram__ half p0[PLANE_ELEMS];
 
-  if (c == 0) {
-    __memcpy(p0, p_gdram, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
-    __memcpy(sp, p0, PLANE_ELEMS * sizeof(half), NRAM2SRAM);
-  }
-  __sync_cluster();
   if (active) {
     half *x_gdram = (half *)__builtin_assume_aligned(x + base, 512);
+    const half *p0 = (const half *)__builtin_assume_aligned(g_pe_lut, 512);
     __memcpy(x0, x_gdram, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
-    __memcpy(p0, sp, PLANE_ELEMS * sizeof(half), SRAM2NRAM);
     __bang_add(x0, x0, p0, PLANE_ELEMS);
     __memcpy(x_gdram, x0, PLANE_ELEMS * sizeof(half), NRAM2GDRAM);
   }
