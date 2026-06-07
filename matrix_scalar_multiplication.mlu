@@ -6,7 +6,8 @@
 #include <framework/core/MLUStream.h>
 #include <sched.h>
 
-#define CHUNK_SIZE 65536
+#define FLOAT_CHUNK_SIZE 65536
+#define HALF_CHUNK_SIZE 262144
 #define TASK_COUNT 32
 
 __mlu_entry__ void matrix_scalar_mul_float_kernel(const float *input,
@@ -22,10 +23,10 @@ __mlu_entry__ void matrix_scalar_mul_float_kernel(const float *input,
   uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
   uint32_t count = per_task + (task_id < remainder ? 1 : 0);
 
-  __nram__ float nram_buf[CHUNK_SIZE];
+  __nram__ float nram_buf[FLOAT_CHUNK_SIZE];
 
-  for (uint32_t offset = 0; offset < count; offset += CHUNK_SIZE) {
-    uint32_t len = (offset + CHUNK_SIZE <= count) ? CHUNK_SIZE : (count - offset);
+  for (uint32_t offset = 0; offset < count; offset += FLOAT_CHUNK_SIZE) {
+    uint32_t len = (offset + FLOAT_CHUNK_SIZE <= count) ? FLOAT_CHUNK_SIZE : (count - offset);
     uint32_t aligned_len = (len + 63) & ~63;
 
     __memcpy(nram_buf, input + start + offset, len * sizeof(float), GDRAM2NRAM);
@@ -52,10 +53,10 @@ __mlu_entry__ void matrix_scalar_mul_half_kernel(const half *input,
   uint32_t start = task_id * per_task + (task_id < remainder ? task_id : remainder);
   uint32_t count = per_task + (task_id < remainder ? 1 : 0);
 
-  __nram__ half nram_buf[CHUNK_SIZE * 2];
+  __nram__ half nram_buf[HALF_CHUNK_SIZE];
 
-  for (uint32_t offset = 0; offset < count; offset += CHUNK_SIZE) {
-    uint32_t len = (offset + CHUNK_SIZE <= count) ? CHUNK_SIZE : (count - offset);
+  for (uint32_t offset = 0; offset < count; offset += HALF_CHUNK_SIZE) {
+    uint32_t len = (offset + HALF_CHUNK_SIZE <= count) ? HALF_CHUNK_SIZE : (count - offset);
     uint32_t aligned_len = (len + 63) & ~63;
 
     __memcpy(nram_buf, input + start + offset, len * sizeof(half), GDRAM2NRAM);
