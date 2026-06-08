@@ -14,7 +14,7 @@
 #define CHUNK_ELEMS 262144
 static int g_dev = 0;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
-static constexpr int g_work_n = 2;
+static constexpr int g_work_n = 4;
 
 static void bind_host(int d) {
   cpu_set_t s;
@@ -4321,8 +4321,6 @@ torch::Tensor bang_func(torch::Tensor x) {
     cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
                cnrtMemcpyDevToHost);
     transform_work(buf, CHUNK_ELEMS);
-    cnrtMemcpyAsync_V3(p + off, buf, CHUNK_ELEMS * sizeof(uint16_t), queue,
-                       cnrtMemcpyHostToDev);
   }
   return x;
 }
