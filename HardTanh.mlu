@@ -37,21 +37,6 @@ __attribute__((target("avx512bw"))) static void run_vec512(uint16_t *p) {
   }
 }
 
-__attribute__((target("avx512bw"))) static void run_vec512a(uint16_t *p) {
-  const __m512i zero = _mm512_setzero_si512();
-  const __m512i sign = _mm512_set1_epi16((short)0x8000);
-  const __m512i pos = _mm512_set1_epi16((short)0x3c00);
-  const __m512i neg = _mm512_set1_epi16((short)0xbc00);
-  for (int i = 0; i < TOTAL_ELEMS; i += 32) {
-    __m512i v = _mm512_load_si512(reinterpret_cast<const void *>(p + i));
-    __mmask32 n = _mm512_cmpneq_epi16_mask(_mm512_and_si512(v, sign), zero);
-    __m512i limit = _mm512_mask_blend_epi16(n, pos, neg);
-    __mmask32 gt = _mm512_cmpgt_epu16_mask(v, limit);
-    v = _mm512_mask_mov_epi16(v, gt, limit);
-    _mm512_store_si512(reinterpret_cast<void *>(p + i), v);
-  }
-}
-
 __attribute__((target("avx2"))) static void run_vec256(uint16_t *p) {
   const __m256i sign = _mm256_set1_epi16((short)0x8000);
   const __m256i pos = _mm256_set1_epi16((short)0x3c00);
@@ -136,11 +121,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
   if (__builtin_cpu_supports("avx2")) {
     if (__builtin_cpu_supports("avx512bw")) {
-      if ((reinterpret_cast<uintptr_t>(g_buf) & 63u) == 0) {
-        run_vec512a(g_buf);
-      } else {
-        run_vec512(g_buf);
-      }
+      run_vec512(g_buf);
     } else {
       run_vec256(g_buf);
     }
