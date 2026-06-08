@@ -3,13 +3,12 @@
 #include <cstdint>
 #include <cstdlib>
 #include <framework/core/MLUStream.h>
-#include <pthread.h>
 #include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
 #define TOTAL_ELEMS 262144
-#define CHUNK_ELEMS 262144
+#define CHUNK_ELEMS 65536
 static int g_dev = 0;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
 alignas(64) static const uint16_t g_tbl[65536] = {
@@ -4110,73 +4109,6 @@ alignas(64) static const uint16_t g_tbl[65536] = {
     0xffe0, 0xffe1, 0xffe2, 0xffe3, 0xffe4, 0xffe5, 0xffe6, 0xffe7, 0xffe8, 0xffe9, 0xffea, 0xffeb, 0xffec, 0xffed, 0xffee, 0xffef,
     0xfff0, 0xfff1, 0xfff2, 0xfff3, 0xfff4, 0xfff5, 0xfff6, 0xfff7, 0xfff8, 0xfff9, 0xfffa, 0xfffb, 0xfffc, 0xfffd, 0xfffe, 0xffff
 };
-static pthread_t g_th[4];
-static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t g_cv = PTHREAD_COND_INITIALIZER;
-static pthread_cond_t g_done_cv = PTHREAD_COND_INITIALIZER;
-static uint16_t *g_job = nullptr;
-static int g_job_n = 0;
-static int g_job_id = 0;
-static int g_done = 0;
-static int g_ready = 0;
-
-static void *worker_loop(void *arg) {
-  int tid = static_cast<int>(reinterpret_cast<intptr_t>(arg));
-  int seen = 0;
-  for (;;) {
-    pthread_mutex_lock(&g_mu);
-    while (g_job_id == seen) {
-      pthread_cond_wait(&g_cv, &g_mu);
-    }
-    uint16_t *p = g_job;
-    int n = g_job_n;
-    seen = g_job_id;
-    pthread_mutex_unlock(&g_mu);
-    int s = (n * tid) >> 2;
-    int e = (n * (tid + 1)) >> 2;
-    for (int i = s; i < e; ++i) {
-      p[i] = g_tbl[p[i]];
-    }
-    pthread_mutex_lock(&g_mu);
-    ++g_done;
-    if (g_done == 4) {
-      pthread_cond_signal(&g_done_cv);
-    }
-    pthread_mutex_unlock(&g_mu);
-  }
-  return nullptr;
-}
-
-static void init_workers() {
-  if (g_ready) {
-    return;
-  }
-  int ok = 1;
-  for (int i = 0; i < 4; ++i) {
-    ok &= pthread_create(&g_th[i], nullptr, worker_loop,
-                         reinterpret_cast<void *>(static_cast<intptr_t>(i))) == 0;
-  }
-  g_ready = ok;
-}
-
-static void run_table(uint16_t *p, int n) {
-  if (!g_ready) {
-    for (int i = 0; i < n; ++i) {
-      p[i] = g_tbl[p[i]];
-    }
-    return;
-  }
-  pthread_mutex_lock(&g_mu);
-  g_job = p;
-  g_job_n = n;
-  g_done = 0;
-  ++g_job_id;
-  pthread_cond_broadcast(&g_cv);
-  while (g_done != 4) {
-    pthread_cond_wait(&g_done_cv, &g_mu);
-  }
-  pthread_mutex_unlock(&g_mu);
-}
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -4210,7 +4142,6 @@ struct InitRuntime {
                 static_cast<uint16_t *>(std::malloc(CHUNK_ELEMS * sizeof(uint16_t)));
           }
         }
-        init_workers();
         g_dev = d;
       }
     }
@@ -4237,7 +4168,9 @@ torch::Tensor bang_func(torch::Tensor x) {
     uint16_t *buf = g_buf[(off / CHUNK_ELEMS) & 1];
     cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
                cnrtMemcpyDevToHost);
-    run_table(buf, CHUNK_ELEMS);
+    for (int i = 0; i < CHUNK_ELEMS; ++i) {
+      buf[i] = g_tbl[buf[i]];
+    }
     cnrtMemcpyAsync_V3(p + off, buf, CHUNK_ELEMS * sizeof(uint16_t), queue,
                        cnrtMemcpyHostToDev);
   }
