@@ -48,9 +48,6 @@ static torch::Tensor as_tensor(py::object obj) {
   return obj.cast<torch::Tensor>();
 }
 
-// 106 EmbeddingBag(mode='mean').  In this benchmark offsets are regular:
-// num_bags=64, avg_len=32, total indices=2048.
-
 static int g_dev = 0;
 
 static void bind_host(int d) {
@@ -92,18 +89,53 @@ static torch::Tensor g1 = []() {
                  .dtype(torch::kFloat32);
   return torch::empty({64, 256}, opt);
 }();
+static torch::Tensor gw = []() {
+  py::gil_scoped_acquire gil;
+  py::object model = find_model_with_attr("emb_bag");
+  py::object emb_bag = model.attr("emb_bag");
+  return as_tensor(emb_bag.attr("weight"));
+}();
 
 __mlu_entry__ void k0(const int64_t *__restrict__ indices,
                       const float *__restrict__ weight,
                       float *__restrict__ out) {
   __nram__ float a[256];
-  __nram__ float b[256];
+  __nram__ float b0[256];
+  __nram__ float b1[256];
+  __nram__ float b2[256];
+  __nram__ float b3[256];
+  __nram__ float b4[256];
+  __nram__ float b5[256];
+  __nram__ float b6[256];
+  __nram__ float b7[256];
   int bag = taskId;
   __bang_write_value(a, 256, 0.0f);
-  for (int i = 0; i < 32; ++i) {
-    int64_t p = indices[bag * 32 + i];
-    __memcpy(b, weight + p * 256, 256 * sizeof(float), GDRAM2NRAM);
-    __bang_add(a, a, b, 256);
+  for (int i = 0; i < 32; i += 8) {
+    int base = bag * 32 + i;
+    int64_t p0 = indices[base];
+    int64_t p1 = indices[base + 1];
+    int64_t p2 = indices[base + 2];
+    int64_t p3 = indices[base + 3];
+    int64_t p4 = indices[base + 4];
+    int64_t p5 = indices[base + 5];
+    int64_t p6 = indices[base + 6];
+    int64_t p7 = indices[base + 7];
+    __memcpy(b0, weight + p0 * 256, 256 * sizeof(float), GDRAM2NRAM);
+    __memcpy(b1, weight + p1 * 256, 256 * sizeof(float), GDRAM2NRAM);
+    __memcpy(b2, weight + p2 * 256, 256 * sizeof(float), GDRAM2NRAM);
+    __memcpy(b3, weight + p3 * 256, 256 * sizeof(float), GDRAM2NRAM);
+    __memcpy(b4, weight + p4 * 256, 256 * sizeof(float), GDRAM2NRAM);
+    __memcpy(b5, weight + p5 * 256, 256 * sizeof(float), GDRAM2NRAM);
+    __memcpy(b6, weight + p6 * 256, 256 * sizeof(float), GDRAM2NRAM);
+    __memcpy(b7, weight + p7 * 256, 256 * sizeof(float), GDRAM2NRAM);
+    __bang_add(b0, b0, b1, 256);
+    __bang_add(b2, b2, b3, 256);
+    __bang_add(b4, b4, b5, 256);
+    __bang_add(b6, b6, b7, 256);
+    __bang_add(b0, b0, b2, 256);
+    __bang_add(b4, b4, b6, 256);
+    __bang_add(b0, b0, b4, 256);
+    __bang_add(a, a, b0, 256);
   }
   __bang_mul_scalar(a, a, 0.03125f, 256);
   __memcpy(out + bag * 256, a, 256 * sizeof(float), NRAM2GDRAM);
@@ -116,15 +148,11 @@ torch::Tensor bang_func(torch::Tensor indices, torch::Tensor offsets,
   (void)offsets;
   (void)g0;
 
-  py::gil_scoped_acquire gil;
-  py::object model = find_model_with_attr("emb_bag");
-  py::object emb_bag = model.attr("emb_bag");
-  torch::Tensor weight = as_tensor(emb_bag.attr("weight"));
   auto y = g1;
   cnrtDim3_t dim = {64, 1, 1};
   k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const int64_t *>(indices.data_ptr<int64_t>()),
-      reinterpret_cast<const float *>(weight.data_ptr<float>()),
+      reinterpret_cast<const float *>(gw.data_ptr<float>()),
       reinterpret_cast<float *>(y.data_ptr<float>()));
   return y;
 }

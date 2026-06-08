@@ -14,11 +14,6 @@
 #define N 192
 #define BM 32
 #define C 8
-#define O0 0
-#define O1 393216
-#define O2 1179648
-#define O3 1966080
-#define OS 2752512
 
 
 static int g_dev = 0;
@@ -99,16 +94,7 @@ static torch::Tensor gm = []() {
                   .dtype(torch::kHalf));
 }();
 
-static torch::Tensor gp = []() {
-  return torch::empty(
-      {OS}, torch::TensorOptions()
-                .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                .dtype(torch::kHalf));
-}();
-
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static cnrtDim3_t dim_p = {8, 1, 1};
-static cnrtDim3_t dim_k = {8, 1, 1};
 static cnrtDim3_t dim_u = {16, 1, 1};
 
 __mlu_entry__ void kp(const half *__restrict__ wi, const half *__restrict__ wh,
@@ -178,19 +164,19 @@ __mlu_func__ void kc(int tid, const half *__restrict__ x,
   __nram__ float fc[N];
   __wram__ half ww[H * N];
 
-  for (int b = 0; b < BM; ++b) {
-    int rb = bb + bo + b;
-    if (first) {
+  if (first) {
+    for (int b = 0; b < BM; ++b) {
+      int rb = bb + bo + b;
       __memcpy(a + b * k, x + rb * T * I0 + t * I0, k * sizeof(half),
                GDRAM2NRAM);
-    } else {
-      __memcpy(a + b * k, in + rb * H, k * sizeof(half), GDRAM2NRAM);
     }
-    if (t == 0) {
-      __bang_write_zero(h + b * H, H);
-    } else {
-      __memcpy(h + b * H, hp + rb * H, H * sizeof(half), GDRAM2NRAM);
-    }
+  } else {
+    __memcpy(a, in + bb * H, BM * H * sizeof(half), GDRAM2NRAM);
+  }
+  if (t == 0) {
+    __bang_write_zero(h, BM * H);
+  } else {
+    __memcpy(h, hp + bb * H, BM * H * sizeof(half), GDRAM2NRAM);
   }
 
   __memcpy(ww, ip + gi * N * k, N * k * sizeof(half), GDRAM2WRAM);
@@ -235,22 +221,19 @@ __mlu_func__ void kc(int tid, const half *__restrict__ x,
   __bang_add(v2, v2, u, BM * G);
   __bang_active_tanh(v2, v2, BM * G);
 
-  for (int b = 0; b < BM; ++b) {
-    __memcpy(u + b * G, h + b * H + col, G * sizeof(half), NRAM2NRAM);
-  }
+  __memcpy(u, h + col, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
+           H * sizeof(half), BM - 1);
   __bang_sub(u, u, v2, BM * G);
-  __bang_mul(u, u, v0, BM * G);
-  __bang_add(u, u, v2, BM * G);
+  __bang_fusion(FUSION_FMA, u, u, v0, v2, BM * G, BM * G);
 
-  for (int b = 0; b < BM; ++b) {
-    int rb = bb + bo + b;
-    __memcpy(hn + rb * H + col, u + b * G, G * sizeof(half), NRAM2GDRAM);
-    if (last) {
-      __memcpy(out + rb * T * H + t * H + col, u + b * G, G * sizeof(half),
-               NRAM2GDRAM);
-    } else {
-      __memcpy(out + rb * H + col, u + b * G, G * sizeof(half), NRAM2GDRAM);
-    }
+  __memcpy(hn + bb * H + col, u, G * sizeof(half), NRAM2GDRAM,
+           H * sizeof(half), G * sizeof(half), BM - 1);
+  if (last) {
+    __memcpy(out + bb * T * H + t * H + col, u, G * sizeof(half), NRAM2GDRAM,
+             T * H * sizeof(half), G * sizeof(half), BM - 1);
+  } else {
+    __memcpy(out + bb * H + col, u, G * sizeof(half), NRAM2GDRAM,
+             H * sizeof(half), G * sizeof(half), BM - 1);
   }
 }
 
@@ -303,6 +286,193 @@ __mlu_entry__ void k3(const half *__restrict__ x, const half *__restrict__ ip0,
   }
 }
 
+__mlu_func__ void kcw(int tid, const half *__restrict__ x,
+                      const half *__restrict__ wip,
+                      const half *__restrict__ wwp,
+                      const half *__restrict__ bi,
+                      const half *__restrict__ bh,
+                      const half *__restrict__ in, const half *__restrict__ hp,
+                      half *__restrict__ hn, half *__restrict__ out, int t,
+                      int k, int first, int last) {
+  int col = (tid & 7) * G;
+  int bo = 0;
+  int bb = (tid >> 3) * BM;
+  __nram__ half a[BM * H];
+  __nram__ half h[BM * H];
+  __nram__ half u[BM * G];
+  __nram__ half v0[BM * G];
+  __nram__ half v1[BM * G];
+  __nram__ half v2[BM * G];
+  __nram__ half c0[N];
+  __nram__ float fu[BM * N];
+  __nram__ float fv[BM * N];
+  __nram__ float fr[BM * G];
+  __nram__ float fz[BM * G];
+  __nram__ float fn[BM * G];
+  __nram__ float fh[BM * G];
+  __nram__ float fc[N];
+
+  if (first) {
+    for (int b = 0; b < BM; ++b) {
+      int rb = bb + bo + b;
+      __memcpy(a + b * k, x + rb * T * I0 + t * I0, k * sizeof(half),
+               GDRAM2NRAM);
+    }
+  } else {
+    __memcpy(a, in + bb * H, BM * H * sizeof(half), GDRAM2NRAM);
+  }
+  if (t == 0) {
+    __bang_write_zero(h, BM * H);
+  } else {
+    __memcpy(h, hp + bb * H, BM * H * sizeof(half), GDRAM2NRAM);
+  }
+
+  __bang_conv(fu, a, wip, k, BM, 1, 1, 1, 1, 1, N);
+  __memcpy(c0, bi + col, G * sizeof(half), GDRAM2NRAM);
+  __memcpy(c0 + G, bi + H + col, G * sizeof(half), GDRAM2NRAM);
+  __memcpy(c0 + G * 2, bi + H * 2 + col, G * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(fc, c0, N);
+  __bang_cycle_add(fu, fu, fc, BM * N, N);
+
+  __bang_conv(fv, h, wwp, H, BM, 1, 1, 1, 1, 1, N);
+  __memcpy(c0, bh + col, G * sizeof(half), GDRAM2NRAM);
+  __memcpy(c0 + G, bh + H + col, G * sizeof(half), GDRAM2NRAM);
+  __memcpy(c0 + G * 2, bh + H * 2 + col, G * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(fc, c0, N);
+  __bang_cycle_add(fv, fv, fc, BM * N, N);
+
+  __memcpy(fz, fu + G, G * sizeof(float), NRAM2NRAM, G * sizeof(float),
+           N * sizeof(float), BM - 1);
+  __memcpy(fn, fu + G * 2, G * sizeof(float), NRAM2NRAM, G * sizeof(float),
+           N * sizeof(float), BM - 1);
+  __memcpy(fr, fv + G, G * sizeof(float), NRAM2NRAM, G * sizeof(float),
+           N * sizeof(float), BM - 1);
+  __bang_add(fz, fz, fr, BM * G);
+  __bang_float2half_rn(v0, fz, BM * G);
+  __bang_active_sigmoid(v0, v0, BM * G);
+
+  __memcpy(fr, fu, G * sizeof(float), NRAM2NRAM, G * sizeof(float),
+           N * sizeof(float), BM - 1);
+  __memcpy(fh, fv, G * sizeof(float), NRAM2NRAM, G * sizeof(float),
+           N * sizeof(float), BM - 1);
+  __bang_add(fr, fr, fh, BM * G);
+  __bang_float2half_rn(v1, fr, BM * G);
+  __bang_active_sigmoid(v1, v1, BM * G);
+
+  __memcpy(fh, fv + G * 2, G * sizeof(float), NRAM2NRAM, G * sizeof(float),
+           N * sizeof(float), BM - 1);
+  __bang_float2half_rn(v2, fn, BM * G);
+  __bang_float2half_rn(u, fh, BM * G);
+  __bang_mul(u, u, v1, BM * G);
+  __bang_add(v2, v2, u, BM * G);
+  __bang_active_tanh(v2, v2, BM * G);
+
+  __memcpy(u, h + col, G * sizeof(half), NRAM2NRAM, G * sizeof(half),
+           H * sizeof(half), BM - 1);
+  __bang_sub(u, u, v2, BM * G);
+  __bang_fusion(FUSION_FMA, u, u, v0, v2, BM * G, BM * G);
+
+  __memcpy(hn + bb * H + col, u, G * sizeof(half), NRAM2GDRAM,
+           H * sizeof(half), G * sizeof(half), BM - 1);
+  if (last) {
+    __memcpy(out + bb * T * H + t * H + col, u, G * sizeof(half), NRAM2GDRAM,
+             T * H * sizeof(half), G * sizeof(half), BM - 1);
+  } else {
+    __memcpy(out + bb * H + col, u, G * sizeof(half), NRAM2GDRAM,
+             H * sizeof(half), G * sizeof(half), BM - 1);
+  }
+}
+
+__mlu_entry__ void k3w(const half *__restrict__ x, const half *__restrict__ ip0,
+                       const half *__restrict__ wp0, const half *__restrict__ b0,
+                       const half *__restrict__ c0, const half *__restrict__ ip1,
+                       const half *__restrict__ wp1, const half *__restrict__ b1,
+                       const half *__restrict__ c1, half *__restrict__ h0,
+                       half *__restrict__ h1, half *__restrict__ h2,
+                       half *__restrict__ h3, half *__restrict__ mid,
+                       half *__restrict__ out) {
+  __wram__ half wip0[N * I0];
+  __wram__ half wwp0[N * H];
+  __wram__ half wip1[N * H];
+  __wram__ half wwp1[N * H];
+  int gi = taskId & 7;
+  if (taskId < C) {
+    __memcpy(wip0, ip0 + gi * N * I0, N * I0 * sizeof(half), GDRAM2WRAM);
+    __memcpy(wwp0, wp0 + gi * N * H, N * H * sizeof(half), GDRAM2WRAM);
+    __memcpy(wip1, ip1 + gi * N * H, N * H * sizeof(half), GDRAM2WRAM);
+    __memcpy(wwp1, wp1 + gi * N * H, N * H * sizeof(half), GDRAM2WRAM);
+  }
+  for (int t = 0; t < T; ++t) {
+    half *p0 = (t & 1) ? h2 : h0;
+    half *n0 = (t & 1) ? h0 : h2;
+    half *p1 = (t & 1) ? h3 : h1;
+    half *n1 = (t & 1) ? h1 : h3;
+    if (taskId < C) {
+      kcw(taskId, x, wip0, wwp0, b0, c0, mid, p0, n0, mid, t, I0, 1, 0);
+    }
+    __sync_all_ipu();
+    if (taskId < C) {
+      kcw(taskId, x, wip1, wwp1, b1, c1, mid, p1, n1, out, t, H, 0, 1);
+    }
+  }
+}
+
+__mlu_func__ void kwr(const half *__restrict__ wi, half *__restrict__ out,
+                      int k) {
+  int col = (taskId & 7) * G;
+  __nram__ half wb[H * N];
+  __nram__ half wf[H * N];
+  __memcpy(wb, wi + col * k, G * k * sizeof(half), GDRAM2NRAM);
+  __memcpy(wb + G * k, wi + (H + col) * k, G * k * sizeof(half),
+           GDRAM2NRAM);
+  __memcpy(wb + G * 2 * k, wi + (H * 2 + col) * k, G * k * sizeof(half),
+           GDRAM2NRAM);
+  int p = 0;
+  for (int i = 0; i < 64; i += 4) {
+    for (int j = 0; j < N / 64; ++j) {
+      for (int m = 0; m < 4; ++m) {
+        int o = i + j * 64 + m;
+        __memcpy(wf + p, wb + o * k, k * sizeof(half), NRAM2NRAM);
+        p += k;
+      }
+    }
+  }
+  __memcpy(out, wf, N * k * sizeof(half), NRAM2WRAM);
+}
+
+__mlu_entry__ void k3r(const half *__restrict__ x, const half *__restrict__ w0,
+                       const half *__restrict__ w1, const half *__restrict__ b0,
+                       const half *__restrict__ c0, const half *__restrict__ w4,
+                       const half *__restrict__ w5, const half *__restrict__ b1,
+                       const half *__restrict__ c1, half *__restrict__ h0,
+                       half *__restrict__ h1, half *__restrict__ h2,
+                       half *__restrict__ h3, half *__restrict__ mid,
+                       half *__restrict__ out) {
+  __wram__ half wip0[N * I0];
+  __wram__ half wwp0[N * H];
+  __wram__ half wip1[N * H];
+  __wram__ half wwp1[N * H];
+  if (taskId < C) {
+    kwr(w0, wip0, I0);
+    kwr(w1, wwp0, H);
+    kwr(w4, wip1, H);
+    kwr(w5, wwp1, H);
+  }
+  for (int t = 0; t < T; ++t) {
+    half *p0 = (t & 1) ? h2 : h0;
+    half *n0 = (t & 1) ? h0 : h2;
+    half *p1 = (t & 1) ? h3 : h1;
+    half *n1 = (t & 1) ? h1 : h3;
+    if (taskId < C) {
+      kcw(taskId, x, wip0, wwp0, b0, c0, mid, p0, n0, mid, t, I0, 1, 0);
+    }
+    __sync_all_ipu();
+    if (taskId < C) {
+      kcw(taskId, x, wip1, wwp1, b1, c1, mid, p1, n1, out, t, H, 0, 1);
+    }
+  }
+}
+
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
                         torch::Tensor w2, torch::Tensor w3, torch::Tensor w4,
                         torch::Tensor w5, torch::Tensor w6, torch::Tensor w7,
@@ -311,7 +481,6 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
   (void)hidden_size;
   (void)num_layers;
   (void)g0;
-  half *pg = static_cast<half *>(gp.unsafeGetTensorImpl()->mutable_data());
   half *py = static_cast<half *>(gy.unsafeGetTensorImpl()->mutable_data());
   half *ph0 = static_cast<half *>(gh0.unsafeGetTensorImpl()->mutable_data());
   half *ph1 = static_cast<half *>(gh1.unsafeGetTensorImpl()->mutable_data());
@@ -328,30 +497,11 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w0, torch::Tensor w1,
       static_cast<const half *>(w6.unsafeGetTensorImpl()->mutable_data());
   const half *pw7 =
       static_cast<const half *>(w7.unsafeGetTensorImpl()->mutable_data());
-  static void *last0 = nullptr;
-  static void *last1 = nullptr;
-  static void *last4 = nullptr;
-  static void *last5 = nullptr;
-  void *p0 = w0.unsafeGetTensorImpl()->mutable_data();
-  void *p1 = w1.unsafeGetTensorImpl()->mutable_data();
-  void *p4 = w4.unsafeGetTensorImpl()->mutable_data();
-  void *p5 = w5.unsafeGetTensorImpl()->mutable_data();
-  if (last0 != p0 || last1 != p1) {
-    kp<<<dim_p, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<const half *>(p0),
-        reinterpret_cast<const half *>(p1), pg + O0, pg + O1, I0);
-    last0 = p0;
-    last1 = p1;
-  }
-  if (last4 != p4 || last5 != p5) {
-    kp<<<dim_p, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<const half *>(p4),
-        reinterpret_cast<const half *>(p5), pg + O2, pg + O3, H);
-    last4 = p4;
-    last5 = p5;
-  }
-  k3<<<dim_u, cnrtFuncTypeUnion4, queue>>>(
-      px, pg + O0, pg + O1, pw2, pw3, pg + O2, pg + O3, pw6, pw7, ph0, ph1,
-      ph2, ph3, pm, py);
+  k3r<<<dim_u, cnrtFuncTypeUnion4, queue>>>(
+      px, static_cast<const half *>(w0.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const half *>(w1.unsafeGetTensorImpl()->mutable_data()), pw2,
+      pw3, static_cast<const half *>(w4.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const half *>(w5.unsafeGetTensorImpl()->mutable_data()), pw6,
+      pw7, ph0, ph1, ph2, ph3, pm, py);
   return gy;
 }

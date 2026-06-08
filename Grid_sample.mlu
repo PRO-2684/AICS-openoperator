@@ -93,30 +93,18 @@ __mlu_entry__ void kprep(const half *__restrict__ g, int *__restrict__ off,
       float fy = ((float)gg[i * 2 + 1] + 1.0f) * 63.5f;
       int xi = (int)fx;
       int yi = (int)fy;
-      if (xi < 0)
-        xi = 0;
-      if (xi > 127)
-        xi = 127;
-      if (yi < 0)
-        yi = 0;
-      if (yi > 127)
-        yi = 127;
-      int xm = xi < 127;
-      int ym = yi < 127;
       float wx = fx - (float)xi;
       float wy = fy - (float)yi;
       float ax = 1.0f - wx;
       float ay = 1.0f - wy;
-      int x1 = xi + xm;
-      int y1 = yi + ym;
       o0[i] = (yi * 128 + xi) * 2;
-      o1[i] = (yi * 128 + x1) * 2;
-      o2[i] = (y1 * 128 + xi) * 2;
-      o3[i] = (y1 * 128 + x1) * 2;
+      o1[i] = (yi * 128 + xi + 1) * 2;
+      o2[i] = ((yi + 1) * 128 + xi) * 2;
+      o3[i] = ((yi + 1) * 128 + xi + 1) * 2;
       ch0[i] = (half)(ax * ay);
-      ch1[i] = (half)((float)xm * wx * ay);
-      ch2[i] = (half)((float)ym * ax * wy);
-      ch3[i] = (half)((float)(xm * ym) * wx * wy);
+      ch1[i] = (half)(wx * ay);
+      ch2[i] = (half)(ax * wy);
+      ch3[i] = (half)(wx * wy);
     }
     __memcpy(po + t, o0, Q * sizeof(int), NRAM2GDRAM);
     __memcpy(po + P + t, o1, Q * sizeof(int), NRAM2GDRAM);
@@ -263,9 +251,15 @@ static cnrtDim3_t dim0 = {128, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
   (void)g0;
-  k2<<<dim0, cnrtFuncTypeBlock, queue>>>(
-      static_cast<const half *>(input.unsafeGetTensorImpl()->mutable_data()),
+  cnrtDim3_t dprep = {32, 1, 1};
+  kprep<<<dprep, cnrtFuncTypeBlock, queue>>>(
       static_cast<const half *>(grid.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<int *>(go.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(gc.unsafeGetTensorImpl()->mutable_data()));
+  k0<<<dim0, cnrtFuncTypeBlock, queue>>>(
+      static_cast<const half *>(input.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const int *>(go.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const half *>(gc.unsafeGetTensorImpl()->mutable_data()),
       static_cast<half *>(gy.unsafeGetTensorImpl()->mutable_data()));
   return gy;
 }

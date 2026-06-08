@@ -7,8 +7,8 @@
 #include <sched.h>
 
 #define FLOAT_CHUNK_SIZE 65536
-#define HALF_CHUNK_SIZE 262144
-#define TASK_COUNT 32
+#define HALF_CHUNK_SIZE 65536
+#define TASK_COUNT 128
 
 __mlu_entry__ void matrix_scalar_mul_float_kernel(const float *input,
                                                   float *output,
