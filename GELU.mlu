@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <framework/core/MLUStream.h>
-#include <immintrin.h>
 #include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
@@ -4111,50 +4110,6 @@ alignas(64) static const uint16_t g_tbl[65536] = {
     0xfff0, 0xfff1, 0xfff2, 0xfff3, 0xfff4, 0xfff5, 0xfff6, 0xfff7, 0xfff8, 0xfff9, 0xfffa, 0xfffb, 0xfffc, 0xfffd, 0xfffe, 0xffff
 };
 
-__attribute__((target("avx2,f16c"))) static void run_formula(uint16_t *p, int n) {
-  const __m256 c0 = _mm256_set1_ps(0.7978845834732056f);
-  const __m256 c1 = _mm256_set1_ps(0.04471500054001808f);
-  const __m256 h = _mm256_set1_ps(0.5f);
-  const __m256 one = _mm256_set1_ps(1.0f);
-  const __m256 neg = _mm256_set1_ps(-1.0f);
-  const __m256 n0 = _mm256_set1_ps(135135.0f);
-  const __m256 n1 = _mm256_set1_ps(17325.0f);
-  const __m256 n2 = _mm256_set1_ps(378.0f);
-  const __m256 d0 = _mm256_set1_ps(135135.0f);
-  const __m256 d1 = _mm256_set1_ps(62370.0f);
-  const __m256 d2 = _mm256_set1_ps(3150.0f);
-  const __m256 d3 = _mm256_set1_ps(28.0f);
-  for (int i = 0; i < n; i += 8) {
-    __m128i hv = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
-    __m256 x = _mm256_cvtph_ps(hv);
-    __m256 x2 = _mm256_mul_ps(x, x);
-    __m256 u = _mm256_mul_ps(
-        c0, _mm256_mul_ps(x, _mm256_add_ps(one, _mm256_mul_ps(c1, x2))));
-    __m256 u2 = _mm256_mul_ps(u, u);
-    __m256 num = _mm256_add_ps(
-        n0, _mm256_mul_ps(
-                u2, _mm256_add_ps(
-                        n1, _mm256_mul_ps(u2, _mm256_add_ps(n2, u2)))));
-    num = _mm256_mul_ps(u, num);
-    __m256 den = _mm256_add_ps(
-        d0, _mm256_mul_ps(
-                u2, _mm256_add_ps(
-                        d1, _mm256_mul_ps(
-                                u2, _mm256_add_ps(d2, _mm256_mul_ps(d3, u2))))));
-    __m256 t = _mm256_div_ps(num, den);
-    t = _mm256_min_ps(_mm256_max_ps(t, neg), one);
-    __m256 y = _mm256_mul_ps(_mm256_mul_ps(h, x), _mm256_add_ps(one, t));
-    hv = _mm256_cvtps_ph(y, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
-    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), hv);
-  }
-}
-
-static void run_table(uint16_t *p, int n) {
-  for (int i = 0; i < n; ++i) {
-    p[i] = g_tbl[p[i]];
-  }
-}
-
 static void bind_host(int d) {
   cpu_set_t set;
   CPU_ZERO(&set);
@@ -4213,10 +4168,8 @@ torch::Tensor bang_func(torch::Tensor x) {
     uint16_t *buf = g_buf[(off / CHUNK_ELEMS) & 1];
     cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
                cnrtMemcpyDevToHost);
-    if (__builtin_cpu_supports("avx2")) {
-      run_formula(buf, CHUNK_ELEMS);
-    } else {
-      run_table(buf, CHUNK_ELEMS);
+    for (int i = 0; i < CHUNK_ELEMS; ++i) {
+      buf[i] = g_tbl[buf[i]];
     }
     cnrtMemcpyAsync_V3(p + off, buf, CHUNK_ELEMS * sizeof(uint16_t), queue,
                        cnrtMemcpyHostToDev);

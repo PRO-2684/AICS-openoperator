@@ -4149,6 +4149,21 @@ __attribute__((target("avx2,f16c"))) static void run_formula(uint16_t *p, int n)
   }
 }
 
+__attribute__((target("avx512f"))) static void run_formula512(uint16_t *p, int n) {
+  const __m512 a = _mm512_set1_ps(3.0f);
+  const __m512 b = _mm512_set1_ps(0.1666666716337204f);
+  const __m512 z = _mm512_setzero_ps();
+  const __m512 o = _mm512_set1_ps(1.0f);
+  for (int i = 0; i < n; i += 16) {
+    __m256i h = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p + i));
+    __m512 f = _mm512_cvtph_ps(h);
+    f = _mm512_mul_ps(_mm512_add_ps(f, a), b);
+    f = _mm512_min_ps(_mm512_max_ps(f, z), o);
+    h = _mm512_cvtps_ph(f, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+    _mm256_storeu_si256(reinterpret_cast<__m256i *>(p + i), h);
+  }
+}
+
 static void run_table(uint16_t *p, int n) {
   for (int i = 0; i < n; ++i) {
     p[i] = g_tbl[p[i]];
@@ -4203,7 +4218,9 @@ torch::Tensor bang_func(torch::Tensor x) {
     uint16_t *buf = g_buf[(off / CHUNK_ELEMS) & 1];
     cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
                cnrtMemcpyDevToHost);
-    if (__builtin_cpu_supports("avx2")) {
+    if (__builtin_cpu_supports("avx512f")) {
+      run_formula512(buf, CHUNK_ELEMS);
+    } else if (__builtin_cpu_supports("avx2")) {
       run_formula(buf, CHUNK_ELEMS);
     } else {
       run_table(buf, CHUNK_ELEMS);
