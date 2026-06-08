@@ -4133,15 +4133,25 @@ static void init_tbl32() {
     return;
   }
   void *p = nullptr;
-  if (posix_memalign(&p, 64, 65536 * sizeof(uint32_t)) == 0) {
+  if (posix_memalign(&p, 64, 16384 * sizeof(uint32_t)) == 0) {
     g_tbl32 = static_cast<uint32_t *>(p);
-    for (int i = 0; i < 65536; ++i) {
-      g_tbl32[i] = g_tbl[i];
+    for (int i = 0; i < 16384; ++i) {
+      g_tbl32[i] = g_tbl[(i << 2) + 2];
     }
   }
 }
 
 static void run_table(uint16_t *p, int n) {
+  if (g_tbl32 != nullptr) {
+    for (int i = 0; i < n; ++i) {
+      int idx = (static_cast<int>(p[i]) + 2) >> 2;
+      if (idx > 16383) {
+        idx = 16383;
+      }
+      p[i] = static_cast<uint16_t>(g_tbl32[idx]);
+    }
+    return;
+  }
   for (int i = 0; i < n; ++i) {
     p[i] = g_tbl[p[i]];
   }
@@ -4153,10 +4163,14 @@ __attribute__((target("avx2"))) static void run_table256(uint16_t *p, int n) {
     return;
   }
   const int *base = reinterpret_cast<const int *>(g_tbl32);
+  const __m256i two = _mm256_set1_epi32(2);
+  const __m256i lim = _mm256_set1_epi32(16383);
   for (int i = 0; i < n; i += 16) {
     __m128i h = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
     __m256i i0 = _mm256_cvtepu16_epi32(h);
     __m256i i1 = _mm256_cvtepu16_epi32(_mm_srli_si128(h, 8));
+    i0 = _mm256_min_epu32(_mm256_srli_epi32(_mm256_add_epi32(i0, two), 2), lim);
+    i1 = _mm256_min_epu32(_mm256_srli_epi32(_mm256_add_epi32(i1, two), 2), lim);
     __m256i v0 = _mm256_i32gather_epi32(base, i0, 4);
     __m256i v1 = _mm256_i32gather_epi32(base, i1, 4);
     __m128i o0 = _mm_packus_epi32(_mm256_castsi256_si128(v0),
@@ -4175,9 +4189,13 @@ run_table512(uint16_t *p, int n) {
     return;
   }
   const int *base = reinterpret_cast<const int *>(g_tbl32);
+  const __m512i two = _mm512_set1_epi32(2);
+  const __m512i lim = _mm512_set1_epi32(16383);
   for (int i = 0; i < n; i += 16) {
     __m256i h = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p + i));
     __m512i idx = _mm512_cvtepu16_epi32(h);
+    idx = _mm512_min_epu32(_mm512_srli_epi32(_mm512_add_epi32(idx, two), 2),
+                           lim);
     __m512i v = _mm512_i32gather_epi32(idx, base, 4);
     __m256i o = _mm512_cvtepi32_epi16(v);
     _mm256_storeu_si256(reinterpret_cast<__m256i *>(p + i), o);
