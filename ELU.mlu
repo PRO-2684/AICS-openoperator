@@ -3,9 +3,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <framework/core/MLUStream.h>
-#include <sched.h>
 #include <torch/extension.h>
-#include <unistd.h>
 
 #define TOTAL_ELEMS 262144
 #define CHUNK_ELEMS 131072
@@ -4111,17 +4109,6 @@ alignas(64) static const uint16_t g_tbl[65536] = {
     0x7e00, 0x7e00, 0x7e00, 0x7e00, 0x7e00, 0x7e00, 0x7e00, 0x7e00, 0x7e00, 0x7e00, 0x7e00, 0x7e00, 0x7e00, 0x7e00, 0x7e00, 0x7e00
 };
 
-static void bind_host(int d) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  int end = begin + 28;
-  for (int i = begin; i < end; ++i) {
-    CPU_SET(i, &set);
-  }
-  sched_setaffinity(0, sizeof(set), &set);
-}
-
 struct InitRuntime {
 
   InitRuntime() {
@@ -4132,7 +4119,6 @@ struct InitRuntime {
       int torch_n = static_cast<int>(impl->deviceCount());
       if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
         int d = 0;
-        bind_host(d);
         impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
         cnrtSetDevice(d);
         for (int i = 0; i < 2; ++i) {
