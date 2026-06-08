@@ -4,7 +4,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <framework/core/MLUStream.h>
-#include <immintrin.h>
 #include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
@@ -4112,7 +4111,6 @@ alignas(64) static const uint16_t g_tbl_const[65536] = {
     0xfff0, 0xfff1, 0xfff2, 0xfff3, 0xfff4, 0xfff5, 0xfff6, 0xfff7, 0xfff8, 0xfff9, 0xfffa, 0xfffb, 0xfffc, 0xfffd, 0xfffe, 0xffff
 };
 static uint16_t *g_tbl = nullptr;
-static uint32_t *g_tbl32 = nullptr;
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -4132,70 +4130,6 @@ static void init_tbl() {
   g_tbl = static_cast<uint16_t *>(std::malloc(65536 * sizeof(uint16_t)));
   if (g_tbl != nullptr) {
     std::memcpy(g_tbl, g_tbl_const, 65536 * sizeof(uint16_t));
-  }
-  g_tbl32 = static_cast<uint32_t *>(std::malloc(65536 * sizeof(uint32_t)));
-  if (g_tbl32 != nullptr) {
-    for (int i = 0; i < 65536; ++i) {
-      g_tbl32[i] = g_tbl_const[i];
-    }
-  }
-}
-
-__attribute__((target("avx512f,avx512bw,avx512vl"))) static void
-run_lut512(uint16_t *p, const uint32_t *tbl, int n) {
-  for (int i = 0; i < n; i += 32) {
-    __m256i a = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p + i));
-    __m256i b = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p + i + 16));
-    __m512i ia = _mm512_cvtepu16_epi32(a);
-    __m512i ib = _mm512_cvtepu16_epi32(b);
-    __m512i va = _mm512_i32gather_epi32(ia, tbl, 4);
-    __m512i vb = _mm512_i32gather_epi32(ib, tbl, 4);
-    _mm256_storeu_si256(reinterpret_cast<__m256i *>(p + i),
-                        _mm512_cvtepi32_epi16(va));
-    _mm256_storeu_si256(reinterpret_cast<__m256i *>(p + i + 16),
-                        _mm512_cvtepi32_epi16(vb));
-  }
-}
-
-__attribute__((target("avx2,f16c"))) static void run_hsigmoid256(uint16_t *p,
-                                                                  int n) {
-  const __m256 zero = _mm256_setzero_ps();
-  const __m256 three = _mm256_set1_ps(3.0f);
-  const __m256 six = _mm256_set1_ps(6.0f);
-  const __m256 inv6 = _mm256_set1_ps(0.1666666716337204f);
-  for (int i = 0; i < n; i += 16) {
-    __m128i a = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
-    __m128i b = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i + 8));
-    __m256 fa = _mm256_cvtph_ps(a);
-    __m256 fb = _mm256_cvtph_ps(b);
-    fa = _mm256_mul_ps(_mm256_min_ps(_mm256_max_ps(_mm256_add_ps(fa, three),
-                                                   zero),
-                                     six),
-                       inv6);
-    fb = _mm256_mul_ps(_mm256_min_ps(_mm256_max_ps(_mm256_add_ps(fb, three),
-                                                   zero),
-                                     six),
-                       inv6);
-    a = _mm256_cvtps_ph(fa, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
-    b = _mm256_cvtps_ph(fb, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
-    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), a);
-    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i + 8), b);
-  }
-}
-
-static void run_lut(uint16_t *p, int n) {
-  if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("f16c")) {
-    run_hsigmoid256(p, n);
-    return;
-  }
-  if (g_tbl32 != nullptr && __builtin_cpu_supports("avx512f") &&
-      __builtin_cpu_supports("avx512bw") &&
-      __builtin_cpu_supports("avx512vl")) {
-    run_lut512(p, g_tbl32, n);
-    return;
-  }
-  for (int i = 0; i < n; ++i) {
-    p[i] = g_tbl[p[i]];
   }
 }
 
@@ -4247,7 +4181,9 @@ torch::Tensor bang_func(torch::Tensor x) {
     uint16_t *buf = g_buf[(off / CHUNK_ELEMS) & 1];
     cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
                cnrtMemcpyDevToHost);
-    run_lut(buf, CHUNK_ELEMS);
+    for (int i = 0; i < CHUNK_ELEMS; ++i) {
+      buf[i] = g_tbl[buf[i]];
+    }
     cnrtMemcpyAsync_V3(p + off, buf, CHUNK_ELEMS * sizeof(uint16_t), queue,
                        cnrtMemcpyHostToDev);
   }
