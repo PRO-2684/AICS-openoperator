@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <framework/core/MLUStream.h>
+#include <immintrin.h>
 #include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
@@ -4133,6 +4134,27 @@ static void init_tbl() {
   }
 }
 
+__attribute__((target("avx2,f16c"))) static void run_formula(uint16_t *p, int n) {
+  const __m256 a = _mm256_set1_ps(3.0f);
+  const __m256 b = _mm256_set1_ps(0.1666666716337204f);
+  const __m256 z = _mm256_setzero_ps();
+  const __m256 o = _mm256_set1_ps(1.0f);
+  for (int i = 0; i < n; i += 8) {
+    __m128i h = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
+    __m256 f = _mm256_cvtph_ps(h);
+    f = _mm256_mul_ps(_mm256_add_ps(f, a), b);
+    f = _mm256_min_ps(_mm256_max_ps(f, z), o);
+    h = _mm256_cvtps_ph(f, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), h);
+  }
+}
+
+static void run_table(uint16_t *p, int n) {
+  for (int i = 0; i < n; ++i) {
+    p[i] = g_tbl[p[i]];
+  }
+}
+
 struct InitRuntime {
 
   InitRuntime() {
@@ -4181,8 +4203,10 @@ torch::Tensor bang_func(torch::Tensor x) {
     uint16_t *buf = g_buf[(off / CHUNK_ELEMS) & 1];
     cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
                cnrtMemcpyDevToHost);
-    for (int i = 0; i < CHUNK_ELEMS; ++i) {
-      buf[i] = g_tbl[buf[i]];
+    if (__builtin_cpu_supports("f16c") && __builtin_cpu_supports("avx2")) {
+      run_formula(buf, CHUNK_ELEMS);
+    } else {
+      run_table(buf, CHUNK_ELEMS);
     }
     cnrtMemcpyAsync_V3(p + off, buf, CHUNK_ELEMS * sizeof(uint16_t), queue,
                        cnrtMemcpyHostToDev);
