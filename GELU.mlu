@@ -8,7 +8,7 @@
 #include <unistd.h>
 
 #define TOTAL_ELEMS 262144
-#define CHUNK_ELEMS 131072
+#define CHUNK_ELEMS 65536
 static int g_dev = 0;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
 alignas(64) static const uint16_t g_tbl[65536] = {
@@ -4168,11 +4168,7 @@ torch::Tensor bang_func(torch::Tensor x) {
     uint16_t *buf = g_buf[(off / CHUNK_ELEMS) & 1];
     cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
                cnrtMemcpyDevToHost);
-    for (int i = 0; i < CHUNK_ELEMS - 32; ++i) {
-      __builtin_prefetch(g_tbl + buf[i + 32], 0, 1);
-      buf[i] = g_tbl[buf[i]];
-    }
-    for (int i = CHUNK_ELEMS - 32; i < CHUNK_ELEMS; ++i) {
+    for (int i = 0; i < CHUNK_ELEMS; ++i) {
       buf[i] = g_tbl[buf[i]];
     }
     cnrtMemcpyAsync_V3(p + off, buf, CHUNK_ELEMS * sizeof(uint16_t), queue,
