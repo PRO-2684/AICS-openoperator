@@ -118,9 +118,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   (void)&g0;
 
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
-  cnrtMemcpyAsync_V3(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), queue,
-                     cnrtMemcpyDevToHost);
-  cnrtQueueSync(queue);
+  cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
   if (__builtin_cpu_supports("avx2")) {
     if (__builtin_cpu_supports("avx512bw")) {
       run_vec512(g_buf);
