@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 #define TOTAL_ELEMS 262144
-#define CHUNK_ELEMS 65536
+#define CHUNK_ELEMS 131072
 static int g_dev = 0;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
 
