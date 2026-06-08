@@ -9,9 +9,8 @@
 #include <unistd.h>
 
 #define TOTAL_ELEMS 262144
-#define CHUNK_ELEMS 65536
 static int g_dev = 0;
-static uint16_t *g_buf[4] = {nullptr, nullptr, nullptr, nullptr};
+static uint16_t *g_buf = nullptr;
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -24,12 +23,12 @@ static void bind_host(int d) {
   sched_setaffinity(0, sizeof(set), &set);
 }
 
-__attribute__((target("avx512bw"))) static void run_vec512(uint16_t *p, int n) {
+__attribute__((target("avx512bw"))) static void run_vec512(uint16_t *p) {
   const __m512i zero = _mm512_setzero_si512();
   const __m512i sign = _mm512_set1_epi16((short)0x8000);
   const __m512i pos = _mm512_set1_epi16((short)0x3c00);
   const __m512i neg = _mm512_set1_epi16((short)0xbc00);
-  for (int i = 0; i < n; i += 32) {
+  for (int i = 0; i < TOTAL_ELEMS; i += 32) {
     __m512i v = _mm512_loadu_si512(reinterpret_cast<const void *>(p + i));
     __mmask32 n = _mm512_cmpneq_epi16_mask(_mm512_and_si512(v, sign), zero);
     __m512i limit = _mm512_mask_blend_epi16(n, pos, neg);
@@ -39,13 +38,13 @@ __attribute__((target("avx512bw"))) static void run_vec512(uint16_t *p, int n) {
   }
 }
 
-__attribute__((target("avx2"))) static void run_vec256(uint16_t *p, int n) {
+__attribute__((target("avx2"))) static void run_vec256(uint16_t *p) {
   const __m256i sign = _mm256_set1_epi16((short)0x8000);
   const __m256i pos = _mm256_set1_epi16((short)0x3c00);
   const __m256i neg = _mm256_set1_epi16((short)0xbc00);
   const __m256i upos = _mm256_xor_si256(pos, sign);
   const __m256i uneg = _mm256_xor_si256(neg, sign);
-  for (int i = 0; i < n; i += 16) {
+  for (int i = 0; i < TOTAL_ELEMS; i += 16) {
     __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p + i));
     __m256i is_neg = _mm256_cmpeq_epi16(_mm256_and_si256(v, sign), sign);
     __m256i limit = _mm256_blendv_epi8(pos, neg, is_neg);
@@ -57,8 +56,8 @@ __attribute__((target("avx2"))) static void run_vec256(uint16_t *p, int n) {
   }
 }
 
-static void run_scalar(uint16_t *p, int n) {
-  for (int i = 0; i < n; ++i) {
+static void run_scalar(uint16_t *p) {
+  for (int i = 0; i < TOTAL_ELEMS; ++i) {
     uint16_t v = p[i];
     uint16_t m = (v & 0x8000u) ? 0xbc00u : 0x3c00u;
     p[i] = v > m ? m : v;
@@ -78,13 +77,11 @@ struct InitRuntime {
         bind_host(d);
         impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
         cnrtSetDevice(d);
-        for (int i = 0; i < 4; ++i) {
-          cnrtHostMalloc(reinterpret_cast<void **>(&g_buf[i]),
-                         CHUNK_ELEMS * sizeof(uint16_t));
-          if (g_buf[i] == nullptr) {
-            g_buf[i] =
-                static_cast<uint16_t *>(std::malloc(CHUNK_ELEMS * sizeof(uint16_t)));
-          }
+        cnrtHostMalloc(reinterpret_cast<void **>(&g_buf),
+                       TOTAL_ELEMS * sizeof(uint16_t));
+        if (g_buf == nullptr) {
+          g_buf =
+              static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
         }
         g_dev = d;
       }
@@ -108,21 +105,17 @@ torch::Tensor bang_func(torch::Tensor x) {
   (void)&g0;
 
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
-  for (int off = 0; off < TOTAL_ELEMS; off += CHUNK_ELEMS) {
-    uint16_t *buf = g_buf[(off / CHUNK_ELEMS) & 3];
-    cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
-               cnrtMemcpyDevToHost);
-    if (__builtin_cpu_supports("avx2")) {
-      if (__builtin_cpu_supports("avx512bw")) {
-        run_vec512(buf, CHUNK_ELEMS);
-      } else {
-        run_vec256(buf, CHUNK_ELEMS);
-      }
+  cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
+  if (__builtin_cpu_supports("avx2")) {
+    if (__builtin_cpu_supports("avx512bw")) {
+      run_vec512(g_buf);
     } else {
-      run_scalar(buf, CHUNK_ELEMS);
+      run_vec256(g_buf);
     }
-    cnrtMemcpyAsync_V3(p + off, buf, CHUNK_ELEMS * sizeof(uint16_t), queue,
-                       cnrtMemcpyHostToDev);
+  } else {
+    run_scalar(g_buf);
   }
+  cnrtMemcpyAsync_V3(p, g_buf, TOTAL_ELEMS * sizeof(uint16_t), queue,
+                     cnrtMemcpyHostToDev);
   return x;
 }
