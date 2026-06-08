@@ -4123,14 +4123,25 @@ alignas(64) static const uint16_t g_tbl_const[65536] = {
     0xfff0, 0xfff1, 0xfff2, 0xfff3, 0xfff4, 0xfff5, 0xfff6, 0xfff7, 0xfff8, 0xfff9, 0xfffa, 0xfffb, 0xfffc, 0xfffd, 0xfffe, 0xffff
 };
 static uint16_t *g_tbl = nullptr;
+static uint32_t *g_tbl32 = nullptr;
 
 static void init_tbl() {
-  if (g_tbl != nullptr) {
+  if (g_tbl != nullptr && g_tbl32 != nullptr) {
     return;
   }
-  g_tbl = static_cast<uint16_t *>(std::malloc(65536 * sizeof(uint16_t)));
+  if (g_tbl == nullptr) {
+    g_tbl = static_cast<uint16_t *>(std::malloc(65536 * sizeof(uint16_t)));
+  }
+  if (g_tbl32 == nullptr) {
+    g_tbl32 = static_cast<uint32_t *>(std::malloc(65536 * sizeof(uint32_t)));
+  }
   if (g_tbl != nullptr) {
     std::memcpy(g_tbl, g_tbl_const, 65536 * sizeof(uint16_t));
+  }
+  if (g_tbl32 != nullptr) {
+    for (int i = 0; i < 65536; ++i) {
+      g_tbl32[i] = g_tbl_const[i];
+    }
   }
 }
 
@@ -4152,6 +4163,19 @@ __attribute__((target("avx2,f16c"))) static void run_formula(uint16_t *p, int n)
 static void run_table(uint16_t *p, int n) {
   for (int i = 0; i < n; ++i) {
     p[i] = g_tbl[p[i]];
+  }
+}
+
+__attribute__((target("avx2"))) static void run_gather(uint16_t *p, int n) {
+  const int *tbl = reinterpret_cast<const int *>(g_tbl32);
+  for (int i = 0; i < n; i += 8) {
+    __m128i h = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
+    __m256i idx = _mm256_cvtepu16_epi32(h);
+    __m256i v = _mm256_i32gather_epi32(tbl, idx, 4);
+    __m128i lo = _mm256_castsi256_si128(v);
+    __m128i hi = _mm256_extracti128_si256(v, 1);
+    __m128i r = _mm_packus_epi32(lo, hi);
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), r);
   }
 }
 
@@ -4219,7 +4243,9 @@ torch::Tensor bang_func(torch::Tensor x) {
     uint16_t *buf = g_buf[(off / CHUNK_ELEMS) & 1];
     cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
                cnrtMemcpyDevToHost);
-    if (__builtin_cpu_supports("avx2")) {
+    if (__builtin_cpu_supports("avx2") && g_tbl32 != nullptr) {
+      run_gather(buf, CHUNK_ELEMS);
+    } else if (__builtin_cpu_supports("avx2")) {
       run_formula(buf, CHUNK_ELEMS);
     } else {
       run_table(buf, CHUNK_ELEMS);
