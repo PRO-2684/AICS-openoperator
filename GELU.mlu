@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <framework/core/MLUStream.h>
+#include <immintrin.h>
 #include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
@@ -4109,6 +4110,31 @@ alignas(64) static const uint16_t g_tbl[65536] = {
     0xffe0, 0xffe1, 0xffe2, 0xffe3, 0xffe4, 0xffe5, 0xffe6, 0xffe7, 0xffe8, 0xffe9, 0xffea, 0xffeb, 0xffec, 0xffed, 0xffee, 0xffef,
     0xfff0, 0xfff1, 0xfff2, 0xfff3, 0xfff4, 0xfff5, 0xfff6, 0xfff7, 0xfff8, 0xfff9, 0xfffa, 0xfffb, 0xfffc, 0xfffd, 0xfffe, 0xffff
 };
+static uint32_t *g_tbl32 = nullptr;
+
+static void init_tbl() {
+  if (g_tbl32 != nullptr) {
+    return;
+  }
+  g_tbl32 = static_cast<uint32_t *>(std::malloc(65536 * sizeof(uint32_t)));
+  if (g_tbl32 != nullptr) {
+    for (int i = 0; i < 65536; ++i) {
+      g_tbl32[i] = static_cast<uint32_t>(g_tbl[i]);
+    }
+  }
+}
+
+__attribute__((target("avx2"))) static void run_table(uint16_t *p, int n) {
+  for (int i = 0; i < n; i += 8) {
+    __m128i h = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
+    __m256i idx = _mm256_cvtepu16_epi32(h);
+    __m256i v = _mm256_i32gather_epi32(reinterpret_cast<const int *>(g_tbl32), idx, 4);
+    __m128i lo = _mm256_castsi256_si128(v);
+    __m128i hi = _mm256_extracti128_si256(v, 1);
+    h = _mm_packus_epi32(lo, hi);
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), h);
+  }
+}
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -4142,6 +4168,7 @@ struct InitRuntime {
                 static_cast<uint16_t *>(std::malloc(CHUNK_ELEMS * sizeof(uint16_t)));
           }
         }
+        init_tbl();
         g_dev = d;
       }
     }
@@ -4168,8 +4195,12 @@ torch::Tensor bang_func(torch::Tensor x) {
     uint16_t *buf = g_buf[(off / CHUNK_ELEMS) & 1];
     cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
                cnrtMemcpyDevToHost);
-    for (int i = 0; i < CHUNK_ELEMS; ++i) {
-      buf[i] = g_tbl[buf[i]];
+    if (g_tbl32 != nullptr && __builtin_cpu_supports("avx2")) {
+      run_table(buf, CHUNK_ELEMS);
+    } else {
+      for (int i = 0; i < CHUNK_ELEMS; ++i) {
+        buf[i] = g_tbl[buf[i]];
+      }
     }
     cnrtMemcpyAsync_V3(p + off, buf, CHUNK_ELEMS * sizeof(uint16_t), queue,
                        cnrtMemcpyHostToDev);
