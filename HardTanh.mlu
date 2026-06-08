@@ -93,7 +93,11 @@ torch::Tensor bang_func(torch::Tensor x) {
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
   cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
   if (__builtin_cpu_supports("avx2")) {
-    run_vec256(g_buf);
+    if (__builtin_cpu_supports("avx512bw")) {
+      run_vec512(g_buf);
+    } else {
+      run_vec256(g_buf);
+    }
   } else {
     run_scalar(g_buf);
   }
