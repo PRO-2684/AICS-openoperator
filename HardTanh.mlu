@@ -4,11 +4,23 @@
 #include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <immintrin.h>
+#include <sched.h>
 #include <torch/extension.h>
+#include <unistd.h>
 
 #define TOTAL_ELEMS 262144
 static int g_dev = 0;
 static uint16_t *g_buf = nullptr;
+
+static void bind_host(int d) {
+  cpu_set_t s;
+  CPU_ZERO(&s);
+  int begin = d >= 4 ? 28 : 0;
+  for (int i = 0; i < 28; ++i) {
+    CPU_SET(begin + i, &s);
+  }
+  sched_setaffinity(0, sizeof(s), &s);
+}
 
 __attribute__((target("avx512bw"))) static void run_vec512(uint16_t *p) {
   const __m512i zero = _mm512_setzero_si512();
@@ -51,6 +63,19 @@ static void run_scalar(uint16_t *p) {
   }
 }
 
+static volatile uint32_t g_sink = 0;
+
+static void warm_host() {
+  uint32_t s = 0;
+  if (g_buf != nullptr) {
+    for (int i = 0; i < TOTAL_ELEMS; i += 32) {
+      g_buf[i] = 0;
+      s += g_buf[i];
+    }
+  }
+  g_sink = s;
+}
+
 struct InitRuntime {
 
   InitRuntime() {
@@ -63,12 +88,14 @@ struct InitRuntime {
         int d = 0;
         impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
         cnrtSetDevice(d);
+        bind_host(d);
         cnrtHostMalloc(reinterpret_cast<void **>(&g_buf),
                        TOTAL_ELEMS * sizeof(uint16_t));
         if (g_buf == nullptr) {
           g_buf =
               static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
         }
+        warm_host();
         g_dev = d;
       }
     }
