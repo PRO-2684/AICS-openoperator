@@ -32,9 +32,8 @@ __attribute__((target("avx512bw"))) static void run_vec512(uint16_t *p) {
     __mmask32 n = _mm512_cmpneq_epi16_mask(_mm512_and_si512(v, sign), zero);
     __m512i limit = _mm512_mask_blend_epi16(n, pos, neg);
     __mmask32 gt = _mm512_cmpgt_epu16_mask(v, limit);
-    if (gt) {
-      _mm512_mask_storeu_epi16(reinterpret_cast<void *>(p + i), gt, limit);
-    }
+    v = _mm512_mask_mov_epi16(v, gt, limit);
+    _mm512_storeu_si512(reinterpret_cast<void *>(p + i), v);
   }
 }
 
