@@ -3,12 +3,25 @@
 #include <cstdint>
 #include <cstdlib>
 #include <framework/core/MLUStream.h>
+#include <sched.h>
 #include <torch/extension.h>
+#include <unistd.h>
 
 #define TOTAL_ELEMS 262144
 #define CHUNK_ELEMS 65536
 static int g_dev = 0;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
+
+static void bind_host(int d) {
+  cpu_set_t s;
+  CPU_ZERO(&s);
+  int begin = d >= 4 ? 28 : 0;
+  for (int i = 0; i < 28; ++i) {
+    CPU_SET(begin + i, &s);
+  }
+  sched_setaffinity(0, sizeof(s), &s);
+}
+
 alignas(64) static const uint16_t g_tbl[65536] = {
     0x0000, 0x0000, 0x0001, 0x0002, 0x0002, 0x0003, 0x0003, 0x0004, 0x0004, 0x0005, 0x0005, 0x0006, 0x0006, 0x0007, 0x0007, 0x0008,
     0x0008, 0x0009, 0x0009, 0x000a, 0x000a, 0x000b, 0x000b, 0x000c, 0x000c, 0x000d, 0x000d, 0x000e, 0x000e, 0x000f, 0x000f, 0x0010,
@@ -4120,6 +4133,7 @@ struct InitRuntime {
         int d = 0;
         impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
         cnrtSetDevice(d);
+        bind_host(d);
         for (int i = 0; i < 2; ++i) {
           cnrtHostMalloc(reinterpret_cast<void **>(&g_buf[i]),
                          CHUNK_ELEMS * sizeof(uint16_t));
