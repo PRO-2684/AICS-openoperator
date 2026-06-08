@@ -4216,7 +4216,7 @@ struct HostWork {
         int n = len;
         int l = ((n * t) / g_work_n + 15) & ~15;
         int r = ((n * (t + 1)) / g_work_n) & ~15;
-        transform(p + l, r - l);
+        run_table(p + l, r - l);
         done.fetch_add(1, std::memory_order_release);
       });
     }
@@ -4237,7 +4237,7 @@ static void init_work() {
 
 static void transform_work(uint16_t *p, int n) {
   if (g_work == nullptr || g_work_used) {
-    transform(p, n);
+    run_table(p, n);
     return;
   }
   g_work_used = true;
@@ -4246,7 +4246,7 @@ static void transform_work(uint16_t *p, int n) {
   g_work->done.store(0, std::memory_order_relaxed);
   g_work->go.store(1, std::memory_order_release);
   int r = ((n * 1) / g_work_n) & ~15;
-  transform(p, r);
+  run_table(p, r);
   while (g_work->done.load(std::memory_order_acquire) < g_work_n - 1) {
     _mm_pause();
   }
