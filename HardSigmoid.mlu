@@ -4155,6 +4155,21 @@ static void run_table(uint16_t *p, int n) {
   }
 }
 
+static volatile uint32_t g_sink = 0;
+
+static void warm_host() {
+  uint32_t s = 0;
+  for (int b = 0; b < 2; ++b) {
+    if (g_buf[b] != nullptr) {
+      for (int i = 0; i < CHUNK_ELEMS; i += 32) {
+        g_buf[b][i] = 0;
+        s += g_buf[b][i];
+      }
+    }
+  }
+  g_sink = s;
+}
+
 struct InitRuntime {
 
   InitRuntime() {
@@ -4177,6 +4192,7 @@ struct InitRuntime {
           }
         }
         init_tbl();
+        warm_host();
         g_dev = d;
       }
     }
