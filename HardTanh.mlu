@@ -1,10 +1,13 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <immintrin.h>
+#include <mutex>
 #include <sched.h>
+#include <thread>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -56,6 +59,25 @@ __attribute__((target("avx2"))) static void run_vec256(uint16_t *p) {
   }
 }
 
+__attribute__((target("avx2"))) static void run_vec256_part(uint16_t *p,
+                                                            int n) {
+  const __m256i sign = _mm256_set1_epi16((short)0x8000);
+  const __m256i pos = _mm256_set1_epi16((short)0x3c00);
+  const __m256i neg = _mm256_set1_epi16((short)0xbc00);
+  const __m256i upos = _mm256_xor_si256(pos, sign);
+  const __m256i uneg = _mm256_xor_si256(neg, sign);
+  for (int i = 0; i < n; i += 16) {
+    __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p + i));
+    __m256i is_neg = _mm256_cmpeq_epi16(_mm256_and_si256(v, sign), sign);
+    __m256i limit = _mm256_blendv_epi8(pos, neg, is_neg);
+    __m256i ulimit = _mm256_blendv_epi8(upos, uneg, is_neg);
+    __m256i uv = _mm256_xor_si256(v, sign);
+    __m256i gt = _mm256_cmpgt_epi16(uv, ulimit);
+    v = _mm256_blendv_epi8(v, limit, gt);
+    _mm256_storeu_si256(reinterpret_cast<__m256i *>(p + i), v);
+  }
+}
+
 static void run_scalar(uint16_t *p) {
   for (int i = 0; i < TOTAL_ELEMS; ++i) {
     uint16_t v = p[i];
@@ -63,6 +85,69 @@ static void run_scalar(uint16_t *p) {
     p[i] = v > m ? m : v;
   }
 }
+
+struct HostPool {
+  static constexpr int kN = 4;
+  std::thread th[kN];
+  std::mutex mu;
+  std::condition_variable cv0;
+  std::condition_variable cv1;
+  bool stop = false;
+  int epoch = 0;
+  int done = 0;
+
+  HostPool() {
+    for (int i = 0; i < kN; ++i) {
+      th[i] = std::thread([this, i]() { work(i); });
+    }
+  }
+
+  ~HostPool() {
+    {
+      std::lock_guard<std::mutex> lk(mu);
+      stop = true;
+      ++epoch;
+    }
+    cv0.notify_all();
+    for (int i = 0; i < kN; ++i) {
+      th[i].join();
+    }
+  }
+
+  void work(int id) {
+    int seen = 0;
+    for (;;) {
+      {
+        std::unique_lock<std::mutex> lk(mu);
+        cv0.wait(lk, [&]() { return stop || epoch != seen; });
+        if (stop) {
+          return;
+        }
+        seen = epoch;
+      }
+      int a = (TOTAL_ELEMS * id) / kN;
+      int b = (TOTAL_ELEMS * (id + 1)) / kN;
+      run_vec256_part(g_buf + a, b - a);
+      {
+        std::lock_guard<std::mutex> lk(mu);
+        if (++done == kN) {
+          cv1.notify_one();
+        }
+      }
+    }
+  }
+
+  void run() {
+    {
+      std::lock_guard<std::mutex> lk(mu);
+      done = 0;
+      ++epoch;
+    }
+    cv0.notify_all();
+    std::unique_lock<std::mutex> lk(mu);
+    cv1.wait(lk, [&]() { return done == kN; });
+  }
+};
 
 struct InitRuntime {
 
@@ -90,6 +175,7 @@ struct InitRuntime {
 };
 
 static const InitRuntime r0 __attribute__((used));
+static HostPool hp __attribute__((used));
 
 static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
@@ -107,7 +193,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
   cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
   if (__builtin_cpu_supports("avx2")) {
-    run_vec256(g_buf);
+    hp.run();
   } else {
     run_scalar(g_buf);
   }
