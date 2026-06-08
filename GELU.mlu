@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <framework/core/MLUStream.h>
+#include <immintrin.h>
 #include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
@@ -4122,11 +4123,83 @@ alignas(64) static const uint16_t g_tbl[65536] = {
 };
 
 static volatile uint32_t g_sink = 0;
+static uint32_t *g_tbl32 = nullptr;
+
+static void init_tbl32() {
+  if (g_tbl32 != nullptr) {
+    return;
+  }
+  void *p = nullptr;
+  if (posix_memalign(&p, 64, 65536 * sizeof(uint32_t)) == 0) {
+    g_tbl32 = static_cast<uint32_t *>(p);
+    for (int i = 0; i < 65536; ++i) {
+      g_tbl32[i] = g_tbl[i];
+    }
+  }
+}
+
+static void run_table(uint16_t *p, int n) {
+  for (int i = 0; i < n; ++i) {
+    p[i] = g_tbl[p[i]];
+  }
+}
+
+__attribute__((target("avx2"))) static void run_table256(uint16_t *p, int n) {
+  if (g_tbl32 == nullptr) {
+    run_table(p, n);
+    return;
+  }
+  const int *base = reinterpret_cast<const int *>(g_tbl32);
+  for (int i = 0; i < n; i += 16) {
+    __m128i h = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
+    __m256i i0 = _mm256_cvtepu16_epi32(h);
+    __m256i i1 = _mm256_cvtepu16_epi32(_mm_srli_si128(h, 8));
+    __m256i v0 = _mm256_i32gather_epi32(base, i0, 4);
+    __m256i v1 = _mm256_i32gather_epi32(base, i1, 4);
+    __m128i o0 = _mm_packus_epi32(_mm256_castsi256_si128(v0),
+                                  _mm256_extracti128_si256(v0, 1));
+    __m128i o1 = _mm_packus_epi32(_mm256_castsi256_si128(v1),
+                                  _mm256_extracti128_si256(v1, 1));
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), o0);
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i + 8), o1);
+  }
+}
+
+__attribute__((target("avx512f,avx512bw,avx512vl"))) static void
+run_table512(uint16_t *p, int n) {
+  if (g_tbl32 == nullptr) {
+    run_table(p, n);
+    return;
+  }
+  const int *base = reinterpret_cast<const int *>(g_tbl32);
+  for (int i = 0; i < n; i += 16) {
+    __m256i h = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p + i));
+    __m512i idx = _mm512_cvtepu16_epi32(h);
+    __m512i v = _mm512_i32gather_epi32(idx, base, 4);
+    __m256i o = _mm512_cvtepi32_epi16(v);
+    _mm256_storeu_si256(reinterpret_cast<__m256i *>(p + i), o);
+  }
+}
+
+static void transform(uint16_t *p, int n) {
+  if (__builtin_cpu_supports("avx512f") &&
+      __builtin_cpu_supports("avx512bw") &&
+      __builtin_cpu_supports("avx512vl")) {
+    run_table512(p, n);
+  } else if (__builtin_cpu_supports("avx2")) {
+    run_table256(p, n);
+  } else {
+    run_table(p, n);
+  }
+}
 
 static void warm_host() {
   uint32_t s = 0;
   for (int i = 0; i < 65536; i += 32) {
     s += g_tbl[i];
+    if (g_tbl32 != nullptr) {
+      s += g_tbl32[i];
+    }
   }
   for (int b = 0; b < 2; ++b) {
     if (g_buf[b] != nullptr) {
@@ -4159,6 +4232,7 @@ struct InitRuntime {
                 static_cast<uint16_t *>(std::malloc(CHUNK_ELEMS * sizeof(uint16_t)));
           }
         }
+        init_tbl32();
         warm_host();
         g_dev = d;
       }
@@ -4186,9 +4260,7 @@ torch::Tensor bang_func(torch::Tensor x) {
     uint16_t *buf = g_buf[(off / CHUNK_ELEMS) & 1];
     cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
                cnrtMemcpyDevToHost);
-    for (int i = 0; i < CHUNK_ELEMS; ++i) {
-      buf[i] = g_tbl[buf[i]];
-    }
+    transform(buf, CHUNK_ELEMS);
     cnrtMemcpyAsync_V3(p + off, buf, CHUNK_ELEMS * sizeof(uint16_t), queue,
                        cnrtMemcpyHostToDev);
   }
