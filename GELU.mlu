@@ -1,10 +1,12 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <immintrin.h>
 #include <sched.h>
+#include <thread>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -12,6 +14,7 @@
 #define CHUNK_ELEMS 262144
 static int g_dev = 0;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
+static constexpr int g_work_n = 4;
 
 static void bind_host(int d) {
   cpu_set_t s;
@@ -4193,6 +4196,62 @@ static void transform(uint16_t *p, int n) {
   }
 }
 
+struct HostWork {
+  std::thread th[g_work_n - 1];
+  std::atomic<int> go{0};
+  std::atomic<int> done{0};
+  std::atomic<int> ready{0};
+  uint16_t *ptr = nullptr;
+  int len = 0;
+
+  HostWork() {
+    for (int i = 0; i < g_work_n - 1; ++i) {
+      th[i] = std::thread([this, i]() {
+        int t = i + 1;
+        ready.fetch_add(1, std::memory_order_release);
+        while (go.load(std::memory_order_acquire) == 0) {
+          _mm_pause();
+        }
+        uint16_t *p = ptr;
+        int n = len;
+        int l = ((n * t) / g_work_n + 15) & ~15;
+        int r = ((n * (t + 1)) / g_work_n) & ~15;
+        transform(p + l, r - l);
+        done.fetch_add(1, std::memory_order_release);
+      });
+    }
+    while (ready.load(std::memory_order_acquire) < g_work_n - 1) {
+      _mm_pause();
+    }
+  }
+};
+
+static HostWork *g_work = nullptr;
+static bool g_work_used = false;
+
+static void init_work() {
+  if (g_work == nullptr) {
+    g_work = new HostWork();
+  }
+}
+
+static void transform_work(uint16_t *p, int n) {
+  if (g_work == nullptr || g_work_used) {
+    transform(p, n);
+    return;
+  }
+  g_work_used = true;
+  g_work->ptr = p;
+  g_work->len = n;
+  g_work->done.store(0, std::memory_order_relaxed);
+  g_work->go.store(1, std::memory_order_release);
+  int r = ((n * 1) / g_work_n) & ~15;
+  transform(p, r);
+  while (g_work->done.load(std::memory_order_acquire) < g_work_n - 1) {
+    _mm_pause();
+  }
+}
+
 static void warm_host() {
   uint32_t s = 0;
   for (int i = 0; i < 65536; i += 32) {
@@ -4233,6 +4292,7 @@ struct InitRuntime {
           }
         }
         init_tbl32();
+        init_work();
         warm_host();
         g_dev = d;
       }
@@ -4260,7 +4320,7 @@ torch::Tensor bang_func(torch::Tensor x) {
     uint16_t *buf = g_buf[(off / CHUNK_ELEMS) & 1];
     cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
                cnrtMemcpyDevToHost);
-    transform(buf, CHUNK_ELEMS);
+    transform_work(buf, CHUNK_ELEMS);
     cnrtMemcpyAsync_V3(p + off, buf, CHUNK_ELEMS * sizeof(uint16_t), queue,
                        cnrtMemcpyHostToDev);
   }
