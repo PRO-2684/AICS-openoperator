@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 #define TOTAL_ELEMS 262144
-#define CHUNK_ELEMS 98304
+#define CHUNK_ELEMS 131072
 static int g_dev = 0;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
 
@@ -4217,17 +4217,14 @@ torch::Tensor bang_func(torch::Tensor x) {
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
   for (int off = 0; off < TOTAL_ELEMS; off += CHUNK_ELEMS) {
     uint16_t *buf = g_buf[(off / CHUNK_ELEMS) & 1];
-    int n = TOTAL_ELEMS - off;
-    if (n > CHUNK_ELEMS) {
-      n = CHUNK_ELEMS;
-    }
-    cnrtMemcpy(buf, p + off, n * sizeof(uint16_t), cnrtMemcpyDevToHost);
+    cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
+               cnrtMemcpyDevToHost);
     if (__builtin_cpu_supports("avx2")) {
-      run_formula(buf, n);
+      run_formula(buf, CHUNK_ELEMS);
     } else {
-      run_table(buf, n);
+      run_table(buf, CHUNK_ELEMS);
     }
-    cnrtMemcpyAsync_V3(p + off, buf, n * sizeof(uint16_t), queue,
+    cnrtMemcpyAsync_V3(p + off, buf, CHUNK_ELEMS * sizeof(uint16_t), queue,
                        cnrtMemcpyHostToDev);
   }
   return x;
