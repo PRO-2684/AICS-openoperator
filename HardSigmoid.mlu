@@ -4203,7 +4203,7 @@ torch::Tensor bang_func(torch::Tensor x) {
     uint16_t *buf = g_buf[(off / CHUNK_ELEMS) & 1];
     cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
                cnrtMemcpyDevToHost);
-    if (__builtin_cpu_supports("f16c") && __builtin_cpu_supports("avx2")) {
+    if (__builtin_cpu_supports("avx2")) {
       run_formula(buf, CHUNK_ELEMS);
     } else {
       run_table(buf, CHUNK_ELEMS);
