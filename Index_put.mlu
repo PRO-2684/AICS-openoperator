@@ -51,23 +51,12 @@ __mlu_entry__ void k0(const half *__restrict__ values,
                       const int64_t *__restrict__ index,
                       half *__restrict__ out, int k) {
   __nram__ half a0[E0];
-  __nram__ half a1[E0];
 
-  int p = taskId;
-  if (p >= k)
-    return;
-  __memcpy_async(a0, values + p * E0, E0 * sizeof(half), GDRAM2NRAM);
-  __sync_io();
-  for (int n = p + taskDim; n < k; n += taskDim) {
+  for (int p = taskId; p < k; p += taskDim) {
     int64_t q = index[p];
-    __memcpy_async(a1, values + n * E0, E0 * sizeof(half), GDRAM2NRAM);
-    __memcpy_async(out + q * E0, a0, E0 * sizeof(half), NRAM2GDRAM);
-    __sync_io();
-    p = n;
-    __memcpy(a0, a1, E0 * sizeof(half), NRAM2NRAM);
+    __memcpy(a0, values + p * E0, E0 * sizeof(half), GDRAM2NRAM);
+    __memcpy(out + q * E0, a0, E0 * sizeof(half), NRAM2GDRAM);
   }
-  int64_t q = index[p];
-  __memcpy(out + q * E0, a0, E0 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor values,
