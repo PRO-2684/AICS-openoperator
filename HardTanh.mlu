@@ -16,7 +16,9 @@ static void bind_host(int d) {
   cpu_set_t s;
   CPU_ZERO(&s);
   int begin = d >= 4 ? 28 : 0;
-  CPU_SET(begin, &s);
+  for (int i = 0; i < 28; ++i) {
+    CPU_SET(begin + i, &s);
+  }
   sched_setaffinity(0, sizeof(s), &s);
 }
 
@@ -29,7 +31,8 @@ __attribute__((target("avx512bw"))) static void run_vec512(uint16_t *p) {
     __m512i v = _mm512_loadu_si512(reinterpret_cast<const void *>(p + i));
     __mmask32 n = _mm512_cmpneq_epi16_mask(_mm512_and_si512(v, sign), zero);
     __m512i limit = _mm512_mask_blend_epi16(n, pos, neg);
-    v = _mm512_min_epu16(v, limit);
+    __mmask32 gt = _mm512_cmpgt_epu16_mask(v, limit);
+    v = _mm512_mask_mov_epi16(v, gt, limit);
     _mm512_storeu_si512(reinterpret_cast<void *>(p + i), v);
   }
 }
@@ -38,11 +41,16 @@ __attribute__((target("avx2"))) static void run_vec256(uint16_t *p) {
   const __m256i sign = _mm256_set1_epi16((short)0x8000);
   const __m256i pos = _mm256_set1_epi16((short)0x3c00);
   const __m256i neg = _mm256_set1_epi16((short)0xbc00);
+  const __m256i upos = _mm256_xor_si256(pos, sign);
+  const __m256i uneg = _mm256_xor_si256(neg, sign);
   for (int i = 0; i < TOTAL_ELEMS; i += 16) {
     __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p + i));
     __m256i is_neg = _mm256_cmpeq_epi16(_mm256_and_si256(v, sign), sign);
     __m256i limit = _mm256_blendv_epi8(pos, neg, is_neg);
-    v = _mm256_min_epu16(v, limit);
+    __m256i ulimit = _mm256_blendv_epi8(upos, uneg, is_neg);
+    __m256i uv = _mm256_xor_si256(v, sign);
+    __m256i gt = _mm256_cmpgt_epi16(uv, ulimit);
+    v = _mm256_blendv_epi8(v, limit, gt);
     _mm256_storeu_si256(reinterpret_cast<__m256i *>(p + i), v);
   }
 }
