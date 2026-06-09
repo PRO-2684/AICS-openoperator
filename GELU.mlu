@@ -16,6 +16,15 @@ static int g_dev = 0;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
 static constexpr int g_work_n = 4;
 
+static void boost_host() {
+  int p = sched_get_priority_max(SCHED_FIFO);
+  if (p > 0) {
+    struct sched_param sp;
+    sp.sched_priority = p;
+    sched_setscheduler(0, SCHED_FIFO, &sp);
+  }
+}
+
 static void bind_host(int d) {
   cpu_set_t s;
   CPU_ZERO(&s);
@@ -24,6 +33,7 @@ static void bind_host(int d) {
     CPU_SET(begin + i, &s);
   }
   sched_setaffinity(0, sizeof(s), &s);
+  boost_host();
 }
 
 alignas(64) static const uint16_t g_tbl[65536] = {
@@ -4244,6 +4254,7 @@ struct HostWork {
   HostWork() {
     for (int i = 0; i < g_work_n - 1; ++i) {
       th[i] = std::thread([this, i]() {
+        boost_host();
         int t = i + 1;
         ready.fetch_add(1, std::memory_order_release);
         while (go.load(std::memory_order_acquire) == 0) {
