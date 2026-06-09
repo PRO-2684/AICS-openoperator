@@ -218,9 +218,6 @@ __attribute__((constructor(101))) static void init_runtime() {
         g_buf =
             static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
       }
-      if (__builtin_cpu_supports("avx512f")) {
-        g_mode = 1;
-      }
       start_workers();
       warm_copy();
       if (g_buf != nullptr) {
