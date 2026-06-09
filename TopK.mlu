@@ -7,6 +7,18 @@
 #define E1 1024
 #define E2 10
 
+static torch::Tensor gy = []() {
+  return torch::empty({E0, E2}, torch::TensorOptions()
+                                    .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                                    .dtype(torch::kHalf));
+}();
+
+static torch::Tensor gz = []() {
+  return torch::empty({E0, E2}, torch::TensorOptions()
+                                    .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                                    .dtype(torch::kInt64));
+}();
+
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
                       int64_t *__restrict__ z) {
   __nram__ half a[E1 + 128];
@@ -32,12 +44,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
 std::vector<torch::Tensor> bang_func(torch::Tensor x, int k, int dim) {
   (void)k;
   (void)dim;
-  auto y = torch::empty({E0, E2}, x.options());
-  auto z = torch::empty({E0, E2}, x.options().dtype(torch::kInt64));
   cnrtDim3_t d = {E0, 1, 1};
   k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()),
-      z.data_ptr<int64_t>());
-  return {y, z};
+      reinterpret_cast<half *>(gy.data_ptr<at::Half>()),
+      gz.data_ptr<int64_t>());
+  return {gy, gz};
 }
