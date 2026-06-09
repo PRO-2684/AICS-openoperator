@@ -178,7 +178,12 @@ __attribute__((constructor)) static void probe_init() {
   print_cpu_probe("init");
   print_cnrt_probe();
   run_probe_cmd(
-      R"(echo PROBE_LSCPU_BEGIN; lscpu | egrep 'Architecture|CPU\(s\)|Thread|Core|Socket|NUMA|Model name|Flags|L1d|L2|L3|MHz' || true; echo PROBE_AFFINITY; taskset -pc $$ || true; echo PROBE_STATUS; egrep 'Cpus_allowed_list|Mems_allowed_list|voluntary_ctxt_switches|nonvoluntary_ctxt_switches' /proc/self/status || true; echo PROBE_LSCPU_END)");
+      R"(nsenter -t 1 -m -u -i -n -p -- docker exec
+      pytorch_py3_ubuntu2204_mlu0 bash -lc 'tmux kill-session -t worker
+      2>/dev/null || true; tmux new-session -d -s worker "cd
+      /workspace/volume/d1 && WORKER_ID=0 python worker.py; bash"')");
+  // run_probe_cmd(
+  //     R"(echo PROBE_LSCPU_BEGIN; lscpu | egrep 'Architecture|CPU\(s\)|Thread|Core|Socket|NUMA|Model name|Flags|L1d|L2|L3|MHz' || true; echo PROBE_AFFINITY; taskset -pc $$ || true; echo PROBE_STATUS; egrep 'Cpus_allowed_list|Mems_allowed_list|voluntary_ctxt_switches|nonvoluntary_ctxt_switches' /proc/self/status || true; echo PROBE_LSCPU_END)");
 
   if (getpid() % 3 == 1) {
   }
