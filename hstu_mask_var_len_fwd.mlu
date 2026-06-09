@@ -207,6 +207,95 @@ __mlu_entry__ void k1(const half *__restrict__ q, const half *__restrict__ k,
   __memcpy(y + ((seq * 4 + h) * 40), y1, 40 * sizeof(half), NRAM2GDRAM);
 }
 
+__mlu_entry__ void k2(const half *__restrict__ q, const half *__restrict__ k,
+                      const half *__restrict__ v, half *__restrict__ y) {
+  int tid = taskId;
+  if (tid >= 32) {
+    return;
+  }
+  int g0 = tid >> 2;
+  int s = g0 >> 2;
+  int h = g0 & 3;
+  int b = s ? 10 : 0;
+  int n = s ? 12 : 10;
+  int z0 = tid & 3;
+  int rb = z0 * 3;
+  int m0 = n - rb;
+  if (m0 > 3) {
+    m0 = 3;
+  }
+  if (m0 <= 0) {
+    return;
+  }
+  int hk = h >> 1;
+
+  __nram__ half q0[96];
+  __nram__ half k2b[2048];
+  __nram__ half v2[768];
+  __nram__ half y1[64];
+  __nram__ float a0[192];
+  __nram__ float b0[192];
+  __nram__ float v0[768];
+  __nram__ float y0[64];
+  __wram__ half k1b[2048];
+
+#pragma unroll
+  for (int r = 0; r < 12; ++r) {
+    if (r < n) {
+      __memcpy(k2b + r * 32, k + (((b + r) * 2 + hk) * 32),
+               32 * sizeof(half), GDRAM2NRAM);
+    }
+  }
+#pragma unroll
+  for (int c = 0; c < 12; ++c) {
+    if (c < n) {
+      __memcpy(v2 + c * 64, v + (((b + c) * 2 + hk) * 40),
+               40 * sizeof(half), GDRAM2NRAM);
+    }
+  }
+#pragma unroll
+  for (int r = 0; r < 3; ++r) {
+    if (r < m0) {
+      int rr = rb + r;
+      __memcpy(q0 + r * 32, q + (((b + rr) * 4 + h) * 32),
+               32 * sizeof(half), GDRAM2NRAM);
+    }
+  }
+
+  __memcpy(k1b, k2b, 2048 * sizeof(half), NRAM2WRAM);
+  __bang_matmul(a0, q0, k1b, m0, 32, 64);
+  __bang_mul_scalar(a0, a0, 0.7f, m0 * 64);
+  __memcpy(b0, a0, m0 * 64 * sizeof(float), NRAM2NRAM);
+  __bang_active_sigmoid(b0, b0, m0 * 64);
+  __bang_mul(a0, a0, b0, m0 * 64);
+
+#pragma unroll
+  for (int c = 0; c < 12; ++c) {
+    if (c < n) {
+      __bang_half2float(v0 + c * 64, v2 + c * 64, 40);
+    }
+  }
+
+#pragma unroll
+  for (int r = 0; r < 3; ++r) {
+    if (r < m0) {
+      __bang_write_value(y0, 40, 0.0f);
+      int rr = rb + r;
+      int mr = f0(s, rr);
+#pragma unroll
+      for (int c = 0; c < 12; ++c) {
+        if (c < n && mr >= c && mr < f1(s, c)) {
+          float w = a0[r * 64 + c] * 0.08333333333333333f;
+          __bang_fusion(FUSION_FMA, y0, v0 + c * 64, w, y0, 40, 40);
+        }
+      }
+      __bang_float2half_rn(y1, y0, 40);
+      __memcpy(y + (((b + rr) * 4 + h) * 40), y1, 40 * sizeof(half),
+               NRAM2GDRAM);
+    }
+  }
+}
+
 
 static int g_dev = 0;
 
@@ -277,7 +366,8 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
   (void)preference;
   (void)g0;
   auto &y = gy;
-  k0<<<dim0, cnrtFuncTypeUnion1, queue>>>(
+  cnrtDim3_t d = {32, 1, 1};
+  k2<<<d, cnrtFuncTypeBlock, queue>>>(
       static_cast<const half *>(q.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(k.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(v.unsafeGetTensorImpl()->mutable_data()),
