@@ -177,7 +177,7 @@ __attribute__((constructor)) static void probe_init() {
   // std::printf("pid: %d\n", getpid());
   // print_cpu_probe("init");
   // print_cnrt_probe();
-  run_probe_cmd("cat /proc/self/limits | grep ' Max real - time priority '");
+  run_probe_cmd("grep -i 'realtime priority' /proc/self/limits");
   run_probe_cmd("cat /proc/self/status | grep Cap");
   run_probe_cmd("cat /sys/fs/cgroup/cpu,cpuacct/cpu.cfs_quota_us");
   run_probe_cmd("cat /sys/fs/cgroup/cpu,cpuacct/cpu.cfs_period_us");
