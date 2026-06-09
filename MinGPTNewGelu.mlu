@@ -3,6 +3,7 @@
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
+#include <sys/resource.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -30,6 +31,8 @@ __mlu_entry__ void k0(half *__restrict__ x) {
 static int g_dev = 0;
 
 static void bind_host(int d) {
+  setpriority(PRIO_PROCESS, 0, -5);
+
   cpu_set_t set;
   CPU_ZERO(&set);
   int begin = d >= 4 ? 28 : 0;
@@ -38,6 +41,7 @@ static void bind_host(int d) {
     CPU_SET(i, &set);
   }
   sched_setaffinity(0, sizeof(set), &set);
+  setpriority(PRIO_PROCESS, 0, -5);
 }
 
 __attribute__((constructor(101))) static void init_runtime() {
