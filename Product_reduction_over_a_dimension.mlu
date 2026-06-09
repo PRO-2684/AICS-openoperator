@@ -13,11 +13,22 @@ static int g_dev = 0;
 static void bind_host(int d) {
   cpu_set_t set;
   CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  int end = begin + 28;
+
+  const int socket_begin = d >= 4 ? 28 : 0;
+  const int socket_cores = 28;
+
+  // 每个进程绑 4 或 7 个核心，减少互相抢。
+  const int group_size = 7;
+  const int groups = socket_cores / group_size;
+  const int gid = getpid() % groups;
+
+  const int begin = socket_begin + gid * group_size;
+  const int end = begin + group_size;
+
   for (int i = begin; i < end; ++i) {
     CPU_SET(i, &set);
   }
+
   sched_setaffinity(0, sizeof(set), &set);
 }
 
