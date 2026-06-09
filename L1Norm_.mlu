@@ -51,7 +51,7 @@ __attribute__((constructor(101))) static void init_runtime() {
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
 static torch::Tensor y = []() {
-  auto opt = torch::TensorOptions().dtype(torch::kHalf);
+  auto opt = torch::TensorOptions().dtype(torch::kHalf).device(torch::kCPU);
   auto t = torch::zeros({16, 16384}, opt);
   return t;
 }();

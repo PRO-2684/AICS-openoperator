@@ -52,7 +52,7 @@ __attribute__((constructor(101))) static void init_runtime() {
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
 static torch::Tensor gy = []() {
-  auto opt = torch::TensorOptions().dtype(torch::kHalf);
+  auto opt = torch::TensorOptions().dtype(torch::kHalf).device(torch::kCPU);
   auto out = torch::zeros({16, 256}, opt);
   // cnrtMemset(out.data_ptr<at::Half>(), 0, 4096 * sizeof(at::Half));
   // cnrtQueueSync(queue);
