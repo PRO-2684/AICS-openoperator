@@ -38,14 +38,12 @@ static void bind_host(int d) {
 }
 
 __attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p, int n) {
-  const __m256 c0 = _mm256_set1_ps(-8.042111881e-12f);
-  const __m256 c1 = _mm256_set1_ps(1.404914911e-09f);
-  const __m256 c2 = _mm256_set1_ps(-1.026921771e-07f);
-  const __m256 c3 = _mm256_set1_ps(4.119821013e-06f);
-  const __m256 c4 = _mm256_set1_ps(-0.0001011567501f);
-  const __m256 c5 = _mm256_set1_ps(0.001647386884f);
-  const __m256 c6 = _mm256_set1_ps(-0.02001283093f);
-  const __m256 c7 = _mm256_set1_ps(0.2495956401f);
+  const __m256 c0 = _mm256_set1_ps(-1.026921771e-07f);
+  const __m256 c1 = _mm256_set1_ps(4.119821013e-06f);
+  const __m256 c2 = _mm256_set1_ps(-0.0001011567501f);
+  const __m256 c3 = _mm256_set1_ps(0.001647386884f);
+  const __m256 c4 = _mm256_set1_ps(-0.02001283093f);
+  const __m256 c5 = _mm256_set1_ps(0.2495956401f);
   const __m256 vhalf = _mm256_set1_ps(0.5f);
   const __m256 pos = _mm256_set1_ps(6.5f);
   const __m256 neg = _mm256_set1_ps(-6.5f);
@@ -67,10 +65,6 @@ __attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p, int n) {
     y1 = _mm256_add_ps(_mm256_mul_ps(y1, b1), c4);
     y0 = _mm256_add_ps(_mm256_mul_ps(y0, b0), c5);
     y1 = _mm256_add_ps(_mm256_mul_ps(y1, b1), c5);
-    y0 = _mm256_add_ps(_mm256_mul_ps(y0, b0), c6);
-    y1 = _mm256_add_ps(_mm256_mul_ps(y1, b1), c6);
-    y0 = _mm256_add_ps(_mm256_mul_ps(y0, b0), c7);
-    y1 = _mm256_add_ps(_mm256_mul_ps(y1, b1), c7);
     y0 = _mm256_add_ps(_mm256_mul_ps(b0, y0), _mm256_mul_ps(x0, vhalf));
     y1 = _mm256_add_ps(_mm256_mul_ps(b1, y1), _mm256_mul_ps(x1, vhalf));
     y0 = _mm256_blendv_ps(y0, x0, _mm256_cmp_ps(x0, pos, _CMP_GT_OQ));
@@ -138,11 +132,7 @@ __attribute__((target("f16c"))) static void run_scalar(uint16_t *p) {
   for (int i = 0; i < TOTAL_ELEMS; ++i) {
     float x = _cvtsh_ss(p[i]);
     float b = x * x;
-    float q = (((((((-8.042111881e-12f * b + 1.404914911e-09f) * b -
-                    1.026921771e-07f) *
-                       b +
-                   4.119821013e-06f) *
-                      b -
+    float q = (((((-1.026921771e-07f * b + 4.119821013e-06f) * b -
                   0.0001011567501f) *
                      b +
                  0.001647386884f) *
