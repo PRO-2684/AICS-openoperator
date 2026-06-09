@@ -12,9 +12,9 @@
 #include <unistd.h>
 
 #define TOTAL_ELEMS 262144
-#define MAIN_ELEMS 32768
-#define WORKER_ELEMS 32768
-#define WORKER_N 7
+#define MAIN_ELEMS 65536
+#define WORKER_ELEMS 65536
+#define WORKER_N 3
 
 static int g_dev = 0;
 static uint16_t *g_buf = nullptr;
