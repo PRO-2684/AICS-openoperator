@@ -19,6 +19,7 @@ static void bind_host(int d) {
   const int socket_begin = d >= 4 ? 28 : 0;
   const int socket_cores = 28;
 
+  // 每个进程绑 4 或 7 个核心，减少互相抢。
   const int group_size = 7;
   const int groups = socket_cores / group_size;
   const int gid = getpid() % groups;
@@ -97,8 +98,8 @@ struct InitRuntime {
         cnrtHostMalloc(reinterpret_cast<void **>(&g_buf),
                        TOTAL_ELEMS * sizeof(uint16_t));
         if (g_buf == nullptr) {
-          g_buf = static_cast<uint16_t *>(
-              std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
+          g_buf =
+              static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
         }
         warm_host();
         g_dev = d;
@@ -117,9 +118,10 @@ static torch::Tensor g0 = []() {
 }();
 
 static torch::Tensor g_y = []() {
-  return torch::from_blob(
-      g_buf, {16, 16384}, [](void *) {},
-      torch::TensorOptions().dtype(torch::kHalf).device(torch::kCPU));
+  return torch::from_blob(g_buf, {16, 16384}, [](void *) {},
+                          torch::TensorOptions()
+                              .dtype(torch::kHalf)
+                              .device(torch::kCPU));
 }();
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
