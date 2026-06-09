@@ -14,60 +14,60 @@
 static int g_dev = 1;
 
 static void bind_host(int d) {
-  setpriority(PRIO_PROCESS, 0, -5);
+  // setpriority(PRIO_PROCESS, 0, -5);
 
-  cpu_set_t cur;
-  if (sched_getaffinity(0, sizeof(cur), &cur) != 0) {
-    return;
-  }
+  // cpu_set_t cur;
+  // if (sched_getaffinity(0, sizeof(cur), &cur) != 0) {
+  //   return;
+  // }
 
-  int cpus[256];
-  int n = 0;
+  // int cpus[256];
+  // int n = 0;
 
-  for (int i = 0; i < 256; ++i) {
-    if (CPU_ISSET(i, &cur)) {
-      cpus[n++] = i;
-    }
-  }
+  // for (int i = 0; i < 256; ++i) {
+  //   if (CPU_ISSET(i, &cur)) {
+  //     cpus[n++] = i;
+  //   }
+  // }
 
-  if (n <= 0) {
-    return;
-  }
+  // if (n <= 0) {
+  //   return;
+  // }
 
-  const int group_size = n >= 8 ? 8 : n;
-  const int groups = (n + group_size - 1) / group_size;
-  const int gid = static_cast<int>(getpid() % groups);
+  // const int group_size = n >= 8 ? 8 : n;
+  // const int groups = (n + group_size - 1) / group_size;
+  // const int gid = static_cast<int>(getpid() % groups);
 
-  cpu_set_t set;
-  CPU_ZERO(&set);
+  // cpu_set_t set;
+  // CPU_ZERO(&set);
 
-  const int begin = gid * group_size;
-  const int end = begin + group_size;
+  // const int begin = gid * group_size;
+  // const int end = begin + group_size;
 
-  for (int i = begin; i < end && i < n; ++i) {
-    CPU_SET(cpus[i], &set);
-  }
+  // for (int i = begin; i < end && i < n; ++i) {
+  //   CPU_SET(cpus[i], &set);
+  // }
 
-  sched_setaffinity(0, sizeof(set), &set);
+  // sched_setaffinity(0, sizeof(set), &set);
   setpriority(PRIO_PROCESS, 0, -5);
 }
 
 __attribute__((constructor(101))) static void init_runtime() {
   unsigned int n = 0;
   cnrtSetDeviceFlag(cnrtDeviceScheduleAuto);
+  bind_host(0);
 
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
-      bind_host(d);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
+  // if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+  //   const auto *impl =
+  //       c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+  //   int torch_n = static_cast<int>(impl->deviceCount());
+  //   if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+  //     int d = 0;
+  //     impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+  //     cnrtSetDevice(d);
+  //     g_dev = d;
+  //   }
+  // }
 }
 auto f = []() {
   auto opt = torch::TensorOptions().device(torch::kCPU).dtype(torch::kHalf);
