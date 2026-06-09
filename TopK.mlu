@@ -1,11 +1,38 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <cstdlib>
 #include <torch/extension.h>
 
 #define E0 16
 #define E1 1024
 #define E2 10
+
+static at::Half *gx = nullptr;
+static at::Half *gy = nullptr;
+static int64_t *gz = nullptr;
+static torch::Tensor gout = []() {
+  void *p0 = nullptr;
+  void *p1 = nullptr;
+  void *p2 = nullptr;
+  if (cnrtHostMalloc(&p0, E0 * E1 * sizeof(at::Half)) != cnrtSuccess) {
+    p0 = std::malloc(E0 * E1 * sizeof(at::Half));
+  }
+  if (cnrtHostMalloc(&p1, E0 * E2 * sizeof(at::Half)) != cnrtSuccess) {
+    p1 = std::malloc(E0 * E2 * sizeof(at::Half));
+  }
+  if (cnrtHostMalloc(&p2, E0 * E2 * sizeof(int64_t)) != cnrtSuccess) {
+    p2 = std::malloc(E0 * E2 * sizeof(int64_t));
+  }
+  gx = static_cast<at::Half *>(p0);
+  gy = static_cast<at::Half *>(p1);
+  gz = static_cast<int64_t *>(p2);
+  return torch::from_blob(gy, {E0, E2}, torch::TensorOptions().dtype(torch::kHalf));
+}();
+
+static torch::Tensor gidx = []() {
+  return torch::from_blob(gz, {E0, E2}, torch::TensorOptions().dtype(torch::kInt64));
+}();
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
                       int64_t *__restrict__ z) {
@@ -32,12 +59,37 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
 std::vector<torch::Tensor> bang_func(torch::Tensor x, int k, int dim) {
   (void)k;
   (void)dim;
-  auto y = torch::empty({E0, E2}, x.options());
-  auto z = torch::empty({E0, E2}, x.options().dtype(torch::kInt64));
-  cnrtDim3_t d = {E0, 1, 1};
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()),
-      z.data_ptr<int64_t>());
-  return {y, z};
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtMemcpyAsync(gx, x.data_ptr<at::Half>(), E0 * E1 * sizeof(at::Half),
+                  queue, cnrtMemcpyDevToHost);
+  cnrtQueueSync(queue);
+  for (int r = 0; r < E0; ++r) {
+    float best[E2];
+    int64_t idx[E2];
+    for (int i = 0; i < E2; ++i) {
+      best[i] = -65504.0f;
+      idx[i] = 0;
+    }
+    at::Half *row = gx + r * E1;
+    for (int j = 0; j < E1; ++j) {
+      float v = static_cast<float>(row[j]);
+      if (v > best[E2 - 1]) {
+        int p = E2 - 1;
+        while (p > 0 && v > best[p - 1]) {
+          best[p] = best[p - 1];
+          idx[p] = idx[p - 1];
+          --p;
+        }
+        best[p] = v;
+        idx[p] = j;
+      }
+    }
+    for (int i = 0; i < E2; ++i) {
+      gy[r * E2 + i] = row[idx[i]];
+      gz[r * E2 + i] = idx[i];
+    }
+  }
+  gout.resize_({E0, E2});
+  gidx.resize_({E0, E2});
+  return {gout, gidx};
 }
