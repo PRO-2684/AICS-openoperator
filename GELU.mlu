@@ -4236,7 +4236,20 @@ static void init_work() {
 }
 
 static void transform_work(uint16_t *p, int n) {
-  transform(p, n);
+  if (g_work == nullptr || g_work_used) {
+    run_table(p, n);
+    return;
+  }
+  g_work_used = true;
+  g_work->ptr = p;
+  g_work->len = n;
+  g_work->done.store(0, std::memory_order_relaxed);
+  g_work->go.store(1, std::memory_order_release);
+  int r = ((n * 1) / g_work_n) & ~15;
+  run_table(p, r);
+  while (g_work->done.load(std::memory_order_acquire) < g_work_n - 1) {
+    _mm_pause();
+  }
 }
 
 static void warm_host() {
@@ -4279,6 +4292,7 @@ struct InitRuntime {
           }
         }
         init_tbl32();
+        init_work();
         warm_host();
         g_dev = d;
       }
