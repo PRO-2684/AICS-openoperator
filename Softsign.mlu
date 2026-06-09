@@ -54,8 +54,8 @@ __attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p) {
     __m256 x1 = _mm256_cvtph_ps(h1);
     __m256 a0 = _mm256_and_ps(x0, sign);
     __m256 a1 = _mm256_and_ps(x1, sign);
-    x0 = _mm256_div_ps(x0, _mm256_add_ps(one, a0));
-    x1 = _mm256_div_ps(x1, _mm256_add_ps(one, a1));
+    x0 = _mm256_mul_ps(x0, _mm256_rcp_ps(_mm256_add_ps(one, a0)));
+    x1 = _mm256_mul_ps(x1, _mm256_rcp_ps(_mm256_add_ps(one, a1)));
     _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), _mm256_cvtps_ph(x0, 0));
     _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i + 8),
                      _mm256_cvtps_ph(x1, 0));
