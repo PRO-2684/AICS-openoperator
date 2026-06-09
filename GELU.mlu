@@ -52,19 +52,17 @@ __attribute__((target("avx2,f16c,fma"))) static void run_part(uint16_t *p,
   const __m256 zero = _mm256_setzero_ps();
   const __m256 hi = _mm256_set1_ps(3.4f);
   const __m256 lo = _mm256_set1_ps(-3.4f);
-  const __m256 c0 = _mm256_set1_ps(0.398930083f);
-  const __m256 c1 = _mm256_set1_ps(-0.0663739297f);
-  const __m256 c2 = _mm256_set1_ps(0.00979025881f);
-  const __m256 c3 = _mm256_set1_ps(-0.00107662798f);
-  const __m256 c4 = _mm256_set1_ps(0.0000820936300f);
-  const __m256 c5 = _mm256_set1_ps(-0.00000377924189f);
-  const __m256 c6 = _mm256_set1_ps(0.0000000772631525f);
+  const __m256 c0 = _mm256_set1_ps(0.398867076f);
+  const __m256 c1 = _mm256_set1_ps(-0.0659488033f);
+  const __m256 c2 = _mm256_set1_ps(0.00933056783f);
+  const __m256 c3 = _mm256_set1_ps(-0.000896358817f);
+  const __m256 c4 = _mm256_set1_ps(0.0000503485738f);
+  const __m256 c5 = _mm256_set1_ps(-0.00000121622953f);
   for (int i = 0; i < n; i += 8) {
     __m128i h = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
     __m256 x = _mm256_cvtph_ps(h);
     __m256 z = _mm256_mul_ps(x, x);
-    __m256 r = _mm256_fmadd_ps(c6, z, c5);
-    r = _mm256_fmadd_ps(r, z, c4);
+    __m256 r = _mm256_fmadd_ps(c5, z, c4);
     r = _mm256_fmadd_ps(r, z, c3);
     r = _mm256_fmadd_ps(r, z, c2);
     r = _mm256_fmadd_ps(r, z, c1);
