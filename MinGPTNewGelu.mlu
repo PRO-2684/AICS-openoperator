@@ -9,7 +9,7 @@
 
 #define E0 4000000
 #define E1 131072
-#define E2 32
+#define E2 16
 
 __mlu_entry__ void k0(half *__restrict__ x) {
   __nram__ half a[E1];
