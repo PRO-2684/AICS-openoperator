@@ -39,14 +39,15 @@ static void bind_host(int d) {
 
 __attribute__((target("avx2,f16c,fma"))) static void run_vec(uint16_t *p,
                                                              int n) {
-  const __m256 c0 = _mm256_set1_ps(-0.00000589121582f);
-  const __m256 c1 = _mm256_set1_ps(0.000424197529f);
-  const __m256 c2 = _mm256_set1_ps(-0.0121958649f);
-  const __m256 c3 = _mm256_set1_ps(0.230288639f);
-  const __m256 c4 = _mm256_set1_ps(0.00800045733f);
+  const __m256 c0 = _mm256_set1_ps(-1.652800015e-08f);
+  const __m256 c1 = _mm256_set1_ps(1.620741494e-06f);
+  const __m256 c2 = _mm256_set1_ps(-6.437051637e-05f);
+  const __m256 c3 = _mm256_set1_ps(0.00138346209f);
+  const __m256 c4 = _mm256_set1_ps(-0.0192371594f);
+  const __m256 c5 = _mm256_set1_ps(0.2490437237f);
   const __m256 vhalf = _mm256_set1_ps(0.5f);
-  const __m256 pos = _mm256_set1_ps(5.2f);
-  const __m256 neg = _mm256_set1_ps(-5.2f);
+  const __m256 pos = _mm256_set1_ps(6.5f);
+  const __m256 neg = _mm256_set1_ps(-6.5f);
   const __m256 z = _mm256_setzero_ps();
   for (int i = 0; i < n; i += 16) {
     __m128i h0 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
@@ -63,8 +64,10 @@ __attribute__((target("avx2,f16c,fma"))) static void run_vec(uint16_t *p,
     y1 = _mm256_fmadd_ps(y1, b1, c3);
     y0 = _mm256_fmadd_ps(y0, b0, c4);
     y1 = _mm256_fmadd_ps(y1, b1, c4);
-    y0 = _mm256_add_ps(y0, _mm256_mul_ps(x0, vhalf));
-    y1 = _mm256_add_ps(y1, _mm256_mul_ps(x1, vhalf));
+    y0 = _mm256_fmadd_ps(y0, b0, c5);
+    y1 = _mm256_fmadd_ps(y1, b1, c5);
+    y0 = _mm256_fmadd_ps(b0, y0, _mm256_mul_ps(x0, vhalf));
+    y1 = _mm256_fmadd_ps(b1, y1, _mm256_mul_ps(x1, vhalf));
     y0 = _mm256_blendv_ps(y0, x0, _mm256_cmp_ps(x0, pos, _CMP_GT_OQ));
     y1 = _mm256_blendv_ps(y1, x1, _mm256_cmp_ps(x1, pos, _CMP_GT_OQ));
     y0 = _mm256_blendv_ps(y0, z, _mm256_cmp_ps(x0, neg, _CMP_LT_OQ));
@@ -130,16 +133,18 @@ __attribute__((target("f16c"))) static void run_scalar(uint16_t *p) {
   for (int i = 0; i < TOTAL_ELEMS; ++i) {
     float x = _cvtsh_ss(p[i]);
     float b = x * x;
-    float y = ((((-0.00000589121582f * b + 0.000424197529f) * b -
-                 0.0121958649f) *
-                    b +
-                0.230288639f) *
+    float q = (((((-1.652800015e-08f * b + 1.620741494e-06f) * b -
+                  6.437051637e-05f) *
+                     b +
+                 0.00138346209f) *
+                    b -
+                0.0192371594f) *
                    b +
-               0.00800045733f) +
-              x * 0.5f;
-    if (x > 5.2f) {
+               0.2490437237f);
+    float y = b * q + x * 0.5f;
+    if (x > 6.5f) {
       y = x;
-    } else if (x < -5.2f) {
+    } else if (x < -6.5f) {
       y = 0.0f;
     }
     p[i] = _cvtss_sh(y, 0);
