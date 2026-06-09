@@ -23,6 +23,8 @@ static void bind_host(int d) {
 
 __attribute__((constructor(101))) static void init_runtime() {
   unsigned int n = 0;
+  cnrtSetDeviceFlag(cnrtDeviceScheduleAuto);
+
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
     const auto *impl =
         c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
