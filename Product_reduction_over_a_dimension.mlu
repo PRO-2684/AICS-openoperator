@@ -73,7 +73,13 @@ auto f = []() {
   auto opt = torch::TensorOptions().device(torch::kCPU).dtype(torch::kHalf);
   return torch::zeros({256}, opt);
 };
-static torch::Tensor g0 = []() { auto a = f(); re };
+static torch::Tensor g0 = []() {
+  auto a = f();
+  for (int i = 0; i < 128; i++) {
+    a = f();
+  }
+  return a;
+}();
 
 alignas(64) static unsigned short g_zero_half_bits = 0;
 
