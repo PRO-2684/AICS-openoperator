@@ -85,8 +85,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __nram__ half v2[768];
   __nram__ half y1[64];
   __nram__ float a0[192];
-  __nram__ float b0[64];
-  __nram__ float b1[64];
+  __nram__ float b0[192];
   __nram__ float v0[768];
   __nram__ float y0[64];
   __wram__ half k1[2048];
@@ -128,26 +127,9 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __memcpy(k1, s0, 2048 * sizeof(half), SRAM2WRAM);
   __bang_matmul(a0, q0, k1, m0, 32, 64);
   __bang_mul_scalar(a0, a0, 0.7f, m0 * 64);
-
-  int nz = 0;
-#pragma unroll
-  for (int r = 0; r < 3; ++r) {
-    if (r < m0) {
-      int rr = rb + r;
-      int mr = f0(s, rr);
-#pragma unroll
-      for (int c = 0; c < 12; ++c) {
-        if (c < n && mr >= c && mr < f1(s, c)) {
-          float z = a0[r * 64 + c];
-          b0[nz] = z;
-          b1[nz] = z;
-          ++nz;
-        }
-      }
-    }
-  }
-  __bang_active_sigmoid(b0, b0, nz);
-  __bang_mul(b0, b0, b1, nz);
+  __memcpy(b0, a0, m0 * 64 * sizeof(float), NRAM2NRAM);
+  __bang_active_sigmoid(b0, b0, m0 * 64);
+  __bang_mul(a0, a0, b0, m0 * 64);
 
   __memcpy(v2, s0 + 2048, 768 * sizeof(half), SRAM2NRAM);
 #pragma unroll
@@ -163,25 +145,10 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
       __bang_write_value(y0, 40, 0.0f);
       int rr = rb + r;
       int mr = f0(s, rr);
-      int bz = 0;
-#pragma unroll
-      for (int u = 0; u < r; ++u) {
-        if (u < m0) {
-          int ur = rb + u;
-          int um = f0(s, ur);
-#pragma unroll
-          for (int c = 0; c < 12; ++c) {
-            if (c < n && um >= c && um < f1(s, c)) {
-              ++bz;
-            }
-          }
-        }
-      }
 #pragma unroll
       for (int c = 0; c < 12; ++c) {
         if (c < n && mr >= c && mr < f1(s, c)) {
-          float w = b0[bz] * 0.08333333333333333f;
-          ++bz;
+          float w = a0[r * 64 + c] * 0.08333333333333333f;
           __bang_fusion(FUSION_FMA, y0, v0 + c * 64, w, y0, 40, 40);
         }
       }
