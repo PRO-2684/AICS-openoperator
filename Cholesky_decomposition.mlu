@@ -75,48 +75,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   }
 }
 
-__mlu_entry__ void k1(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[E2];
-  __nram__ float b[E2];
-  int n = taskId;
-  __memcpy(a, x + n * E2, E2 * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(b, a, E2);
-  for (int j = 0; j < E1; ++j) {
-    float v = b[j * E1 + j];
-    int k = 0;
-    for (; k + 3 < j; k += 4) {
-      float v0 = b[j * E1 + k];
-      float v1 = b[j * E1 + k + 1];
-      float v2 = b[j * E1 + k + 2];
-      float v3 = b[j * E1 + k + 3];
-      v -= v0 * v0 + v1 * v1 + v2 * v2 + v3 * v3;
-    }
-    for (; k < j; ++k)
-      v -= b[j * E1 + k] * b[j * E1 + k];
-    float d = sqrtf(v);
-    b[j * E1 + j] = d;
-    for (int i = j + 1; i < E1; ++i) {
-      float u = b[i * E1 + j];
-      int p = 0;
-      for (; p + 3 < j; p += 4) {
-        u -= b[i * E1 + p] * b[j * E1 + p] +
-             b[i * E1 + p + 1] * b[j * E1 + p + 1] +
-             b[i * E1 + p + 2] * b[j * E1 + p + 2] +
-             b[i * E1 + p + 3] * b[j * E1 + p + 3];
-      }
-      for (; p < j; ++p)
-        u -= b[i * E1 + p] * b[j * E1 + p];
-      b[i * E1 + j] = u / d;
-    }
-  }
-  for (int r = 0; r < E1; ++r) {
-    if (r + 1 < E1)
-      __bang_write_value(b + r * E1 + r + 1, E1 - r - 1, 0.0f);
-  }
-  __bang_float2half_rn(a, b, E2);
-  __memcpy(y + n * E2, a, E2 * sizeof(half), NRAM2GDRAM);
-}
-
 
 static int g_dev = 0;
 
@@ -167,8 +125,8 @@ static torch::Tensor gy = []() {
 torch::Tensor bang_func(torch::Tensor A) {
   (void)g0;
   auto &y = gy;
-  cnrtDim3_t d = {E0, 1, 1};
-  k1<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtDim3_t d = {4, E0, 1};
+  k0<<<d, cnrtFuncTypeUnion1, torch_mlu::getCurMLUStream()>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
