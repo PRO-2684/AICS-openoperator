@@ -42,7 +42,7 @@ static torch::Tensor gy = []() {
   auto opt = torch::TensorOptions().dtype(torch::kHalf);
   auto out = torch::zeros({16, 256}, opt);
   // cnrtMemset(out.data_ptr<at::Half>(), 0, 4096 * sizeof(at::Half));
-  cnrtQueueSync(queue);
+  // cnrtQueueSync(queue);
 
   return out;
 }();
