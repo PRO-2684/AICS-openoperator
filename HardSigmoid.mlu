@@ -11,6 +11,7 @@
 #include <sys/resource.h>
 #include <torch/extension.h>
 #include <unistd.h>
+#include <utility>
 
 #define TOTAL_ELEMS 262144
 #define CHUNK_ELEMS 131072
@@ -7576,5 +7577,5 @@ torch::Tensor bang_func(torch::Tensor x) {
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
   cnrtMemcpy(g_out, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
   run_work(g_out);
-  return g_y;
+  return std::move(g_y);
 }
