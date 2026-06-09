@@ -7448,15 +7448,11 @@ torch::Tensor bang_func(torch::Tensor x) {
   (void)&g0;
 
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
-  for (int off = 0; off < TOTAL_ELEMS; off += CHUNK_ELEMS) {
-    uint16_t *buf = g_out + off;
-    cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
-               cnrtMemcpyDevToHost);
-    if (__builtin_cpu_supports("avx2")) {
-      run_formula(buf, CHUNK_ELEMS);
-    } else {
-      run_table(buf, CHUNK_ELEMS);
-    }
+  cnrtMemcpy(g_out, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
+  if (__builtin_cpu_supports("avx2")) {
+    run_formula(g_out, TOTAL_ELEMS);
+  } else {
+    run_table(g_out, TOTAL_ELEMS);
   }
   return g_y;
 }
