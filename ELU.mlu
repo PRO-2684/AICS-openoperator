@@ -7466,7 +7466,7 @@ struct InitRuntime {
           c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
       int torch_n = static_cast<int>(impl->deviceCount());
       if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-        int d = 0;
+        int d = 1;
         impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
         cnrtSetDevice(d);
         bind_host(d);
