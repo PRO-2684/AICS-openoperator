@@ -85,23 +85,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     F0(d + E1 * E5 * 3, a + 256);
     F0(d + E1 * E5 * 6, a + 512);
     half *o = y + p * E2 + r * E1;
-    __memcpy_async(o, d, E1 * m * sizeof(half), NRAM2GDRAM);
-    __memcpy_async(o + E2, d + E1 * E5, E1 * m * sizeof(half),
-                   NRAM2GDRAM);
-    __memcpy_async(o + E2 * 2, d + E1 * E5 * 2, E1 * m * sizeof(half),
-                   NRAM2GDRAM);
-    __memcpy_async(o + E2 * 3, d + E1 * E5 * 3, E1 * m * sizeof(half),
-                   NRAM2GDRAM);
-    __memcpy_async(o + E2 * 4, d + E1 * E5 * 4, E1 * m * sizeof(half),
-                   NRAM2GDRAM);
-    __memcpy_async(o + E2 * 5, d + E1 * E5 * 5, E1 * m * sizeof(half),
-                   NRAM2GDRAM);
-    __memcpy_async(o + E2 * 6, d + E1 * E5 * 6, E1 * m * sizeof(half),
-                   NRAM2GDRAM);
-    __memcpy_async(o + E2 * 7, d + E1 * E5 * 7, E1 * m * sizeof(half),
-                   NRAM2GDRAM);
-    __memcpy_async(o + E2 * 8, d + E1 * E5 * 8, E1 * m * sizeof(half),
-                   NRAM2GDRAM);
+    __memcpy_async(o, d, E1 * m * sizeof(half), NRAM2GDRAM,
+                   E2 * sizeof(half), E1 * E5 * sizeof(half), 8);
     ++z;
   }
   __sync_io();
