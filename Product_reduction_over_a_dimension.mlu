@@ -9,7 +9,7 @@
 
 #define E0 4096
 
-static int g_dev = 1;
+static int g_dev = 0;
 
 static void bind_host(int d) {
   cpu_set_t cur;
@@ -65,6 +65,14 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
+
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
 alignas(64) static unsigned short g_zero_half_bits = 0;
 
 static torch::Tensor gy = []() {
