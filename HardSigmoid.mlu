@@ -1,3 +1,4 @@
+#include <ATen/Parallel.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
 #include <cstdint>
@@ -17,6 +18,17 @@ static uint16_t *g_buf[2] = {nullptr, nullptr};
 static uint16_t *g_out = nullptr;
 
 static void bind_host(int d) {
+  setenv("OMP_NUM_THREADS", "1", 1);
+  setenv("MKL_NUM_THREADS", "1", 1);
+  setenv("OPENBLAS_NUM_THREADS", "1", 1);
+  try {
+    at::set_num_threads(1);
+  } catch (...) {
+  }
+  try {
+    at::set_num_interop_threads(1);
+  } catch (...) {
+  }
   cpu_set_t set;
   CPU_ZERO(&set);
   int begin = d >= 4 ? 28 : 0;
@@ -7311,7 +7323,7 @@ alignas(64) static const uint16_t g_tbl_const[65536] = {
     0xfff0, 0xfff1, 0xfff2, 0xfff3, 0xfff4, 0xfff5, 0xfff6, 0xfff7, 0xfff8,
     0xfff9, 0xfffa, 0xfffb, 0xfffc, 0xfffd, 0xfffe, 0xffff};
 static uint16_t *g_tbl = nullptr;
-static uint16_t g_small_tbl[2][1056];
+static uint16_t g_small_tbl[2][528];
 static bool g_small_ready = false;
 
 static void init_tbl() {
@@ -7325,8 +7337,8 @@ static void init_tbl() {
 }
 
 __attribute__((target("f16c"))) static void init_small_tbl() {
-  for (int i = 0; i < 1056; ++i) {
-    uint16_t h = static_cast<uint16_t>((i << 4) + 8);
+  for (int i = 0; i < 528; ++i) {
+    uint16_t h = static_cast<uint16_t>((i << 5) + 16);
     float a = _cvtsh_ss(h);
     float yp = (a + 3.0f) * 0.1666666716337204f;
     float yn = (3.0f - a) * 0.1666666716337204f;
@@ -7385,7 +7397,7 @@ static inline __attribute__((always_inline)) uint16_t map_small(uint16_t v) {
   if (__builtin_expect(a >= 0x4200u, 0)) {
     return (v & 0x8000u) ? 0x0000u : 0x3c00u;
   }
-  return g_small_tbl[v >> 15][a >> 4];
+  return g_small_tbl[v >> 15][a >> 5];
 }
 
 static void run_small_table(uint16_t *p, int n) {
