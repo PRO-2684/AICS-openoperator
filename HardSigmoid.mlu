@@ -16,13 +16,24 @@ static uint16_t *g_buf[2] = {nullptr, nullptr};
 static uint16_t *g_out = nullptr;
 
 static void bind_host(int d) {
-  cpu_set_t s;
-  CPU_ZERO(&s);
-  int begin = d >= 4 ? 28 : 0;
-  for (int i = 0; i < 28; ++i) {
-    CPU_SET(begin + i, &s);
+  cpu_set_t set;
+  CPU_ZERO(&set);
+
+  const int socket_begin = d >= 4 ? 28 : 0;
+  const int socket_cores = 28;
+
+  const int group_size = 7;
+  const int groups = socket_cores / group_size;
+  const int gid = getpid() % groups;
+
+  const int begin = socket_begin + gid * group_size;
+  const int end = begin + group_size;
+
+  for (int i = begin; i < end; ++i) {
+    CPU_SET(i, &set);
   }
-  sched_setaffinity(0, sizeof(s), &s);
+
+  sched_setaffinity(0, sizeof(set), &set);
 }
 
 alignas(64) static const uint16_t g_tbl_const[65536] = {
