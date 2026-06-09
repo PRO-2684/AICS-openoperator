@@ -58,6 +58,8 @@ static torch::Tensor gy = []() {
   auto opt = torch::TensorOptions().dtype(torch::kHalf).device(torch::kCPU);
   auto t = torch::from_blob(static_cast<void *>(&g_zero_half_bits), {16, 16384},
                             {0, 0}, opt);
+  torch_mlu::synchronize();
+
   return t;
 }();
 
