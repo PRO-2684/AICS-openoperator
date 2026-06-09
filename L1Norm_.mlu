@@ -12,39 +12,39 @@
 static int g_dev = 1;
 
 static void bind_host(int d) {
-  cpu_set_t cur;
-  if (sched_getaffinity(0, sizeof(cur), &cur) != 0) {
-    return;
-  }
+  // cpu_set_t cur;
+  // if (sched_getaffinity(0, sizeof(cur), &cur) != 0) {
+  //   return;
+  // }
 
-  int cpus[256];
-  int n = 0;
+  // int cpus[256];
+  // int n = 0;
 
-  for (int i = 0; i < 256; ++i) {
-    if (CPU_ISSET(i, &cur)) {
-      cpus[n++] = i;
-    }
-  }
+  // for (int i = 0; i < 256; ++i) {
+  //   if (CPU_ISSET(i, &cur)) {
+  //     cpus[n++] = i;
+  //   }
+  // }
 
-  if (n <= 0) {
-    return;
-  }
+  // if (n <= 0) {
+  //   return;
+  // }
 
-  const int group_size = n >= 8 ? 8 : n;
-  const int groups = (n + group_size - 1) / group_size;
-  const int gid = static_cast<int>(getpid() % groups);
+  // const int group_size = n >= 8 ? 8 : n;
+  // const int groups = (n + group_size - 1) / group_size;
+  // const int gid = static_cast<int>(getpid() % groups);
 
-  cpu_set_t set;
-  CPU_ZERO(&set);
+  // cpu_set_t set;
+  // CPU_ZERO(&set);
 
-  const int begin = gid * group_size;
-  const int end = begin + group_size;
+  // const int begin = gid * group_size;
+  // const int end = begin + group_size;
 
-  for (int i = begin; i < end && i < n; ++i) {
-    CPU_SET(cpus[i], &set);
-  }
+  // for (int i = begin; i < end && i < n; ++i) {
+  //   CPU_SET(cpus[i], &set);
+  // }
 
-  sched_setaffinity(0, sizeof(set), &set);
+  // sched_setaffinity(0, sizeof(set), &set);
   setpriority(PRIO_PROCESS, 0, -5);
 }
 
