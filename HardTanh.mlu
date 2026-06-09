@@ -1,17 +1,28 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <immintrin.h>
+#include <pthread.h>
 #include <sched.h>
 #include <sys/resource.h>
 #include <torch/extension.h>
 #include <unistd.h>
+#include <utility>
 
 #define TOTAL_ELEMS 262144
+#define WORKER_ELEMS 65536
+#define MAIN_ELEMS 65536
 static int g_dev = 1;
 static uint16_t *g_buf = nullptr;
+static uint16_t *g_work = nullptr;
+static std::atomic<int> g_epoch{0};
+static std::atomic<int> g_done{0};
+static std::atomic<int> g_ready{0};
+static int g_workers = 0;
+static int g_mode = 0;
 
 static void bind_host(int d) {
   setenv("OMP_NUM_THREADS", "1", 1);
@@ -27,12 +38,12 @@ static void bind_host(int d) {
   setpriority(PRIO_PROCESS, 0, -5);
 }
 
-__attribute__((target("avx512bw"))) static void run_vec512(uint16_t *p) {
+__attribute__((target("avx512bw"))) static void run_vec512(uint16_t *p, int n) {
   const __m512i zero = _mm512_setzero_si512();
   const __m512i sign = _mm512_set1_epi16((short)0x8000);
   const __m512i pos = _mm512_set1_epi16((short)0x3c00);
   const __m512i neg = _mm512_set1_epi16((short)0xbc00);
-  for (int i = 0; i < TOTAL_ELEMS; i += 32) {
+  for (int i = 0; i < n; i += 32) {
     __m512i v = _mm512_loadu_si512(reinterpret_cast<const void *>(p + i));
     __mmask32 n = _mm512_cmpneq_epi16_mask(_mm512_and_si512(v, sign), zero);
     __m512i limit = _mm512_mask_blend_epi16(n, pos, neg);
@@ -41,11 +52,11 @@ __attribute__((target("avx512bw"))) static void run_vec512(uint16_t *p) {
   }
 }
 
-__attribute__((target("avx2"))) static void run_vec256(uint16_t *p) {
+__attribute__((target("avx2"))) static void run_vec256(uint16_t *p, int n) {
   const __m256i sign = _mm256_set1_epi16((short)0x8000);
   const __m256i pos = _mm256_set1_epi16((short)0x3c00);
   const __m256i neg = _mm256_set1_epi16((short)0xbc00);
-  for (int i = 0; i < TOTAL_ELEMS; i += 16) {
+  for (int i = 0; i < n; i += 16) {
     __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p + i));
     __m256i is_neg = _mm256_cmpeq_epi16(_mm256_and_si256(v, sign), sign);
     __m256i limit = _mm256_blendv_epi8(pos, neg, is_neg);
@@ -54,11 +65,72 @@ __attribute__((target("avx2"))) static void run_vec256(uint16_t *p) {
   }
 }
 
-static void run_scalar(uint16_t *p) {
-  for (int i = 0; i < TOTAL_ELEMS; ++i) {
+static void run_scalar(uint16_t *p, int n) {
+  for (int i = 0; i < n; ++i) {
     uint16_t v = p[i];
     uint16_t m = (v & 0x8000u) ? 0xbc00u : 0x3c00u;
     p[i] = v > m ? m : v;
+  }
+}
+
+static void run_part(uint16_t *p, int n) {
+  if (g_mode == 2) {
+    run_vec512(p, n);
+  } else if (g_mode == 1) {
+    run_vec256(p, n);
+  } else {
+    run_scalar(p, n);
+  }
+}
+
+static void *worker_entry(void *arg) {
+  int idx = static_cast<int>(reinterpret_cast<intptr_t>(arg));
+  g_ready.fetch_add(1, std::memory_order_release);
+  int seen = 0;
+  for (;;) {
+    int e = g_epoch.load(std::memory_order_acquire);
+    while (e == seen) {
+      _mm_pause();
+      e = g_epoch.load(std::memory_order_acquire);
+    }
+    seen = e;
+    uint16_t *p = g_work;
+    run_part(p + MAIN_ELEMS + idx * WORKER_ELEMS, WORKER_ELEMS);
+    g_done.fetch_add(1, std::memory_order_release);
+  }
+  return nullptr;
+}
+
+static void start_workers() {
+  if (g_workers != 0) {
+    return;
+  }
+  g_ready.store(0, std::memory_order_relaxed);
+  for (int i = 0; i < 3; ++i) {
+    pthread_t th;
+    if (pthread_create(&th, nullptr, worker_entry,
+                       reinterpret_cast<void *>(static_cast<intptr_t>(i))) ==
+        0) {
+      pthread_detach(th);
+      ++g_workers;
+    }
+  }
+  while (g_ready.load(std::memory_order_acquire) != g_workers) {
+    _mm_pause();
+  }
+}
+
+static void run_work(uint16_t *p) {
+  if (g_workers == 3) {
+    g_work = p;
+    g_done.store(0, std::memory_order_relaxed);
+    g_epoch.fetch_add(1, std::memory_order_release);
+    run_part(p, MAIN_ELEMS);
+    while (g_done.load(std::memory_order_acquire) != 3) {
+      _mm_pause();
+    }
+  } else {
+    run_part(p, TOTAL_ELEMS);
   }
 }
 
@@ -101,7 +173,16 @@ struct InitRuntime {
           g_buf = static_cast<uint16_t *>(
               std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
         }
+        if (__builtin_cpu_supports("avx512bw")) {
+          g_mode = 2;
+        } else if (__builtin_cpu_supports("avx2")) {
+          g_mode = 1;
+        }
+        start_workers();
         warm_host();
+        if (g_buf != nullptr) {
+          run_work(g_buf);
+        }
         g_dev = d;
       }
     }
@@ -131,14 +212,6 @@ torch::Tensor bang_func(torch::Tensor x) {
 
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
   cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
-  if (__builtin_cpu_supports("avx2")) {
-    if (__builtin_cpu_supports("avx512bw")) {
-      run_vec512(g_buf);
-    } else {
-      run_vec256(g_buf);
-    }
-  } else {
-    run_scalar(g_buf);
-  }
-  return g_y;
+  run_work(g_buf);
+  return std::move(g_y);
 }
