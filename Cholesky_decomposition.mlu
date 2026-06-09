@@ -67,11 +67,10 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     int r0 = c * 16;
     for (int i = 0; i < 16; ++i) {
       int g = r0 + i;
-      if (g + 1 < E1)
-        __bang_write_value(b + i * E1 + g + 1, E1 - g - 1, 0.0f);
+      __bang_float2half_rn(a + i * E1, b + i * E1, g + 1);
+      __memcpy(y + n * E2 + o + i * E1, a + i * E1, (g + 1) * sizeof(half),
+               NRAM2GDRAM);
     }
-    __bang_float2half_rn(a, b, E3);
-    __memcpy(y + n * E2 + o, a, E3 * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -114,7 +113,7 @@ static torch::Tensor g0 = []() {
 }();
 
 static torch::Tensor gy = []() {
-  return torch::empty(
+  return torch::zeros(
       {E0, E1, E1},
       torch::TensorOptions()
           .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
