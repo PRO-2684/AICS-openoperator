@@ -15,7 +15,6 @@
 static int g_dev = 1;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
 static uint16_t *g_out = nullptr;
-static cnrtNotifier_t g_notifier[2] = {nullptr, nullptr};
 
 static void bind_host(int d) {
   setenv("OMP_NUM_THREADS", "1", 1);
@@ -7480,8 +7479,6 @@ struct InitRuntime {
           g_buf[0] = g_out;
           g_buf[1] = g_out + CHUNK_ELEMS;
         }
-        cnrtNotifierCreate(&g_notifier[0]);
-        cnrtNotifierCreate(&g_notifier[1]);
         warm_host();
         g_dev = d;
       }
@@ -7509,22 +7506,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   (void)&g0;
 
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
-  cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  if (g_notifier[0] != nullptr && g_notifier[1] != nullptr &&
-      cnrtMemcpyAsync(g_buf[0], p, CHUNK_ELEMS * sizeof(uint16_t), q,
-                      cnrtMemcpyDevToHost) == cnrtSuccess &&
-      cnrtPlaceNotifier(g_notifier[0], q) == cnrtSuccess &&
-      cnrtMemcpyAsync(g_buf[1], p + CHUNK_ELEMS,
-                      CHUNK_ELEMS * sizeof(uint16_t), q,
-                      cnrtMemcpyDevToHost) == cnrtSuccess &&
-      cnrtPlaceNotifier(g_notifier[1], q) == cnrtSuccess) {
-    cnrtWaitNotifier(g_notifier[0]);
-    run_formula(g_buf[0], CHUNK_ELEMS);
-    cnrtWaitNotifier(g_notifier[1]);
-    run_formula(g_buf[1], CHUNK_ELEMS);
-  } else {
-    cnrtMemcpy(g_out, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
-    run_formula(g_out, TOTAL_ELEMS);
-  }
+  cnrtMemcpy(g_out, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
+  run_formula(g_out, TOTAL_ELEMS);
   return g_y;
 }
