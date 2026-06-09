@@ -71,8 +71,9 @@ __attribute__((constructor(101))) static void init_runtime() {
 }
 auto f = []() {
   auto opt = torch::TensorOptions().device(torch::kCPU).dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
-} ;static torch::Tensor g0 = ();
+  return torch::zeros({256}, opt);
+};
+static torch::Tensor g0 = []() { auto a = f(); re };
 
 alignas(64) static unsigned short g_zero_half_bits = 0;
 
@@ -82,7 +83,6 @@ static torch::Tensor gy = []() {
                               {0, 0}, opt);
   // cnrtMemset(out.data_ptr<at::Half>(), 0, 4096 * sizeof(at::Half));
   // cnrtQueueSync(queue);
-
 
   return out;
 }();
