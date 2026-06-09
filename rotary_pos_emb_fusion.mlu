@@ -105,6 +105,36 @@ __mlu_func__ void apply_one(const half *x, half *y, half *a0, half *a1,
   __memcpy(y, v, E1 * sizeof(half), NRAM2GDRAM);
 }
 
+__mlu_func__ void load8(half *a0, half *a1, const half *p) {
+  __memcpy(a0, p, E4 * sizeof(half), NRAM2NRAM, E4 * sizeof(half),
+           E3 * sizeof(half), E5 - 1);
+  __memcpy(a1, p + E4, E4 * sizeof(half), NRAM2NRAM, E4 * sizeof(half),
+           E3 * sizeof(half), E5 - 1);
+}
+
+__mlu_func__ void apply_head(const half *x, half *y, half *a0, half *a1,
+                             half *b0, half *b1, half *c0, half *c1,
+                             half *d0, half *d1, half *t) {
+  __nram__ half v[E3 * E5];
+  __memcpy(v, x, E3 * sizeof(half), GDRAM2NRAM, E3 * sizeof(half),
+           E3 * 4 * sizeof(half), E5 - 1);
+  load8(a0, a1, v);
+
+  __bang_mul(c0, a0, b0, E4 * E5);
+  __bang_mul(t, a1, d0, E4 * E5);
+  __bang_sub(c0, c0, t, E4 * E5);
+
+  __bang_mul(c1, a1, b1, E4 * E5);
+  __bang_fusion(FUSION_FMA, c1, a0, d1, c1, E4 * E5, E4 * E5);
+
+  __memcpy(v, c0, E4 * sizeof(half), NRAM2NRAM, E3 * sizeof(half),
+           E4 * sizeof(half), E5 - 1);
+  __memcpy(v + E4, c1, E4 * sizeof(half), NRAM2NRAM, E3 * sizeof(half),
+           E4 * sizeof(half), E5 - 1);
+  __memcpy(y, v, E3 * sizeof(half), NRAM2GDRAM, E3 * 4 * sizeof(half),
+           E3 * sizeof(half), E5 - 1);
+}
+
 __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
                       const half *__restrict__ c, const half *__restrict__ s,
                       half *__restrict__ qo, half *__restrict__ ko) {
@@ -162,8 +192,48 @@ __mlu_entry__ void k1(const half *__restrict__ q, const half *__restrict__ k,
   apply_one(k + off, ko + off, a0, a1, b0, b1, c0, c1, d0, d1, t);
 }
 
+__mlu_entry__ void k2(const half *__restrict__ q, const half *__restrict__ k,
+                      const half *__restrict__ c, const half *__restrict__ s,
+                      half *__restrict__ qo, half *__restrict__ ko) {
+  int h = coreId;
+  int p = taskIdY << 3;
+  __mlu_shared__ half sc[E3 * E5 * 2];
+  if (coreId == 0) {
+    __memcpy(sc, c + p * E3, E3 * E5 * sizeof(half), GDRAM2SRAM);
+    __memcpy(sc + E3 * E5, s + p * E3, E3 * E5 * sizeof(half), GDRAM2SRAM);
+  }
+  __sync_cluster();
+  if (h >= 4) {
+    return;
+  }
+
+  __nram__ half a0[E4 * E5];
+  __nram__ half a1[E4 * E5];
+  __nram__ half b0[E4 * E5];
+  __nram__ half b1[E4 * E5];
+  __nram__ half c0[E4 * E5];
+  __nram__ half c1[E4 * E5];
+  __nram__ half d0[E4 * E5];
+  __nram__ half d1[E4 * E5];
+  __nram__ half t[E4 * E5];
+  __nram__ half u[E3 * E5];
+  __nram__ half v[E3 * E5];
+
+  __memcpy(u, sc, E3 * E5 * sizeof(half), SRAM2NRAM);
+  __memcpy(v, sc + E3 * E5, E3 * E5 * sizeof(half), SRAM2NRAM);
+  load8(b0, b1, u);
+  load8(d0, d1, v);
+
+  int off = p * (E3 * 4) + h * E3;
+  apply_head(q + off, qo + off, a0, a1, b0, b1, c0, c1, d0, d1, t);
+  apply_head(k + off, ko + off, a0, a1, b0, b1, c0, c1, d0, d1, t);
+  off += E0 >> 1;
+  apply_head(q + off, qo + off, a0, a1, b0, b1, c0, c1, d0, d1, t);
+  apply_head(k + off, ko + off, a0, a1, b0, b1, c0, c1, d0, d1, t);
+}
+
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static cnrtDim3_t dim0 = {8, 1, 1};
+static cnrtDim3_t dim0 = {4, 8, 1};
 
 std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k,
                                      torch::Tensor cos, torch::Tensor sin,
@@ -172,7 +242,7 @@ std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k,
   (void)&r0;
   (void)z;
 
-  k1<<<dim0, cnrtFuncTypeBlock, queue>>>(
+  k2<<<dim0, cnrtFuncTypeUnion1, queue>>>(
       static_cast<const half *>(q.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(k.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(cos.unsafeGetTensorImpl()->mutable_data()),
