@@ -56,18 +56,6 @@ static torch::Tensor z = []() {
   return torch::zeros({1}, opt);
 }();
 
-static torch::Tensor qo = []() {
-  return torch::empty({2, 64, 4, 64}, torch::TensorOptions()
-                                           .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                                           .dtype(torch::kHalf));
-}();
-
-static torch::Tensor ko = []() {
-  return torch::empty({2, 64, 4, 64}, torch::TensorOptions()
-                                           .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                                           .dtype(torch::kHalf));
-}();
-
 __mlu_func__ void load_pair(half *a0, half *a1, const half *p) {
 #pragma unroll
   for (int r = 0; r < E5; ++r) {
@@ -181,7 +169,7 @@ std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k,
       static_cast<const half *>(k.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(cos.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(sin.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(qo.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(ko.unsafeGetTensorImpl()->mutable_data()));
-  return {qo, ko};
+      static_cast<half *>(q.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(k.unsafeGetTensorImpl()->mutable_data()));
+  return {q, k};
 }
