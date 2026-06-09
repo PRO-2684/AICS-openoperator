@@ -4154,12 +4154,15 @@ __attribute__((target("avx2"))) static void run_table256(uint16_t *p, int n) {
     return;
   }
   const int *base = reinterpret_cast<const int *>(g_tbl32);
+  const __m256i sign = _mm256_set1_epi32(0x8000);
   for (int i = 0; i < n; i += 16) {
     __m128i h = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
     __m256i i0 = _mm256_cvtepu16_epi32(h);
     __m256i i1 = _mm256_cvtepu16_epi32(_mm_srli_si128(h, 8));
-    __m256i v0 = _mm256_i32gather_epi32(base, i0, 4);
-    __m256i v1 = _mm256_i32gather_epi32(base, i1, 4);
+    __m256i m0 = _mm256_slli_epi32(_mm256_and_si256(i0, sign), 16);
+    __m256i m1 = _mm256_slli_epi32(_mm256_and_si256(i1, sign), 16);
+    __m256i v0 = _mm256_mask_i32gather_epi32(i0, base, i0, m0, 4);
+    __m256i v1 = _mm256_mask_i32gather_epi32(i1, base, i1, m1, 4);
     __m128i o0 = _mm_packus_epi32(_mm256_castsi256_si128(v0),
                                   _mm256_extracti128_si256(v0, 1));
     __m128i o1 = _mm_packus_epi32(_mm256_castsi256_si128(v1),
@@ -4176,10 +4179,15 @@ run_table512(uint16_t *p, int n) {
     return;
   }
   const int *base = reinterpret_cast<const int *>(g_tbl32);
+  const __m256i sign = _mm256_set1_epi16((short)0x8000);
   for (int i = 0; i < n; i += 16) {
     __m256i h = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p + i));
+    __mmask16 neg = _mm256_test_epi16_mask(h, sign);
+    if (neg == 0) {
+      continue;
+    }
     __m512i idx = _mm512_cvtepu16_epi32(h);
-    __m512i v = _mm512_i32gather_epi32(idx, base, 4);
+    __m512i v = _mm512_mask_i32gather_epi32(idx, neg, idx, base, 4);
     __m256i o = _mm512_cvtepi32_epi16(v);
     _mm256_storeu_si256(reinterpret_cast<__m256i *>(p + i), o);
   }
