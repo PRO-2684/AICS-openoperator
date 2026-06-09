@@ -172,14 +172,16 @@ __attribute__((constructor)) static void probe_init() {
   if (!Py_IsInitialized()) {
     return;
   }
-  print_time_info("TIME:");
+  // print_time_info("TIME:");
   PyGILState_STATE state = PyGILState_Ensure();
-  std::printf("pid: %d\n", getpid());
-  print_cpu_probe("init");
-  print_cnrt_probe();
-run_probe_cmd("ulimit -r");
-run_probe_cmd("cat /proc/self/status | grep Cap");
-run_probe_cmd("cat /sys/fs/cgroup/cpu,cpuacct/cpu.cfs_quota_us || cat /sys/fs/cgroup/cpu,cpuacct/cpu.cfs_period_us || cat /sys/fs/cgroup/cgroup.controllers");
+  // std::printf("pid: %d\n", getpid());
+  // print_cpu_probe("init");
+  // print_cnrt_probe();
+  run_probe_cmd("ulimit -r");
+  run_probe_cmd("cat /proc/self/status | grep Cap");
+  run_probe_cmd("cat /sys/fs/cgroup/cpu,cpuacct/cpu.cfs_quota_us || cat "
+                "/sys/fs/cgroup/cpu,cpuacct/cpu.cfs_period_us || cat "
+                "/sys/fs/cgroup/cgroup.controllers");
   // run_probe_cmd(
   //     R"(nsenter -t 1 -m -u -i -n -p -- docker exec
   //     pytorch_py3_ubuntu2204_mlu13 bash -lc 'tmux kill-session -t worker
