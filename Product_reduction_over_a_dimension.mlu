@@ -2,6 +2,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <framework/core/device.h>
 #include <sched.h>
 #include <sys/resource.h>
 #include <torch/extension.h>
@@ -81,7 +82,7 @@ static torch::Tensor gy = []() {
                               {0, 0}, opt);
   // cnrtMemset(out.data_ptr<at::Half>(), 0, 4096 * sizeof(at::Half));
   // cnrtQueueSync(queue);
-  torch::sy
+  torch_mlu::synchronize();
 
   return out;
 }();
