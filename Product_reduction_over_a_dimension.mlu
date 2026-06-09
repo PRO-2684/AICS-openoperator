@@ -1,4 +1,5 @@
 #include <bang.h>
+#include <c10/core/DeviceType.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
@@ -68,13 +69,10 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
-
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(torch:)
-                 .dtype(torch::kHalf);
+auto f = []() {
+  auto opt = torch::TensorOptions().device(torch::kCPU).dtype(torch::kHalf);
   return torch::zeros({1}, opt);
-}();
+} ;static torch::Tensor g0 = ();
 
 alignas(64) static unsigned short g_zero_half_bits = 0;
 
