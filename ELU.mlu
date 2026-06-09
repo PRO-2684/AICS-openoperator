@@ -4217,16 +4217,22 @@ struct HostWork {
     for (int i = 0; i < g_work_n - 1; ++i) {
       th[i] = std::thread([this, i]() {
         int t = i + 1;
+        int seen = 0;
         ready.fetch_add(1, std::memory_order_release);
-        while (go.load(std::memory_order_acquire) == 0) {
-          _mm_pause();
+        for (;;) {
+          int cur = go.load(std::memory_order_acquire);
+          while (cur == seen) {
+            _mm_pause();
+            cur = go.load(std::memory_order_acquire);
+          }
+          seen = cur;
+          uint16_t *p = ptr;
+          int n = len;
+          int l = ((n * t) / g_work_n + 15) & ~15;
+          int r = ((n * (t + 1)) / g_work_n) & ~15;
+          transform(p + l, r - l);
+          done.fetch_add(1, std::memory_order_release);
         }
-        uint16_t *p = ptr;
-        int n = len;
-        int l = ((n * t) / g_work_n + 15) & ~15;
-        int r = ((n * (t + 1)) / g_work_n) & ~15;
-        transform(p + l, r - l);
-        done.fetch_add(1, std::memory_order_release);
       });
     }
     while (ready.load(std::memory_order_acquire) < g_work_n - 1) {
@@ -4236,7 +4242,6 @@ struct HostWork {
 };
 
 static HostWork *g_work = nullptr;
-static bool g_work_used = false;
 
 static void init_work() {
   if (g_work == nullptr) {
@@ -4245,15 +4250,14 @@ static void init_work() {
 }
 
 static void transform_work(uint16_t *p, int n) {
-  if (g_work == nullptr || g_work_used) {
+  if (g_work == nullptr) {
     transform(p, n);
     return;
   }
-  g_work_used = true;
   g_work->ptr = p;
   g_work->len = n;
   g_work->done.store(0, std::memory_order_relaxed);
-  g_work->go.store(1, std::memory_order_release);
+  g_work->go.fetch_add(1, std::memory_order_release);
   int r = ((n * 1) / g_work_n) & ~15;
   transform(p, r);
   while (g_work->done.load(std::memory_order_acquire) < g_work_n - 1) {
