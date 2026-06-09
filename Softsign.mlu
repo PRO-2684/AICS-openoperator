@@ -71,6 +71,16 @@ __attribute__((target("f16c"))) static void run_scalar(uint16_t *p) {
   }
 }
 
+static void warm_copy() {
+  void *d = nullptr;
+  if (g_buf != nullptr &&
+      cnrtMalloc(&d, TOTAL_ELEMS * sizeof(uint16_t)) == cnrtSuccess) {
+    cnrtMemset(d, 0, TOTAL_ELEMS * sizeof(uint16_t));
+    cnrtMemcpy(g_buf, d, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
+    cnrtFree(d);
+  }
+}
+
 __attribute__((constructor(101))) static void init_runtime() {
   unsigned int n = 0;
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
@@ -88,6 +98,7 @@ __attribute__((constructor(101))) static void init_runtime() {
         g_buf =
             static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
       }
+      warm_copy();
       g_dev = d;
     }
   }

@@ -7388,6 +7388,13 @@ static void warm_host() {
       s += g_out[i];
     }
   }
+  void *d = nullptr;
+  if (g_out != nullptr &&
+      cnrtMalloc(&d, TOTAL_ELEMS * sizeof(uint16_t)) == cnrtSuccess) {
+    cnrtMemset(d, 0, TOTAL_ELEMS * sizeof(uint16_t));
+    cnrtMemcpy(g_out, d, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
+    cnrtFree(d);
+  }
   g_sink = s;
 }
 

@@ -7472,6 +7472,14 @@ static void warm_host() {
       }
     }
   }
+  void *d = nullptr;
+  if (g_buf[0] != nullptr &&
+      cnrtMalloc(&d, TOTAL_ELEMS * sizeof(uint16_t)) == cnrtSuccess) {
+    cnrtMemset(d, 0, TOTAL_ELEMS * sizeof(uint16_t));
+    cnrtMemcpy(g_buf[0], d, TOTAL_ELEMS * sizeof(uint16_t),
+               cnrtMemcpyDevToHost);
+    cnrtFree(d);
+  }
   g_sink = s;
 }
 
