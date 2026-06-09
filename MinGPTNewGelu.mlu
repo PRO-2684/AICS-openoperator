@@ -21,7 +21,8 @@ __mlu_entry__ void k0(half *__restrict__ x) {
     if (n > E1) {
       n = E1;
     }
-    __memcpy(a, x + p, n * sizeof(half), GDRAM2NRAM);
+    __bang_write_zero(a, n);
+    __memcpy(x + p, a, n * sizeof(half), NRAM2GDRAM);
   }
 }
 
