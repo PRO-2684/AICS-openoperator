@@ -82,7 +82,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
   __mlu_shared__ float sh[320];
   int b = taskIdY;
   int c = coreId;
-  int r0 = c * 32;
+  int r0 = c * 64;
 
   __nram__ float x[E1 * E2];
   __nram__ float z[E1 * E2];
@@ -98,22 +98,22 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
   float *pu = u + b * E1 * E2;
   float *ps = s + b * E2;
 
-  if (c < 4) {
+  if (c < 2) {
     __memcpy(h0, pa, E1 * E2 * sizeof(half), GDRAM2NRAM);
     __bang_half2float(x, h0, E1 * E2);
     __bang_transpose(h1, h0, E1, E2);
     __bang_half2float(z, h1, E1 * E2);
     for (int i = 0; i < E2; ++i) {
-      __bang_mul(t0, z + i * E1 + r0, z + i * E1 + r0, 32);
-      __bang_reduce_sum(t0, t0, 32);
-      sh[c * E2 + i] = t0[0];
+      __bang_mul(t0, z + i * E1 + r0, z + i * E1 + r0, 64);
+      __bang_reduce_sum(t0, t0, 64);
+      sh[c * E2 + i] = t0[0] + t0[32];
     }
   }
   __sync_cluster();
 
   if (c == 0) {
     for (int i = 0; i < E2; ++i) {
-      ev[i] = sh[i] + sh[E2 + i] + sh[E2 * 2 + i] + sh[E2 * 3 + i];
+      ev[i] = sh[i] + sh[E2 + i];
     }
   }
 
@@ -121,14 +121,14 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
     int pe = sweep < 5 ? E2 - 1 : 12;
     for (int p = 0; p < pe; ++p) {
       for (int q = p + 1; q < E2; ++q) {
-        if (c < 4) {
-          __bang_mul(t0, z + p * E1 + r0, z + q * E1 + r0, 32);
-          __bang_reduce_sum(t0, t0, 32);
-          sh[c] = t0[0];
+        if (c < 2) {
+          __bang_mul(t0, z + p * E1 + r0, z + q * E1 + r0, 64);
+          __bang_reduce_sum(t0, t0, 64);
+          sh[c] = t0[0] + t0[32];
         }
         __sync_cluster();
         if (c == 0) {
-          float apq = sh[0] + sh[1] + sh[2] + sh[3];
+          float apq = sh[0] + sh[1];
           float cc = 1.0f;
           float ss = 0.0f;
           float app = ev[p];
@@ -149,18 +149,18 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
           ev[q] = s2 * app + 2.0f * cs * apq + c2 * aqq;
         }
         __sync_cluster();
-        if (c < 4) {
+        if (c < 2) {
           float cc = sh[4];
           float ss = sh[5];
           if (ss != 0.0f) {
-            __bang_mul_scalar(t0, z + p * E1 + r0, cc, 32);
-            __bang_mul_scalar(t1, z + q * E1 + r0, ss, 32);
-            __bang_sub(t0, t0, t1, 32);
-            __bang_mul_scalar(t1, z + q * E1 + r0, cc, 32);
-            __bang_mul_scalar(t2, z + p * E1 + r0, ss, 32);
-            __bang_add(t1, t1, t2, 32);
-            __memcpy(z + p * E1 + r0, t0, 32 * sizeof(float), NRAM2NRAM);
-            __memcpy(z + q * E1 + r0, t1, 32 * sizeof(float), NRAM2NRAM);
+            __bang_mul_scalar(t0, z + p * E1 + r0, cc, 64);
+            __bang_mul_scalar(t1, z + q * E1 + r0, ss, 64);
+            __bang_sub(t0, t0, t1, 64);
+            __bang_mul_scalar(t1, z + q * E1 + r0, cc, 64);
+            __bang_mul_scalar(t2, z + p * E1 + r0, ss, 64);
+            __bang_add(t1, t1, t2, 64);
+            __memcpy(z + p * E1 + r0, t0, 64 * sizeof(float), NRAM2NRAM);
+            __memcpy(z + q * E1 + r0, t1, 64 * sizeof(float), NRAM2NRAM);
           }
         }
       }
@@ -193,10 +193,10 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
     }
   }
   __sync_cluster();
-  if (c < 4) {
+  if (c < 2) {
     __memcpy(iv, sh + E2, E2 * sizeof(float), SRAM2NRAM);
-    __bang_cycle_mul(x + r0 * E2, x + r0 * E2, iv, 32 * E2, E2);
-    __memcpy(pu + r0 * E2, x + r0 * E2, 32 * E2 * sizeof(float), NRAM2GDRAM);
+    __bang_cycle_mul(x + r0 * E2, x + r0 * E2, iv, 64 * E2, E2);
+    __memcpy(pu + r0 * E2, x + r0 * E2, 64 * E2 * sizeof(float), NRAM2GDRAM);
   }
 }
 
