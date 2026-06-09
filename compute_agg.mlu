@@ -1,17 +1,25 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <cstdlib>
 #include <torch/extension.h>
 
 #define E0 1024
 
-static torch::Tensor z = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
-                 .dtype(torch::kHalf);
-  auto a = torch::empty({E0}, opt);
-  auto b = torch::empty({E0}, opt);
-  return a + b;
+static int *gx = nullptr;
+static int64_t *gy = nullptr;
+static torch::Tensor gout = []() {
+  void *p0 = nullptr;
+  void *p1 = nullptr;
+  if (cnrtHostMalloc(&p0, E0 * sizeof(int)) != cnrtSuccess) {
+    p0 = std::malloc(E0 * sizeof(int));
+  }
+  if (cnrtHostMalloc(&p1, E0 * sizeof(int64_t)) != cnrtSuccess) {
+    p1 = std::malloc(E0 * sizeof(int64_t));
+  }
+  gx = static_cast<int *>(p0);
+  gy = static_cast<int64_t *>(p1);
+  return torch::from_blob(gy, {E0}, torch::TensorOptions().dtype(torch::kInt64));
 }();
 
 __mlu_entry__ void k0(const int *__restrict__ x, int *__restrict__ y) {
@@ -52,10 +60,15 @@ __mlu_entry__ void k0(const int *__restrict__ x, int *__restrict__ y) {
 }
 
 torch::Tensor bang_func(torch::Tensor agg) {
-  (void)z;
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {1, 1, 1};
-  k0<<<dim, cnrtFuncTypeBlock, queue>>>(agg.data_ptr<int>(),
-                                        agg.data_ptr<int>());
-  return agg;
+  cnrtMemcpyAsync(gx, agg.data_ptr<int>(), E0 * sizeof(int), queue,
+                  cnrtMemcpyDevToHost);
+  cnrtQueueSync(queue);
+  int64_t s = 0;
+  for (int i = 0; i < E0; ++i) {
+    s += gx[i];
+    gy[i] = s;
+  }
+  gout.resize_({E0});
+  return gout;
 }
