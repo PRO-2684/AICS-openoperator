@@ -7339,8 +7339,24 @@ __attribute__((target("avx2,f16c"))) static void run_formula(uint16_t *p,
 }
 
 static void run_table(uint16_t *p, int n) {
-  for (int i = 0; i < n; ++i) {
-    p[i] = g_tbl[p[i]];
+  const uint16_t *t = g_tbl;
+  for (int i = 0; i < n; i += 8) {
+    uint16_t v0 = p[i + 0];
+    uint16_t v1 = p[i + 1];
+    uint16_t v2 = p[i + 2];
+    uint16_t v3 = p[i + 3];
+    uint16_t v4 = p[i + 4];
+    uint16_t v5 = p[i + 5];
+    uint16_t v6 = p[i + 6];
+    uint16_t v7 = p[i + 7];
+    p[i + 0] = t[v0];
+    p[i + 1] = t[v1];
+    p[i + 2] = t[v2];
+    p[i + 3] = t[v3];
+    p[i + 4] = t[v4];
+    p[i + 5] = t[v5];
+    p[i + 6] = t[v6];
+    p[i + 7] = t[v7];
   }
 }
 
@@ -7430,10 +7446,10 @@ torch::Tensor bang_func(torch::Tensor x) {
 
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
   cnrtMemcpy(g_out, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
-  if (__builtin_cpu_supports("avx2")) {
-    run_formula(g_out, TOTAL_ELEMS);
-  } else {
+  if (g_tbl != nullptr) {
     run_table(g_out, TOTAL_ELEMS);
+  } else {
+    run_formula(g_out, TOTAL_ELEMS);
   }
   return g_y;
 }
