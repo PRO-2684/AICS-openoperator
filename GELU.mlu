@@ -4360,7 +4360,6 @@ struct InitRuntime {
         init_tbl32();
         init_work();
         warm_host();
-        pin_host(d >= 4 ? 28 : 0);
         g_dev = d;
       }
     }
