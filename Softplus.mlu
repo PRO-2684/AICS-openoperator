@@ -41,13 +41,12 @@ static void bind_host(int d) {
 __attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p, int n) {
   const __m256 vhalf = _mm256_set1_ps(0.5f);
   const __m256 sign = _mm256_castsi256_ps(_mm256_set1_epi32(0x7fffffff));
-  const __m256 cutoff = _mm256_set1_ps(8.0f);
+  const __m256 cutoff = _mm256_set1_ps(4.8f);
   const __m256 z = _mm256_setzero_ps();
-  const __m256 c0 = _mm256_set1_ps(0.0007436707774f);
-  const __m256 c1 = _mm256_set1_ps(-0.01638956466f);
-  const __m256 c2 = _mm256_set1_ps(0.1340226347f);
-  const __m256 c3 = _mm256_set1_ps(-0.4887655294f);
-  const __m256 c4 = _mm256_set1_ps(0.6873281626f);
+  const __m256 c0 = _mm256_set1_ps(-0.01032207857f);
+  const __m256 c1 = _mm256_set1_ps(0.1193524721f);
+  const __m256 c2 = _mm256_set1_ps(-0.4782445578f);
+  const __m256 c3 = _mm256_set1_ps(0.6861811049f);
   for (int i = 0; i < n; i += 16) {
     __m128i h0 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
     __m128i h1 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i + 8));
@@ -63,8 +62,6 @@ __attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p, int n) {
     p1 = _mm256_add_ps(_mm256_mul_ps(p1, a1), c2);
     p0 = _mm256_add_ps(_mm256_mul_ps(p0, a0), c3);
     p1 = _mm256_add_ps(_mm256_mul_ps(p1, a1), c3);
-    p0 = _mm256_add_ps(_mm256_mul_ps(p0, a0), c4);
-    p1 = _mm256_add_ps(_mm256_mul_ps(p1, a1), c4);
     p0 = _mm256_blendv_ps(z, p0, _mm256_cmp_ps(a0, cutoff, _CMP_LE_OQ));
     p1 = _mm256_blendv_ps(z, p1, _mm256_cmp_ps(a1, cutoff, _CMP_LE_OQ));
     y0 = _mm256_add_ps(y0, p0);
@@ -131,13 +128,11 @@ __attribute__((target("f16c"))) static void run_scalar(uint16_t *p) {
     float x = _cvtsh_ss(p[i]);
     float a = x < 0.0f ? -x : x;
     float y = (x + a) * 0.5f;
-    float q = (((0.0007436707774f * a - 0.01638956466f) * a +
-                0.1340226347f) *
-                   a -
-               0.4887655294f) *
+    float q = ((-0.01032207857f * a + 0.1193524721f) * a -
+               0.4782445578f) *
                   a +
-              0.6873281626f;
-    if (a <= 8.0f) {
+              0.6861811049f;
+    if (a <= 4.8f) {
       y += q;
     }
     p[i] = _cvtss_sh(y, 0);
