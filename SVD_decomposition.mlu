@@ -79,18 +79,17 @@ static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
 __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
                       float *__restrict__ s) {
-  __mlu_shared__ float sh[320];
+  __mlu_shared__ float zs[E1 * E2];
+  __mlu_shared__ float es[128];
   int b = taskIdY;
   int c = coreId;
-  int r0 = c * 64;
+  int r0 = c * 32;
 
-  __nram__ float x[E1 * E2];
   __nram__ float z[E1 * E2];
-  __nram__ float ev[E2];
-  __nram__ float iv[E2];
   __nram__ float t0[E1];
   __nram__ float t1[E1];
   __nram__ float t2[E1];
+  __nram__ float t3[E1];
   __nram__ half h0[E1 * E2];
   __nram__ half h1[E1 * E2];
 
@@ -98,105 +97,103 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
   float *pu = u + b * E1 * E2;
   float *ps = s + b * E2;
 
-  if (c < 2) {
+  if (c == 0) {
     __memcpy(h0, pa, E1 * E2 * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(x, h0, E1 * E2);
     __bang_transpose(h1, h0, E1, E2);
     __bang_half2float(z, h1, E1 * E2);
+    __memcpy(zs, z, E1 * E2 * sizeof(float), NRAM2SRAM);
     for (int i = 0; i < E2; ++i) {
-      __bang_mul(t0, z + i * E1 + r0, z + i * E1 + r0, 64);
-      __bang_reduce_sum(t0, t0, 64);
-      sh[c * E2 + i] = t0[0] + t0[32];
+      __bang_mul(t0, z + i * E1, z + i * E1, E1);
+      __bang_reduce_sum(t0, t0, E1);
+      es[i] = t0[0] + t0[32] + t0[64] + t0[96];
     }
   }
   __sync_cluster();
 
-  if (c == 0) {
-    for (int i = 0; i < E2; ++i) {
-      ev[i] = sh[i] + sh[E2 + i];
-    }
-  }
-
   for (int sweep = 0; sweep < 6; ++sweep) {
-    int pe = sweep < 5 ? E2 - 1 : 12;
-    for (int p = 0; p < pe; ++p) {
-      for (int q = p + 1; q < E2; ++q) {
-        if (c < 2) {
-          __bang_mul(t0, z + p * E1 + r0, z + q * E1 + r0, 64);
-          __bang_reduce_sum(t0, t0, 64);
-          sh[c] = t0[0] + t0[32];
-        }
-        __sync_cluster();
-        if (c == 0) {
-          float apq = sh[0] + sh[1];
-          float cc = 1.0f;
-          float ss = 0.0f;
-          float app = ev[p];
-          float aqq = ev[q];
-          if (fabsf(apq) > 0.000001f) {
-          float tau = (aqq - app) / (2.0f * apq);
-          float st = tau >= 0.0f ? 1.0f : -1.0f;
-          float tt = st / (fabsf(tau) + sqrtf(1.0f + tau * tau));
-            cc = 1.0f / sqrtf(1.0f + tt * tt);
-            ss = tt * cc;
+    int re = sweep < 5 ? E2 - 1 : 22;
+    for (int r = 0; r < re; ++r) {
+      for (int g = 0; g < 8; ++g) {
+        if (c < 4) {
+          int idx = g * 4 + c;
+          int p;
+          int q;
+          if (idx == 0) {
+            p = E2 - 1;
+            q = r;
+          } else {
+            p = r + idx;
+            if (p >= E2 - 1)
+              p -= E2 - 1;
+            q = r - idx;
+            if (q < 0)
+              q += E2 - 1;
           }
-          sh[4] = cc;
-          sh[5] = ss;
-          float c2 = cc * cc;
-          float s2 = ss * ss;
-          float cs = cc * ss;
-          ev[p] = c2 * app - 2.0f * cs * apq + s2 * aqq;
-          ev[q] = s2 * app + 2.0f * cs * apq + c2 * aqq;
-        }
-        __sync_cluster();
-        if (c < 2) {
-          float cc = sh[4];
-          float ss = sh[5];
-          if (ss != 0.0f) {
-            __bang_mul_scalar(t0, z + p * E1 + r0, cc, 64);
-            __bang_mul_scalar(t1, z + q * E1 + r0, ss, 64);
-            __bang_sub(t0, t0, t1, 64);
-            __bang_mul_scalar(t1, z + q * E1 + r0, cc, 64);
-            __bang_mul_scalar(t2, z + p * E1 + r0, ss, 64);
-            __bang_add(t1, t1, t2, 64);
-            __memcpy(z + p * E1 + r0, t0, 64 * sizeof(float), NRAM2NRAM);
-            __memcpy(z + q * E1 + r0, t1, 64 * sizeof(float), NRAM2NRAM);
+          __memcpy(t0, zs + p * E1, E1 * sizeof(float), SRAM2NRAM);
+          __memcpy(t1, zs + q * E1, E1 * sizeof(float), SRAM2NRAM);
+          __bang_mul(t2, t0, t1, E1);
+          __bang_reduce_sum(t2, t2, E1);
+          float apq = t2[0] + t2[32] + t2[64] + t2[96];
+          float app = es[p];
+          float aqq = es[q];
+          if (fabsf(apq) > 0.000001f) {
+            float tau = (aqq - app) / (2.0f * apq);
+            float st = tau >= 0.0f ? 1.0f : -1.0f;
+            float tt = st / (fabsf(tau) + sqrtf(1.0f + tau * tau));
+            float cc = 1.0f / sqrtf(1.0f + tt * tt);
+            float ss = tt * cc;
+            __bang_mul_scalar(t2, t0, cc, E1);
+            __bang_mul_scalar(t3, t1, ss, E1);
+            __bang_sub(t2, t2, t3, E1);
+            __bang_mul_scalar(t3, t0, ss, E1);
+            __bang_mul_scalar(t0, t1, cc, E1);
+            __bang_add(t3, t3, t0, E1);
+            __memcpy(zs + p * E1, t2, E1 * sizeof(float), NRAM2SRAM);
+            __memcpy(zs + q * E1, t3, E1 * sizeof(float), NRAM2SRAM);
+            float c2 = cc * cc;
+            float s2 = ss * ss;
+            float cs = cc * ss;
+            es[p] = c2 * app - 2.0f * cs * apq + s2 * aqq;
+            es[q] = s2 * app + 2.0f * cs * apq + c2 * aqq;
           }
         }
       }
+      __sync_cluster();
     }
   }
 
   if (c == 0) {
     for (int i = 0; i < E2; ++i) {
-      float r = ev[i];
-      ev[i] = r > 0.0f ? sqrtf(r) : 0.0f;
+      float r = es[i];
+      es[i] = r > 0.0f ? sqrtf(r) : 0.0f;
     }
     for (int i = 0; i < E2 - 1; ++i) {
       int m = i;
-      float best = ev[i];
+      float best = es[i];
       for (int j = i + 1; j < E2; ++j) {
-        if (ev[j] > best) {
-          best = ev[j];
+        if (es[j] > best) {
+          best = es[j];
           m = j;
         }
       }
       if (m != i) {
-        float t = ev[i];
-        ev[i] = ev[m];
-        ev[m] = t;
+        float t = es[i];
+        es[i] = es[m];
+        es[m] = t;
       }
     }
     for (int i = 0; i < E2; ++i) {
-      ps[i] = ev[i];
-      sh[E2 + i] = ev[i] > 0.000001f ? 1.0f / ev[i] : 0.0f;
+      ps[i] = es[i];
+      es[E2 + i] = es[i] > 0.000001f ? 1.0f / es[i] : 0.0f;
     }
   }
   __sync_cluster();
-  if (c < 2) {
-    __memcpy(iv, sh + E2, E2 * sizeof(float), SRAM2NRAM);
-    __bang_cycle_mul(x + r0 * E2, x + r0 * E2, iv, 64 * E2, E2);
-    __memcpy(pu + r0 * E2, x + r0 * E2, 64 * E2 * sizeof(float), NRAM2GDRAM);
+  if (c < 4) {
+    __memcpy(h0, pa + r0 * E2, 32 * E2 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(z, h0, 32 * E2);
+    __memcpy(t0, es + E2, E2 * sizeof(float), SRAM2NRAM);
+    __bang_cycle_mul(z, z, t0, 32 * E2, E2);
+    __memcpy(pu + r0 * E2, z, 32 * E2 * sizeof(float), NRAM2GDRAM);
   }
 }
 
