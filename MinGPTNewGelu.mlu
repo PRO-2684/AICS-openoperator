@@ -23,12 +23,10 @@ __mlu_entry__ void k0(half *__restrict__ x) {
     }
     __memcpy(a, x + p, n * sizeof(half), GDRAM2NRAM);
     __bang_mul(b, a, a, n);
-    __bang_mul_scalar(c, b, (half)-0.000179648399f, n);
-    __bang_add_scalar(c, c, (half)0.00489807129f, n);
-    __bang_mul(c, c, b, n);
-    __bang_add_scalar(c, c, (half)-0.0542602539f, n);
-    __bang_mul(c, c, b, n);
-    __bang_add_scalar(c, c, (half)0.388916016f, n);
+    __bang_fusion(FUSION_FMA, c, b, (half)-0.000179648399f,
+                  (half)0.00489807129f, n, n);
+    __bang_fusion(FUSION_FMA, c, c, b, (half)-0.0542602539f, n, n);
+    __bang_fusion(FUSION_FMA, c, c, b, (half)0.388916016f, n, n);
     __bang_mul(c, c, b, n);
     __bang_fusion(FUSION_FMA, c, a, (half)0.5f, c, n, n);
     __bang_gt_scalar(b, a, (half)3.05f, n);
