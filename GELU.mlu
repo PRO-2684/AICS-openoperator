@@ -6,6 +6,7 @@
 #include <framework/core/MLUStream.h>
 #include <immintrin.h>
 #include <sched.h>
+#include <sys/resource.h>
 #include <thread>
 #include <torch/extension.h>
 #include <unistd.h>
@@ -17,6 +18,7 @@ static uint16_t *g_buf[2] = {nullptr, nullptr};
 static constexpr int g_work_n = 8;
 
 static void boost_host() {
+  setpriority(PRIO_PROCESS, 0, -5);
   int p = sched_get_priority_max(SCHED_FIFO);
   if (p > 0) {
     struct sched_param sp;
@@ -4358,6 +4360,7 @@ struct InitRuntime {
         init_tbl32();
         init_work();
         warm_host();
+        pin_host(d >= 4 ? 28 : 0);
         g_dev = d;
       }
     }
