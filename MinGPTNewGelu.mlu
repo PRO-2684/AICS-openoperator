@@ -8,7 +8,7 @@
 #include <unistd.h>
 
 #define E0 4000000
-#define E1 81920
+#define E1 90112
 #define E2 32
 
 __mlu_entry__ void k0(half *__restrict__ x) {
@@ -32,10 +32,12 @@ __mlu_entry__ void k0(half *__restrict__ x) {
     __bang_mul(c, c, b, n);
     __bang_fusion(FUSION_FMA, c, a, (half)0.5f, c, n, n);
     __bang_gt_scalar(b, a, (half)3.05f, n);
-    __bang_maskmove(c, a, b, n);
-    __bang_lt_scalar(b, a, (half)-3.05f, n);
-    __bang_write_zero(d, n);
-    __bang_maskmove(c, d, b, n);
+    __bang_lt_scalar(d, a, (half)-3.05f, n);
+    __bang_add(d, d, b, n);
+    __bang_mul_scalar(d, d, (half)-1.0f, n);
+    __bang_add_scalar(d, d, (half)1.0f, n);
+    __bang_mul(c, c, d, n);
+    __bang_fusion(FUSION_FMA, c, a, b, c, n, n);
     __memcpy(x + p, c, n * sizeof(half), NRAM2GDRAM);
   }
 }
