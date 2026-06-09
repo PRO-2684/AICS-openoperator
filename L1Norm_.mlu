@@ -3,12 +3,15 @@
 #include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
+#include <sys/resource.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
 #define N0 262144
 
 static int g_dev = 0;
+
+// static inline void tune_process_priority() { setpriority(PRIO_PROCESS, 0, -5); }
 
 static void bind_host(int d) {
   cpu_set_t set;
