@@ -7371,15 +7371,15 @@ run_table512(uint16_t *p, int n) {
   }
 }
 
-static void transform(uint16_t *p, int n) {
-  if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("f16c")) {
+__attribute__((target("avx2,f16c"))) static void transform(uint16_t *p, int n) {
+  if (__builtin_cpu_supports("avx2")) {
     const __m256 c0 = _mm256_set1_ps(5.009380082e-06f);
     const __m256 c1 = _mm256_set1_ps(-0.0002516042418f);
     const __m256 c2 = _mm256_set1_ps(0.005032566247f);
     const __m256 c3 = _mm256_set1_ps(-0.05279772884f);
     const __m256 c4 = _mm256_set1_ps(0.3839685138f);
     const __m256 c5 = _mm256_set1_ps(0.002755368813f);
-    const __m256 half = _mm256_set1_ps(0.5f);
+    const __m256 vhalf = _mm256_set1_ps(0.5f);
     const __m256 pos = _mm256_set1_ps(4.0f);
     const __m256 neg = _mm256_set1_ps(-4.0f);
     const __m256 z = _mm256_setzero_ps();
@@ -7392,7 +7392,7 @@ static void transform(uint16_t *p, int n) {
       y = _mm256_add_ps(_mm256_mul_ps(y, b), c3);
       y = _mm256_add_ps(_mm256_mul_ps(y, b), c4);
       y = _mm256_add_ps(_mm256_mul_ps(y, b), c5);
-      y = _mm256_add_ps(y, _mm256_mul_ps(x, half));
+      y = _mm256_add_ps(y, _mm256_mul_ps(x, vhalf));
       y = _mm256_blendv_ps(y, x, _mm256_cmp_ps(x, pos, _CMP_GT_OQ));
       y = _mm256_blendv_ps(y, z, _mm256_cmp_ps(x, neg, _CMP_LT_OQ));
       h = _mm256_cvtps_ph(y, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);

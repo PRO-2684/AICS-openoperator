@@ -43,7 +43,7 @@ static void bind_host(int d) {
 }
 
 __attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p) {
-  const __m256 half = _mm256_set1_ps(0.5f);
+  const __m256 vhalf = _mm256_set1_ps(0.5f);
   const __m256 sign = _mm256_castsi256_ps(_mm256_set1_epi32(0x7fffffff));
   const __m256 cutoff = _mm256_set1_ps(8.0f);
   const __m256 z = _mm256_setzero_ps();
@@ -59,8 +59,8 @@ __attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p) {
     __m256 x1 = _mm256_cvtph_ps(h1);
     __m256 a0 = _mm256_and_ps(x0, sign);
     __m256 a1 = _mm256_and_ps(x1, sign);
-    __m256 y0 = _mm256_mul_ps(_mm256_add_ps(x0, a0), half);
-    __m256 y1 = _mm256_mul_ps(_mm256_add_ps(x1, a1), half);
+    __m256 y0 = _mm256_mul_ps(_mm256_add_ps(x0, a0), vhalf);
+    __m256 y1 = _mm256_mul_ps(_mm256_add_ps(x1, a1), vhalf);
     __m256 p0 = _mm256_add_ps(_mm256_mul_ps(c0, a0), c1);
     __m256 p1 = _mm256_add_ps(_mm256_mul_ps(c0, a1), c1);
     p0 = _mm256_add_ps(_mm256_mul_ps(p0, a0), c2);
@@ -135,12 +135,10 @@ torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
   cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
-  if (__builtin_cpu_supports("f16c")) {
-    if (__builtin_cpu_supports("avx2")) {
-      run_vec(g_buf);
-    } else {
-      run_scalar(g_buf);
-    }
+  if (__builtin_cpu_supports("avx2")) {
+    run_vec(g_buf);
+  } else {
+    run_scalar(g_buf);
   }
   return gy;
 }

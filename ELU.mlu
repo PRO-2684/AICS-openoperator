@@ -7372,8 +7372,8 @@ run_table512(uint16_t *p, int n) {
   }
 }
 
-static void transform(uint16_t *p, int n) {
-  if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("f16c")) {
+__attribute__((target("avx2,f16c"))) static void transform(uint16_t *p, int n) {
+  if (__builtin_cpu_supports("avx2")) {
     const __m256 c0 = _mm256_set1_ps(0.001010787526f);
     const __m256 c1 = _mm256_set1_ps(0.01692523899f);
     const __m256 c2 = _mm256_set1_ps(0.1185426107f);

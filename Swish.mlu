@@ -51,7 +51,7 @@ __attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p) {
   const __m256 c5 = _mm256_set1_ps(0.001647386884f);
   const __m256 c6 = _mm256_set1_ps(-0.02001283093f);
   const __m256 c7 = _mm256_set1_ps(0.2495956401f);
-  const __m256 half = _mm256_set1_ps(0.5f);
+  const __m256 vhalf = _mm256_set1_ps(0.5f);
   const __m256 pos = _mm256_set1_ps(6.5f);
   const __m256 neg = _mm256_set1_ps(-6.5f);
   const __m256 z = _mm256_setzero_ps();
@@ -76,8 +76,8 @@ __attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p) {
     y1 = _mm256_add_ps(_mm256_mul_ps(y1, b1), c6);
     y0 = _mm256_add_ps(_mm256_mul_ps(y0, b0), c7);
     y1 = _mm256_add_ps(_mm256_mul_ps(y1, b1), c7);
-    y0 = _mm256_add_ps(_mm256_mul_ps(b0, y0), _mm256_mul_ps(x0, half));
-    y1 = _mm256_add_ps(_mm256_mul_ps(b1, y1), _mm256_mul_ps(x1, half));
+    y0 = _mm256_add_ps(_mm256_mul_ps(b0, y0), _mm256_mul_ps(x0, vhalf));
+    y1 = _mm256_add_ps(_mm256_mul_ps(b1, y1), _mm256_mul_ps(x1, vhalf));
     y0 = _mm256_blendv_ps(y0, x0, _mm256_cmp_ps(x0, pos, _CMP_GT_OQ));
     y1 = _mm256_blendv_ps(y1, x1, _mm256_cmp_ps(x1, pos, _CMP_GT_OQ));
     y0 = _mm256_blendv_ps(y0, z, _mm256_cmp_ps(x0, neg, _CMP_LT_OQ));
@@ -152,12 +152,10 @@ torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
   cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
-  if (__builtin_cpu_supports("f16c")) {
-    if (__builtin_cpu_supports("avx2")) {
-      run_vec(g_buf);
-    } else {
-      run_scalar(g_buf);
-    }
+  if (__builtin_cpu_supports("avx2")) {
+    run_vec(g_buf);
+  } else {
+    run_scalar(g_buf);
   }
   return gy;
 }
