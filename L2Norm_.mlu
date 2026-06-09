@@ -100,5 +100,5 @@ torch::Tensor bang_func(torch::Tensor x) {
   } else {
     run_scalar(g_buf);
   }
-  return gy;
+  return std::move(gy);
 }
