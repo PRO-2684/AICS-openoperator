@@ -43,7 +43,7 @@ __mlu_entry__ void k0(half *__restrict__ x) {
     } else {
       __bang_active_gelu(a1, a1, n);
     }
-    __sync_io_move_compute();
+    __sync_io_move_compute(true, false, true, true, false, true);
     if (q == 0) {
       __memcpy_async(x + p, a0, n * sizeof(half), NRAM2GDRAM);
     } else {
