@@ -59,9 +59,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
         s[i * E1 + j] = v / d;
       }
     }
-    if (j + 1 < E1) {
-      __sync_cluster();
-    }
+    __sync_cluster();
   }
   if (c < 4) {
     int o = c * E3;
