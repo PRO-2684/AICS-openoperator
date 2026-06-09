@@ -14,8 +14,8 @@
 
 #define TOTAL_ELEMS 262144
 #define CHUNK_ELEMS 131072
-#define WORKER_ELEMS 87384
-#define MAIN_ELEMS 87376
+#define WORKER_ELEMS 65536
+#define MAIN_ELEMS 65536
 static int g_dev = 1;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
 static uint16_t *g_out = nullptr;
@@ -24,7 +24,6 @@ static std::atomic<int> g_epoch{0};
 static std::atomic<int> g_done{0};
 static std::atomic<int> g_ready{0};
 static int g_workers = 0;
-static int g_cpu_begin = 0;
 
 static void bind_host(int d) {
   setenv("OMP_NUM_THREADS", "1", 1);
@@ -33,19 +32,11 @@ static void bind_host(int d) {
   cpu_set_t set;
   CPU_ZERO(&set);
   int begin = d >= 4 ? 28 : 0;
-  g_cpu_begin = begin;
   for (int i = 0; i < 28; ++i) {
     CPU_SET(begin + i, &set);
   }
   sched_setaffinity(0, sizeof(set), &set);
   setpriority(PRIO_PROCESS, 0, -5);
-}
-
-static void bind_worker(int idx) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  CPU_SET(g_cpu_begin + 1 + idx, &set);
-  pthread_setaffinity_np(pthread_self(), sizeof(set), &set);
 }
 
 #if 0
@@ -7404,7 +7395,7 @@ static void start_workers() {
     return;
   }
   g_ready.store(0, std::memory_order_relaxed);
-  for (int i = 0; i < 2; ++i) {
+  for (int i = 0; i < 3; ++i) {
     pthread_t th;
     if (pthread_create(&th, nullptr, worker_entry,
                        reinterpret_cast<void *>(static_cast<intptr_t>(i))) ==
@@ -7419,12 +7410,12 @@ static void start_workers() {
 }
 
 static void run_work(uint16_t *p) {
-  if (g_workers == 2) {
+  if (g_workers == 3) {
     g_work = p;
     g_done.store(0, std::memory_order_relaxed);
     g_epoch.fetch_add(1, std::memory_order_release);
     run_formula(p, MAIN_ELEMS);
-    while (g_done.load(std::memory_order_acquire) != 2) {
+    while (g_done.load(std::memory_order_acquire) != 3) {
       _mm_pause();
     }
   } else {
