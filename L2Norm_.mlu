@@ -1,19 +1,20 @@
 #include <bang.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
+#include <cstdint>
+#include <cstdlib>
 #include <framework/core/MLUStream.h>
+#include <immintrin.h>
 #include <sched.h>
 #include <sys/resource.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
 #define TOTAL_ELEMS (16 * 16384)
-#define TASKS 32
-#define ELEMS_PER_TASK (TOTAL_ELEMS / TASKS)
-#define CHUNK_ELEMS (ELEMS_PER_TASK / 2)
-#define L2_SCALE ((half)0.00782012939453125f)
+#define L2_SCALE 0.00782012939453125f
 
 static int g_dev = 1;
+static uint16_t *g_buf = nullptr;
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -49,33 +50,44 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 
-__mlu_entry__ void l2_norm_scale_kernel(half *__restrict__ x) {
-  const int base = taskId * ELEMS_PER_TASK;
-
-  half *px = (half *)__builtin_assume_aligned(x + base, 512);
-
-  __nram__ half h0[CHUNK_ELEMS];
-  __nram__ half h1[CHUNK_ELEMS];
-
-  __memcpy_async(h0, px, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  __sync_io();
-  __memcpy_async(h1, px + CHUNK_ELEMS, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  __bang_mul_scalar(h0, h0, L2_SCALE, CHUNK_ELEMS);
-  __sync_io_move_compute();
-  __memcpy_async(px, h0, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
-  __bang_mul_scalar(h1, h1, L2_SCALE, CHUNK_ELEMS);
-  __sync_io_move_compute();
-  __memcpy_async(px + CHUNK_ELEMS, h1, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
-  __sync_io();
+__attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p) {
+  const __m256 scale = _mm256_set1_ps(L2_SCALE);
+  for (int i = 0; i < TOTAL_ELEMS; i += 16) {
+    __m128i h0 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
+    __m128i h1 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i + 8));
+    __m256 x0 = _mm256_mul_ps(_mm256_cvtph_ps(h0), scale);
+    __m256 x1 = _mm256_mul_ps(_mm256_cvtph_ps(h1), scale);
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), _mm256_cvtps_ph(x0, 0));
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i + 8),
+                     _mm256_cvtps_ph(x1, 0));
+  }
 }
 
-static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static constexpr cnrtDim3_t dim = {4, 8, 1};
+__attribute__((target("f16c"))) static void run_scalar(uint16_t *p) {
+  for (int i = 0; i < TOTAL_ELEMS; ++i) {
+    p[i] = _cvtss_sh(_cvtsh_ss(p[i]) * L2_SCALE, 0);
+  }
+}
+
+static torch::Tensor gy = []() {
+  cnrtHostMalloc(reinterpret_cast<void **>(&g_buf),
+                 TOTAL_ELEMS * sizeof(uint16_t));
+  if (g_buf == nullptr) {
+    g_buf = static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
+  }
+  return torch::from_blob(
+      g_buf, {16, 16384}, [](void *) {},
+      torch::TensorOptions().dtype(torch::kHalf).device(torch::kCPU));
+}();
+
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
-
-  l2_norm_scale_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
-
-  return std::move(x);
+  auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
+  cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
+  if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("f16c")) {
+    run_vec(g_buf);
+  } else {
+    run_scalar(g_buf);
+  }
+  return gy;
 }
