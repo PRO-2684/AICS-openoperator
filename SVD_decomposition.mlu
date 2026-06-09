@@ -76,10 +76,11 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
 
   __nram__ float x[E1 * E2];
   __nram__ float z[E1 * E2];
-  __nram__ float gm[E2 * E2];
   __nram__ float ev[E2];
   __nram__ float iv[E2];
   __nram__ float t0[E1];
+  __nram__ float t1[E1];
+  __nram__ float t2[E1];
   __nram__ half h0[E1 * E2];
   __nram__ half h1[E1 * E2];
 
@@ -93,53 +94,46 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
   __bang_transpose(h1, h0, E1, E2);
   __bang_half2float(z, h1, E1 * E2);
   for (int i = 0; i < E2; ++i) {
-    for (int j = i; j < E2; ++j) {
-      __bang_mul(t0, z + i * E1, z + j * E1, E1);
-      __bang_reduce_sum(t0, t0, E1);
-      float r = t0[0] + t0[32] + t0[64] + t0[96];
-      gm[i * E2 + j] = r;
-      gm[j * E2 + i] = r;
-    }
+    __bang_mul(t0, z + i * E1, z + i * E1, E1);
+    __bang_reduce_sum(t0, t0, E1);
+    ev[i] = t0[0] + t0[32] + t0[64] + t0[96];
   }
 
   for (int sweep = 0; sweep < 6; ++sweep) {
-    for (int p = 0; p < E2 - 1; ++p) {
+    int pe = sweep < 5 ? E2 - 1 : 13;
+    for (int p = 0; p < pe; ++p) {
       for (int q = p + 1; q < E2; ++q) {
-        float apq = gm[p * E2 + q];
+        __bang_mul(t0, z + p * E1, z + q * E1, E1);
+        __bang_reduce_sum(t0, t0, E1);
+        float apq = t0[0] + t0[32] + t0[64] + t0[96];
         if (fabsf(apq) > 0.000001f) {
-          float app = gm[p * E2 + p];
-          float aqq = gm[q * E2 + q];
+          float app = ev[p];
+          float aqq = ev[q];
           float tau = (aqq - app) / (2.0f * apq);
           float st = tau >= 0.0f ? 1.0f : -1.0f;
           float tt = st / (fabsf(tau) + sqrtf(1.0f + tau * tau));
           float cc = 1.0f / sqrtf(1.0f + tt * tt);
           float ss = tt * cc;
-          for (int k = 0; k < E2; ++k) {
-            if (k != p && k != q) {
-              float kp = gm[k * E2 + p];
-              float kq = gm[k * E2 + q];
-              float np = cc * kp - ss * kq;
-              float nq = ss * kp + cc * kq;
-              gm[k * E2 + p] = np;
-              gm[p * E2 + k] = np;
-              gm[k * E2 + q] = nq;
-              gm[q * E2 + k] = nq;
-            }
-          }
+          __bang_mul_scalar(t0, z + p * E1, cc, E1);
+          __bang_mul_scalar(t1, z + q * E1, ss, E1);
+          __bang_sub(t0, t0, t1, E1);
+          __bang_mul_scalar(t1, z + q * E1, cc, E1);
+          __bang_mul_scalar(t2, z + p * E1, ss, E1);
+          __bang_add(t1, t1, t2, E1);
+          __memcpy(z + p * E1, t0, E1 * sizeof(float), NRAM2NRAM);
+          __memcpy(z + q * E1, t1, E1 * sizeof(float), NRAM2NRAM);
           float c2 = cc * cc;
           float s2 = ss * ss;
           float cs = cc * ss;
-          gm[p * E2 + p] = c2 * app - 2.0f * cs * apq + s2 * aqq;
-          gm[q * E2 + q] = s2 * app + 2.0f * cs * apq + c2 * aqq;
-          gm[p * E2 + q] = 0.0f;
-          gm[q * E2 + p] = 0.0f;
+          ev[p] = c2 * app - 2.0f * cs * apq + s2 * aqq;
+          ev[q] = s2 * app + 2.0f * cs * apq + c2 * aqq;
         }
       }
     }
   }
 
   for (int i = 0; i < E2; ++i) {
-    float r = gm[i * E2 + i];
+    float r = ev[i];
     ev[i] = r > 0.0f ? sqrtf(r) : 0.0f;
   }
   for (int i = 0; i < E2 - 1; ++i) {
