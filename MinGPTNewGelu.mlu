@@ -28,14 +28,16 @@ __mlu_entry__ void k0(half *__restrict__ x) {
       __bang_write_value(a + n, m - n, (half)0.0f);
     }
     __bang_mul(b, a, a, m);
-    __bang_mul_scalar(c, b, (half)0.00278091431f, m);
-    __bang_add_scalar(c, c, (half)-0.0467529297f, m);
+    __bang_mul_scalar(c, b, (half)-0.000245809555f, m);
+    __bang_add_scalar(c, c, (half)0.00580596924f, m);
     __bang_mul(c, c, b, m);
-    __bang_add_scalar(c, c, (half)0.381347656f, m);
+    __bang_add_scalar(c, c, (half)-0.0579223633f, m);
+    __bang_mul(c, c, b, m);
+    __bang_add_scalar(c, c, (half)0.392822266f, m);
     __bang_mul(c, c, b, m);
     __bang_fusion(FUSION_FMA, c, a, (half)0.5f, c, m, m);
-    __bang_gt_scalar(d, a, (half)2.6f, m);
-    __bang_lt_scalar(e, a, (half)-2.6f, m);
+    __bang_gt_scalar(d, a, (half)2.8f, m);
+    __bang_lt_scalar(e, a, (half)-2.8f, m);
     __bang_add(e, e, d, m);
     __bang_mul_scalar(e, e, (half)-1.0f, m);
     __bang_add_scalar(e, e, (half)1.0f, m);
