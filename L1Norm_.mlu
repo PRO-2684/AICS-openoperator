@@ -13,14 +13,14 @@
 static int g_dev = 1;
 
 static void bind_host(int d) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  int end = begin + 28;
-  for (int i = begin; i < end; ++i) {
-    CPU_SET(i, &set);
-  }
-  sched_setaffinity(0, sizeof(set), &set);
+  // cpu_set_t set;
+  // CPU_ZERO(&set);
+  // int begin = d >= 4 ? 28 : 0;
+  // int end = begin + 28;
+  // for (int i = begin; i < end; ++i) {
+  //   CPU_SET(i, &set);
+  // }
+  // sched_setaffinity(0, sizeof(set), &set);
   setpriority(PRIO_PROCESS, 0, -5);
 }
 
@@ -50,7 +50,6 @@ static torch::Tensor g0 = []() {
   //   t = torch::from_blob(static_cast<void *>(&g_zero_half_bits), {16, i + 1},
   //                        {0, 0}, opt);
   // }
-  torch_mlu::synchronize();
   return t;
 }();
 
@@ -58,7 +57,6 @@ static torch::Tensor gy = []() {
   auto opt = torch::TensorOptions().dtype(torch::kHalf).device(torch::kCPU);
   auto t = torch::from_blob(static_cast<void *>(&g_zero_half_bits), {16, 16384},
                             {0, 0}, opt);
-  torch_mlu::synchronize();
 
   return t;
 }();
