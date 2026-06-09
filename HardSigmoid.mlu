@@ -7418,6 +7418,20 @@ static void start_workers() {
   }
 }
 
+static void run_work(uint16_t *p) {
+  if (g_workers == 2) {
+    g_work = p;
+    g_done.store(0, std::memory_order_relaxed);
+    g_epoch.fetch_add(1, std::memory_order_release);
+    run_formula(p, MAIN_ELEMS);
+    while (g_done.load(std::memory_order_acquire) != 2) {
+      _mm_pause();
+    }
+  } else {
+    run_formula(p, TOTAL_ELEMS);
+  }
+}
+
 #if 0
 static void run_table(uint16_t *p, int n) {
   const uint16_t *t = g_tbl;
@@ -7540,6 +7554,9 @@ struct InitRuntime {
         }
         start_workers();
         warm_host();
+        if (g_out != nullptr) {
+          run_work(g_out);
+        }
         g_dev = d;
       }
     }
@@ -7567,16 +7584,6 @@ torch::Tensor bang_func(torch::Tensor x) {
 
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
   cnrtMemcpy(g_out, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
-  if (g_workers == 2) {
-    g_work = g_out;
-    g_done.store(0, std::memory_order_relaxed);
-    g_epoch.fetch_add(1, std::memory_order_release);
-    run_formula(g_out, MAIN_ELEMS);
-    while (g_done.load(std::memory_order_acquire) != 2) {
-      _mm_pause();
-    }
-  } else {
-    run_formula(g_out, TOTAL_ELEMS);
-  }
+  run_work(g_out);
   return g_y;
 }
