@@ -4246,8 +4246,7 @@ __attribute__((target("avx2,f16c,fma"))) static void run_formula256(uint16_t *p,
 }
 
 static void transform(uint16_t *p, int n) {
-  if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma") &&
-      __builtin_cpu_supports("f16c")) {
+  if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma")) {
     run_formula256(p, n);
   } else if (__builtin_cpu_supports("avx512f") &&
       __builtin_cpu_supports("avx512bw") &&
