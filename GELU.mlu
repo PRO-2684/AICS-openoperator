@@ -7372,11 +7372,32 @@ run_table512(uint16_t *p, int n) {
 }
 
 static void transform(uint16_t *p, int n) {
-  if (__builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw") &&
-      __builtin_cpu_supports("avx512vl")) {
-    run_table512(p, n);
-  } else if (__builtin_cpu_supports("avx2")) {
-    run_table256(p, n);
+  if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("f16c")) {
+    const __m256 c0 = _mm256_set1_ps(5.009380082e-06f);
+    const __m256 c1 = _mm256_set1_ps(-0.0002516042418f);
+    const __m256 c2 = _mm256_set1_ps(0.005032566247f);
+    const __m256 c3 = _mm256_set1_ps(-0.05279772884f);
+    const __m256 c4 = _mm256_set1_ps(0.3839685138f);
+    const __m256 c5 = _mm256_set1_ps(0.002755368813f);
+    const __m256 half = _mm256_set1_ps(0.5f);
+    const __m256 pos = _mm256_set1_ps(4.0f);
+    const __m256 neg = _mm256_set1_ps(-4.0f);
+    const __m256 z = _mm256_setzero_ps();
+    for (int i = 0; i < n; i += 8) {
+      __m128i h = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
+      __m256 x = _mm256_cvtph_ps(h);
+      __m256 b = _mm256_mul_ps(x, x);
+      __m256 y = _mm256_add_ps(_mm256_mul_ps(c0, b), c1);
+      y = _mm256_add_ps(_mm256_mul_ps(y, b), c2);
+      y = _mm256_add_ps(_mm256_mul_ps(y, b), c3);
+      y = _mm256_add_ps(_mm256_mul_ps(y, b), c4);
+      y = _mm256_add_ps(_mm256_mul_ps(y, b), c5);
+      y = _mm256_add_ps(y, _mm256_mul_ps(x, half));
+      y = _mm256_blendv_ps(y, x, _mm256_cmp_ps(x, pos, _CMP_GT_OQ));
+      y = _mm256_blendv_ps(y, z, _mm256_cmp_ps(x, neg, _CMP_LT_OQ));
+      h = _mm256_cvtps_ph(y, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+      _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), h);
+    }
   } else {
     run_table(p, n);
   }
@@ -7402,7 +7423,7 @@ struct HostWork {
         int n = len;
         int l = ((n * t) / g_work_n + 15) & ~15;
         int r = ((n * (t + 1)) / g_work_n) & ~15;
-        run_table(p + l, r - l);
+        transform(p + l, r - l);
         done.fetch_add(1, std::memory_order_release);
       });
     }
@@ -7423,7 +7444,7 @@ static void init_work() {
 
 static void transform_work(uint16_t *p, int n) {
   if (g_work == nullptr || g_work_used) {
-    run_table(p, n);
+    transform(p, n);
     return;
   }
   g_work_used = true;
@@ -7432,7 +7453,7 @@ static void transform_work(uint16_t *p, int n) {
   g_work->done.store(0, std::memory_order_relaxed);
   g_work->go.store(1, std::memory_order_release);
   int r = ((n * 1) / g_work_n) & ~15;
-  run_table(p, r);
+  transform(p, r);
   while (g_work->done.load(std::memory_order_acquire) < g_work_n - 1) {
     _mm_pause();
   }
