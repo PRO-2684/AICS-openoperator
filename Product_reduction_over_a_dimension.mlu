@@ -38,10 +38,9 @@ __attribute__((constructor(101))) static void init_runtime() {
 }
 static torch::Tensor gy = []() {
   auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  auto out = torch::empty({16, 256}, opt);
-  cnrtMemset(out.data_ptr<at::Half>(), 0, 4096 * sizeof(at::Half));
+  auto out = torch::zeros({16, 256}, opt);
+  // cnrtMemset(out.data_ptr<at::Half>(), 0, 4096 * sizeof(at::Half));
   return out;
 }();
 
