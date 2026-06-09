@@ -14,7 +14,7 @@
 #define CHUNK_ELEMS 262144
 static int g_dev = 0;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
-static constexpr int g_work_n = 4;
+static constexpr int g_work_n = 8;
 
 static void bind_host(int d) {
   cpu_set_t s;
@@ -4184,13 +4184,116 @@ run_table512(uint16_t *p, int n) {
   }
 }
 
+__attribute__((target("avx2,f16c,fma"))) static void run_vec256(uint16_t *p,
+                                                                int n) {
+  const __m256 c0 = _mm256_set1_ps(0.00000000156956714f);
+  const __m256 c2 = _mm256_set1_ps(0.398942235f);
+  const __m256 c4 = _mm256_set1_ps(-0.0664901584f);
+  const __m256 c6 = _mm256_set1_ps(0.00997313463f);
+  const __m256 c8 = _mm256_set1_ps(-0.00118690865f);
+  const __m256 c10 = _mm256_set1_ps(0.000115185206f);
+  const __m256 c12 = _mm256_set1_ps(-0.00000934856791f);
+  const __m256 c14 = _mm256_set1_ps(0.000000640816833f);
+  const __m256 c16 = _mm256_set1_ps(-0.0000000366174575f);
+  const __m256 c18 = _mm256_set1_ps(0.00000000167161271f);
+  const __m256 c20 = _mm256_set1_ps(-0.0000000000563666437f);
+  const __m256 c22 = _mm256_set1_ps(0.00000000000122583986f);
+  const __m256 c24 = _mm256_set1_ps(-0.0000000000000126965431f);
+  const __m256 half = _mm256_set1_ps(0.5f);
+  const __m256 pos = _mm256_set1_ps(3.5f);
+  const __m256 neg = _mm256_set1_ps(-3.5f);
+  const __m256 z = _mm256_setzero_ps();
+  for (int i = 0; i < n; i += 16) {
+    __m128i h0 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
+    __m128i h1 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i + 8));
+    __m256 x0 = _mm256_cvtph_ps(h0);
+    __m256 x1 = _mm256_cvtph_ps(h1);
+    __m256 b0 = _mm256_mul_ps(x0, x0);
+    __m256 b1 = _mm256_mul_ps(x1, x1);
+    __m256 y0 = _mm256_fmadd_ps(c24, b0, c22);
+    __m256 y1 = _mm256_fmadd_ps(c24, b1, c22);
+    y0 = _mm256_fmadd_ps(y0, b0, c20);
+    y1 = _mm256_fmadd_ps(y1, b1, c20);
+    y0 = _mm256_fmadd_ps(y0, b0, c18);
+    y1 = _mm256_fmadd_ps(y1, b1, c18);
+    y0 = _mm256_fmadd_ps(y0, b0, c16);
+    y1 = _mm256_fmadd_ps(y1, b1, c16);
+    y0 = _mm256_fmadd_ps(y0, b0, c14);
+    y1 = _mm256_fmadd_ps(y1, b1, c14);
+    y0 = _mm256_fmadd_ps(y0, b0, c12);
+    y1 = _mm256_fmadd_ps(y1, b1, c12);
+    y0 = _mm256_fmadd_ps(y0, b0, c10);
+    y1 = _mm256_fmadd_ps(y1, b1, c10);
+    y0 = _mm256_fmadd_ps(y0, b0, c8);
+    y1 = _mm256_fmadd_ps(y1, b1, c8);
+    y0 = _mm256_fmadd_ps(y0, b0, c6);
+    y1 = _mm256_fmadd_ps(y1, b1, c6);
+    y0 = _mm256_fmadd_ps(y0, b0, c4);
+    y1 = _mm256_fmadd_ps(y1, b1, c4);
+    y0 = _mm256_fmadd_ps(y0, b0, c2);
+    y1 = _mm256_fmadd_ps(y1, b1, c2);
+    y0 = _mm256_fmadd_ps(y0, b0, c0);
+    y1 = _mm256_fmadd_ps(y1, b1, c0);
+    y0 = _mm256_add_ps(y0, _mm256_mul_ps(x0, half));
+    y1 = _mm256_add_ps(y1, _mm256_mul_ps(x1, half));
+    y0 = _mm256_blendv_ps(y0, x0, _mm256_cmp_ps(x0, pos, _CMP_GT_OQ));
+    y1 = _mm256_blendv_ps(y1, x1, _mm256_cmp_ps(x1, pos, _CMP_GT_OQ));
+    y0 = _mm256_blendv_ps(y0, z, _mm256_cmp_ps(x0, neg, _CMP_LT_OQ));
+    y1 = _mm256_blendv_ps(y1, z, _mm256_cmp_ps(x1, neg, _CMP_LT_OQ));
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), _mm256_cvtps_ph(y0, 0));
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i + 8),
+                     _mm256_cvtps_ph(y1, 0));
+  }
+}
+
+__attribute__((target("avx512f,f16c,fma"))) static void run_vec512(uint16_t *p,
+                                                                   int n) {
+  const __m512 c0 = _mm512_set1_ps(0.00000000156956714f);
+  const __m512 c2 = _mm512_set1_ps(0.398942235f);
+  const __m512 c4 = _mm512_set1_ps(-0.0664901584f);
+  const __m512 c6 = _mm512_set1_ps(0.00997313463f);
+  const __m512 c8 = _mm512_set1_ps(-0.00118690865f);
+  const __m512 c10 = _mm512_set1_ps(0.000115185206f);
+  const __m512 c12 = _mm512_set1_ps(-0.00000934856791f);
+  const __m512 c14 = _mm512_set1_ps(0.000000640816833f);
+  const __m512 c16 = _mm512_set1_ps(-0.0000000366174575f);
+  const __m512 c18 = _mm512_set1_ps(0.00000000167161271f);
+  const __m512 c20 = _mm512_set1_ps(-0.0000000000563666437f);
+  const __m512 c22 = _mm512_set1_ps(0.00000000000122583986f);
+  const __m512 c24 = _mm512_set1_ps(-0.0000000000000126965431f);
+  const __m512 half = _mm512_set1_ps(0.5f);
+  const __m512 pos = _mm512_set1_ps(3.5f);
+  const __m512 neg = _mm512_set1_ps(-3.5f);
+  const __m512 z = _mm512_setzero_ps();
+  for (int i = 0; i < n; i += 16) {
+    __m256i h = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p + i));
+    __m512 x = _mm512_cvtph_ps(h);
+    __m512 b = _mm512_mul_ps(x, x);
+    __m512 y = _mm512_fmadd_ps(c24, b, c22);
+    y = _mm512_fmadd_ps(y, b, c20);
+    y = _mm512_fmadd_ps(y, b, c18);
+    y = _mm512_fmadd_ps(y, b, c16);
+    y = _mm512_fmadd_ps(y, b, c14);
+    y = _mm512_fmadd_ps(y, b, c12);
+    y = _mm512_fmadd_ps(y, b, c10);
+    y = _mm512_fmadd_ps(y, b, c8);
+    y = _mm512_fmadd_ps(y, b, c6);
+    y = _mm512_fmadd_ps(y, b, c4);
+    y = _mm512_fmadd_ps(y, b, c2);
+    y = _mm512_fmadd_ps(y, b, c0);
+    y = _mm512_add_ps(y, _mm512_mul_ps(x, half));
+    y = _mm512_mask_blend_ps(_mm512_cmp_ps_mask(x, pos, _CMP_GT_OQ), y, x);
+    y = _mm512_mask_blend_ps(_mm512_cmp_ps_mask(x, neg, _CMP_LT_OQ), y, z);
+    h = _mm512_cvtps_ph(y, 0);
+    _mm256_storeu_si256(reinterpret_cast<__m256i *>(p + i), h);
+  }
+}
+
 static void transform(uint16_t *p, int n) {
-  if (__builtin_cpu_supports("avx512f") &&
-      __builtin_cpu_supports("avx512bw") &&
-      __builtin_cpu_supports("avx512vl")) {
-    run_table512(p, n);
-  } else if (__builtin_cpu_supports("avx2")) {
-    run_table256(p, n);
+  if (__builtin_cpu_supports("avx512f")) {
+    run_vec512(p, n);
+  } else if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma")) {
+    run_vec256(p, n);
   } else {
     run_table(p, n);
   }
@@ -4216,7 +4319,7 @@ struct HostWork {
         int n = len;
         int l = ((n * t) / g_work_n + 15) & ~15;
         int r = ((n * (t + 1)) / g_work_n) & ~15;
-        run_table(p + l, r - l);
+        transform(p + l, r - l);
         done.fetch_add(1, std::memory_order_release);
       });
     }
@@ -4237,7 +4340,7 @@ static void init_work() {
 
 static void transform_work(uint16_t *p, int n) {
   if (g_work == nullptr || g_work_used) {
-    run_table(p, n);
+    transform(p, n);
     return;
   }
   g_work_used = true;
@@ -4246,7 +4349,7 @@ static void transform_work(uint16_t *p, int n) {
   g_work->done.store(0, std::memory_order_relaxed);
   g_work->go.store(1, std::memory_order_release);
   int r = ((n * 1) / g_work_n) & ~15;
-  run_table(p, r);
+  transform(p, r);
   while (g_work->done.load(std::memory_order_acquire) < g_work_n - 1) {
     _mm_pause();
   }
@@ -4291,7 +4394,6 @@ struct InitRuntime {
                 static_cast<uint16_t *>(std::malloc(CHUNK_ELEMS * sizeof(uint16_t)));
           }
         }
-        init_tbl32();
         init_work();
         warm_host();
         g_dev = d;
