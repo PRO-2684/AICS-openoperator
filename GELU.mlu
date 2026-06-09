@@ -13,7 +13,7 @@
 
 #define TOTAL_ELEMS 262144
 #define CHUNK_ELEMS 262144
-static int g_dev = 0;
+static int g_dev = 1;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
 static constexpr int g_work_n = 4;
 

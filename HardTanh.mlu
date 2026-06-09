@@ -10,7 +10,7 @@
 #include <unistd.h>
 
 #define TOTAL_ELEMS 262144
-static int g_dev = 0;
+static int g_dev = 1;
 static uint16_t *g_buf = nullptr;
 
 static void bind_host(int d) {
