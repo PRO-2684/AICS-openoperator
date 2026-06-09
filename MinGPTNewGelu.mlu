@@ -1,5 +1,6 @@
 #include <bang.h>
 #include <cnrt.h>
+#include <cstdio>
 #include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
@@ -27,7 +28,19 @@ __mlu_entry__ void k0(half *__restrict__ x) {
 torch::Tensor bang_func(torch::Tensor x) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {E2, 1, 1};
+  cnrtNotifier_t s = nullptr;
+  cnrtNotifier_t e = nullptr;
+  cnrtNotifierCreate(&s);
+  cnrtNotifierCreate(&e);
+  cnrtPlaceNotifier(s, queue);
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
+  cnrtPlaceNotifier(e, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(s, e, &us);
+  std::fprintf(stderr, "NOTIFY_US %.3f\n", us);
+  cnrtNotifierDestroy(s);
+  cnrtNotifierDestroy(e);
   return x;
 }
