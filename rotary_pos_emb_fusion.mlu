@@ -53,7 +53,9 @@ static torch::Tensor z = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
+  auto a = torch::empty({E0}, opt);
+  auto b = torch::empty({E0}, opt);
+  return a + b;
 }();
 
 static torch::Tensor qo = []() {
