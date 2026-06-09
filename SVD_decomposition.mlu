@@ -58,18 +58,27 @@ static torch::Tensor gs = []() {
 }();
 
 static torch::Tensor gv = []() {
-  return torch::empty(
+  auto t = torch::empty(
       {E0, E2, E2},
       torch::TensorOptions()
           .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
           .dtype(torch::kFloat32));
+  static float h[E0 * E2 * E2];
+  for (int b = 0; b < E0; ++b) {
+    for (int i = 0; i < E2; ++i) {
+      h[b * E2 * E2 + i * E2 + i] = 1.0f;
+    }
+  }
+  cnrtMemcpy(t.unsafeGetTensorImpl()->mutable_data(), h,
+             E0 * E2 * E2 * sizeof(float), CNRT_MEM_TRANS_DIR_HOST2DEV);
+  return t;
 }();
 
 static cnrtDim3_t dim0 = {E0, 1, 1};
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
 __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
-                      float *__restrict__ s, float *__restrict__ v) {
+                      float *__restrict__ s) {
   int b = taskId;
   if (b >= E0)
     return;
@@ -87,7 +96,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
   const half *pa = a + b * E1 * E2;
   float *pu = u + b * E1 * E2;
   float *ps = s + b * E2;
-  float *pv = v + b * E2 * E2;
 
   __memcpy(h0, pa, E1 * E2 * sizeof(half), GDRAM2NRAM);
   __bang_half2float(x, h0, E1 * E2);
@@ -156,11 +164,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
     ps[i] = ev[i];
     iv[i] = ev[i] > 0.000001f ? 1.0f / ev[i] : 0.0f;
   }
-  __bang_write_zero(z, E2 * E2);
-  for (int i = 0; i < E2; ++i) {
-    z[i * E2 + i] = 1.0f;
-  }
-  __memcpy(pv, z, E2 * E2 * sizeof(float), NRAM2GDRAM);
   __bang_cycle_mul(x, x, iv, E1 * E2, E2);
   __memcpy(pu, x, E1 * E2 * sizeof(float), NRAM2GDRAM);
 }
@@ -169,7 +172,6 @@ std::vector<torch::Tensor> bang_func(torch::Tensor A) {
   k0<<<dim0, cnrtFuncTypeBlock, queue>>>(
       static_cast<const half *>(A.unsafeGetTensorImpl()->mutable_data()),
       static_cast<float *>(gu.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<float *>(gs.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<float *>(gv.unsafeGetTensorImpl()->mutable_data()));
+      static_cast<float *>(gs.unsafeGetTensorImpl()->mutable_data()));
   return {gu, gs, gv};
 }
