@@ -1,13 +1,12 @@
 #include <bang.h>
-#include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
 #define E0 4096
-
 
 static int g_dev = 0;
 
@@ -21,7 +20,6 @@ static void bind_host(int d) {
   }
   sched_setaffinity(0, sizeof(set), &set);
 }
-
 
 __attribute__((constructor(101))) static void init_runtime() {
   unsigned int n = 0;
