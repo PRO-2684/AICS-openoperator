@@ -11,7 +11,7 @@
 #define E2 (E1 * E1)
 #define E3 27
 #define E4 16
-#define E5 64
+#define E5 48
 #define F0(d, s)                                                              \
   __memcpy(d, s, E1 * sizeof(half), NRAM2NRAM, E1 * sizeof(half), m - 1,      \
            E1 * E5 * sizeof(half), 2, 256 * sizeof(half), m - 1,              \
@@ -63,21 +63,21 @@ static torch::Tensor gy = []() {
 }();
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static cnrtDim3_t dim0 = {16, 4, 2};
+static cnrtDim3_t dim0 = {16, 3, 6};
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[256 * (E5 + 2)];
   __nram__ half b[E1 * E5 * 18];
-  int total = E4 * 3 * 4;
+  int total = E4 * 3 * 6;
   int z = 0;
   for (int g = taskId; g < total; g += taskDim) {
     half *d = b + (z & 1) * E1 * E5 * 9;
-    int h = g & 3;
-    int u = g >> 2;
+    int h = g % 6;
+    int u = g / 6;
     int c = u % 3;
     int n = u / 3;
     int r = h * E5;
-    int m = h == 3 ? 62 : E5;
+    int m = h == 5 ? 14 : E5;
     const half *src = x + ((n * 3 + c) * 256 + r) * 256;
     __memcpy(a, src, 256 * (m + 2) * sizeof(half), GDRAM2NRAM);
     int p = n * E3 + c * 9;
