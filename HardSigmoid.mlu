@@ -20,7 +20,9 @@ static uint16_t *g_out = nullptr;
 static uint16_t *g_work = nullptr;
 static std::atomic<int> g_epoch{0};
 static std::atomic<int> g_done{0};
+static std::atomic<int> g_ready{0};
 static int g_workers = 0;
+static int g_cpu_begin = 0;
 
 static void bind_host(int d) {
   setenv("OMP_NUM_THREADS", "1", 1);
@@ -29,6 +31,7 @@ static void bind_host(int d) {
   cpu_set_t set;
   CPU_ZERO(&set);
   int begin = d >= 4 ? 28 : 0;
+  g_cpu_begin = begin;
   for (int i = 0; i < 28; ++i) {
     CPU_SET(begin + i, &set);
   }
@@ -36,6 +39,7 @@ static void bind_host(int d) {
   setpriority(PRIO_PROCESS, 0, -5);
 }
 
+#if 0
 alignas(64) static const uint16_t g_tbl_const[65536] = {
     0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800,
     0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800,
@@ -7350,6 +7354,7 @@ __attribute__((target("f16c"))) static void init_small_tbl() {
   }
   g_small_ready = true;
 }
+#endif
 
 __attribute__((target("avx2,f16c,fma"))) static void run_formula(uint16_t *p,
                                                                  int n) {
@@ -7399,6 +7404,7 @@ static void start_workers() {
   }
 }
 
+#if 0
 static void run_table(uint16_t *p, int n) {
   const uint16_t *t = g_tbl;
   for (int i = 0; i < n; i += 8) {
@@ -7465,6 +7471,7 @@ static void run_small_table(uint16_t *p, int n) {
     p[i + 15] = map_small(vf);
   }
 }
+#endif
 
 static volatile uint32_t g_sink = 0;
 
