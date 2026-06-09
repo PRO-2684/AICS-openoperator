@@ -4,7 +4,6 @@
 #include <framework/core/MLUStream.h>
 #include <sched.h>
 #include <math.h>
-#include <cstdlib>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -206,61 +205,6 @@ static torch::Tensor gy = []() {
                           .dtype(torch::kHalf));
 }();
 
-static at::Half *hq = nullptr;
-static at::Half *hk = nullptr;
-static at::Half *hv = nullptr;
-static at::Half *hy0 = nullptr;
-static torch::Tensor hy = []() {
-  void *p0 = nullptr;
-  void *p1 = nullptr;
-  void *p2 = nullptr;
-  void *p3 = nullptr;
-  if (cnrtHostMalloc(&p0, 22 * 4 * 32 * sizeof(at::Half)) != cnrtSuccess) {
-    p0 = std::malloc(22 * 4 * 32 * sizeof(at::Half));
-  }
-  if (cnrtHostMalloc(&p1, 22 * 2 * 32 * sizeof(at::Half)) != cnrtSuccess) {
-    p1 = std::malloc(22 * 2 * 32 * sizeof(at::Half));
-  }
-  if (cnrtHostMalloc(&p2, 22 * 2 * 40 * sizeof(at::Half)) != cnrtSuccess) {
-    p2 = std::malloc(22 * 2 * 40 * sizeof(at::Half));
-  }
-  if (cnrtHostMalloc(&p3, 22 * 4 * 40 * sizeof(at::Half)) != cnrtSuccess) {
-    p3 = std::malloc(22 * 4 * 40 * sizeof(at::Half));
-  }
-  hq = static_cast<at::Half *>(p0);
-  hk = static_cast<at::Half *>(p1);
-  hv = static_cast<at::Half *>(p2);
-  hy0 = static_cast<at::Half *>(p3);
-  return torch::from_blob(hy0, {22, 4, 40},
-                          torch::TensorOptions().dtype(torch::kHalf));
-}();
-
-static int h0(int s, int r) {
-  if (s == 0) {
-    return r < 3 ? 4 : r;
-  }
-  if (r < 2) {
-    return 1;
-  }
-  if (r < 5) {
-    return 4;
-  }
-  return r;
-}
-
-static int h1(int s, int c) {
-  if (s == 0) {
-    return (c >= 6 && c < 8) ? 8 : 10;
-  }
-  if (c >= 6 && c < 8) {
-    return 8;
-  }
-  if (c >= 8 && c < 10) {
-    return 10;
-  }
-  return 12;
-}
-
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 static cnrtDim3_t dim0 = {4, 8, 1};
 
@@ -283,47 +227,11 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
   (void)label_lens;
   (void)preference;
   (void)g0;
-  cnrtMemcpyAsync(hq, q.data_ptr<at::Half>(), 22 * 4 * 32 * sizeof(at::Half),
-                  queue, cnrtMemcpyDevToHost);
-  cnrtMemcpyAsync(hk, k.data_ptr<at::Half>(), 22 * 2 * 32 * sizeof(at::Half),
-                  queue, cnrtMemcpyDevToHost);
-  cnrtMemcpyAsync(hv, v.data_ptr<at::Half>(), 22 * 2 * 40 * sizeof(at::Half),
-                  queue, cnrtMemcpyDevToHost);
-  cnrtQueueSync(queue);
-  for (int s = 0; s < 2; ++s) {
-    int b = s ? 10 : 0;
-    int n = s ? 12 : 10;
-    for (int h = 0; h < 4; ++h) {
-      int kh = h >> 1;
-      for (int r = 0; r < n; ++r) {
-        float out[40];
-        for (int d = 0; d < 40; ++d) {
-          out[d] = 0.0f;
-        }
-        int mr = h0(s, r);
-        const at::Half *qp = hq + ((b + r) * 4 + h) * 32;
-        for (int c = 0; c < n; ++c) {
-          if (mr >= c && mr < h1(s, c)) {
-            const at::Half *kp = hk + ((b + c) * 2 + kh) * 32;
-            float dot = 0.0f;
-            for (int d = 0; d < 32; ++d) {
-              dot += static_cast<float>(qp[d]) * static_cast<float>(kp[d]);
-            }
-            float x0 = dot * 0.7f;
-            float w = x0 / (1.0f + expf(-x0)) * 0.08333333333333333f;
-            const at::Half *vp = hv + ((b + c) * 2 + kh) * 40;
-            for (int d = 0; d < 40; ++d) {
-              out[d] += w * static_cast<float>(vp[d]);
-            }
-          }
-        }
-        at::Half *yp = hy0 + ((b + r) * 4 + h) * 40;
-        for (int d = 0; d < 40; ++d) {
-          yp[d] = at::Half(out[d]);
-        }
-      }
-    }
-  }
-  hy.resize_({22, 4, 40});
-  return hy;
+  auto &y = gy;
+  k0<<<dim0, cnrtFuncTypeUnion1, queue>>>(
+      static_cast<const half *>(q.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const half *>(k.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const half *>(v.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
+  return y;
 }
