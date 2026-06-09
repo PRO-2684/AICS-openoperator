@@ -38,7 +38,7 @@ static void bind_host(int d) {
   setpriority(PRIO_PROCESS, 0, -5);
 }
 
-__attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p, int n) {
+__attribute__((target("avx2,f16c"))) static void run_vec256(uint16_t *p, int n) {
   const __m256 one = _mm256_set1_ps(1.0f);
   const __m256 sign = _mm256_castsi256_ps(_mm256_set1_epi32(0x7fffffff));
   for (int i = 0; i < n; i += 16) {
@@ -53,6 +53,28 @@ __attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p, int n) {
     _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), _mm256_cvtps_ph(x0, 0));
     _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i + 8),
                      _mm256_cvtps_ph(x1, 0));
+  }
+}
+
+__attribute__((target("avx512f,f16c"))) static void run_vec512(uint16_t *p,
+                                                               int n) {
+  const __m512 one = _mm512_set1_ps(1.0f);
+  const __m512i sign = _mm512_set1_epi32(0x7fffffff);
+  for (int i = 0; i < n; i += 16) {
+    __m256i h = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p + i));
+    __m512 x = _mm512_cvtph_ps(h);
+    __m512 a = _mm512_castsi512_ps(_mm512_and_si512(_mm512_castps_si512(x), sign));
+    x = _mm512_mul_ps(x, _mm512_rcp14_ps(_mm512_add_ps(one, a)));
+    h = _mm512_cvtps_ph(x, 0);
+    _mm256_storeu_si256(reinterpret_cast<__m256i *>(p + i), h);
+  }
+}
+
+static void run_vec(uint16_t *p, int n) {
+  if (__builtin_cpu_supports("avx512f")) {
+    run_vec512(p, n);
+  } else {
+    run_vec256(p, n);
   }
 }
 
