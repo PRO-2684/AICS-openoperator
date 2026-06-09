@@ -4184,51 +4184,13 @@ run_table512(uint16_t *p, int n) {
   }
 }
 
-__attribute__((target("avx2,f16c,fma"))) static inline __m256
-gelu_poly8(__m256 x) {
-  const __m256 q = _mm256_set1_ps(0.25f);
-  const __m256 half = _mm256_set1_ps(0.5f);
-  __m256 z = _mm256_mul_ps(x, q);
-  __m256 u = _mm256_mul_ps(z, z);
-  __m256 y = _mm256_set1_ps(4.76672369f);
-  y = _mm256_fmadd_ps(y, u, _mm256_set1_ps(-26.5621524f));
-  y = _mm256_fmadd_ps(y, u, _mm256_set1_ps(66.2629747f));
-  y = _mm256_fmadd_ps(y, u, _mm256_set1_ps(-98.8473602f));
-  y = _mm256_fmadd_ps(y, u, _mm256_set1_ps(99.7085049f));
-  y = _mm256_fmadd_ps(y, u, _mm256_set1_ps(-72.9241266f));
-  y = _mm256_fmadd_ps(y, u, _mm256_set1_ps(40.1885358f));
-  y = _mm256_fmadd_ps(y, u, _mm256_set1_ps(-16.9750051f));
-  y = _mm256_fmadd_ps(y, u, _mm256_set1_ps(6.38179592f));
-  y = _mm256_fmadd_ps(y, u, _mm256_set1_ps(5.85035131e-06f));
-  y = _mm256_add_ps(y, _mm256_mul_ps(x, half));
-  const __m256 lo = _mm256_set1_ps(-4.0f);
-  const __m256 hi = _mm256_set1_ps(4.0f);
-  const __m256 zero = _mm256_setzero_ps();
-  y = _mm256_blendv_ps(y, x, _mm256_cmp_ps(x, hi, _CMP_GT_OQ));
-  y = _mm256_blendv_ps(y, zero, _mm256_cmp_ps(x, lo, _CMP_LT_OQ));
-  return y;
-}
-
-__attribute__((target("avx2,f16c,fma"))) static void run_formula256(uint16_t *p,
-                                                                    int n) {
-  for (int i = 0; i < n; i += 16) {
-    __m128i h0 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
-    __m128i h1 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i + 8));
-    __m256 x0 = _mm256_cvtph_ps(h0);
-    __m256 x1 = _mm256_cvtph_ps(h1);
-    h0 = _mm256_cvtps_ph(gelu_poly8(x0),
-                         _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
-    h1 = _mm256_cvtps_ph(gelu_poly8(x1),
-                         _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
-    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), h0);
-    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i + 8), h1);
-  }
-}
-
 static void transform(uint16_t *p, int n) {
-  if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("f16c") &&
-      __builtin_cpu_supports("fma")) {
-    run_formula256(p, n);
+  if (__builtin_cpu_supports("avx512f") &&
+      __builtin_cpu_supports("avx512bw") &&
+      __builtin_cpu_supports("avx512vl")) {
+    run_table512(p, n);
+  } else if (__builtin_cpu_supports("avx2")) {
+    run_table256(p, n);
   } else {
     run_table(p, n);
   }
@@ -4254,7 +4216,7 @@ struct HostWork {
         int n = len;
         int l = ((n * t) / g_work_n + 15) & ~15;
         int r = ((n * (t + 1)) / g_work_n) & ~15;
-        transform(p + l, r - l);
+        run_table(p + l, r - l);
         done.fetch_add(1, std::memory_order_release);
       });
     }
@@ -4284,7 +4246,7 @@ static void transform_work(uint16_t *p, int n) {
   g_work->done.store(0, std::memory_order_relaxed);
   g_work->go.store(1, std::memory_order_release);
   int r = ((n * 1) / g_work_n) & ~15;
-  transform(p, r);
+  run_table(p, r);
   while (g_work->done.load(std::memory_order_acquire) < g_work_n - 1) {
     _mm_pause();
   }
