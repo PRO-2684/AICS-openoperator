@@ -340,7 +340,7 @@ torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
       static_cast<const half *>(grid.unsafeGetTensorImpl()->mutable_data()),
       static_cast<int *>(go.unsafeGetTensorImpl()->mutable_data()),
       static_cast<half *>(gc.unsafeGetTensorImpl()->mutable_data()));
-  k3<<<dim1, cnrtFuncTypeUnion1, queue>>>(
+  k0<<<dim0, cnrtFuncTypeBlock, queue>>>(
       static_cast<const half *>(input.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const int *>(go.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(gc.unsafeGetTensorImpl()->mutable_data()),
