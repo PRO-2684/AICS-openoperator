@@ -38,12 +38,12 @@ static void bind_host(int d) {
 }
 
 __attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p, int n) {
-  const __m256 c0 = _mm256_set1_ps(-1.026921771e-07f);
-  const __m256 c1 = _mm256_set1_ps(4.119821013e-06f);
-  const __m256 c2 = _mm256_set1_ps(-0.0001011567501f);
-  const __m256 c3 = _mm256_set1_ps(0.001647386884f);
-  const __m256 c4 = _mm256_set1_ps(-0.02001283093f);
-  const __m256 c5 = _mm256_set1_ps(0.2495956401f);
+  const __m256 c0 = _mm256_set1_ps(-1.652800015e-08f);
+  const __m256 c1 = _mm256_set1_ps(1.620741494e-06f);
+  const __m256 c2 = _mm256_set1_ps(-6.437051637e-05f);
+  const __m256 c3 = _mm256_set1_ps(0.00138346209f);
+  const __m256 c4 = _mm256_set1_ps(-0.0192371594f);
+  const __m256 c5 = _mm256_set1_ps(0.2490437237f);
   const __m256 vhalf = _mm256_set1_ps(0.5f);
   const __m256 pos = _mm256_set1_ps(6.5f);
   const __m256 neg = _mm256_set1_ps(-6.5f);
@@ -132,14 +132,14 @@ __attribute__((target("f16c"))) static void run_scalar(uint16_t *p) {
   for (int i = 0; i < TOTAL_ELEMS; ++i) {
     float x = _cvtsh_ss(p[i]);
     float b = x * x;
-    float q = (((((-1.026921771e-07f * b + 4.119821013e-06f) * b -
-                  0.0001011567501f) *
+    float q = (((((-1.652800015e-08f * b + 1.620741494e-06f) * b -
+                  6.437051637e-05f) *
                      b +
-                 0.001647386884f) *
+                 0.00138346209f) *
                     b -
-                0.02001283093f) *
+                0.0192371594f) *
                    b +
-               0.2495956401f);
+               0.2490437237f);
     float y = b * q + x * 0.5f;
     if (x > 6.5f) {
       y = x;
