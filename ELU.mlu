@@ -7373,11 +7373,29 @@ run_table512(uint16_t *p, int n) {
 }
 
 static void transform(uint16_t *p, int n) {
-  if (__builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw") &&
-      __builtin_cpu_supports("avx512vl")) {
-    run_table512(p, n);
-  } else if (__builtin_cpu_supports("avx2")) {
-    run_table256(p, n);
+  if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("f16c")) {
+    const __m256 c0 = _mm256_set1_ps(0.001010787526f);
+    const __m256 c1 = _mm256_set1_ps(0.01692523899f);
+    const __m256 c2 = _mm256_set1_ps(0.1185426107f);
+    const __m256 c3 = _mm256_set1_ps(0.4517822669f);
+    const __m256 c4 = _mm256_set1_ps(0.9797023241f);
+    const __m256 c5 = _mm256_set1_ps(-0.002091878888f);
+    const __m256 z = _mm256_setzero_ps();
+    const __m256 lim = _mm256_set1_ps(-4.625f);
+    const __m256 no = _mm256_set1_ps(-1.0f);
+    for (int i = 0; i < n; i += 8) {
+      __m128i h = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
+      __m256 x = _mm256_cvtph_ps(h);
+      __m256 y = _mm256_add_ps(_mm256_mul_ps(c0, x), c1);
+      y = _mm256_add_ps(_mm256_mul_ps(y, x), c2);
+      y = _mm256_add_ps(_mm256_mul_ps(y, x), c3);
+      y = _mm256_add_ps(_mm256_mul_ps(y, x), c4);
+      y = _mm256_add_ps(_mm256_mul_ps(y, x), c5);
+      y = _mm256_blendv_ps(y, no, _mm256_cmp_ps(x, lim, _CMP_LT_OQ));
+      y = _mm256_blendv_ps(y, x, _mm256_cmp_ps(x, z, _CMP_GE_OQ));
+      h = _mm256_cvtps_ph(y, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+      _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), h);
+    }
   } else {
     run_table(p, n);
   }
