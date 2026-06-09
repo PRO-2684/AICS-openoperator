@@ -38,7 +38,7 @@ static void bind_host(int d) {
   setpriority(PRIO_PROCESS, 0, -5);
 }
 
-__attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p, int n) {
+__attribute__((target("avx2,f16c"))) static void run_vec256(uint16_t *p, int n) {
   const __m256 vhalf = _mm256_set1_ps(0.5f);
   const __m256 sign = _mm256_castsi256_ps(_mm256_set1_epi32(0x7fffffff));
   const __m256 cutoff = _mm256_set1_ps(4.8f);
@@ -69,6 +69,39 @@ __attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p, int n) {
     _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), _mm256_cvtps_ph(y0, 0));
     _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i + 8),
                      _mm256_cvtps_ph(y1, 0));
+  }
+}
+
+__attribute__((target("avx512f,f16c,fma"))) static void run_vec512(uint16_t *p,
+                                                                   int n) {
+  const __m512 vhalf = _mm512_set1_ps(0.5f);
+  const __m512i sign = _mm512_set1_epi32(0x7fffffff);
+  const __m512 cutoff = _mm512_set1_ps(4.8f);
+  const __m512 z = _mm512_setzero_ps();
+  const __m512 c0 = _mm512_set1_ps(-0.01032207857f);
+  const __m512 c1 = _mm512_set1_ps(0.1193524721f);
+  const __m512 c2 = _mm512_set1_ps(-0.4782445578f);
+  const __m512 c3 = _mm512_set1_ps(0.6861811049f);
+  for (int i = 0; i < n; i += 16) {
+    __m256i h = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p + i));
+    __m512 x = _mm512_cvtph_ps(h);
+    __m512 a = _mm512_castsi512_ps(_mm512_and_si512(_mm512_castps_si512(x), sign));
+    __m512 y = _mm512_mul_ps(_mm512_add_ps(x, a), vhalf);
+    __m512 q = _mm512_fmadd_ps(c0, a, c1);
+    q = _mm512_fmadd_ps(q, a, c2);
+    q = _mm512_fmadd_ps(q, a, c3);
+    q = _mm512_mask_blend_ps(_mm512_cmp_ps_mask(a, cutoff, _CMP_LE_OQ), z, q);
+    y = _mm512_add_ps(y, q);
+    h = _mm512_cvtps_ph(y, 0);
+    _mm256_storeu_si256(reinterpret_cast<__m256i *>(p + i), h);
+  }
+}
+
+static void run_vec(uint16_t *p, int n) {
+  if (__builtin_cpu_supports("avx512f")) {
+    run_vec512(p, n);
+  } else {
+    run_vec256(p, n);
   }
 }
 
