@@ -13,8 +13,8 @@
 #include <utility>
 
 #define TOTAL_ELEMS 262144
-#define WORKER_ELEMS 32768
-#define MAIN_ELEMS 32768
+#define WORKER_ELEMS 65536
+#define MAIN_ELEMS 65536
 static int g_dev = 1;
 static uint16_t *g_buf = nullptr;
 static uint16_t *g_work = nullptr;
@@ -99,7 +99,7 @@ static void start_workers() {
     return;
   }
   g_ready.store(0, std::memory_order_relaxed);
-  for (int i = 0; i < 7; ++i) {
+  for (int i = 0; i < 3; ++i) {
     pthread_t th;
     if (pthread_create(&th, nullptr, worker_entry,
                        reinterpret_cast<void *>(static_cast<intptr_t>(i))) ==
@@ -114,12 +114,12 @@ static void start_workers() {
 }
 
 static void run_work(uint16_t *p) {
-  if (g_workers == 7) {
+  if (g_workers == 3) {
     g_work = p;
     g_done.store(0, std::memory_order_relaxed);
     g_epoch.fetch_add(1, std::memory_order_release);
     run_vec(p, MAIN_ELEMS);
-    while (g_done.load(std::memory_order_acquire) != 7) {
+    while (g_done.load(std::memory_order_acquire) != 3) {
       _mm_pause();
     }
   } else {
