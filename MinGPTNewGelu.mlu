@@ -28,7 +28,7 @@ __mlu_entry__ void k0(half *__restrict__ x) {
   }
 }
 
-static int g_dev = 0;
+static int g_dev = 1;
 
 static void bind_host(int d) {
   setpriority(PRIO_PROCESS, 0, -5);
