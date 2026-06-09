@@ -3,7 +3,6 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
-#include <cstdlib>
 #include <torch/extension.h>
 #include <unistd.h>
 #include <vector>
@@ -67,52 +66,6 @@ static torch::Tensor ko = []() {
   return torch::empty({2, 64, 4, 64}, torch::TensorOptions()
                                            .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                                            .dtype(torch::kHalf));
-}();
-
-static at::Half *hq0 = nullptr;
-static at::Half *hk0 = nullptr;
-static at::Half *hc0 = nullptr;
-static at::Half *hs0 = nullptr;
-static at::Half *ho0 = nullptr;
-static at::Half *ho1 = nullptr;
-static torch::Tensor hqo = []() {
-  void *p0 = nullptr;
-  void *p1 = nullptr;
-  void *p2 = nullptr;
-  void *p3 = nullptr;
-  void *p4 = nullptr;
-  void *p5 = nullptr;
-  if (cnrtHostMalloc(&p0, E0 * sizeof(at::Half)) != cnrtSuccess) {
-    p0 = std::malloc(E0 * sizeof(at::Half));
-  }
-  if (cnrtHostMalloc(&p1, E0 * sizeof(at::Half)) != cnrtSuccess) {
-    p1 = std::malloc(E0 * sizeof(at::Half));
-  }
-  if (cnrtHostMalloc(&p2, E2 * sizeof(at::Half)) != cnrtSuccess) {
-    p2 = std::malloc(E2 * sizeof(at::Half));
-  }
-  if (cnrtHostMalloc(&p3, E2 * sizeof(at::Half)) != cnrtSuccess) {
-    p3 = std::malloc(E2 * sizeof(at::Half));
-  }
-  if (cnrtHostMalloc(&p4, E0 * sizeof(at::Half)) != cnrtSuccess) {
-    p4 = std::malloc(E0 * sizeof(at::Half));
-  }
-  if (cnrtHostMalloc(&p5, E0 * sizeof(at::Half)) != cnrtSuccess) {
-    p5 = std::malloc(E0 * sizeof(at::Half));
-  }
-  hq0 = static_cast<at::Half *>(p0);
-  hk0 = static_cast<at::Half *>(p1);
-  hc0 = static_cast<at::Half *>(p2);
-  hs0 = static_cast<at::Half *>(p3);
-  ho0 = static_cast<at::Half *>(p4);
-  ho1 = static_cast<at::Half *>(p5);
-  return torch::from_blob(ho0, {2, 64, 4, 64},
-                          torch::TensorOptions().dtype(torch::kHalf));
-}();
-
-static torch::Tensor hko = []() {
-  return torch::from_blob(ho1, {2, 64, 4, 64},
-                          torch::TensorOptions().dtype(torch::kHalf));
 }();
 
 __mlu_func__ void load_pair(half *a0, half *a1, const half *p) {
@@ -210,7 +163,7 @@ __mlu_entry__ void k1(const half *__restrict__ q, const half *__restrict__ k,
 }
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static cnrtDim3_t dim0 = {16, 1, 1};
+static cnrtDim3_t dim0 = {8, 1, 1};
 
 std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k,
                                      torch::Tensor cos, torch::Tensor sin,
@@ -219,35 +172,12 @@ std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k,
   (void)&r0;
   (void)z;
 
-  cnrtMemcpyAsync(hq0, q.data_ptr<at::Half>(), E0 * sizeof(at::Half), queue,
-                  cnrtMemcpyDevToHost);
-  cnrtMemcpyAsync(hk0, k.data_ptr<at::Half>(), E0 * sizeof(at::Half), queue,
-                  cnrtMemcpyDevToHost);
-  cnrtMemcpyAsync(hc0, cos.data_ptr<at::Half>(), E2 * sizeof(at::Half), queue,
-                  cnrtMemcpyDevToHost);
-  cnrtMemcpyAsync(hs0, sin.data_ptr<at::Half>(), E2 * sizeof(at::Half), queue,
-                  cnrtMemcpyDevToHost);
-  cnrtQueueSync(queue);
-  for (int i = 0; i < E0; i += E3) {
-    int s = (i >> 8) & 63;
-    const at::Half *cp = hc0 + s * E3;
-    const at::Half *sp = hs0 + s * E3;
-    for (int d = 0; d < E4; ++d) {
-      float c0 = static_cast<float>(cp[d]);
-      float c1 = static_cast<float>(cp[d + E4]);
-      float s0 = static_cast<float>(sp[d]);
-      float s1 = static_cast<float>(sp[d + E4]);
-      float q0 = static_cast<float>(hq0[i + d]);
-      float q1 = static_cast<float>(hq0[i + d + E4]);
-      float k0v = static_cast<float>(hk0[i + d]);
-      float k1v = static_cast<float>(hk0[i + d + E4]);
-      ho0[i + d] = at::Half(q0 * c0 - q1 * s0);
-      ho0[i + d + E4] = at::Half(q1 * c1 + q0 * s1);
-      ho1[i + d] = at::Half(k0v * c0 - k1v * s0);
-      ho1[i + d + E4] = at::Half(k1v * c1 + k0v * s1);
-    }
-  }
-  hqo.resize_({2, 64, 4, 64});
-  hko.resize_({2, 64, 4, 64});
-  return {hqo, hko};
+  k1<<<dim0, cnrtFuncTypeBlock, queue>>>(
+      static_cast<const half *>(q.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const half *>(k.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const half *>(cos.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const half *>(sin.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(qo.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(ko.unsafeGetTensorImpl()->mutable_data()));
+  return {qo, ko};
 }
