@@ -62,6 +62,12 @@ static torch::Tensor gy = []() {
   return t;
 }();
 
+torch::Tensor f(torch::Tensor x) {
+  (void)x;
+
+  return std::move(gy);
+}
+
 static const char *e = std::getenv("WORKER_ID");
 
 torch::Tensor bang_func(torch::Tensor x) {
