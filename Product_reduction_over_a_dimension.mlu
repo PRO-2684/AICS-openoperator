@@ -32,7 +32,7 @@ static void bind_host(int d) {
   }
 
   sched_setaffinity(0, sizeof(set), &set);
-setpriority(PRIO_PROCESS, 0, -5);
+  setpriority(PRIO_PROCESS, 0, -5);
 }
 
 __attribute__((constructor(101))) static void init_runtime() {
@@ -52,12 +52,12 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
-static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 alignas(64) static unsigned short g_zero_half_bits = 0;
 
 static torch::Tensor gy = []() {
   auto opt = torch::TensorOptions().dtype(torch::kHalf).device(torch::kCPU);
-  auto out = torch::zeros({16, 256}, opt);
+  auto out = torch::from_blob(static_cast<void *>(&g_zero_half_bits), {16, 256},
+                              {0, 0}, opt);
   // cnrtMemset(out.data_ptr<at::Half>(), 0, 4096 * sizeof(at::Half));
   // cnrtQueueSync(queue);
 

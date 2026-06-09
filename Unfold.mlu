@@ -63,7 +63,7 @@ static torch::Tensor gy = []() {
 }();
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static cnrtDim3_t dim0 = {16, 3, 2};
+static cnrtDim3_t dim0 = {16, 3, 6};
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[256 * (E5 + 2)];
