@@ -13,8 +13,6 @@
 #define TOTAL_ELEMS 262144
 static int g_dev = 1;
 static uint16_t *g_buf = nullptr;
-alignas(64) static uint32_t g_tbl[1024];
-static bool g_tbl_ready = false;
 
 
 static void bind_host(int d) {
@@ -31,37 +29,21 @@ static void bind_host(int d) {
   setpriority(PRIO_PROCESS, 0, -5);
 }
 
-__attribute__((target("f16c"))) static void init_tbl() {
-  for (int i = 0; i < 1024; ++i) {
-    uint16_t h = static_cast<uint16_t>((i << 5) + 16);
-    if (h >= 0x7c00u) {
-      h = 0x7bffu;
-    }
-    float x = _cvtsh_ss(h);
-    float y = x / (1.0f + x);
-    g_tbl[i] = static_cast<uint32_t>(_cvtss_sh(y, 0));
-  }
-  g_tbl_ready = true;
-}
-
-__attribute__((target("avx2"))) static void run_vec(uint16_t *p) {
-  const __m256i abs_mask = _mm256_set1_epi32(0x7fff);
-  const __m256i sign_mask = _mm256_set1_epi32(0x8000);
-  const int *t = reinterpret_cast<const int *>(g_tbl);
+__attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p) {
+  const __m256 one = _mm256_set1_ps(1.0f);
+  const __m256 sign = _mm256_castsi256_ps(_mm256_set1_epi32(0x7fffffff));
   for (int i = 0; i < TOTAL_ELEMS; i += 16) {
     __m128i h0 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
     __m128i h1 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i + 8));
-    __m256i lo = _mm256_cvtepu16_epi32(h0);
-    __m256i hi = _mm256_cvtepu16_epi32(h1);
-    __m256i il = _mm256_srli_epi32(_mm256_and_si256(lo, abs_mask), 5);
-    __m256i ih = _mm256_srli_epi32(_mm256_and_si256(hi, abs_mask), 5);
-    __m256i yl = _mm256_i32gather_epi32(t, il, 4);
-    __m256i yh = _mm256_i32gather_epi32(t, ih, 4);
-    yl = _mm256_or_si256(yl, _mm256_and_si256(lo, sign_mask));
-    yh = _mm256_or_si256(yh, _mm256_and_si256(hi, sign_mask));
-    __m256i out = _mm256_packus_epi32(yl, yh);
-    out = _mm256_permute4x64_epi64(out, 0xd8);
-    _mm256_storeu_si256(reinterpret_cast<__m256i *>(p + i), out);
+    __m256 x0 = _mm256_cvtph_ps(h0);
+    __m256 x1 = _mm256_cvtph_ps(h1);
+    __m256 a0 = _mm256_and_ps(x0, sign);
+    __m256 a1 = _mm256_and_ps(x1, sign);
+    x0 = _mm256_mul_ps(x0, _mm256_rcp_ps(_mm256_add_ps(one, a0)));
+    x1 = _mm256_mul_ps(x1, _mm256_rcp_ps(_mm256_add_ps(one, a1)));
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), _mm256_cvtps_ph(x0, 0));
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i + 8),
+                     _mm256_cvtps_ph(x1, 0));
   }
 }
 
@@ -101,7 +83,6 @@ __attribute__((constructor(101))) static void init_runtime() {
         g_buf =
             static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
       }
-      init_tbl();
       warm_copy();
       g_dev = d;
     }
@@ -125,9 +106,6 @@ torch::Tensor bang_func(torch::Tensor x) {
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
   cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
   if (__builtin_cpu_supports("avx2")) {
-    if (!g_tbl_ready) {
-      init_tbl();
-    }
     run_vec(g_buf);
   } else {
     run_scalar(g_buf);
