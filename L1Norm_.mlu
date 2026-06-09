@@ -9,7 +9,7 @@
 
 #define N0 262144
 
-static int g_dev = 0;
+static int g_dev = 1;
 
 static void bind_host(int d) {
   cpu_set_t set;

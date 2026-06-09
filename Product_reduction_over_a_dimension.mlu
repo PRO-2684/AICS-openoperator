@@ -9,7 +9,7 @@
 
 #define E0 4096
 
-static int g_dev = 0;
+static int g_dev = 1;
 
 static void bind_host(int d) {
   setpriority(PRIO_PROCESS, 0, -5);
