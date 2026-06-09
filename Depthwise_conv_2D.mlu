@@ -86,9 +86,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
 __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
   __nram__ half a[E2];
+  __nram__ half h[E3];
   __nram__ float af[E2];
   __nram__ float b[E1];
-  __nram__ float p[E3];
   __nram__ half k[576];
   __memcpy(k, w, 576 * sizeof(half), GDRAM2NRAM);
   for (int g = taskId; g < E0; g += taskDim) {
@@ -106,10 +106,10 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
       __bang_fusion(FUSION_FMA, b, af + dy * 130 + dx, (float)k[o + i], b, E1,
                     E1);
     }
-    __memcpy(p, b, 128 * sizeof(float), NRAM2NRAM, 128 * sizeof(float),
-             130 * sizeof(float), 127);
-    __bang_float2half_rn(a, p, E3);
-    __memcpy(y + n * 1048576 + c * 16384, a, E3 * sizeof(half), NRAM2GDRAM);
+    __bang_float2half_rn(a, b, E1);
+    __memcpy(h, a, 128 * sizeof(half), NRAM2NRAM, 128 * sizeof(half),
+             130 * sizeof(half), 127);
+    __memcpy(y + n * 1048576 + c * 16384, h, E3 * sizeof(half), NRAM2GDRAM);
   }
 }
 
