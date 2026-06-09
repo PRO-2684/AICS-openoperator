@@ -23,15 +23,11 @@ static void bind_host(int d) {
   // sched_setaffinity(0, sizeof(set), &set);
   setpriority(PRIO_PROCESS, 0, -5);
 
-  // int max_fifo = sched_get_priority_max(SCHED_FIFO);
-  struct sched_param sp;
-  sp.sched_priority = 5;
-
-  int rc = sched_setscheduler(0, SCHED_FIFO, &sp);
-  if (rc != 0) {
-    fprintf(stderr, "sched_setscheduler(SCHED_FIFO) failed: %s\n",
-            strerror(errno));
-    exit(-1);
+  int max_fifo = sched_get_priority_max(SCHED_FIFO);
+  if (max_fifo > 0) {
+    struct sched_param sp;
+    sp.sched_priority = max_fifo;
+    (void)sched_setscheduler(0, SCHED_FIFO, &sp);
   }
 }
 
