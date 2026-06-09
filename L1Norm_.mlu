@@ -61,7 +61,7 @@ torch::Tensor f(torch::Tensor x) {
 }
 
 static torch::Tensor g0 = []() {
-  auto t = f();
+  auto t = f(gy);
   return t;
 }();
 
