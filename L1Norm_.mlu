@@ -51,23 +51,23 @@ static void bind_host(int d) {
 __attribute__((constructor(101))) static void init_runtime() {
   bind_host(0);
 
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    cnrtSetDeviceFlag(cnrtDeviceScheduleAuto);
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
+  // unsigned int n = 0;
+  // if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+  //   cnrtSetDeviceFlag(cnrtDeviceScheduleAuto);
+  //   const auto *impl =
+  //       c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+  //   int torch_n = static_cast<int>(impl->deviceCount());
+  //   if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+  //     int d = 0;
+  //     impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+  //     cnrtSetDevice(d);
+  //     g_dev = d;
+  //   }
+  // }
 }
 static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions().device(torch::kCPU).dtype(torch::kHalf);
-  return torch::zeros({16, 16384}, opt);
+  return torch::zeros({16}, opt);
 }();
 alignas(64) static unsigned short g_zero_half_bits = 0;
 
