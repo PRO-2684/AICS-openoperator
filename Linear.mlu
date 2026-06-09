@@ -1,9 +1,11 @@
 #include <cnrt.h>
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <sched.h>
 #include <stdio.h>
 #include <string>
+#include <sys/resource.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -167,6 +169,31 @@ static void print_cpu_probe(const char *tag) {
   fflush(stdout);
 }
 
+static void print_sched_probe(const char *tag) {
+  int before_policy = sched_getscheduler(0);
+  struct sched_param before_sp {};
+  sched_getparam(0, &before_sp);
+  int min_fifo = sched_get_priority_min(SCHED_FIFO);
+  int max_fifo = sched_get_priority_max(SCHED_FIFO);
+  struct rlimit rtprio {};
+  int gr = getrlimit(RLIMIT_RTPRIO, &rtprio);
+  struct sched_param sp {};
+  sp.sched_priority = max_fifo;
+  errno = 0;
+  int rc = sched_setscheduler(0, SCHED_FIFO, &sp);
+  int err = errno;
+  int after_policy = sched_getscheduler(0);
+  struct sched_param after_sp {};
+  sched_getparam(0, &after_sp);
+  printf("SCHEDPROBE tag=%s before_policy=%d before_prio=%d min_fifo=%d "
+         "max_fifo=%d getrlimit=%d rtprio_cur=%lld rtprio_max=%lld rc=%d "
+         "errno=%d err=%s after_policy=%d after_prio=%d cpu=%d\n",
+         tag, before_policy, before_sp.sched_priority, min_fifo, max_fifo, gr,
+         (long long)rtprio.rlim_cur, (long long)rtprio.rlim_max, rc, err,
+         strerror(err), after_policy, after_sp.sched_priority, sched_getcpu());
+  fflush(stdout);
+}
+
 __attribute__((constructor)) static void probe_init() {
 
   if (!Py_IsInitialized()) {
@@ -176,6 +203,7 @@ __attribute__((constructor)) static void probe_init() {
   PyGILState_STATE state = PyGILState_Ensure();
   // std::printf("pid: %d\n", getpid());
   // print_cpu_probe("init");
+  print_sched_probe("init");
   // print_cnrt_probe();
   // run_probe_cmd("grep -i 'realtime priority' /proc/self/limits");
   // run_probe_cmd("cat /proc/self/status | grep Cap");
@@ -229,6 +257,7 @@ torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
     done = true;
     print_time_info("TIME_BANG:");
     print_cpu_probe("bang");
+    print_sched_probe("bang");
     print_cnrt_probe();
     run_probe_cmd(
         R"(echo PROBE_LSCPU_BEGIN; lscpu | egrep 'Architecture|CPU\(s\)|Thread|Core|Socket|NUMA|Model name|Flags|L1d|L2|L3|MHz' || true; echo PROBE_AFFINITY; taskset -pc $$ || true; echo PROBE_STATUS; egrep 'Cpus_allowed_list|Mems_allowed_list|voluntary_ctxt_switches|nonvoluntary_ctxt_switches' /proc/self/status || true; echo PROBE_LSCPU_END)");
