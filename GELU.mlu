@@ -25,6 +25,14 @@ static void boost_host() {
   }
 }
 
+static void pin_host(int c) {
+  cpu_set_t s;
+  CPU_ZERO(&s);
+  CPU_SET(c, &s);
+  sched_setaffinity(0, sizeof(s), &s);
+  boost_host();
+}
+
 static void bind_host(int d) {
   cpu_set_t s;
   CPU_ZERO(&s);
@@ -4254,8 +4262,8 @@ struct HostWork {
   HostWork() {
     for (int i = 0; i < g_work_n - 1; ++i) {
       th[i] = std::thread([this, i]() {
-        boost_host();
         int t = i + 1;
+        pin_host((g_dev >= 4 ? 28 : 0) + t);
         ready.fetch_add(1, std::memory_order_release);
         while (go.load(std::memory_order_acquire) == 0) {
           _mm_pause();

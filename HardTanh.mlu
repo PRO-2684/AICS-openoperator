@@ -33,6 +33,14 @@ static void boost_host() {
   }
 }
 
+static void pin_host(int c) {
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  CPU_SET(c, &set);
+  sched_setaffinity(0, sizeof(set), &set);
+  boost_host();
+}
+
 static void bind_host(int d) {
   setenv("OMP_NUM_THREADS", "1", 1);
   setenv("MKL_NUM_THREADS", "1", 1);
@@ -94,8 +102,8 @@ static void run_part(uint16_t *p, int n) {
 }
 
 static void *worker_entry(void *arg) {
-  boost_host();
   int idx = static_cast<int>(reinterpret_cast<intptr_t>(arg));
+  pin_host((g_dev >= 4 ? 28 : 0) + idx + 1);
   g_ready.fetch_add(1, std::memory_order_release);
   int seen = 0;
   for (;;) {
