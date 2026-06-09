@@ -7504,6 +7504,8 @@ static torch::Tensor g_y = []() {
 torch::Tensor bang_func(torch::Tensor x) {
   (void)&r0;
   (void)&g0;
-  (void)x;
+
+  auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
+  cnrtMemcpy(g_out, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
   return g_y;
 }
