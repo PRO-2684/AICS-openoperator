@@ -13,8 +13,6 @@
 #define TOTAL_ELEMS 262144
 static int g_dev = 1;
 static uint16_t *g_buf = nullptr;
-alignas(64) static uint16_t g_tbl[65536];
-static bool g_tbl_ready = false;
 
 static void bind_host(int d) {
   setenv("OMP_NUM_THREADS", "1", 1);
@@ -30,43 +28,58 @@ static void bind_host(int d) {
   setpriority(PRIO_PROCESS, 0, -5);
 }
 
-__attribute__((target("f16c"))) static void init_tbl() {
-  for (int i = 0; i < 65536; ++i) {
-    float x = _cvtsh_ss(static_cast<unsigned short>(i));
-    float y;
-    if (std::isnan(x)) {
-      y = x;
-    } else if (x > 20.0f) {
-      y = x;
-    } else if (x < -20.0f) {
-      y = std::exp(x);
-    } else {
-      y = std::log1p(std::exp(x));
-    }
-    g_tbl[i] = _cvtss_sh(y, 0);
+__attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p) {
+  const __m256 vhalf = _mm256_set1_ps(0.5f);
+  const __m256 sign = _mm256_castsi256_ps(_mm256_set1_epi32(0x7fffffff));
+  const __m256 cutoff = _mm256_set1_ps(8.0f);
+  const __m256 z = _mm256_setzero_ps();
+  const __m256 c0 = _mm256_set1_ps(0.0007436707774f);
+  const __m256 c1 = _mm256_set1_ps(-0.01638956466f);
+  const __m256 c2 = _mm256_set1_ps(0.1340226347f);
+  const __m256 c3 = _mm256_set1_ps(-0.4887655294f);
+  const __m256 c4 = _mm256_set1_ps(0.6873281626f);
+  for (int i = 0; i < TOTAL_ELEMS; i += 16) {
+    __m128i h0 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
+    __m128i h1 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i + 8));
+    __m256 x0 = _mm256_cvtph_ps(h0);
+    __m256 x1 = _mm256_cvtph_ps(h1);
+    __m256 a0 = _mm256_and_ps(x0, sign);
+    __m256 a1 = _mm256_and_ps(x1, sign);
+    __m256 y0 = _mm256_mul_ps(_mm256_add_ps(x0, a0), vhalf);
+    __m256 y1 = _mm256_mul_ps(_mm256_add_ps(x1, a1), vhalf);
+    __m256 p0 = _mm256_add_ps(_mm256_mul_ps(c0, a0), c1);
+    __m256 p1 = _mm256_add_ps(_mm256_mul_ps(c0, a1), c1);
+    p0 = _mm256_add_ps(_mm256_mul_ps(p0, a0), c2);
+    p1 = _mm256_add_ps(_mm256_mul_ps(p1, a1), c2);
+    p0 = _mm256_add_ps(_mm256_mul_ps(p0, a0), c3);
+    p1 = _mm256_add_ps(_mm256_mul_ps(p1, a1), c3);
+    p0 = _mm256_add_ps(_mm256_mul_ps(p0, a0), c4);
+    p1 = _mm256_add_ps(_mm256_mul_ps(p1, a1), c4);
+    p0 = _mm256_blendv_ps(z, p0, _mm256_cmp_ps(a0, cutoff, _CMP_LE_OQ));
+    p1 = _mm256_blendv_ps(z, p1, _mm256_cmp_ps(a1, cutoff, _CMP_LE_OQ));
+    y0 = _mm256_add_ps(y0, p0);
+    y1 = _mm256_add_ps(y1, p1);
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), _mm256_cvtps_ph(y0, 0));
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i + 8),
+                     _mm256_cvtps_ph(y1, 0));
   }
-  g_tbl_ready = true;
 }
 
-static void run_table(uint16_t *p) {
-  const uint16_t *t = g_tbl;
-  for (int i = 0; i < TOTAL_ELEMS; i += 8) {
-    uint16_t v0 = p[i + 0];
-    uint16_t v1 = p[i + 1];
-    uint16_t v2 = p[i + 2];
-    uint16_t v3 = p[i + 3];
-    uint16_t v4 = p[i + 4];
-    uint16_t v5 = p[i + 5];
-    uint16_t v6 = p[i + 6];
-    uint16_t v7 = p[i + 7];
-    p[i + 0] = t[v0];
-    p[i + 1] = t[v1];
-    p[i + 2] = t[v2];
-    p[i + 3] = t[v3];
-    p[i + 4] = t[v4];
-    p[i + 5] = t[v5];
-    p[i + 6] = t[v6];
-    p[i + 7] = t[v7];
+__attribute__((target("f16c"))) static void run_scalar(uint16_t *p) {
+  for (int i = 0; i < TOTAL_ELEMS; ++i) {
+    float x = _cvtsh_ss(p[i]);
+    float a = x < 0.0f ? -x : x;
+    float y = (x + a) * 0.5f;
+    float q = (((0.0007436707774f * a - 0.01638956466f) * a +
+                0.1340226347f) *
+                   a -
+               0.4887655294f) *
+                  a +
+              0.6873281626f;
+    if (a <= 8.0f) {
+      y += q;
+    }
+    p[i] = _cvtss_sh(y, 0);
   }
 }
 
@@ -97,7 +110,6 @@ __attribute__((constructor(101))) static void init_runtime() {
         g_buf =
             static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
       }
-      init_tbl();
       warm_copy();
       g_dev = d;
     }
@@ -120,9 +132,10 @@ torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
   cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
-  if (!g_tbl_ready) {
-    init_tbl();
+  if (__builtin_cpu_supports("avx2")) {
+    run_vec(g_buf);
+  } else {
+    run_scalar(g_buf);
   }
-  run_table(g_buf);
   return gy;
 }
