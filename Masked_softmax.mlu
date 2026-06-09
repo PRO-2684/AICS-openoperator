@@ -9,7 +9,7 @@
 #define E0 32768
 #define E1 128
 #define E2 64
-#define E3 64
+#define E3 32
 #define E4 64
 
 
