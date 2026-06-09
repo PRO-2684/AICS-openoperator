@@ -35,7 +35,7 @@ __mlu_entry__ void k0(half *__restrict__ x) {
   __nram__ half b[E1];
   __nram__ half c[E1];
   __nram__ half d[E1];
-  for (int p = taskId * E1; p < E0; p += E1 * E2) {
+  for (int p = taskId * E1; p < E0; p += E1 * E2 * 2) {
     int n = E0 - p;
     if (n > E1) {
       n = E1;
