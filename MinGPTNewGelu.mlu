@@ -8,7 +8,7 @@
 #include <unistd.h>
 
 #define E0 4000000
-#define E1 65536
+#define E1 81920
 #define E2 32
 
 __mlu_entry__ void k0(half *__restrict__ x) {
@@ -16,33 +16,26 @@ __mlu_entry__ void k0(half *__restrict__ x) {
   __nram__ half b[E1];
   __nram__ half c[E1];
   __nram__ half d[E1];
-  __nram__ half e[E1];
   for (int p = taskId * E1; p < E0; p += E1 * E2) {
     int n = E0 - p;
     if (n > E1) {
       n = E1;
     }
-    int m = (n + 63) & ~63;
     __memcpy(a, x + p, n * sizeof(half), GDRAM2NRAM);
-    if (m > n) {
-      __bang_write_value(a + n, m - n, (half)0.0f);
-    }
-    __bang_mul(b, a, a, m);
-    __bang_mul_scalar(c, b, (half)-0.000245809555f, m);
-    __bang_add_scalar(c, c, (half)0.00580596924f, m);
-    __bang_mul(c, c, b, m);
-    __bang_add_scalar(c, c, (half)-0.0579223633f, m);
-    __bang_mul(c, c, b, m);
-    __bang_add_scalar(c, c, (half)0.392822266f, m);
-    __bang_mul(c, c, b, m);
-    __bang_fusion(FUSION_FMA, c, a, (half)0.5f, c, m, m);
-    __bang_gt_scalar(d, a, (half)2.8f, m);
-    __bang_lt_scalar(e, a, (half)-2.8f, m);
-    __bang_add(e, e, d, m);
-    __bang_mul_scalar(e, e, (half)-1.0f, m);
-    __bang_add_scalar(e, e, (half)1.0f, m);
-    __bang_mul(c, c, e, m);
-    __bang_fusion(FUSION_FMA, c, a, d, c, m, m);
+    __bang_mul(b, a, a, n);
+    __bang_mul_scalar(c, b, (half)0.00230979919f, n);
+    __bang_add_scalar(c, c, (half)-0.0430603027f, n);
+    __bang_mul(c, c, b, n);
+    __bang_add_scalar(c, c, (half)0.375244141f, n);
+    __bang_mul(c, c, b, n);
+    __bang_fusion(FUSION_FMA, c, a, (half)0.5f, c, n, n);
+    __bang_gt_scalar(b, a, (half)2.75f, n);
+    __bang_lt_scalar(d, a, (half)-2.75f, n);
+    __bang_add(d, d, b, n);
+    __bang_mul_scalar(d, d, (half)-1.0f, n);
+    __bang_add_scalar(d, d, (half)1.0f, n);
+    __bang_mul(c, c, d, n);
+    __bang_fusion(FUSION_FMA, c, a, b, c, n, n);
     __memcpy(x + p, c, n * sizeof(half), NRAM2GDRAM);
   }
 }
