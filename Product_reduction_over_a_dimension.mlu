@@ -3,6 +3,7 @@
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
+#include <sys/resource.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -11,6 +12,7 @@
 static int g_dev = 0;
 
 static void bind_host(int d) {
+  setpriority(PRIO_PROCESS, 0, -5);
   cpu_set_t set;
   CPU_ZERO(&set);
 

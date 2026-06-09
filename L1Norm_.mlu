@@ -11,9 +11,8 @@
 
 static int g_dev = 0;
 
-// static inline void tune_process_priority() { setpriority(PRIO_PROCESS, 0, -5); }
-
 static void bind_host(int d) {
+  setpriority(PRIO_PROCESS, 0, -5);
   cpu_set_t set;
   CPU_ZERO(&set);
 
