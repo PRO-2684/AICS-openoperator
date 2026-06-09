@@ -42,7 +42,7 @@ static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 static torch::Tensor y = []() {
   auto opt = torch::TensorOptions().dtype(torch::kHalf);
   auto t = torch::zeros({16, 16384}, opt);
-  cnrtQueue_t
+  cnrtQueueSync(queue);
   return t;
 }();
 
