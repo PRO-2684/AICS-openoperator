@@ -50,5 +50,5 @@ static torch::Tensor gy = []() {
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)x;
   (void)dim;
-  return gy;
+  return x;
 }
