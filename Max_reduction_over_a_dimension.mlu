@@ -66,7 +66,7 @@ static torch::Tensor y = []() {
                  .dtype(torch::kHalf);
   auto out = torch::empty({16, 256}, opt);
   torch_mlu::synchronize();
-  (void)out.unsafeGetTensorImpl();
+  (void)out.unsafeGetTensorImpl()->mutable_data();
   (void)out.sizes();
   return out;
 }();
