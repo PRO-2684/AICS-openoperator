@@ -32,10 +32,10 @@ __mlu_entry__ void k0(half *__restrict__ x) {
     __bang_mul(c, c, b, n);
     __bang_fusion(FUSION_FMA, c, a, (half)0.5f, c, n, n);
     __bang_gt_scalar(b, a, (half)3.05f, n);
-    __bang_maskmove(c, a, b, n * sizeof(half));
+    __bang_maskmove(c, a, b, n);
     __bang_lt_scalar(b, a, (half)-3.05f, n);
     __bang_write_zero(d, n);
-    __bang_maskmove(c, d, b, n * sizeof(half));
+    __bang_maskmove(c, d, b, n);
     __memcpy(x + p, c, n * sizeof(half), NRAM2GDRAM);
   }
 }
