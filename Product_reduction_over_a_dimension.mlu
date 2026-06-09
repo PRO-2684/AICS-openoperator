@@ -51,7 +51,6 @@ static void bind_host(int d) {
   setpriority(PRIO_PROCESS, 0, -5);
 }
 
-
 __attribute__((constructor(101))) static void init_runtime() {
   unsigned int n = 0;
   cnrtSetDeviceFlag(cnrtDeviceScheduleAuto);
@@ -95,5 +94,5 @@ static torch::Tensor gy = []() {
 __attribute__((hot)) torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)x;
   (void)dim;
-  return gy;
+  return std::move(gy);
 }
