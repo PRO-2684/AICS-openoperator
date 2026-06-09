@@ -22,6 +22,7 @@ __mlu_entry__ void k0(half *__restrict__ x) {
       n = E1;
     }
     __memcpy(a, x + p, n * sizeof(half), GDRAM2NRAM);
+    __bang_mul_scalar(a, a, (half)0.5f, n);
     __memcpy(x + p, a, n * sizeof(half), NRAM2GDRAM);
   }
 }
