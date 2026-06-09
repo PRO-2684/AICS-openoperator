@@ -64,7 +64,11 @@ static torch::Tensor y = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  return torch::empty({16, 256}, opt);
+  auto out = torch::empty({16, 256}, opt);
+  torch_mlu::synchronize();
+  (void)out.unsafeGetTensorImpl();
+  (void)out.sizes();
+  return out;
 }();
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
