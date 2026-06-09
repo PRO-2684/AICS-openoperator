@@ -22,6 +22,7 @@ static std::atomic<int> g_epoch{0};
 static std::atomic<int> g_done{0};
 static std::atomic<int> g_ready{0};
 static int g_workers = 0;
+static int g_mode = 0;
 
 static void bind_host(int d) {
   setenv("OMP_NUM_THREADS", "1", 1);
@@ -77,6 +78,43 @@ __attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p, int n) {
   }
 }
 
+__attribute__((target("avx512f,f16c"))) static void run_vec512(uint16_t *p,
+                                                               int n) {
+  const __m512 c0 = _mm512_set1_ps(-1.652800015e-08f);
+  const __m512 c1 = _mm512_set1_ps(1.620741494e-06f);
+  const __m512 c2 = _mm512_set1_ps(-6.437051637e-05f);
+  const __m512 c3 = _mm512_set1_ps(0.00138346209f);
+  const __m512 c4 = _mm512_set1_ps(-0.0192371594f);
+  const __m512 c5 = _mm512_set1_ps(0.2490437237f);
+  const __m512 vhalf = _mm512_set1_ps(0.5f);
+  const __m512 pos = _mm512_set1_ps(6.5f);
+  const __m512 neg = _mm512_set1_ps(-6.5f);
+  const __m512 z = _mm512_setzero_ps();
+  for (int i = 0; i < n; i += 16) {
+    __m256i h = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p + i));
+    __m512 x = _mm512_cvtph_ps(h);
+    __m512 b = _mm512_mul_ps(x, x);
+    __m512 y = _mm512_add_ps(_mm512_mul_ps(c0, b), c1);
+    y = _mm512_add_ps(_mm512_mul_ps(y, b), c2);
+    y = _mm512_add_ps(_mm512_mul_ps(y, b), c3);
+    y = _mm512_add_ps(_mm512_mul_ps(y, b), c4);
+    y = _mm512_add_ps(_mm512_mul_ps(y, b), c5);
+    y = _mm512_add_ps(_mm512_mul_ps(b, y), _mm512_mul_ps(x, vhalf));
+    y = _mm512_mask_blend_ps(_mm512_cmp_ps_mask(x, pos, _CMP_GT_OQ), y, x);
+    y = _mm512_mask_blend_ps(_mm512_cmp_ps_mask(x, neg, _CMP_LT_OQ), y, z);
+    h = _mm512_cvtps_ph(y, 0);
+    _mm256_storeu_si256(reinterpret_cast<__m256i *>(p + i), h);
+  }
+}
+
+static void run_part(uint16_t *p, int n) {
+  if (g_mode == 1) {
+    run_vec512(p, n);
+  } else {
+    run_vec(p, n);
+  }
+}
+
 static void *worker_entry(void *arg) {
   int idx = static_cast<int>(reinterpret_cast<intptr_t>(arg));
   g_ready.fetch_add(1, std::memory_order_release);
@@ -89,7 +127,7 @@ static void *worker_entry(void *arg) {
     }
     seen = e;
     uint16_t *p = g_work;
-    run_vec(p + MAIN_ELEMS + idx * WORKER_ELEMS, WORKER_ELEMS);
+    run_part(p + MAIN_ELEMS + idx * WORKER_ELEMS, WORKER_ELEMS);
     g_done.fetch_add(1, std::memory_order_release);
   }
   return nullptr;
@@ -119,12 +157,12 @@ static void run_work(uint16_t *p) {
     g_work = p;
     g_done.store(0, std::memory_order_relaxed);
     g_epoch.fetch_add(1, std::memory_order_release);
-    run_vec(p, MAIN_ELEMS);
+    run_part(p, MAIN_ELEMS);
     while (g_done.load(std::memory_order_acquire) != 3) {
       _mm_pause();
     }
   } else {
-    run_vec(p, TOTAL_ELEMS);
+    run_part(p, TOTAL_ELEMS);
   }
 }
 
@@ -186,6 +224,9 @@ __attribute__((constructor(101))) static void init_runtime() {
       if (g_buf == nullptr) {
         g_buf =
             static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
+      }
+      if (__builtin_cpu_supports("avx512f")) {
+        g_mode = 1;
       }
       start_workers();
       warm_copy();
