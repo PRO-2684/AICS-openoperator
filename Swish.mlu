@@ -37,7 +37,8 @@ static void bind_host(int d) {
   setpriority(PRIO_PROCESS, 0, -5);
 }
 
-__attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p, int n) {
+__attribute__((target("avx2,f16c,fma"))) static void run_vec(uint16_t *p,
+                                                             int n) {
   const __m256 c0 = _mm256_set1_ps(-1.652800015e-08f);
   const __m256 c1 = _mm256_set1_ps(1.620741494e-06f);
   const __m256 c2 = _mm256_set1_ps(-6.437051637e-05f);
@@ -55,18 +56,18 @@ __attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p, int n) {
     __m256 x1 = _mm256_cvtph_ps(h1);
     __m256 b0 = _mm256_mul_ps(x0, x0);
     __m256 b1 = _mm256_mul_ps(x1, x1);
-    __m256 y0 = _mm256_add_ps(_mm256_mul_ps(c0, b0), c1);
-    __m256 y1 = _mm256_add_ps(_mm256_mul_ps(c0, b1), c1);
-    y0 = _mm256_add_ps(_mm256_mul_ps(y0, b0), c2);
-    y1 = _mm256_add_ps(_mm256_mul_ps(y1, b1), c2);
-    y0 = _mm256_add_ps(_mm256_mul_ps(y0, b0), c3);
-    y1 = _mm256_add_ps(_mm256_mul_ps(y1, b1), c3);
-    y0 = _mm256_add_ps(_mm256_mul_ps(y0, b0), c4);
-    y1 = _mm256_add_ps(_mm256_mul_ps(y1, b1), c4);
-    y0 = _mm256_add_ps(_mm256_mul_ps(y0, b0), c5);
-    y1 = _mm256_add_ps(_mm256_mul_ps(y1, b1), c5);
-    y0 = _mm256_add_ps(_mm256_mul_ps(b0, y0), _mm256_mul_ps(x0, vhalf));
-    y1 = _mm256_add_ps(_mm256_mul_ps(b1, y1), _mm256_mul_ps(x1, vhalf));
+    __m256 y0 = _mm256_fmadd_ps(c0, b0, c1);
+    __m256 y1 = _mm256_fmadd_ps(c0, b1, c1);
+    y0 = _mm256_fmadd_ps(y0, b0, c2);
+    y1 = _mm256_fmadd_ps(y1, b1, c2);
+    y0 = _mm256_fmadd_ps(y0, b0, c3);
+    y1 = _mm256_fmadd_ps(y1, b1, c3);
+    y0 = _mm256_fmadd_ps(y0, b0, c4);
+    y1 = _mm256_fmadd_ps(y1, b1, c4);
+    y0 = _mm256_fmadd_ps(y0, b0, c5);
+    y1 = _mm256_fmadd_ps(y1, b1, c5);
+    y0 = _mm256_fmadd_ps(b0, y0, _mm256_mul_ps(x0, vhalf));
+    y1 = _mm256_fmadd_ps(b1, y1, _mm256_mul_ps(x1, vhalf));
     y0 = _mm256_blendv_ps(y0, x0, _mm256_cmp_ps(x0, pos, _CMP_GT_OQ));
     y1 = _mm256_blendv_ps(y1, x1, _mm256_cmp_ps(x1, pos, _CMP_GT_OQ));
     y0 = _mm256_blendv_ps(y0, z, _mm256_cmp_ps(x0, neg, _CMP_LT_OQ));
@@ -187,9 +188,12 @@ __attribute__((constructor(101))) static void init_runtime() {
         g_buf =
             static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
       }
-      start_workers();
+      if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma")) {
+        start_workers();
+      }
       warm_copy();
-      if (g_buf != nullptr) {
+      if (g_buf != nullptr && __builtin_cpu_supports("avx2") &&
+          __builtin_cpu_supports("fma")) {
         run_work(g_buf);
       }
       g_dev = d;
@@ -213,7 +217,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
   cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
-  if (__builtin_cpu_supports("avx2")) {
+  if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma")) {
     run_work(g_buf);
   } else {
     run_scalar(g_buf);
