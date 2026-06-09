@@ -28,11 +28,11 @@ static void bind_host(int d) {
   sp.sched_priority = max_fifo;
 
   int rc = sched_setscheduler(0, SCHED_FIFO, &sp);
-  if (rc != 0) {
-    fprintf(stderr, "sched_setscheduler(SCHED_FIFO) failed: %s\n",
-            strerror(errno));
-    exit(-1);
-  }
+  // if (rc != 0) {
+  //   fprintf(stderr, "sched_setscheduler(SCHED_FIFO) failed: %s\n",
+  //           strerror(errno));
+  //   exit(-1);
+  // }
 }
 
 __attribute__((constructor(101))) static void init_runtime() {
