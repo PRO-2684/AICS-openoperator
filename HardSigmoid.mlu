@@ -3,8 +3,10 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <atomic>
 #include <framework/core/MLUStream.h>
 #include <immintrin.h>
+#include <pthread.h>
 #include <sched.h>
 #include <sys/resource.h>
 #include <torch/extension.h>
@@ -15,6 +17,10 @@
 static int g_dev = 1;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
 static uint16_t *g_out = nullptr;
+static uint16_t *g_work = nullptr;
+static std::atomic<int> g_epoch{0};
+static std::atomic<int> g_done{0};
+static int g_workers = 0;
 
 static void bind_host(int d) {
   setenv("OMP_NUM_THREADS", "1", 1);
