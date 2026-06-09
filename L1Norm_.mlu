@@ -65,10 +65,8 @@ __attribute__((constructor(101))) static void init_runtime() {
   }
 }
 static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
+  auto opt = torch::TensorOptions().device(torch::kCPU).dtype(torch::kHalf);
+  return torch::zeros({16, 16384}, opt);
 }();
 alignas(64) static unsigned short g_zero_half_bits = 0;
 
