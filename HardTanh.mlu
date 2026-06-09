@@ -5,6 +5,7 @@
 #include <framework/core/MLUStream.h>
 #include <immintrin.h>
 #include <sched.h>
+#include <sys/resource.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -20,6 +21,7 @@ static void bind_host(int d) {
     CPU_SET(begin + i, &s);
   }
   sched_setaffinity(0, sizeof(s), &s);
+  setpriority(PRIO_PROCESS, 0, -5);
 }
 
 __attribute__((target("avx512bw"))) static void run_vec512(uint16_t *p) {
