@@ -13,31 +13,13 @@
 
 __mlu_entry__ void k0(half *__restrict__ x) {
   __nram__ half a[E1];
-  __nram__ half b[E1];
-  __nram__ half c[E1];
-  __nram__ half d[E1];
-  __nram__ half e[3];
-  e[0] = (half)0.00489807129f;
-  e[1] = (half)-0.0542602539f;
-  e[2] = (half)0.388916016f;
   for (int p = taskId * E1; p < E0; p += E1 * E2) {
     int n = E0 - p;
     if (n > E1) {
       n = E1;
     }
     __memcpy(a, x + p, n * sizeof(half), GDRAM2NRAM);
-    __bang_mul(b, a, a, n);
-    __bang_fusion(FUSION_FMA, c, b, (half)-0.000179648399f, e, n, 1);
-    __bang_fusion(FUSION_FMA, c, c, b, e + 1, n, 1);
-    __bang_fusion(FUSION_FMA, c, c, b, e + 2, n, 1);
-    __bang_mul(c, c, b, n);
-    __bang_fusion(FUSION_FMA, c, a, (half)0.5f, c, n, n);
-    __bang_gt_scalar(b, a, (half)3.05f, n);
-    __bang_ge_scalar(d, a, (half)-3.05f, n);
-    __bang_sub(d, d, b, n);
-    __bang_mul(c, c, d, n);
-    __bang_fusion(FUSION_FMA, c, a, b, c, n, n);
-    __memcpy(x + p, c, n * sizeof(half), NRAM2GDRAM);
+    __memcpy(x + p, a, n * sizeof(half), NRAM2GDRAM);
   }
 }
 
