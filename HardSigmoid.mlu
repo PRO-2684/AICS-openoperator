@@ -39,6 +39,13 @@ static void bind_host(int d) {
   setpriority(PRIO_PROCESS, 0, -5);
 }
 
+static void bind_worker(int idx) {
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  CPU_SET(g_cpu_begin + 1 + idx, &set);
+  pthread_setaffinity_np(pthread_self(), sizeof(set), &set);
+}
+
 #if 0
 alignas(64) static const uint16_t g_tbl_const[65536] = {
     0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800, 0x3800,
@@ -7374,6 +7381,8 @@ __attribute__((target("avx2,f16c,fma"))) static void run_formula(uint16_t *p,
 
 static void *worker_entry(void *arg) {
   int idx = static_cast<int>(reinterpret_cast<intptr_t>(arg));
+  bind_worker(idx);
+  g_ready.fetch_add(1, std::memory_order_release);
   int seen = 0;
   for (;;) {
     int e = g_epoch.load(std::memory_order_acquire);
@@ -7393,6 +7402,7 @@ static void start_workers() {
   if (g_workers != 0) {
     return;
   }
+  g_ready.store(0, std::memory_order_relaxed);
   for (int i = 0; i < 3; ++i) {
     pthread_t th;
     if (pthread_create(&th, nullptr, worker_entry,
@@ -7401,6 +7411,9 @@ static void start_workers() {
       pthread_detach(th);
       ++g_workers;
     }
+  }
+  while (g_ready.load(std::memory_order_acquire) != g_workers) {
+    _mm_pause();
   }
 }
 
