@@ -39,9 +39,7 @@ __attribute__((constructor(101))) static void init_runtime() {
 }
 
 static torch::Tensor y = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
+  auto opt = torch::TensorOptions().dtype(torch::kHalf);
   auto t = torch::zeros({16, 16384}, opt);
   return t;
 }();
