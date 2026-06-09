@@ -77,5 +77,5 @@ torch::Tensor bang_func(torch::Tensor x) {
   l2_norm_scale_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
 
-  return x;
+  return std::move(x);
 }

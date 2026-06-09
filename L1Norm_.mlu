@@ -87,5 +87,5 @@ torch::Tensor bang_func(torch::Tensor x) {
   (void)x;
   (void)e;
 
-  return gy;
+  return std::move(gy);
 }
