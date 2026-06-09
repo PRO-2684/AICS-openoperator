@@ -327,14 +327,14 @@ __mlu_func__ void kcw(int tid, const half *__restrict__ x,
     __memcpy(h, hp + bb * H, BM * H * sizeof(half), GDRAM2NRAM);
   }
 
-  __bang_conv(fu, a, wip, k, BM, 1, 1, 1, 1, 1, N);
+  __bang_matmul(fu, a, wip, BM, k, N);
   __memcpy(c0, bi + col, G * sizeof(half), GDRAM2NRAM);
   __memcpy(c0 + G, bi + H + col, G * sizeof(half), GDRAM2NRAM);
   __memcpy(c0 + G * 2, bi + H * 2 + col, G * sizeof(half), GDRAM2NRAM);
   __bang_half2float(fc, c0, N);
   __bang_cycle_add(fu, fu, fc, BM * N, N);
 
-  __bang_conv(fv, h, wwp, H, BM, 1, 1, 1, 1, 1, N);
+  __bang_matmul(fv, h, wwp, BM, H, N);
   __memcpy(c0, bh + col, G * sizeof(half), GDRAM2NRAM);
   __memcpy(c0 + G, bh + H + col, G * sizeof(half), GDRAM2NRAM);
   __memcpy(c0 + G * 2, bh + H * 2 + col, G * sizeof(half), GDRAM2NRAM);
@@ -420,24 +420,11 @@ __mlu_entry__ void k3w(const half *__restrict__ x, const half *__restrict__ ip0,
 __mlu_func__ void kwr(const half *__restrict__ wi, half *__restrict__ out,
                       int k) {
   int col = (taskId & 7) * G;
-  __nram__ half wb[H * N];
-  __nram__ half wf[H * N];
-  __memcpy(wb, wi + col * k, G * k * sizeof(half), GDRAM2NRAM);
-  __memcpy(wb + G * k, wi + (H + col) * k, G * k * sizeof(half),
-           GDRAM2NRAM);
-  __memcpy(wb + G * 2 * k, wi + (H * 2 + col) * k, G * k * sizeof(half),
-           GDRAM2NRAM);
-  int p = 0;
-  for (int i = 0; i < 64; i += 4) {
-    for (int j = 0; j < N / 64; ++j) {
-      for (int m = 0; m < 4; ++m) {
-        int o = i + j * 64 + m;
-        __memcpy(wf + p, wb + o * k, k * sizeof(half), NRAM2NRAM);
-        p += k;
-      }
-    }
-  }
-  __memcpy(out, wf, N * k * sizeof(half), NRAM2WRAM);
+  __memcpy(out, wi + col * k, G * k * sizeof(half), GDRAM2WRAM);
+  __memcpy(out + G * k, wi + (H + col) * k, G * k * sizeof(half),
+           GDRAM2WRAM);
+  __memcpy(out + G * 2 * k, wi + (H * 2 + col) * k, G * k * sizeof(half),
+           GDRAM2WRAM);
 }
 
 __mlu_entry__ void k3r(const half *__restrict__ x, const half *__restrict__ w0,
