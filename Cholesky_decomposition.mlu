@@ -12,7 +12,7 @@
 #define E2 4096
 #define E3 1024
 
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
   __mlu_shared__ float s[E2];
   __nram__ half a[E3];
   __nram__ float b[E3];
@@ -70,8 +70,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
       if (g + 1 < E1)
         __bang_write_value(b + i * E1 + g + 1, E1 - g - 1, 0.0f);
     }
-    __bang_float2half_rn(a, b, E3);
-    __memcpy(y + n * E2 + o, a, E3 * sizeof(half), NRAM2GDRAM);
+    __memcpy(y + n * E2 + o, b, E3 * sizeof(float), NRAM2GDRAM);
   }
 }
 
@@ -118,7 +117,7 @@ static torch::Tensor gy = []() {
       {E0, E1, E1},
       torch::TensorOptions()
           .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-          .dtype(torch::kHalf));
+          .dtype(torch::kFloat32));
 }();
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 static cnrtDim3_t dim0 = {4, E0, 1};
@@ -129,6 +128,6 @@ torch::Tensor bang_func(torch::Tensor A) {
 
   k0<<<dim0, cnrtFuncTypeUnion1, queue>>>(
       static_cast<const half *>(A.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
+      static_cast<float *>(y.unsafeGetTensorImpl()->mutable_data()));
   return y;
 }

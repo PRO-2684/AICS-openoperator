@@ -65,7 +65,7 @@ __mlu_func__ float f2(float x) {
 }
 
 __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
-                      const half *__restrict__ v, half *__restrict__ y) {
+                      const half *__restrict__ v, float *__restrict__ y) {
   int g0 = taskIdY;
   int s = g0 >> 2;
   int h = g0 & 3;
@@ -152,8 +152,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
           __bang_fusion(FUSION_FMA, y0, v0 + c * 64, w, y0, 40, 40);
         }
       }
-      __bang_float2half_rn(y1, y0, 40);
-      __memcpy(y + (((b + rr) * 4 + h) * 40), y1, 40 * sizeof(half),
+      __memcpy(y + (((b + rr) * 4 + h) * 40), y0, 40 * sizeof(float),
                NRAM2GDRAM);
     }
   }
@@ -293,7 +292,7 @@ static torch::Tensor gy = []() {
   return torch::empty({22, 4, 40},
                       torch::TensorOptions()
                           .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                          .dtype(torch::kHalf));
+                          .dtype(torch::kFloat32));
 }();
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
@@ -319,10 +318,10 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
   (void)preference;
   (void)g0;
   auto &y = gy;
-  k2<<<dim0, cnrtFuncTypeUnion1, queue>>>(
+  k0<<<dim0, cnrtFuncTypeUnion1, queue>>>(
       static_cast<const half *>(q.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(k.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(v.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
+      static_cast<float *>(y.unsafeGetTensorImpl()->mutable_data()));
   return y;
 }
