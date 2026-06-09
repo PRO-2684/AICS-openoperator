@@ -50,7 +50,17 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 
-__attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p) {
+__attribute__((target("avx512f,f16c"))) static void run_vec512(uint16_t *p) {
+  const __m512 scale = _mm512_set1_ps(L2_SCALE);
+  for (int i = 0; i < TOTAL_ELEMS; i += 16) {
+    __m256i h = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p + i));
+    __m512 x = _mm512_mul_ps(_mm512_cvtph_ps(h), scale);
+    h = _mm512_cvtps_ph(x, 0);
+    _mm256_storeu_si256(reinterpret_cast<__m256i *>(p + i), h);
+  }
+}
+
+__attribute__((target("avx2,f16c"))) static void run_vec256(uint16_t *p) {
   const __m256 scale = _mm256_set1_ps(L2_SCALE);
   for (int i = 0; i < TOTAL_ELEMS; i += 16) {
     __m128i h0 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
@@ -60,6 +70,14 @@ __attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p) {
     _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), _mm256_cvtps_ph(x0, 0));
     _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i + 8),
                      _mm256_cvtps_ph(x1, 0));
+  }
+}
+
+static void run_vec(uint16_t *p) {
+  if (__builtin_cpu_supports("avx512f")) {
+    run_vec512(p);
+  } else {
+    run_vec256(p);
   }
 }
 
