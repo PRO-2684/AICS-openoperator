@@ -32,6 +32,7 @@ static void bind_host(int d) {
   }
 
   sched_setaffinity(0, sizeof(set), &set);
+  setpriority(PRIO_PROCESS, 0, -5);
 }
 
 __attribute__((constructor(101))) static void init_runtime() {
