@@ -14,7 +14,6 @@
 #define E4 32
 #define E5 8
 #define E6 31
-#define E7 4096
 
 
 static int g_dev = 0;
@@ -80,34 +79,6 @@ __mlu_func__ void load_pair(half *a0, half *a1, const half *p) {
       __memcpy(a1 + t * E4, src + E4, E4 * sizeof(half), NRAM2NRAM);
     }
   }
-}
-
-__mlu_func__ void load_pair4(half *a0, half *a1, const half *p) {
-#pragma unroll
-  for (int g = 0; g < 4; ++g) {
-    load_pair(a0 + g * E2, a1 + g * E2, p);
-  }
-}
-
-__mlu_func__ void pack_one(const half *x, half *a0, half *a1, half *v, int g) {
-  __memcpy(v, x, E1 * sizeof(half), GDRAM2NRAM);
-  half *p0 = a0 + g * E2;
-  half *p1 = a1 + g * E2;
-  __memcpy(p0, v, E4 * sizeof(half), NRAM2NRAM, E4 * sizeof(half),
-           E3 * sizeof(half), E6);
-  __memcpy(p1, v + E4, E4 * sizeof(half), NRAM2NRAM, E4 * sizeof(half),
-           E3 * sizeof(half), E6);
-}
-
-__mlu_func__ void store_one(half *y, const half *c0, const half *c1, half *v,
-                            int g) {
-  const half *p0 = c0 + g * E2;
-  const half *p1 = c1 + g * E2;
-  __memcpy(v, p0, E4 * sizeof(half), NRAM2NRAM, E3 * sizeof(half),
-           E4 * sizeof(half), E6);
-  __memcpy(v + E4, p1, E4 * sizeof(half), NRAM2NRAM, E3 * sizeof(half),
-           E4 * sizeof(half), E6);
-  __memcpy(y, v, E1 * sizeof(half), NRAM2GDRAM);
 }
 
 __mlu_func__ void apply_one(const half *x, half *y, half *a0, half *a1,
@@ -189,51 +160,6 @@ __mlu_entry__ void k1(const half *__restrict__ q, const half *__restrict__ k,
   off += E0 >> 1;
   apply_one(q + off, qo + off, a0, a1, b0, b1, c0, c1, d0, d1, t);
   apply_one(k + off, ko + off, a0, a1, b0, b1, c0, c1, d0, d1, t);
-}
-
-__mlu_entry__ void k2(const half *__restrict__ q, const half *__restrict__ k,
-                      const half *__restrict__ c, const half *__restrict__ s,
-                      half *__restrict__ qo, half *__restrict__ ko) {
-  int p = taskId << 3;
-  int off = taskId * E1;
-
-  __nram__ half a0[E7];
-  __nram__ half a1[E7];
-  __nram__ half b0[E7];
-  __nram__ half b1[E7];
-  __nram__ half c0[E7];
-  __nram__ half c1[E7];
-  __nram__ half d0[E7];
-  __nram__ half d1[E7];
-  __nram__ half t[E7];
-  __nram__ half u[E3 * E5];
-  __nram__ half v[E3 * E5];
-  __nram__ half w[E1];
-
-  __memcpy(u, c + p * E3, E3 * E5 * sizeof(half), GDRAM2NRAM);
-  __memcpy(v, s + p * E3, E3 * E5 * sizeof(half), GDRAM2NRAM);
-  load_pair4(b0, b1, u);
-  load_pair4(d0, d1, v);
-
-  pack_one(q + off, a0, a1, w, 0);
-  pack_one(k + off, a0, a1, w, 1);
-  off += E0 >> 1;
-  pack_one(q + off, a0, a1, w, 2);
-  pack_one(k + off, a0, a1, w, 3);
-
-  __bang_mul(c0, a0, b0, E7);
-  __bang_mul(t, a1, d0, E7);
-  __bang_sub(c0, c0, t, E7);
-
-  __bang_mul(c1, a1, b1, E7);
-  __bang_fusion(FUSION_FMA, c1, a0, d1, c1, E7, E7);
-
-  off = taskId * E1;
-  store_one(qo + off, c0, c1, w, 0);
-  store_one(ko + off, c0, c1, w, 1);
-  off += E0 >> 1;
-  store_one(qo + off, c0, c1, w, 2);
-  store_one(ko + off, c0, c1, w, 3);
 }
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
