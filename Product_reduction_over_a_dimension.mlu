@@ -36,6 +36,8 @@ static int g_dev = 0;
 //     }
 //   }
 // }
+static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+
 static torch::Tensor gy = []() {
   auto opt = torch::TensorOptions()
                  .dtype(torch::kHalf);
