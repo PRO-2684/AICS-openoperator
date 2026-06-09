@@ -4213,8 +4213,46 @@ run_table512(uint16_t *p, int n) {
   }
 }
 
+__attribute__((target("avx2,f16c,fma"))) static inline __m256
+exp_fast(__m256 x) {
+  const __m256 k = _mm256_set1_ps(1.4426950408889634f);
+  const __m256 b = _mm256_set1_ps(127.0f);
+  __m256 y = _mm256_fmadd_ps(x, k, b);
+  __m256i n = _mm256_cvttps_epi32(y);
+  __m256 z = _mm256_sub_ps(y, _mm256_cvtepi32_ps(n));
+  __m256i bits = _mm256_slli_epi32(n, 23);
+  __m256 p = _mm256_set1_ps(0.009618129107628477f);
+  p = _mm256_fmadd_ps(p, z, _mm256_set1_ps(0.05550410866482158f));
+  p = _mm256_fmadd_ps(p, z, _mm256_set1_ps(0.2402265069591007f));
+  p = _mm256_fmadd_ps(p, z, _mm256_set1_ps(0.6931471805599453f));
+  p = _mm256_fmadd_ps(p, z, _mm256_set1_ps(1.0f));
+  return _mm256_mul_ps(_mm256_castsi256_ps(bits), p);
+}
+
+__attribute__((target("avx2,f16c,fma"))) static void run_formula256(uint16_t *p,
+                                                                    int n) {
+  const __m256 one = _mm256_set1_ps(1.0f);
+  const __m256 zero = _mm256_setzero_ps();
+  for (int i = 0; i < n; i += 16) {
+    __m128i h0 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
+    __m128i h1 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i + 8));
+    __m256 x0 = _mm256_cvtph_ps(h0);
+    __m256 x1 = _mm256_cvtph_ps(h1);
+    __m256 y0 = _mm256_sub_ps(exp_fast(x0), one);
+    __m256 y1 = _mm256_sub_ps(exp_fast(x1), one);
+    y0 = _mm256_blendv_ps(y0, x0, _mm256_cmp_ps(x0, zero, _CMP_GT_OQ));
+    y1 = _mm256_blendv_ps(y1, x1, _mm256_cmp_ps(x1, zero, _CMP_GT_OQ));
+    h0 = _mm256_cvtps_ph(y0, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+    h1 = _mm256_cvtps_ph(y1, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), h0);
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i + 8), h1);
+  }
+}
+
 static void transform(uint16_t *p, int n) {
-  if (__builtin_cpu_supports("avx512f") &&
+  if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma")) {
+    run_formula256(p, n);
+  } else if (__builtin_cpu_supports("avx512f") &&
       __builtin_cpu_supports("avx512bw") &&
       __builtin_cpu_supports("avx512vl")) {
     run_table512(p, n);
