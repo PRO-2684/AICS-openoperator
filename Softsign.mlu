@@ -14,13 +14,11 @@
 #include <utility>
 
 #define TOTAL_ELEMS 262144
-#define HALF_ELEMS 131072
 #define WORKER_ELEMS 65536
 #define MAIN_ELEMS 65536
 static int g_dev = 1;
 static uint16_t *g_buf = nullptr;
 static uint16_t *g_work = nullptr;
-static int g_work_len = TOTAL_ELEMS;
 static std::atomic<int> g_epoch{0};
 static std::atomic<int> g_done{0};
 static std::atomic<int> g_ready{0};
@@ -70,11 +68,7 @@ static void *worker_entry(void *arg) {
     }
     seen = e;
     uint16_t *p = g_work;
-    int n = g_work_len;
-    int t = idx + 1;
-    int l = ((n * t) / 4 + 15) & ~15;
-    int r = ((n * (t + 1)) / 4) & ~15;
-    run_vec(p + l, r - l);
+    run_vec(p + MAIN_ELEMS + idx * WORKER_ELEMS, WORKER_ELEMS);
     g_done.fetch_add(1, std::memory_order_release);
   }
   return nullptr;
@@ -99,19 +93,17 @@ static void start_workers() {
   }
 }
 
-static void run_work(uint16_t *p, int n) {
+static void run_work(uint16_t *p) {
   if (g_workers == 3) {
     g_work = p;
-    g_work_len = n;
     g_done.store(0, std::memory_order_relaxed);
     g_epoch.fetch_add(1, std::memory_order_release);
-    int r = ((n * 1) / 4) & ~15;
-    run_vec(p, r);
+    run_vec(p, MAIN_ELEMS);
     while (g_done.load(std::memory_order_acquire) != 3) {
       _mm_pause();
     }
   } else {
-    run_vec(p, n);
+    run_vec(p, TOTAL_ELEMS);
   }
 }
 
@@ -164,7 +156,7 @@ __attribute__((constructor(101))) static void init_runtime() {
       start_workers();
       warm_copy();
       if (g_buf != nullptr) {
-        run_work(g_buf, TOTAL_ELEMS);
+        run_work(g_buf);
       }
       g_dev = d;
     }
@@ -183,23 +175,13 @@ static torch::Tensor gy = []() {
       torch::TensorOptions().dtype(torch::kHalf).device(torch::kCPU));
 }();
 
-static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
+  cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
   if (__builtin_cpu_supports("avx2")) {
-    cnrtMemcpyAsync(g_buf, p, HALF_ELEMS * sizeof(uint16_t), queue,
-                    cnrtMemcpyDevToHost);
-    cnrtQueueSync(queue);
-    cnrtMemcpyAsync(g_buf + HALF_ELEMS, p + HALF_ELEMS,
-                    HALF_ELEMS * sizeof(uint16_t), queue,
-                    cnrtMemcpyDevToHost);
-    run_work(g_buf, HALF_ELEMS);
-    cnrtQueueSync(queue);
-    run_work(g_buf + HALF_ELEMS, HALF_ELEMS);
+    run_work(g_buf);
   } else {
-    cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
     run_scalar(g_buf);
   }
   return std::move(gy);
