@@ -15,7 +15,6 @@ __mlu_entry__ void k0(half *__restrict__ x) {
   __nram__ half a0[E1];
   __nram__ half a1[E1];
   __nram__ half a2[E1];
-  half *buf[3] = {a0, a1, a2};
   int p = taskId * E1;
   if (p >= E0) {
     return;
@@ -24,27 +23,51 @@ __mlu_entry__ void k0(half *__restrict__ x) {
   if (n > E1) {
     n = E1;
   }
-  __memcpy_async(buf[0], x + p, n * sizeof(half), GDRAM2NRAM);
+  __memcpy_async(a0, x + p, n * sizeof(half), GDRAM2NRAM);
   __sync_io();
   int m = 0;
   for (p += E1 * E2; p < E0; p += E1 * E2) {
-    int next = (m + 1) % 3;
-    int cur = m % 3;
     int out_p = p - E1 * E2;
     int next_n = E0 - p;
     if (next_n > E1) {
       next_n = E1;
     }
-    __memcpy_async(buf[next], x + p, next_n * sizeof(half), GDRAM2NRAM);
-    __bang_active_gelu(buf[cur], buf[cur], n);
-    __sync_io_move_compute();
-    __memcpy_async(x + out_p, buf[cur], n * sizeof(half), NRAM2GDRAM);
-    m = next;
+    if (m == 0) {
+      __memcpy_async(a1, x + p, next_n * sizeof(half), GDRAM2NRAM);
+      __bang_active_gelu(a0, a0, n);
+      __sync_io_move_compute();
+      __memcpy_async(x + out_p, a0, n * sizeof(half), NRAM2GDRAM);
+      m = 1;
+    } else if (m == 1) {
+      __memcpy_async(a2, x + p, next_n * sizeof(half), GDRAM2NRAM);
+      __bang_active_gelu(a1, a1, n);
+      __sync_io_move_compute();
+      __memcpy_async(x + out_p, a1, n * sizeof(half), NRAM2GDRAM);
+      m = 2;
+    } else {
+      __memcpy_async(a0, x + p, next_n * sizeof(half), GDRAM2NRAM);
+      __bang_active_gelu(a2, a2, n);
+      __sync_io_move_compute();
+      __memcpy_async(x + out_p, a2, n * sizeof(half), NRAM2GDRAM);
+      m = 0;
+    }
     n = next_n;
   }
-  __bang_active_gelu(buf[m], buf[m], n);
+  if (m == 0) {
+    __bang_active_gelu(a0, a0, n);
+  } else if (m == 1) {
+    __bang_active_gelu(a1, a1, n);
+  } else {
+    __bang_active_gelu(a2, a2, n);
+  }
   __sync_compute();
-  __memcpy_async(x + p - E1 * E2, buf[m], n * sizeof(half), NRAM2GDRAM);
+  if (m == 0) {
+    __memcpy_async(x + p - E1 * E2, a0, n * sizeof(half), NRAM2GDRAM);
+  } else if (m == 1) {
+    __memcpy_async(x + p - E1 * E2, a1, n * sizeof(half), NRAM2GDRAM);
+  } else {
+    __memcpy_async(x + p - E1 * E2, a2, n * sizeof(half), NRAM2GDRAM);
+  }
   __sync_io();
 }
 
