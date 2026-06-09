@@ -13,10 +13,6 @@
 
 __mlu_entry__ void k0(half *__restrict__ x) {
   __nram__ half a[E1];
-  __nram__ half b[E1];
-  __nram__ half c[E1];
-  __nram__ half d[E1];
-  __nram__ half e[E1];
   for (int p = taskId * E1; p < E0; p += E1 * E2) {
     int n = E0 - p;
     if (n > E1) {
@@ -27,23 +23,8 @@ __mlu_entry__ void k0(half *__restrict__ x) {
     if (m > n) {
       __bang_write_value(a + n, m - n, (half)0.0f);
     }
-    __bang_mul(b, a, a, m);
-    __bang_mul_scalar(c, b, (half)-0.000199908237f, m);
-    __bang_add_scalar(c, c, (half)0.00519306183f, m);
-    __bang_mul(c, c, b, m);
-    __bang_add_scalar(c, c, (half)-0.0555098436f, m);
-    __bang_mul(c, c, b, m);
-    __bang_add_scalar(c, c, (half)0.390345166f, m);
-    __bang_mul(c, c, b, m);
-    __bang_fusion(FUSION_FMA, c, a, (half)0.5f, c, m, m);
-    __bang_gt_scalar(d, a, (half)3.0f, m);
-    __bang_lt_scalar(e, a, (half)-3.0f, m);
-    __bang_add(e, e, d, m);
-    __bang_mul_scalar(e, e, (half)-1.0f, m);
-    __bang_add_scalar(e, e, (half)1.0f, m);
-    __bang_mul(c, c, e, m);
-    __bang_fusion(FUSION_FMA, c, a, d, c, m, m);
-    __memcpy(x + p, c, n * sizeof(half), NRAM2GDRAM);
+    __bang_active_gelu(a, a, m);
+    __memcpy(x + p, a, n * sizeof(half), NRAM2GDRAM);
   }
 }
 
