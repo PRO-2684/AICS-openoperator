@@ -69,10 +69,10 @@ alignas(64) static unsigned short g_zero_half_bits = 0;
 
 static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions().device(torch::kCPU).dtype(torch::kHalf);
-  auto t = torch::zeros({16}, opt); 
-  for(int i = 0; i < 8;i++){
-    t = t = torch::from_blob(static_cast<void *>(&g_zero_half_bits),
-                             {16, 16384}, {0, 0}, opt);
+  auto t = torch::zeros({16}, opt);
+  for (int i = 0; i < 8; i++) {
+    t = torch::from_blob(static_cast<void *>(&g_zero_half_bits),
+                             {16, i + 1}, {0, 0}, opt);
   }
   return t;
 }();
