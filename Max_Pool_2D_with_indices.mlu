@@ -56,8 +56,8 @@ static torch::Tensor g1 = []() {
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a0[16384];
   __nram__ half a1[16384];
-  __nram__ half b0[16384];
-  __nram__ half b1[16384];
+  __nram__ half b0[8192];
+  __nram__ half b1[8192];
   __nram__ half c0[4096];
   __nram__ half c1[4096];
   __nram__ half d0[4096];
@@ -82,15 +82,11 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     half *b = q == 0 ? b0 : b1;
     half *c = q == 0 ? c0 : c1;
     half *d = q == 0 ? d0 : d1;
-    __memcpy(b, a, sizeof(half), NRAM2NRAM, sizeof(half),
-             2 * sizeof(half), 8191);
-    __memcpy(b + 8192, a + 1, sizeof(half), NRAM2NRAM, sizeof(half),
-             2 * sizeof(half), 8191);
-    __bang_maximum(b, b, b + 8192, 8192);
-    __memcpy(c, b, 64 * sizeof(half), NRAM2NRAM, 64 * sizeof(half),
-             128 * sizeof(half), 63);
-    __memcpy(d, b + 64, 64 * sizeof(half), NRAM2NRAM, 64 * sizeof(half),
-             128 * sizeof(half), 63);
+    __bang_maxpool(b, a, 128, 128, 1, 2, 1, 1, 2);
+    __memcpy(c, b, sizeof(half), NRAM2NRAM, sizeof(half),
+             2 * sizeof(half), 4095);
+    __memcpy(d, b + 1, sizeof(half), NRAM2NRAM, sizeof(half),
+             2 * sizeof(half), 4095);
     __bang_maximum(c, c, d, 4096);
     __sync_io_move_compute();
     __memcpy_async(y + r * 4096, c, 4096 * sizeof(half), NRAM2GDRAM);
