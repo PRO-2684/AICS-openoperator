@@ -40,7 +40,7 @@ static void bind_host(int d) {
 
 __attribute__((target("avx2,f16c,fma"))) static void run_part(uint16_t *p,
                                                               int n) {
-  const __m256 half = _mm256_set1_ps(0.5f);
+  const __m256 hlf = _mm256_set1_ps(0.5f);
   const __m256 zero = _mm256_setzero_ps();
   const __m256 hi = _mm256_set1_ps(3.4f);
   const __m256 lo = _mm256_set1_ps(-3.4f);
@@ -62,7 +62,7 @@ __attribute__((target("avx2,f16c,fma"))) static void run_part(uint16_t *p,
     r = _mm256_fmadd_ps(r, z, c1);
     r = _mm256_fmadd_ps(r, z, c0);
     r = _mm256_mul_ps(r, z);
-    __m256 y = _mm256_fmadd_ps(x, half, r);
+    __m256 y = _mm256_fmadd_ps(x, hlf, r);
     __m256 mhi = _mm256_cmp_ps(x, hi, _CMP_GT_OQ);
     __m256 mlo = _mm256_cmp_ps(x, lo, _CMP_LT_OQ);
     y = _mm256_blendv_ps(y, x, mhi);
