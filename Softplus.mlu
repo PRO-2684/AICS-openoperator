@@ -19,15 +19,15 @@
 static int g_dev = 1;
 static uint16_t *g_buf = nullptr;
 static uint16_t *g_work = nullptr;
-alignas(64) static float g_lut_fast[193];
+alignas(64) static float g_lut_fast[3073];
 static std::atomic<int> g_epoch{0};
 static std::atomic<int> g_done{0};
 static std::atomic<int> g_ready{0};
 static int g_workers = 0;
 
 static void init_lut_fast() {
-  for (int i = 0; i < 193; ++i) {
-    float x = -6.0f + 0.0625f * static_cast<float>(i);
+  for (int i = 0; i < 3073; ++i) {
+    float x = -6.0f + 0.00390625f * static_cast<float>(i);
     g_lut_fast[i] = std::log1p(std::exp(x));
   }
 }
@@ -47,13 +47,13 @@ static void bind_host(int d) {
 }
 
 __attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p, int n) {
-  const __m256 sc = _mm256_set1_ps(16.0f);
+  const __m256 sc = _mm256_set1_ps(256.0f);
   const __m256 sh = _mm256_set1_ps(6.0f);
   const __m256 pos = _mm256_set1_ps(6.0f);
   const __m256 neg = _mm256_set1_ps(-6.0f);
   const __m256 z = _mm256_setzero_ps();
   const __m256i zi = _mm256_setzero_si256();
-  const __m256i hi = _mm256_set1_epi32(191);
+  const __m256i hi = _mm256_set1_epi32(3072);
   for (int i = 0; i < n; i += 16) {
     __m128i h0 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
     __m128i h1 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i + 8));
@@ -61,20 +61,12 @@ __attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p, int n) {
     __m256 x1 = _mm256_cvtph_ps(h1);
     __m256 t0 = _mm256_mul_ps(_mm256_add_ps(x0, sh), sc);
     __m256 t1 = _mm256_mul_ps(_mm256_add_ps(x1, sh), sc);
-    __m256i k0 = _mm256_cvttps_epi32(t0);
-    __m256i k1 = _mm256_cvttps_epi32(t1);
+    __m256i k0 = _mm256_cvtps_epi32(t0);
+    __m256i k1 = _mm256_cvtps_epi32(t1);
     k0 = _mm256_max_epi32(zi, _mm256_min_epi32(k0, hi));
     k1 = _mm256_max_epi32(zi, _mm256_min_epi32(k1, hi));
-    __m256 f0 = _mm256_sub_ps(t0, _mm256_cvtepi32_ps(k0));
-    __m256 f1 = _mm256_sub_ps(t1, _mm256_cvtepi32_ps(k1));
-    __m256 a0 = _mm256_i32gather_ps(g_lut_fast, k0, 4);
-    __m256 a1 = _mm256_i32gather_ps(g_lut_fast, k1, 4);
-    __m256 b0 =
-        _mm256_i32gather_ps(g_lut_fast, _mm256_add_epi32(k0, _mm256_set1_epi32(1)), 4);
-    __m256 b1 =
-        _mm256_i32gather_ps(g_lut_fast, _mm256_add_epi32(k1, _mm256_set1_epi32(1)), 4);
-    __m256 y0 = _mm256_add_ps(a0, _mm256_mul_ps(f0, _mm256_sub_ps(b0, a0)));
-    __m256 y1 = _mm256_add_ps(a1, _mm256_mul_ps(f1, _mm256_sub_ps(b1, a1)));
+    __m256 y0 = _mm256_i32gather_ps(g_lut_fast, k0, 4);
+    __m256 y1 = _mm256_i32gather_ps(g_lut_fast, k1, 4);
     y0 = _mm256_blendv_ps(y0, x0, _mm256_cmp_ps(x0, pos, _CMP_GT_OQ));
     y1 = _mm256_blendv_ps(y1, x1, _mm256_cmp_ps(x1, pos, _CMP_GT_OQ));
     y0 = _mm256_blendv_ps(y0, z, _mm256_cmp_ps(x0, neg, _CMP_LT_OQ));
