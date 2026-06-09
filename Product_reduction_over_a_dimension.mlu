@@ -86,7 +86,7 @@ static torch::Tensor gy = []() {
   // cnrtQueueSync(queue);
   torch_mlu::synchronize();
   (void) out.unsafeGetTensorImpl();
-  (void) out.size;
+  (void) out.sizes();
 
   return out;
 }();
