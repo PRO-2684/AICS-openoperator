@@ -37,6 +37,7 @@ __mlu_entry__ void k0(half *__restrict__ x) {
 
 static int g_dev = 0;
 static constexpr cnrtDim3_t dim_init = {1, 1, 1};
+static bool g_warm = false;
 
 static void bind_host(int d) {
   setpriority(PRIO_PROCESS, 0, -5);
@@ -78,12 +79,7 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  auto t = torch::empty({64}, opt);
-  auto q = torch_mlu::getCurMLUStream();
-  k_init<<<dim_init, cnrtFuncTypeBlock, q>>>(
-      reinterpret_cast<half *>(t.unsafeGetTensorImpl()->mutable_data()));
-  cnrtQueueSync(q);
-  return t;
+  return torch::empty({1}, opt);
 }();
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
@@ -91,6 +87,12 @@ static constexpr cnrtDim3_t dim = {E2, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
+  if (!g_warm) {
+    g_warm = true;
+    k_init<<<dim_init, cnrtFuncTypeBlock, queue>>>(
+        reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
+    cnrtQueueSync(queue);
+  }
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
   return x;
