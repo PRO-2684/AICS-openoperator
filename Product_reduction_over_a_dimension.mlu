@@ -2,6 +2,7 @@
 #include <c10/core/DeviceType.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
+#include <cstdio>
 #include <cstdlib>
 #include <dirent.h>
 #include <framework/core/MLUStream.h>
