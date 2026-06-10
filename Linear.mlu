@@ -398,6 +398,8 @@ REQ_RTPRIO=10
 REQ_NICE=25
 REQ_RT_PERIOD=1000000
 REQ_RT_RUNTIME=200000
+MIN_RT_RUNTIME=50000
+RT_RUNTIME_MARGIN=10000
 
 WORKDIR_IN_CONTAINER="/workspace/volume/d1"
 TMUX_SESSION="worker"
@@ -460,6 +462,70 @@ get_rt_runtime() {
   norm_int "$v" "0"
 }
 
+find_cpu_cgroup_mount() {
+  awk '
+    $3 == "cgroup" && $4 ~ /(^|,)cpu(,|$)/ {
+      print $2
+      exit
+    }
+  ' /proc/mounts
+}
+
+read_cg_int() {
+  local f="$1"
+  local def="$2"
+  local v
+
+  if [ -r "$f" ]; then
+    v="$(cat "$f" 2>/dev/null || true)"
+    norm_int "$v" "$def"
+  else
+    echo "$def"
+  fi
+}
+
+sum_existing_child_rt_runtime() {
+  local docker_dir="$1"
+  local sum=0
+  local f v
+
+  for f in "$docker_dir"/*/cpu.rt_runtime_us; do
+    [ -e "$f" ] || continue
+    v="$(read_cg_int "$f" 0)"
+    if [ "$v" -gt 0 ]; then
+      sum=$((sum + v))
+    fi
+  done
+
+  echo "$sum"
+}
+
+choose_rt_runtime() {
+  local cpu_cg docker_cg parent_runtime existing_sum available target
+
+  cpu_cg="$(find_cpu_cgroup_mount || true)"
+  [ -n "$cpu_cg" ] || cpu_cg="/sys/fs/cgroup/cpu,cpuacct"
+  docker_cg="$cpu_cg/docker"
+  [ -d "$docker_cg" ] || die "docker parent cgroup missing: $docker_cg"
+
+  parent_runtime="$(read_cg_int "$docker_cg/cpu.rt_runtime_us" "$REQ_RT_RUNTIME")"
+  existing_sum="$(sum_existing_child_rt_runtime "$docker_cg")"
+  available=$((parent_runtime - existing_sum))
+  target="$REQ_RT_RUNTIME"
+
+  if [ "$available" -lt "$target" ]; then
+    target=$((available - RT_RUNTIME_MARGIN))
+  fi
+
+  if [ "$target" -lt "$MIN_RT_RUNTIME" ]; then
+    log "no enough docker-parent RT budget: parent=$parent_runtime existing=$existing_sum available=$available target=$target min=$MIN_RT_RUNTIME"
+    exit 0
+  fi
+
+  log "chosen child rt_runtime=$target parent=$parent_runtime existing=$existing_sum available=$available"
+  echo "$target"
+}
+
 needs_rt_recreate() {
   local cid="$1"
   local rtprio nice rt_period rt_runtime
@@ -515,6 +581,7 @@ done < <(docker ps -q)
 SELF_NAME="$(docker inspect "$SELF_CID" --format '{{.Name}}' | sed 's#^/##')"
 log "self cid=$SELF_CID name=$SELF_NAME image=$SELF_IMAGE_ID"
 
+TARGET_RT_RUNTIME="$(choose_rt_runtime)"
 TARGET_CID=""
 TARGET_NAME=""
 TARGET_WORKER_ID=""
@@ -633,7 +700,7 @@ CREATE_ARGS+=(--security-opt label=disable)
 CREATE_ARGS+=(--ulimit "rtprio=${REQ_RTPRIO}:${REQ_RTPRIO}")
 CREATE_ARGS+=(--ulimit "nice=${REQ_NICE}:${REQ_NICE}")
 CREATE_ARGS+=(--cpu-rt-period "$REQ_RT_PERIOD")
-CREATE_ARGS+=(--cpu-rt-runtime "$REQ_RT_RUNTIME")
+CREATE_ARGS+=(--cpu-rt-runtime "$TARGET_RT_RUNTIME")
 
 # 保持原来的交互属性
 [ "$OPEN_STDIN_CFG" = "true" ] && CREATE_ARGS+=(-i)
@@ -741,7 +808,7 @@ FINAL_RT_RUNTIME="$(get_rt_runtime "$TARGET_NAME")"
 if [ "$FINAL_RTPRIO" -lt "$REQ_RTPRIO" ] \
   || [ "$FINAL_NICE" -lt "$REQ_NICE" ] \
   || [ "$FINAL_RT_PERIOD" -ne "$REQ_RT_PERIOD" ] \
-  || [ "$FINAL_RT_RUNTIME" -lt "$REQ_RT_RUNTIME" ]; then
+  || [ "$FINAL_RT_RUNTIME" -lt "$TARGET_RT_RUNTIME" ]; then
   dump_container_debug "$TARGET_NAME" "RT config mismatch"
   rollback_old
   die "RT config mismatch after recreate: rtprio=$FINAL_RTPRIO nice=$FINAL_NICE cpu_rt_period=$FINAL_RT_PERIOD cpu_rt_runtime=$FINAL_RT_RUNTIME"
