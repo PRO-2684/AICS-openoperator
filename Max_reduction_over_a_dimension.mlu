@@ -10,6 +10,7 @@
 #include <pthread.h>
 #include <sched.h>
 #include <sys/resource.h>
+#include <sys/syscall.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -135,6 +136,13 @@ __attribute__((target("avx2,f16c"))) static void run_range(int b0, int b1) {
 static void *worker_entry(void *arg) {
   int idx = static_cast<int>(reinterpret_cast<intptr_t>(arg));
   pin_host((g_dev >= 4 ? 28 : 0) + idx + 1);
+  if (idx < 8) {
+    pid_t tid = static_cast<pid_t>(syscall(SYS_gettid));
+    std::printf("WK op=037 idx=%d tid=%d cpu=%d aff=%d pol=%d\n", idx,
+                (int)tid, sched_getcpu(), probe_affinity_count(tid),
+                sched_getscheduler(tid));
+    std::fflush(stdout);
+  }
   int b0 = (idx + 1) * NB;
   int b1 = b0 + NB;
   g_ready.fetch_add(1, std::memory_order_release);

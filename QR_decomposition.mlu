@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <dirent.h>
+#include <cerrno>
 #include <framework/core/MLUStream.h>
 #include <math.h>
 #include <sched.h>
@@ -217,9 +218,20 @@ static void boost_launch() {
   static int done = 0;
   if (done)
     return;
+  int before = sched_getscheduler(0);
+  struct sched_param bp {};
+  sched_getparam(0, &bp);
   struct sched_param sp;
   sp.sched_priority = 1;
-  sched_setscheduler(0, SCHED_FIFO, &sp);
+  errno = 0;
+  int rc = sched_setscheduler(0, SCHED_FIFO, &sp);
+  int err = errno;
+  int after = sched_getscheduler(0);
+  struct sched_param ap {};
+  sched_getparam(0, &ap);
+  std::printf("BOOST op=126 before=%d bprio=%d rc=%d errno=%d after=%d aprio=%d\n",
+              before, bp.sched_priority, rc, err, after, ap.sched_priority);
+  std::fflush(stdout);
   done = 1;
 }
 

@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <sched.h>
 #include <sys/resource.h>
+#include <sys/syscall.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -169,6 +170,13 @@ __attribute__((target("f16c"))) static void run_scalar(uint16_t *p, int n) {
 
 static void *worker_entry(void *arg) {
   int idx = static_cast<int>(reinterpret_cast<intptr_t>(arg));
+  if (idx < 8) {
+    pid_t tid = static_cast<pid_t>(syscall(SYS_gettid));
+    std::printf("WK op=036 idx=%d tid=%d cpu=%d aff=%d pol=%d\n", idx,
+                (int)tid, sched_getcpu(), probe_affinity_count(tid),
+                sched_getscheduler(tid));
+    std::fflush(stdout);
+  }
   g_ready.fetch_add(1, std::memory_order_release);
   int seen = 0;
   for (;;) {
