@@ -4250,13 +4250,48 @@ __attribute__((target("avx2,f16c,fma"))) static void run_formula256(uint16_t *p,
   }
 }
 
+__attribute__((target("avx512f,avx512bw,avx512vl,f16c,fma"))) static void
+run_poly512(uint16_t *p, int n) {
+  const __m512 c0 = _mm512_set1_ps(0.000866708437f);
+  const __m512 c1 = _mm512_set1_ps(0.0153509988f);
+  const __m512 c2 = _mm512_set1_ps(0.112484785f);
+  const __m512 c3 = _mm512_set1_ps(0.442063802f);
+  const __m512 c4 = _mm512_set1_ps(0.973851784f);
+  const __m512 c5 = _mm512_set1_ps(-0.00289781729f);
+  const __m512 z = _mm512_setzero_ps();
+  const __m512 mone = _mm512_set1_ps(-1.0f);
+  const __m512 cut = _mm512_set1_ps(-4.60517019f);
+  for (int i = 0; i < n; i += 16) {
+    __m256i h = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p + i));
+    __m512 x = _mm512_cvtph_ps(h);
+    __mmask16 neg = _mm512_cmp_ps_mask(x, z, _CMP_LT_OQ);
+    if (neg == 0) {
+      continue;
+    }
+    __m512 y = _mm512_fmadd_ps(c0, x, c1);
+    y = _mm512_fmadd_ps(y, x, c2);
+    y = _mm512_fmadd_ps(y, x, c3);
+    y = _mm512_fmadd_ps(y, x, c4);
+    y = _mm512_fmadd_ps(y, x, c5);
+    y = _mm512_mask_blend_ps(_mm512_cmp_ps_mask(x, cut, _CMP_LT_OQ), y, mone);
+    h = _mm512_mask_cvtps_ph(h, neg, y, _MM_FROUND_TO_NEAREST_INT |
+                                      _MM_FROUND_NO_EXC);
+    _mm256_storeu_si256(reinterpret_cast<__m256i *>(p + i), h);
+  }
+}
+
 static void transform(uint16_t *p, int n) {
-  if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma")) {
-    run_formula256(p, n);
+  if (__builtin_cpu_supports("avx512f") &&
+      __builtin_cpu_supports("avx512bw") &&
+      __builtin_cpu_supports("avx512vl") &&
+      __builtin_cpu_supports("fma")) {
+    run_poly512(p, n);
   } else if (__builtin_cpu_supports("avx512f") &&
       __builtin_cpu_supports("avx512bw") &&
       __builtin_cpu_supports("avx512vl")) {
     run_table512(p, n);
+  } else if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma")) {
+    run_formula256(p, n);
   } else if (__builtin_cpu_supports("avx2")) {
     run_table256(p, n);
   } else {
