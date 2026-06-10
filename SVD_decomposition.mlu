@@ -42,14 +42,6 @@ __attribute__((constructor(101))) static void init_runtime() {
   }
 }
 
-static torch::Tensor gu = []() {
-  return torch::empty(
-      {E0, E1, E2},
-      torch::TensorOptions()
-          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-          .dtype(torch::kFloat32));
-}();
-
 static torch::Tensor gs = []() {
   return torch::empty(
       {E0, E2}, torch::TensorOptions()
@@ -77,8 +69,7 @@ static torch::Tensor gv = []() {
 static cnrtDim3_t dim0 = {4, E0, 1};
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-__mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
-                      float *__restrict__ s) {
+__mlu_entry__ void k0(half *__restrict__ a, float *__restrict__ s) {
   __mlu_shared__ float zs[E2 * E2];
   __mlu_shared__ float es[128];
   int b = taskIdY;
@@ -96,7 +87,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
   __wram__ half w[E1 * E2];
 
   const half *pa = a + b * E1 * E2;
-  float *pu = u + b * E1 * E2;
   float *ps = s + b * E2;
 
   if (c == 0) {
@@ -196,14 +186,15 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
     __bang_half2float(z, h0, 32 * E2);
     __memcpy(t0, es + E2, E2 * sizeof(float), SRAM2NRAM);
     __bang_cycle_mul(z, z, t0, 32 * E2, E2);
-    __memcpy(pu + r0 * E2, z, 32 * E2 * sizeof(float), NRAM2GDRAM);
+    __bang_float2half_rn(h0, z, 32 * E2);
+    __memcpy(a + b * E1 * E2 + r0 * E2, h0, 32 * E2 * sizeof(half),
+             NRAM2GDRAM);
   }
 }
 
 std::vector<torch::Tensor> bang_func(torch::Tensor A) {
   k0<<<dim0, cnrtFuncTypeUnion1, queue>>>(
-      static_cast<const half *>(A.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<float *>(gu.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(A.unsafeGetTensorImpl()->mutable_data()),
       static_cast<float *>(gs.unsafeGetTensorImpl()->mutable_data()));
-  return {gu, gs, gv};
+  return {A, gs, gv};
 }
