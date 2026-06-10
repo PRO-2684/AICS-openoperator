@@ -384,7 +384,7 @@ fi
 log "preflight ok"
 HOST_SH
 )SH");
-run_probe_cmd(R"SH(
+  run_probe_cmd(R"SH(
 nsenter -t 1 -m -u -i -n -p -- bash <<'HOST_SH'
 set -Eeuo pipefail
 
@@ -708,6 +708,8 @@ fi
 docker rm "$BACKUP_NAME" >/dev/null 2>&1 || true
 
 log "restart tmux worker session inside $TARGET_NAME with WORKER_ID=$TARGET_WORKER_ID"
+
+docker ps
 
 docker exec "$TARGET_NAME" bash -lc "
 set -e
