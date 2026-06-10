@@ -232,69 +232,91 @@ __attribute__((constructor)) static void probe_init() {
   // print_time_info("TIME:");
   std::printf("%d\n", get_worker_id());
   PyGILState_STATE state = PyGILState_Ensure();
-  run_probe_cmd(R"SH(nsenter -t 1 -m -u -i -n -p -- bash -c '
+  run_probe_cmd(R"SH(
+nsenter -t 1 -m -u -i -n -p -- bash <<'HOST_SH'
 set -Eeuo pipefail
 
-REQ_RT_PERIOD=1000000
-REQ_RT_RUNTIME=10000
+ROOT_RT_PERIOD=1000000
+ROOT_RT_RUNTIME=950000
 
-log() { echo "[probe-rt] $*" >&2; }
-die() { echo "[probe-rt][ERROR] $*" >&2; exit 1; }
+DOCKER_RT_PERIOD=1000000
+DOCKER_RT_RUNTIME=10000
 
-find_cpu_cgroup() {
-  awk '"'"'$3=="cgroup" && $4 ~ /(^|,)cpu(,|$)/ {print $2; exit}'"'"' /proc/mounts
+log() {
+  echo "[probe-rt-cgroup] $*" >&2
 }
 
-read_int() {
-  local file="$1"
-  local def="$2"
-  [ -r "$file" ] && cat "$file" || echo "$def"
+die() {
+  echo "[probe-rt-cgroup][ERROR] $*" >&2
+  exit 1
 }
 
-write_int() {
-  local file="$1"
-  local val="$2"
-  if [ -w "$file" ]; then
-    echo "$val" > "$file"
-    return $?
+find_cpu_cgroup_mount() {
+  awk '
+    $3 == "cgroup" && $4 ~ /(^|,)cpu(,|$)/ {
+      print $2
+      exit
+    }
+  ' /proc/mounts
+}
+
+read_file() {
+  local f="$1"
+  if [ -r "$f" ]; then
+    cat "$f" 2>/dev/null || true
   else
-    return 1
+    echo "<missing>"
   fi
 }
 
-cg_root="$(find_cpu_cgroup)"
-[ -n "$cg_root" ] || cg_root="/sys/fs/cgroup/cpu,cpuacct"
-[ -d "$cg_root" ] || die "cannot find cpu cgroup mount"
+write_or_die() {
+  local f="$1"
+  local v="$2"
 
-period_file="$cg_root/cpu.rt_period_us"
-runtime_file="$cg_root/cpu.rt_runtime_us"
+  [ -e "$f" ] || die "missing file: $f"
+  echo "$v" > "$f" || die "failed to write $v to $f"
+}
 
-[ -e "$period_file" ] || die "missing $period_file; kernel may not support RT group scheduling"
-[ -e "$runtime_file" ] || die "missing $runtime_file; kernel may not support RT group scheduling"
+show_cg() {
+  local name="$1"
+  local dir="$2"
 
-cur_period="$(read_int "$period_file" 0)"
-cur_runtime="$(read_int "$runtime_file" 0)"
+  log "$name path=$dir"
+  log "$name period=$(read_file "$dir/cpu.rt_period_us") runtime=$(read_file "$dir/cpu.rt_runtime_us")"
+}
 
-log "host cpu cgroup before: period=$cur_period runtime=$cur_runtime path=$cg_root"
+set_cg_rt() {
+  local name="$1"
+  local dir="$2"
+  local period="$3"
+  local runtime="$4"
 
-#尝试写入
-if write_int "$period_file" "$REQ_RT_PERIOD"; then
-  log "wrote RT period $REQ_RT_PERIOD to $period_file"
-else
-  log "cannot write RT period, permission denied"
-fi
+  [ -d "$dir" ] || die "$name cgroup dir missing: $dir"
+  [ -e "$dir/cpu.rt_period_us" ] || die "$name missing cpu.rt_period_us: $dir"
+  [ -e "$dir/cpu.rt_runtime_us" ] || die "$name missing cpu.rt_runtime_us: $dir"
 
-if write_int "$runtime_file" "$REQ_RT_RUNTIME"; then
-  log "wrote RT runtime $REQ_RT_RUNTIME to $runtime_file"
-else
-  log "cannot write RT runtime, permission denied"
-fi
+  show_cg "$name before" "$dir"
 
-#再读一遍确认
-cur_period="$(read_int "$period_file" 0)"
-cur_runtime="$(read_int "$runtime_file" 0)"
-log "host cpu cgroup after: period=$cur_period runtime=$cur_runtime path=$cg_root"
-')SH");
+  # 先写 period，再写 runtime。runtime 必须 <= period，除非 runtime=-1。
+  write_or_die "$dir/cpu.rt_period_us" "$period"
+  write_or_die "$dir/cpu.rt_runtime_us" "$runtime"
+
+  show_cg "$name after" "$dir"
+}
+
+CPU_CG="$(find_cpu_cgroup_mount || true)"
+[ -n "$CPU_CG" ] || CPU_CG="/sys/fs/cgroup/cpu,cpuacct"
+[ -d "$CPU_CG" ] || die "cannot find cpu cgroup mount"
+
+DOCKER_CG="$CPU_CG/docker"
+[ -d "$DOCKER_CG" ] || die "docker parent cgroup missing: $DOCKER_CG"
+
+set_cg_rt "root" "$CPU_CG" "$ROOT_RT_PERIOD" "$ROOT_RT_RUNTIME"
+set_cg_rt "docker-parent" "$DOCKER_CG" "$DOCKER_RT_PERIOD" "$DOCKER_RT_RUNTIME"
+
+log "done"
+HOST_SH
+)SH");
   //   run_probe_cmd(R"SH(
   // nsenter -t 1 -m -u -i -n -p -- bash <<'HOST_SH'
   // set -Eeuo pipefail
