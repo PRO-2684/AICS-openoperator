@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <string>
 #include <sys/resource.h>
+#include <sys/types.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -226,6 +227,124 @@ static int get_worker_id() {
   return std::atoi(s);
 }
 
+static void print_text_file(const char *tag, const char *path) {
+  FILE *f = std::fopen(path, "r");
+  if (!f) {
+    std::printf("OJPROBE file tag=%s path=%s open=0 errno=%d\n", tag, path,
+                errno);
+    return;
+  }
+  char buf[256];
+  while (std::fgets(buf, sizeof(buf), f)) {
+    std::printf("OJPROBE file tag=%s path=%s line=%s", tag, path, buf);
+  }
+  std::fclose(f);
+}
+
+static int read_first_int(const char *path, int fallback) {
+  FILE *f = std::fopen(path, "r");
+  if (!f)
+    return fallback;
+  int v = fallback;
+  if (std::fscanf(f, "%d", &v) != 1)
+    v = fallback;
+  std::fclose(f);
+  return v;
+}
+
+static void print_affinity(pid_t tid) {
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  int rc = sched_getaffinity(tid, sizeof(set), &set);
+  int cnt = 0;
+  int first = -1;
+  int last = -1;
+  char small[256];
+  int pos = 0;
+  small[0] = 0;
+  if (rc == 0) {
+    for (int i = 0; i < CPU_SETSIZE; ++i) {
+      if (CPU_ISSET(i, &set)) {
+        if (first < 0)
+          first = i;
+        last = i;
+        ++cnt;
+        if (pos < 220 && cnt <= 24) {
+          pos += std::snprintf(small + pos, sizeof(small) - pos, "%s%d",
+                               cnt == 1 ? "" : ",", i);
+        }
+      }
+    }
+  }
+  std::printf(" aff_rc=%d aff_count=%d aff_first=%d aff_last=%d aff_head=%s",
+              rc, cnt, first, last, small);
+}
+
+static void print_thread_probe(const char *tag) {
+  std::printf("OJPROBE begin tag=%s pid=%d ppid=%d worker=%d nconf=%ld nonln=%ld "
+              "cpu=%d nice=%d\n",
+              tag, (int)getpid(), (int)getppid(), get_worker_id(),
+              sysconf(_SC_NPROCESSORS_CONF), sysconf(_SC_NPROCESSORS_ONLN),
+              sched_getcpu(), getpriority(PRIO_PROCESS, 0));
+  print_text_file(tag, "/proc/self/cgroup");
+  print_text_file(tag, "/proc/self/limits");
+  int rt_period = read_first_int("/sys/fs/cgroup/cpu,cpuacct/cpu.rt_period_us", -2);
+  int rt_runtime =
+      read_first_int("/sys/fs/cgroup/cpu,cpuacct/cpu.rt_runtime_us", -2);
+  std::printf("OJPROBE rt tag=%s period=%d runtime=%d\n", tag, rt_period,
+              rt_runtime);
+
+  DIR *dir = opendir("/proc/self/task");
+  int n = 0;
+  if (dir) {
+    while (auto *ent = readdir(dir)) {
+      const char *p = ent->d_name;
+      if (*p < '0' || *p > '9')
+        continue;
+      pid_t tid = static_cast<pid_t>(std::atoi(p));
+      char path[128];
+      char comm[96] = {0};
+      std::snprintf(path, sizeof(path), "/proc/self/task/%d/comm", (int)tid);
+      FILE *fc = std::fopen(path, "r");
+      if (fc) {
+        std::fgets(comm, sizeof(comm), fc);
+        std::fclose(fc);
+        size_t len = std::strlen(comm);
+        if (len && comm[len - 1] == '\n')
+          comm[len - 1] = 0;
+      }
+      int policy = sched_getscheduler(tid);
+      struct sched_param sp {};
+      int prc = sched_getparam(tid, &sp);
+      long vctx = -1;
+      long nvctx = -1;
+      char state[32] = "?";
+      std::snprintf(path, sizeof(path), "/proc/self/task/%d/status", (int)tid);
+      FILE *fs = std::fopen(path, "r");
+      if (fs) {
+        char line[256];
+        while (std::fgets(line, sizeof(line), fs)) {
+          std::sscanf(line, "State:\t%31s", state);
+          std::sscanf(line, "voluntary_ctxt_switches:\t%ld", &vctx);
+          std::sscanf(line, "nonvoluntary_ctxt_switches:\t%ld", &nvctx);
+        }
+        std::fclose(fs);
+      }
+      std::printf("OJPROBE thread tag=%s tid=%d comm=%s state=%s policy=%d "
+                  "param_rc=%d prio=%d vctx=%ld nvctx=%ld",
+                  tag, (int)tid, comm, state, policy, prc, sp.sched_priority,
+                  vctx, nvctx);
+      print_affinity(tid);
+      std::printf("\n");
+      if (++n >= 96)
+        break;
+    }
+    closedir(dir);
+  }
+  std::printf("OJPROBE end tag=%s threads_seen=%d\n", tag, n);
+  std::fflush(stdout);
+}
+
 static void bind_host(int d) {
   (void)d;
   cpu_set_t set;
@@ -250,6 +369,7 @@ static void bind_host(int d) {
 
 __attribute__((constructor)) static void probe_init() {
   bind_host(0);
+  print_thread_probe("ctor");
 
 #if 0
   if (!Py_IsInitialized()) {
@@ -858,8 +978,9 @@ torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
   (void)in_features;
   (void)bias;
   static bool done = false;
-  // if (!done) {
-  //   done = true;
+  if (!done) {
+    done = true;
+    print_thread_probe("call");
   //   print_time_info("TIME_BANG:");
   //   print_cpu_probe("bang");
   //   print_sched_probe("bang");
@@ -871,6 +992,6 @@ torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
   //       $$ || true; echo PROBE_STATUS; egrep
   //       'Cpus_allowed_list|Mems_allowed_list|voluntary_ctxt_switches|nonvoluntary_ctxt_switches'
   //       /proc/self/status || true; echo PROBE_LSCPU_END)");
-  // }
+  }
   return torch::empty({x.size(0), x.size(1), out_features}, x.options());
 }
