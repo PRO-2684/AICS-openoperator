@@ -63,7 +63,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   }
   if (c < 4) {
     int o = c * E3;
-    __bang_float2half_rn(a, b, E3);
     __memcpy(b, s + o, E3 * sizeof(float), SRAM2NRAM);
     int r0 = c * 16;
     for (int i = 0; i < 16; ++i) {
@@ -128,7 +127,7 @@ torch::Tensor bang_func(torch::Tensor A) {
   (void)g0;
   auto &y = gy;
 
-    k0<<<dim0, cnrtFuncTypeUnion1, queue>>>(
+  k0<<<dim0, cnrtFuncTypeUnion1, queue>>>(
       static_cast<const half *>(A.unsafeGetTensorImpl()->mutable_data()),
       static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
   return y;
