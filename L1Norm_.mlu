@@ -1,5 +1,6 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
+#include <cstdio>
 #include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <framework/core/device.h>
@@ -15,6 +16,10 @@ static int g_dev = 1;
 static const char *e = std::getenv("WORKER_ID");
 
 static void bind_host(int d) {
+  if (e) {
+  std::fprintf(stdout,"%s\n",e);
+  
+  }
   // cpu_set_t set;
   // CPU_ZERO(&set);
   // int begin = d >= 4 ? 28 : 0;
