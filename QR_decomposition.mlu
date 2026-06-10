@@ -101,7 +101,9 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
     __bang_mul(tmp, rr + k * E1, rr + k * E1, E1);
     __bang_reduce_sum(tmp, tmp, E1);
     float ss = tmp[0] + tmp[32] + tmp[64] + tmp[96];
-    float n = sqrtf(ss);
+    float x0 = rr[k * E1 + k];
+    float n0 = sqrtf(ss);
+    float n = x0 >= 0.0f ? -n0 : n0;
     float inv = n > 0.0f ? 1.0f / n : 0.0f;
     hh[k * E1 + k] = n;
     __bang_mul_scalar(qq + k * E1, rr + k * E1, inv, E1);
