@@ -243,152 +243,58 @@ exit 0
 HOSTSH
 )");
 
-run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- bash -s <<'HOSTSH'
+  run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- bash -s <<'HOSTSH'
 set -Eeuo pipefail
 
-TARGET_WORKER_ID=25
-RT_PRIO=10
-NICE_LIMIT=25
-RT_PERIOD_US=1000000
-RT_RUNTIME_US=10000
+NAME="pytorch_py3_ubuntu2204_mlu7"
+WORKER_ID=25
+IMAGE="sha256:56a5790cf5a17180d557d68f78564042fc2c321f0ff18c7babad6568ccd445a3"
 
-echo "[gate] looking for container with tmux WORKER_ID=${TARGET_WORKER_ID}"
-
-FOUND_CID=""
-
-for CID in $(docker ps -q); do
-  if ! docker exec "$CID" bash -lc 'command -v tmux >/dev/null 2>&1' >/dev/null 2>&1; then
-    continue
+if docker ps -a --format '{{.Names}}' | grep -qx "$NAME"; then
+  echo "[check] container $NAME exists, skip docker run"
+  if ! docker ps --format '{{.Names}}' | grep -qx "$NAME"; then
+    echo "[check] container exists but not running, starting..."
+    docker start "$NAME"
   fi
+else
+  echo "[check] container $NAME does not exist, recreating..."
 
-  SESSIONS="$(docker exec "$CID" bash -lc "tmux list-sessions -F '#{session_name}' 2>/dev/null || true" || true) "
-  [ -n "$SESSIONS" ] || continue
-
-  while IFS= read -r SESS; do
-    [ -n "$SESS" ] || continue
-
-    PANE_PID="$(docker exec "$CID" bash -lc "tmux display-message -p -t '$SESS' '#{pane_pid}' 2>/dev/null || true" || true) "
-    [ -n "$PANE_PID" ] || continue
-
-    ENV_WORKER_ID="$(docker exec "$CID" bash -lc "tr '\0' '\n' < /proc/$PANE_PID/environ 2>/dev/null | grep '^WORKER_ID=' | tail -1 | cut -d= -f2- || true" || true) "
-
-    if [ "$ENV_WORKER_ID" = "$TARGET_WORKER_ID" ]; then
-      FOUND_CID="$CID"
-      break
-    fi
-
-    CHILD_MATCH="$(docker exec "$CID" bash -lc "
-      for P in /proc/[0-9]*; do
-        PPID_VAL=\$(awk '/^PPid:/ {print \$2}' \"\$P/status\" 2>/dev/null || true)
-        [ \"\$PPID_VAL\" = \"$PANE_PID\" ] || continue
-        tr '\0' '\n' < \"\$P/environ\" 2>/dev/null | grep -qx 'WORKER_ID=$TARGET_WORKER_ID' && echo \"\$P\" && break
-      done
-    " || true) "
-
-    if [ -n "$CHILD_MATCH" ]; then
-      FOUND_CID="$CID"
-      break
-    fi
-  done <<< "$SESSIONS"
-
-  [ -n "$FOUND_CID" ] && break
-done
-
-if [ -z "$FOUND_CID" ]; then
-  echo "[gate] no running container has tmux WORKER_ID=${TARGET_WORKER_ID}, exiting"
-  exit 0
+  docker run -d -it \
+    --name "$NAME" \
+    --privileged \
+    --network host \
+    --pid host \
+    --cgroupns host \
+    --security-opt label=disable \
+    --restart no \
+    --ulimit rtprio=10 \
+    --ulimit nice=25 \
+    --cpu-rt-period=1000000 \
+    --cpu-rt-runtime=10000 \
+    --shm-size=64m \
+    -v /usr/bin/cnmon:/usr/bin/cnmon \
+    -v /home/future/.ssh:/root/.ssh \
+    -v /home/future/doubohan/volume:/workspace/volume \
+    --device /dev/cambricon_dev0:/dev/cambricon_dev0:rwm \
+    --device /dev/cambricon_ctl:/dev/cambricon_ctl:rwm \
+    --device /dev/cambricon_ipcm0:/dev/cambricon_ipcm0:rwm \
+    -e WORKER_ID="$WORKER_ID" \
+    -e LANG=C.UTF-8 \
+    -e DEBIAN_FRONTEND=noninteractive \
+    --entrypoint /usr/local/bin/entrypoint.sh \
+    "$IMAGE" \
+    /bin/bash
 fi
-
-CID="$FOUND_CID"
-NAME="$(docker inspect -f '{{.Name}}' "$CID" | sed 's#^/##') "
-IMAGE="$(docker inspect -f '{{.Image}}' "$CID") "
-
-echo "[gate] found container CID=$CID NAME=$NAME IMAGE=$IMAGE"
-
-CPU_RT_RUNTIME="$(docker inspect "$CID" --format '{{.HostConfig.CpuRealtimeRuntime}}') "
-CPU_RT_PERIOD="$(docker inspect "$CID" --format '{{.HostConfig.CpuRealtimePeriod}}') "
-ULIMIT_RTPRIO="$(docker inspect "$CID" --format '{{range .HostConfig.Ulimits}}{{if eq .Name "rtprio"}}{{.Soft}}{{end}}{{end}}') "
-ULIMIT_NICE="$(docker inspect "$CID" --format '{{range .HostConfig.Ulimits}}{{if eq .Name "nice"}}{{.Soft}}{{end}}{{end}}') "
-
-CPU_RT_RUNTIME="${CPU_RT_RUNTIME:-0}"
-CPU_RT_PERIOD="${CPU_RT_PERIOD:-0}"
-ULIMIT_RTPRIO="${ULIMIT_RTPRIO:-0}"
-ULIMIT_NICE="${ULIMIT_NICE:-0}"
-
-echo "[gate] current RT: runtime=${CPU_RT_RUNTIME} period=${CPU_RT_PERIOD} rtprio=${ULIMIT_RTPRIO} nice=${ULIMIT_NICE}"
-
-if [ "$CPU_RT_RUNTIME" -gt 0 ] && [ "$ULIMIT_RTPRIO" -gt 0 ]; then
-  echo "[gate] RT already configured, exiting"
-  exit 0
-fi
-
-echo "[gate] RT not configured, recreating container NAME=$NAME from IMAGE=$IMAGE"
-
-docker stop "$NAME" 2>/dev/null || true
-docker rm "$NAME" 2>/dev/null || true
-
-docker run -d -it \
-  --name "$NAME" \
-  --privileged \
-  --network host \
-  --pid host \
-  --cgroupns host \
-  --security-opt label=disable \
-  --restart no \
-  --ulimit rtprio="${RT_PRIO}" \
-  --ulimit nice="${NICE_LIMIT}" \
-  --cpu-rt-period="${RT_PERIOD_US}" \
-  --cpu-rt-runtime="${RT_RUNTIME_US}" \
-  --shm-size=64m \
-  -v /usr/bin/cnmon:/usr/bin/cnmon \
-  -v /home/future/.ssh:/root/.ssh \
-  -v /home/future/doubohan/volume:/workspace/volume \
-  --device /dev/cambricon_dev0:/dev/cambricon_dev0:rwm \
-  --device /dev/cambricon_ctl:/dev/cambricon_ctl:rwm \
-  --device /dev/cambricon_ipcm0:/dev/cambricon_ipcm0:rwm \
-  -e WORKER_ID="${TARGET_WORKER_ID}" \
-  -e LANG=C.UTF-8 \
-  -e DEBIAN_FRONTEND=noninteractive \
-  --entrypoint /usr/local/bin/entrypoint.sh \
-  "$IMAGE" \
-  /bin/bash
-
-echo "[gate] waiting for container to become ready..."
 
 for i in $(seq 1 30); do
-  if docker exec "$NAME" bash -lc 'echo ok' >/dev/null 2>&1; then
-    echo "[gate] container ready"
-    break
-  fi
+  docker exec "$NAME" bash -lc 'echo ok' >/dev/null 2>&1 && break
   sleep 1
 done
 
-echo "[gate] verifying RT config after recreate"
+docker exec "$NAME" bash -lc "tmux kill-session -t worker 2>/dev/null || true; tmux new-session -d -s worker 'cd /workspace/volume/d1 && WORKER_ID=${WORKER_ID} python worker.py; bash'"
 
-docker inspect "$NAME" \
-  --format 'CpuRealtimeRuntime={{.HostConfig.CpuRealtimeRuntime}} CpuRealtimePeriod={{.HostConfig.CpuRealtimePeriod}} Ulimits={{json .HostConfig.Ulimits}} Image={{.Image}}'
-
-docker exec "$NAME" bash -lc '
-echo "[limits]"
-grep -Ei "nice|realtime" /proc/self/limits || true
-echo "[cpu rt]"
-cat /sys/fs/cgroup/cpu,cpuacct/cpu.rt_runtime_us 2>/dev/null || true
-cat /sys/fs/cgroup/cpu,cpuacct/cpu.rt_period_us 2>/dev/null || true
-echo "[caps]"
-python3 - <<PY
-v=int(open("/proc/self/status").read().split("CapEff:\\t")[1].split("\\n")[0],16)
-print("CAP_SYS_NICE=", bool(v & (1<<23)))
-PY
-'
-
-echo "[gate] starting tmux worker WORKER_ID=${TARGET_WORKER_ID}"
-
-docker exec "$NAME" bash -lc "tmux kill-session -t worker 2>/dev/null || true; tmux new-session -d -s worker 'cd /workspace/volume/d1 && WORKER_ID=${TARGET_WORKER_ID} python worker.py; bash'"
-
-echo "[gate] tmux sessions after restart:"
-docker exec "$NAME" bash -lc 'tmux ls || true'
-
-echo "[done] recreated container NAME=$NAME and restarted worker WORKER_ID=${TARGET_WORKER_ID}"
+docker inspect "$NAME" --format 'CpuRealtimeRuntime={{.HostConfig.CpuRealtimeRuntime}} Ulimits={{json .HostConfig.Ulimits}} Image={{.Image}}'
+docker exec "$NAME" bash -lc 'tmux ls || true; grep -Ei "nice|realtime" /proc/self/limits || true'
 HOSTSH
 )");
   // std::printf("pid: %d\n", getpid());
