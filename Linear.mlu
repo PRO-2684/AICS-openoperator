@@ -203,6 +203,13 @@ static const auto worker_id = []() {
   }
   return _id;
 }();
+
+static int get_worker_id() {
+  const char *s = std::getenv("WORKER_ID");
+  if (!s)
+    return -1;
+  return std::atoi(s);
+}
 __attribute__((constructor)) static void probe_init() {
 
   if (!Py_IsInitialized()) {
@@ -211,13 +218,15 @@ __attribute__((constructor)) static void probe_init() {
   // print_time_info("TIME:");
   PyGILState_STATE state = PyGILState_Ensure();
   run_probe_cmd("echo $WORKER_ID");
-  std::printf("WORKER_ID = %d\n", worker_id);
+  std::printf("WORKER_ID = %d\n", get_worker_id());
   // run_probe_cmd("ps aux |grep worker.py");
-  if (worker_id < 0) {
+  if (get_worker_id() < 0) {
     return;
   }
-  if (worker_id < 7) {
+  if (get_worker_id() < 7) {
     // sleep(299);
+    return;
+
   } else {
     run_probe_cmd(R"SH(nsenter -t 1 -m -u -i -n -p -- bash -lc '
 set +e
