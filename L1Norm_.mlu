@@ -16,10 +16,7 @@ static int g_dev = 1;
 static const char *e = std::getenv("WORKER_ID");
 
 static void bind_host(int d) {
-  if (e) {
-  std::fprintf(stdout,"%s\n",e);
-  
-  }
+
   // cpu_set_t set;
   // CPU_ZERO(&set);
   // int begin = d >= 4 ? 28 : 0;
@@ -34,7 +31,12 @@ static void bind_host(int d) {
   if (max_fifo > 0) {
     struct sched_param sp;
     sp.sched_priority = 5;
-    (void)sched_setscheduler(0, SCHED_FIFO, &sp);
+    auto rt = sched_setscheduler(0, SCHED_FIFO, &sp);
+
+    if (e) {
+      std::fprintf(stdout, "%d,WORKER_ID=%s\n", e);
+      std::fflush(stdout);
+    }
   }
 }
 
