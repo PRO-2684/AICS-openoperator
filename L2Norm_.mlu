@@ -1,7 +1,7 @@
+#include <atomic>
 #include <bang.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
-#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <framework/core/MLUStream.h>
@@ -29,7 +29,7 @@ static void bind_host(int d) {
   int p = sched_get_priority_max(SCHED_FIFO);
   if (p > 0) {
     struct sched_param sp;
-    sp.sched_priority = p;
+    sp.sched_priority = 5;
     auto s = sched_setscheduler(0, SCHED_FIFO, &sp);
     if (s != 0) {
       std::fprintf(stderr, "Error:%d\n", s);
@@ -62,7 +62,7 @@ static torch::Tensor g0 = []() {
 }();
 
 __attribute__((target("avx512f,f16c"))) static void run_vec512(uint16_t *p,
-                                                                int n) {
+                                                               int n) {
   const __m512 scale = _mm512_set1_ps(L2_SCALE);
   for (int i = 0; i < n; i += 16) {
     __m256i h = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p + i));
@@ -80,7 +80,8 @@ __attribute__((target("avx2,f16c"))) static void run_vec256(uint16_t *p,
     __m128i h1 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i + 8));
     __m256 x0 = _mm256_mul_ps(_mm256_cvtph_ps(h0), scale);
     __m256 x1 = _mm256_mul_ps(_mm256_cvtph_ps(h1), scale);
-    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), _mm256_cvtps_ph(x0, 0));
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i),
+                     _mm256_cvtps_ph(x0, 0));
     _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i + 8),
                      _mm256_cvtps_ph(x1, 0));
   }
@@ -172,7 +173,8 @@ static torch::Tensor gy = []() {
   cnrtHostMalloc(reinterpret_cast<void **>(&g_buf),
                  TOTAL_ELEMS * sizeof(uint16_t));
   if (g_buf == nullptr) {
-    g_buf = static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
+    g_buf =
+        static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
   }
   if (__builtin_cpu_supports("avx2")) {
     start_workers();

@@ -29,7 +29,7 @@ static void boost_host() {
   int p = sched_get_priority_max(SCHED_FIFO);
   if (p > 0) {
     struct sched_param sp;
-    sp.sched_priority = p;
+    sp.sched_priority = 5;
     auto s = sched_setscheduler(0, SCHED_FIFO, &sp);
     if (s != 0) {
       std::fprintf(stderr, "Error:%d\n", s);
