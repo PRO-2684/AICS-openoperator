@@ -76,7 +76,6 @@ static torch::Tensor gv = []() {
 
 static cnrtDim3_t dim0 = {4, E0, 1};
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static std::vector<torch::Tensor> out = {gu, gs, gv};
 
 __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
                       float *__restrict__ s) {
@@ -111,8 +110,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
   }
   __sync_cluster();
 
-  for (int sweep = 0; sweep < 6; ++sweep) {
-    int re = sweep < 5 ? E2 - 1 : 22;
+  for (int sweep = 0; sweep < 5; ++sweep) {
+    int re = E2 - 1;
     for (int r = 0; r < re; ++r) {
       for (int g = 0; g < 8; ++g) {
         if (c < 4) {
@@ -203,5 +202,5 @@ std::vector<torch::Tensor> bang_func(torch::Tensor A) {
       static_cast<const half *>(A.unsafeGetTensorImpl()->mutable_data()),
       static_cast<float *>(gu.unsafeGetTensorImpl()->mutable_data()),
       static_cast<float *>(gs.unsafeGetTensorImpl()->mutable_data()));
-  return out;
+  return {gu, gs, gv};
 }
