@@ -63,6 +63,11 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
+  void *p = nullptr;
+  if (cnrtMalloc(&p, 64) == cnrtSuccess) {
+    cnrtMemset(p, 0, 64);
+    cnrtFree(p);
+  }
   return torch::empty({1}, opt);
 }();
 
