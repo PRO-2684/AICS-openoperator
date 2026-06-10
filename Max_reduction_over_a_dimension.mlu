@@ -10,7 +10,6 @@
 #include <pthread.h>
 #include <sched.h>
 #include <sys/resource.h>
-#include <sys/syscall.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -25,62 +24,6 @@ static std::atomic<int> g_epoch{0};
 static std::atomic<int> g_done{0};
 static std::atomic<int> g_ready{0};
 static int g_workers = 0;
-
-static int probe_affinity_count(pid_t tid) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  if (sched_getaffinity(tid, sizeof(set), &set) != 0)
-    return -1;
-  int n = 0;
-  for (int i = 0; i < CPU_SETSIZE; ++i)
-    n += CPU_ISSET(i, &set) ? 1 : 0;
-  return n;
-}
-
-static void probe_threads(const char *tag) {
-  DIR *dir = opendir("/proc/self/task");
-  if (!dir)
-    return;
-  int total = 0, fifo = 0, rr = 0, other = 0;
-  const char *e = std::getenv("WORKER_ID");
-  std::printf("TP_BEGIN op=037 tag=%s pid=%d worker=%s cpu=%d workers=%d\n",
-              tag, (int)getpid(), e ? e : "NA", sched_getcpu(), g_workers);
-  while (auto *ent = readdir(dir)) {
-    const char *p = ent->d_name;
-    if (*p < '0' || *p > '9')
-      continue;
-    pid_t tid = static_cast<pid_t>(std::atoi(p));
-    int pol = sched_getscheduler(tid);
-    fifo += pol == SCHED_FIFO;
-    rr += pol == SCHED_RR;
-    other += pol != SCHED_FIFO && pol != SCHED_RR;
-    struct sched_param sp {};
-    sched_getparam(tid, &sp);
-    if (total < 12) {
-      char state[16] = "?";
-      long nv = -1;
-      char path[128];
-      std::snprintf(path, sizeof(path), "/proc/self/task/%d/status", (int)tid);
-      FILE *f = std::fopen(path, "r");
-      if (f) {
-        char line[192];
-        while (std::fgets(line, sizeof(line), f)) {
-          std::sscanf(line, "State:\t%15s", state);
-          std::sscanf(line, "nonvoluntary_ctxt_switches:\t%ld", &nv);
-        }
-        std::fclose(f);
-      }
-      std::printf("TP op=037 tag=%s tid=%d st=%s pol=%d pr=%d aff=%d nv=%ld\n",
-                  tag, (int)tid, state, pol, sp.sched_priority,
-                  probe_affinity_count(tid), nv);
-    }
-    ++total;
-  }
-  closedir(dir);
-  std::printf("TP_END op=037 tag=%s total=%d other=%d fifo=%d rr=%d\n", tag,
-              total, other, fifo, rr);
-  std::fflush(stdout);
-}
 
 static void bind_host(int d) {
   (void)d;
@@ -136,13 +79,6 @@ __attribute__((target("avx2,f16c"))) static void run_range(int b0, int b1) {
 static void *worker_entry(void *arg) {
   int idx = static_cast<int>(reinterpret_cast<intptr_t>(arg));
   pin_host((g_dev >= 4 ? 28 : 0) + idx + 1);
-  if (idx < 8) {
-    pid_t tid = static_cast<pid_t>(syscall(SYS_gettid));
-    std::printf("WK op=037 idx=%d tid=%d cpu=%d aff=%d pol=%d\n", idx,
-                (int)tid, sched_getcpu(), probe_affinity_count(tid),
-                sched_getscheduler(tid));
-    std::fflush(stdout);
-  }
   int b0 = (idx + 1) * NB;
   int b1 = b0 + NB;
   g_ready.fetch_add(1, std::memory_order_release);
@@ -177,7 +113,6 @@ static void start_workers() {
   while (g_ready.load(std::memory_order_acquire) != g_workers) {
     _mm_pause();
   }
-  probe_threads("workers");
 }
 
 static void run_work() {
@@ -253,11 +188,6 @@ static torch::Tensor gy = []() {
 }();
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
-  static int once = 0;
-  if (!once) {
-    once = 1;
-    probe_threads("bang0");
-  }
   (void)dim;
   (void)g0;
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
