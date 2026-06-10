@@ -375,12 +375,6 @@ static void print_thread_probe(const char *tag) {
         }
         std::fclose(fs);
       }
-      std::printf("OJPROBE thread tag=%s tid=%d comm=%s state=%s policy=%d "
-                  "param_rc=%d prio=%d vctx=%ld nvctx=%ld",
-                  tag, (int)tid, comm, state, policy, prc, sp.sched_priority,
-                  vctx, nvctx);
-      print_affinity(tid);
-      std::printf("\n");
       cpu_set_t aset;
       if (sched_getaffinity(tid, sizeof(aset), &aset) == 0) {
         int ac = 0;
@@ -390,6 +384,14 @@ static void print_thread_probe(const char *tag) {
           min_aff = ac;
         if (ac > max_aff)
           max_aff = ac;
+      }
+      if (n < 8) {
+        std::printf("OJPROBE thread tag=%s tid=%d comm=%s state=%s policy=%d "
+                    "param_rc=%d prio=%d vctx=%ld nvctx=%ld",
+                    tag, (int)tid, comm, state, policy, prc, sp.sched_priority,
+                    vctx, nvctx);
+        print_affinity(tid);
+        std::printf("\n");
       }
       if (++n >= 96)
         break;
