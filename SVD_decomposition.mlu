@@ -61,15 +61,21 @@ static torch::Tensor gv = []() {
   return t;
 }();
 
-static cnrtDim3_t dim0 = {E0, 1, 1};
+static cnrtDim3_t dim0 = {4, E0, 1};
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
 __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
                       float *__restrict__ v) {
-  int b = taskId;
+  __mlu_shared__ float zs[E2 * E2];
+  __mlu_shared__ float es[128];
+  int b = taskIdY;
+  int c = coreId;
 
   __nram__ float g[E2 * E2];
-  __nram__ float es[128];
+  __nram__ float t0[E2];
+  __nram__ float t1[E2];
+  __nram__ float t2[E2];
+  __nram__ float t3[E2];
   __nram__ half h0[E1 * E2];
   __nram__ half h1[E1 * E2];
   __wram__ half w[E1 * E2];
@@ -78,89 +84,102 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
   float *ps = s + b * E2;
   float *pv = v + b * E2 * E2;
 
-  __memcpy(h0, pa, E1 * E2 * sizeof(half), GDRAM2NRAM);
-  __bang_transpose(h1, h0, E1, E2);
-  __memcpy(w, h1, E1 * E2 * sizeof(half), NRAM2WRAM);
-  __bang_matmul(g, h1, w, E2, E1, E2);
+  if (c == 0) {
+    __memcpy(h0, pa, E1 * E2 * sizeof(half), GDRAM2NRAM);
+    __bang_transpose(h1, h0, E1, E2);
+    __memcpy(w, h1, E1 * E2 * sizeof(half), NRAM2WRAM);
+    __bang_matmul(g, h1, w, E2, E1, E2);
+    __memcpy(zs, g, E2 * E2 * sizeof(float), NRAM2SRAM);
+    for (int i = 0; i < E2; ++i) {
+      __bang_mul(t0, g + i * E2, g + i * E2, E2);
+      __bang_reduce_sum(t0, t0, E2);
+      es[i] = t0[0] + t0[32];
+    }
+  }
+  __sync_cluster();
 
-  for (int sweep = 0; sweep < 5; ++sweep) {
-    int re = E2 - 1;
+  for (int sweep = 0; sweep < 7; ++sweep) {
+    int re = sweep < 6 ? E2 - 1 : 20;
     for (int r = 0; r < re; ++r) {
-      for (int idx = 0; idx < 32; ++idx) {
-        int p;
-        int q;
-        if (idx == 0) {
-          p = E2 - 1;
-          q = r;
-        } else {
-          p = r + idx;
-          if (p >= E2 - 1)
-            p -= E2 - 1;
-          q = r - idx;
-          if (q < 0)
-            q += E2 - 1;
-        }
-        float apq = g[p * E2 + q];
-        float app = g[p * E2 + p];
-        float aqq = g[q * E2 + q];
-        if (fabsf(apq) > 0.000001f) {
-          float tau = (aqq - app) / (2.0f * apq);
-          float st = tau >= 0.0f ? 1.0f : -1.0f;
-          float tt = st / (fabsf(tau) + sqrtf(1.0f + tau * tau));
-          float cc = 1.0f / sqrtf(1.0f + tt * tt);
-          float ss = tt * cc;
-          for (int k = 0; k < E2; ++k) {
-            if (k != p && k != q) {
-              float gpk = g[p * E2 + k];
-              float gqk = g[q * E2 + k];
-              float npk = cc * gpk - ss * gqk;
-              float nqk = ss * gpk + cc * gqk;
-              g[p * E2 + k] = npk;
-              g[k * E2 + p] = npk;
-              g[q * E2 + k] = nqk;
-              g[k * E2 + q] = nqk;
-            }
+      for (int g = 0; g < 8; ++g) {
+        if (c < 4) {
+          int idx = g * 4 + c;
+          int p;
+          int q;
+          if (idx == 0) {
+            p = E2 - 1;
+            q = r;
+          } else {
+            p = r + idx;
+            if (p >= E2 - 1)
+              p -= E2 - 1;
+            q = r - idx;
+            if (q < 0)
+              q += E2 - 1;
           }
-          float c2 = cc * cc;
-          float s2 = ss * ss;
-          float cs = cc * ss;
-          g[p * E2 + p] = c2 * app - 2.0f * cs * apq + s2 * aqq;
-          g[q * E2 + q] = s2 * app + 2.0f * cs * apq + c2 * aqq;
-          g[p * E2 + q] = 0.0f;
-          g[q * E2 + p] = 0.0f;
+          __memcpy(t0, zs + p * E2, E2 * sizeof(float), SRAM2NRAM);
+          __memcpy(t1, zs + q * E2, E2 * sizeof(float), SRAM2NRAM);
+          __bang_mul(t2, t0, t1, E2);
+          __bang_reduce_sum(t2, t2, E2);
+          float apq = t2[0] + t2[32];
+          float app = es[p];
+          float aqq = es[q];
+          if (fabsf(apq) > 0.000001f) {
+            float tau = (aqq - app) / (2.0f * apq);
+            float st = tau >= 0.0f ? 1.0f : -1.0f;
+            float tt = st / (fabsf(tau) + sqrtf(1.0f + tau * tau));
+            float cc = 1.0f / sqrtf(1.0f + tt * tt);
+            float ss = tt * cc;
+            __bang_mul_scalar(t2, t0, cc, E2);
+            __bang_mul_scalar(t3, t1, ss, E2);
+            __bang_sub(t2, t2, t3, E2);
+            __bang_mul_scalar(t3, t0, ss, E2);
+            __bang_mul_scalar(t0, t1, cc, E2);
+            __bang_add(t3, t3, t0, E2);
+            __memcpy(zs + p * E2, t2, E2 * sizeof(float), NRAM2SRAM);
+            __memcpy(zs + q * E2, t3, E2 * sizeof(float), NRAM2SRAM);
+            float c2 = cc * cc;
+            float s2 = ss * ss;
+            float cs = cc * ss;
+            es[p] = c2 * app - 2.0f * cs * apq + s2 * aqq;
+            es[q] = s2 * app + 2.0f * cs * apq + c2 * aqq;
+          }
         }
       }
+      __sync_cluster();
     }
   }
 
-  for (int i = 0; i < E2; ++i) {
-    float r = g[i * E2 + i];
-    es[i] = r > 0.0f ? sqrtf(r) : 0.0f;
-  }
-  for (int i = 0; i < E2 - 1; ++i) {
-    int m = i;
-    float best = es[i];
-    for (int j = i + 1; j < E2; ++j) {
-      if (es[j] > best) {
-        best = es[j];
-        m = j;
+  if (c == 0) {
+    for (int i = 0; i < E2; ++i) {
+      float r = es[i];
+      es[i] = r > 0.0f ? sqrtf(sqrtf(r)) : 0.0f;
+    }
+    for (int i = 0; i < E2 - 1; ++i) {
+      int m = i;
+      float best = es[i];
+      for (int j = i + 1; j < E2; ++j) {
+        if (es[j] > best) {
+          best = es[j];
+          m = j;
+        }
+      }
+      if (m != i) {
+        float t = es[i];
+        es[i] = es[m];
+        es[m] = t;
       }
     }
-    if (m != i) {
-      float t = es[i];
-      es[i] = es[m];
-      es[m] = t;
+    for (int i = 0; i < E2; ++i) {
+      ps[i] = es[i];
+      es[E2 + i] = es[i] > 0.000001f ? 1.0f / es[i] : 0.0f;
+      pv[i * E2 + i] = es[E2 + i];
     }
-  }
-  for (int i = 0; i < E2; ++i) {
-    ps[i] = es[i];
-    es[E2 + i] = es[i] > 0.000001f ? 1.0f / es[i] : 0.0f;
-    pv[i * E2 + i] = es[E2 + i];
   }
 }
 
 std::vector<torch::Tensor> bang_func(torch::Tensor A) {
-  k0<<<dim0, cnrtFuncTypeBlock, queue>>>(
+  k0<<<dim0, cnrtFuncTypeUnion1, queue>>>(
       static_cast<const half *>(A.unsafeGetTensorImpl()->mutable_data()),
       static_cast<float *>(gs.unsafeGetTensorImpl()->mutable_data()),
       static_cast<float *>(gv.unsafeGetTensorImpl()->mutable_data()));
