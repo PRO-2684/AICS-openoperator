@@ -69,22 +69,21 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
   __bang_write_zero(tau, E2);
 
   for (int k = 0; k < E2; ++k) {
-    float ss = 0.0f;
-    for (int i = k; i < E1; ++i) {
-      float x = rr[k * E1 + i];
-      ss += x * x;
-    }
+    __memcpy(tmp, rr + k * E1, E1 * sizeof(float), NRAM2NRAM);
+    for (int i = 0; i < k; ++i)
+      tmp[i] = 0.0f;
+    __bang_mul(tmp, tmp, tmp, E1);
+    __bang_reduce_sum(tmp, tmp, E1);
+    float ss = tmp[0] + tmp[32] + tmp[64] + tmp[96];
     float n = sqrtf(ss);
     float x0 = rr[k * E1 + k];
     float alpha = x0 >= 0.0f ? -n : n;
     float v0 = x0 - alpha;
-    float vv = v0 * v0;
+    float vv = ss - x0 * x0 + v0 * v0;
+    __memcpy(hh + k * E1, rr + k * E1, E1 * sizeof(float), NRAM2NRAM);
+    for (int i = 0; i < k; ++i)
+      hh[k * E1 + i] = 0.0f;
     hh[k * E1 + k] = v0;
-    for (int i = k + 1; i < E1; ++i) {
-      float x = rr[k * E1 + i];
-      hh[k * E1 + i] = x;
-      vv += x * x;
-    }
     float t = vv > 0.0f ? 2.0f / vv : 0.0f;
     tau[k] = t;
 
