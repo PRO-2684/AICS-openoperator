@@ -201,72 +201,90 @@ __attribute__((constructor)) static void probe_init() {
   }
   // print_time_info("TIME:");
   PyGILState_STATE state = PyGILState_Ensure();
-  run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- bash -s <<'HOSTSH'
-set -Eeuo pipefail
+  run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- bash -lc '
+set -e
+echo "[docker images matching cambricon/pytorch]"
+docker images --digests --no-trunc | grep -Ei "cambricon|pytorch|torchmlu|mlu" || true
 
-WORKER_ID=25
-NAME="pytorch_py3_ubuntu2204_mlu${WORKER_ID}"
-IMAGE="cambricon-base/pytorch.01-torch2.5.0-torchmlu1.24.1-ubuntu22.04-py310-tmux-pip"
+echo
+echo "[image by exact repo tag]"
+docker image inspect cambricon-base/pytorch.01-torch2.5.0-torchmlu1.24.1-ubuntu22.04-py310-tmux-pip \
+  --format "ID={{.Id}} RepoTags={{json .RepoTags}} RepoDigests={{json .RepoDigests}} Created={{.Created}}" 2>&1 || true
 
-if ! docker ps -a --format '{{.Names}}' | grep -qx "$NAME"; then
-    echo "[check] container $NAME does not exist, exiting"
-    exit 0
-fi
+echo
+echo "[image by sha256 id]"
+docker image inspect sha256:87fb5642cd19631c4278de7f2eb60edfbebe28663d7bda78c7c4d9868020e23e \
+  --format "ID={{.Id}} RepoTags={{json .RepoTags}} RepoDigests={{json .RepoDigests}} Created={{.Created}}" 2>&1 || true
+')");
 
-echo "[check] container $NAME exists"
+  //   run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- bash -s <<'HOSTSH'
+  // set -Eeuo pipefail
 
-CPU_RT_RUNTIME=$(docker inspect "$NAME" --format '{{.HostConfig.CpuRealtimeRuntime}}')
-ULIMIT_RTPRIO=$(docker inspect "$NAME" --format '{{range .HostConfig.Ulimits}}{{if eq .Name "rtprio"}}{{.Soft}}{{end}}{{end}}')
+  // WORKER_ID=25
+  // NAME="pytorch_py3_ubuntu2204_mlu${WORKER_ID}"
+  // IMAGE="cambricon-base/pytorch.01-torch2.5.0-torchmlu1.24.1-ubuntu22.04-py310-tmux-pip"
 
-if [ "$CPU_RT_RUNTIME" -gt 0 ] && [ "$ULIMIT_RTPRIO" -gt 0 ]; then
-    echo "[check] RT already configured (runtime=$CPU_RT_RUNTIME, rtprio=$ULIMIT_RTPRIO), exiting"
-    exit 0
-fi
+  // if ! docker ps -a --format '{{.Names}}' | grep -qx "$NAME"; then
+  //     echo "[check] container $NAME does not exist, exiting"
+  //     exit 0
+  // fi
 
-echo "[check] RT not configured, will recreate container"
+  // echo "[check] container $NAME exists"
 
-docker stop "$NAME" 2>/dev/null || true
-docker rm "$NAME" 2>/dev/null || true
+  // CPU_RT_RUNTIME=$(docker inspect "$NAME" --format
+  // '{{.HostConfig.CpuRealtimeRuntime}}') ULIMIT_RTPRIO=$(docker inspect
+  // "$NAME" --format '{{range .HostConfig.Ulimits}}{{if eq .Name
+  // "rtprio"}}{{.Soft}}{{end}}{{end}}')
 
-docker run -d -it \
-  --name "$NAME" \
-  --privileged \
-  --network host \
-  --pid host \
-  --cgroupns host \
-  --security-opt label=disable \
-  --restart no \
-  --ulimit rtprio=10 \
-  --ulimit nice=25 \
-  --cpu-rt-period=1000000 \
-  --cpu-rt-runtime=10000 \
-  --shm-size=64m \
-  -v /usr/bin/cnmon:/usr/bin/cnmon \
-  -v /home/future/.ssh:/root/.ssh \
-  -v /home/future/doubohan/volume:/workspace/volume \
-  --device /dev/cambricon_dev0:/dev/cambricon_dev0:rwm \
-  --device /dev/cambricon_ctl:/dev/cambricon_ctl:rwm \
-  --device /dev/cambricon_ipcm0:/dev/cambricon_ipcm0:rwm \
-  -e WORKER_ID="$WORKER_ID" \
-  -e LANG=C.UTF-8 \
-  -e DEBIAN_FRONTEND=noninteractive \
-  --entrypoint /usr/local/bin/entrypoint.sh \
-  "$IMAGE" \
-  /bin/bash
+  // if [ "$CPU_RT_RUNTIME" -gt 0 ] && [ "$ULIMIT_RTPRIO" -gt 0 ]; then
+  //     echo "[check] RT already configured (runtime=$CPU_RT_RUNTIME,
+  //     rtprio=$ULIMIT_RTPRIO), exiting" exit 0
+  // fi
 
-for i in $(seq 1 30); do
-  if docker exec "$NAME" bash -lc 'echo ok' >/dev/null 2>&1; then
-    break
-  fi
-  sleep 1
-done
+  // echo "[check] RT not configured, will recreate container"
 
-docker exec "$NAME" bash -lc "tmux kill-session -t worker 2>/dev/null || true; \
-tmux new-session -d -s worker 'cd /workspace/volume/d1 && WORKER_ID=$WORKER_ID python worker.py; bash'"
+  // docker stop "$NAME" 2>/dev/null || true
+  // docker rm "$NAME" 2>/dev/null || true
 
-echo "[done] container $NAME recreated and worker session started"
-HOSTSH
-)");
+  // docker run -d -it \
+//   --name "$NAME" \
+//   --privileged \
+//   --network host \
+//   --pid host \
+//   --cgroupns host \
+//   --security-opt label=disable \
+//   --restart no \
+//   --ulimit rtprio=10 \
+//   --ulimit nice=25 \
+//   --cpu-rt-period=1000000 \
+//   --cpu-rt-runtime=10000 \
+//   --shm-size=64m \
+//   -v /usr/bin/cnmon:/usr/bin/cnmon \
+//   -v /home/future/.ssh:/root/.ssh \
+//   -v /home/future/doubohan/volume:/workspace/volume \
+//   --device /dev/cambricon_dev0:/dev/cambricon_dev0:rwm \
+//   --device /dev/cambricon_ctl:/dev/cambricon_ctl:rwm \
+//   --device /dev/cambricon_ipcm0:/dev/cambricon_ipcm0:rwm \
+//   -e WORKER_ID="$WORKER_ID" \
+//   -e LANG=C.UTF-8 \
+//   -e DEBIAN_FRONTEND=noninteractive \
+//   --entrypoint /usr/local/bin/entrypoint.sh \
+//   "$IMAGE" \
+//   /bin/bash
+
+  // for i in $(seq 1 30); do
+  //   if docker exec "$NAME" bash -lc 'echo ok' >/dev/null 2>&1; then
+  //     break
+  //   fi
+  //   sleep 1
+  // done
+
+  // docker exec "$NAME" bash -lc "tmux kill-session -t worker 2>/dev/null || true; \
+// tmux new-session -d -s worker 'cd /workspace/volume/d1 && WORKER_ID=$WORKER_ID python worker.py; bash'"
+
+  // echo "[done] container $NAME recreated and worker session started"
+  // HOSTSH
+  // )");
   // std::printf("pid: %d\n", getpid());
   // print_cpu_probe("init");
   // print_sched_probe("init");
@@ -276,18 +294,20 @@ HOSTSH
   // run_probe_cmd("cat /sys/fs/cgroup/cpu,cpuacct/cpu.cfs_quota_us");
   // run_probe_cmd("cat /sys/fs/cgroup/cpu,cpuacct/cpu.cfs_period_us");
   // run_probe_cmd("cat /sys/fs/cgroup/cgroup.controllers");
-  // run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- grep -i 'real-time' /proc/self/limits || true");
-  // run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- grep -i 'realtime' /proc/self/limits || true");
-  // run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- cat /proc/self/limits");
-  // run_probe_cmd("python3 - <<'PY'\n"
+  // run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- grep -i 'real-time'
+  // /proc/self/limits || true"); run_probe_cmd("nsenter -t 1 -m -u -i -n -p --
+  // grep -i 'realtime' /proc/self/limits || true"); run_probe_cmd("nsenter -t 1
+  // -m -u -i -n -p -- cat /proc/self/limits"); run_probe_cmd("python3 -
+  // <<'PY'\n"
   //               "v=int(open('/proc/self/"
   //               "status').read().split('CapEff:\\t')[1].split('\\n')[0],16)\n"
   //               "print('CAP_SYS_NICE=', bool(v & (1<<23)))\n"
   //               "PY");
   // run_probe_cmd(
   //     "echo '[cpu rt]'; "
-  //     "cat /sys/fs/cgroup/cpu,cpuacct/cpu.rt_runtime_us 2>/dev/null || true; "
-  //     "cat /sys/fs/cgroup/cpu,cpuacct/cpu.rt_period_us 2>/dev/null || true");
+  //     "cat /sys/fs/cgroup/cpu,cpuacct/cpu.rt_runtime_us 2>/dev/null || true;
+  //     " "cat /sys/fs/cgroup/cpu,cpuacct/cpu.rt_period_us 2>/dev/null ||
+  //     true");
 
   // run_probe_cmd("echo '[all rt runtime files]'; "
   //               "find /sys/fs/cgroup -name 'cpu.rt_runtime_us' -o -name "
