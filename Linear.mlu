@@ -294,7 +294,7 @@ kill_matches() {
   done
 }
 
-kill_matches -USR1 "-USR1"
+kill_matches -TERM "-TERM"
 '"'"' 2>/dev/null || echo "skip $name: docker exec failed"
 done
 ')SH");
