@@ -232,69 +232,11 @@ __attribute__((constructor)) static void probe_init() {
   // print_time_info("TIME:");
   std::printf("%d\n", get_worker_id());
   PyGILState_STATE state = PyGILState_Ensure();
-run_probe_cmd(R"SH(nsenter -t 1 -m -u -i -n -p -- bash -s <<'HOSTSH'
-set -u
 
-docker ps -a --format '{{.Names}}' | grep '^pytorch_py3_ubuntu2204_mlu' | while read -r NAME; do
-  [ -n "$NAME" ] || continue
-
-  echo
-  echo "################################################################################"
-  echo "CONTAINER: $NAME"
-  echo "################################################################################"
-
-  docker inspect "$NAME" --format \
-'Running={{.State.Running}}
-Pid={{.State.Pid}}
-Privileged={{.HostConfig.Privileged}}
-CgroupnsMode={{.HostConfig.CgroupnsMode}}
-CpuRealtimeRuntime={{.HostConfig.CpuRealtimeRuntime}}
-CpuRealtimePeriod={{.HostConfig.CpuRealtimePeriod}}
-Ulimits={{json .HostConfig.Ulimits}}' 2>&1 || true
-
-  if [ "$(docker inspect "$NAME" --format '{{.State.Running}}' 2>/dev/null || echo false)" != "true" ]; then
-    echo "[skip] not running"
-    continue
-  fi
-
-  docker exec "$NAME" bash -lc '
-set +e
-
-echo "[limits]"
-grep -Ei "nice|realtime|rtprio|priority" /proc/self/limits || true
-
-echo "[cap_sys_nice]"
-python3 - <<'"'"'PY'"'"' 2>/dev/null || true
-s=open("/proc/self/status").read()
-v=int(s.split("CapEff:\t",1)[1].split("\n",1)[0],16)
-print(bool(v & (1<<23)))
-PY
-
-echo "[cgroup rt]"
-echo -n "runtime="
-cat /sys/fs/cgroup/cpu,cpuacct/cpu.rt_runtime_us 2>/dev/null || echo "N/A"
-echo -n "period="
-cat /sys/fs/cgroup/cpu,cpuacct/cpu.rt_period_us 2>/dev/null || echo "N/A"
-
-echo "[try rr/fifo]"
-for pol in r f; do
-  for p in 1 5 10; do
-    if chrt "-$pol" -p "$p" $$ >/dev/null 2>&1; then
-      echo "$pol $p OK"
-      chrt -o -p 0 $$ >/dev/null 2>&1 || true
-    else
-      echo "$pol $p FAIL"
-    fi
-  done
-done
-'
-done
-HOSTSH
-)SH");
-  {
-    PyGILState_Release(state);
-    return;
-  }
+  // {
+  //   PyGILState_Release(state);
+  //   return;
+  // }
   run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- docker ps -a)");
   run_probe_cmd(R"(ps aux |grep worker.py)");
   run_probe_cmd(R"SH(
