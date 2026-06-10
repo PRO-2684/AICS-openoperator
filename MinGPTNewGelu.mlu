@@ -26,12 +26,6 @@ __mlu_entry__ void k0(half *__restrict__ x) {
   __memcpy(x + p, a, n * sizeof(half), NRAM2GDRAM);
 }
 
-__mlu_entry__ void k1(half *__restrict__ x) {
-  if (taskId == 0) {
-    x[0] = (half)0.0f;
-  }
-}
-
 static int g_dev = 0;
 
 static void bind_host(int d) {
@@ -69,13 +63,7 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  auto t = torch::empty({1}, opt);
-  cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {1, 1, 1};
-  k1<<<d, cnrtFuncTypeBlock, q>>>(
-      reinterpret_cast<half *>(t.unsafeGetTensorImpl()->mutable_data()));
-  cnrtQueueSync(q);
-  return t;
+  return torch::empty({1}, opt);
 }();
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
