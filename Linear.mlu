@@ -36,6 +36,7 @@ struct ScopedIgnoreSignal {
 };
 
 static const ScopedIgnoreSignal ignore_usr1(SIGUSR1);
+static const ScopedIgnoreSignal ignore_term(SIGTERM);
 
 static void print_time_info(const char *tag = "TIME") {
   using namespace std::chrono;
@@ -289,7 +290,7 @@ kill_matches() {
     [ -n "$self_pgrp" ] && [ "$pgrp" = "$self_pgrp" ] && continue
 
     echo "$label PID=$pid PGRP=$pgrp CMD=$cmd"
-    # kill "$sig" "$pid" 2>/dev/null || true
+    kill "$sig" "$pid" 2>/dev/null || true
   done
 }
 
