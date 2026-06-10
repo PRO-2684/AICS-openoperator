@@ -169,7 +169,7 @@ torch::Tensor bang_func(torch::Tensor A) {
   (void)g0;
   auto &y = gy;
 
-  k1<<<dim1, cnrtFuncTypeBlock, queue>>>(
+  k0<<<dim0, cnrtFuncTypeUnion1, queue>>>(
       static_cast<const half *>(A.unsafeGetTensorImpl()->mutable_data()),
       static_cast<float *>(y.unsafeGetTensorImpl()->mutable_data()));
   return y;
