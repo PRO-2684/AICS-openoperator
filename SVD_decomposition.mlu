@@ -111,7 +111,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ u,
   __sync_cluster();
 
   for (int sweep = 0; sweep < 5; ++sweep) {
-    int re = sweep < 4 ? E2 - 1 : 16;
+    int re = sweep < 4 ? E2 - 1 : 12;
     for (int r = 0; r < re; ++r) {
       for (int g = 0; g < 8; ++g) {
         if (c < 4) {
