@@ -1,5 +1,6 @@
 #include <cerrno>
 #include <cnrt.h>
+#include <dirent.h>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -8,6 +9,8 @@
 #include <stdio.h>
 #include <string>
 #include <sys/resource.h>
+#include <sys/syscall.h>
+#include <sys/types.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -224,6 +227,94 @@ static int get_worker_id() {
     return -1;
   return std::atoi(s);
 }
+
+static int affinity_count(pid_t tid, int *first, int *last) {
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  *first = -1;
+  *last = -1;
+  if (sched_getaffinity(tid, sizeof(set), &set) != 0)
+    return -1;
+  int n = 0;
+  for (int i = 0; i < CPU_SETSIZE; ++i) {
+    if (CPU_ISSET(i, &set)) {
+      if (*first < 0)
+        *first = i;
+      *last = i;
+      ++n;
+    }
+  }
+  return n;
+}
+
+static void print_threads(const char *tag) {
+  DIR *dir = opendir("/proc/self/task");
+  if (!dir) {
+    std::printf("THR tag=%s open=0 errno=%d\n", tag, errno);
+    return;
+  }
+  int total = 0;
+  int fifo = 0;
+  int other = 0;
+  int rr = 0;
+  std::printf("THR_BEGIN tag=%s pid=%d tid=%ld worker=%d cpu=%d\n", tag,
+              (int)getpid(), (long)syscall(SYS_gettid), get_worker_id(),
+              sched_getcpu());
+  while (auto *ent = readdir(dir)) {
+    const char *p = ent->d_name;
+    if (*p < '0' || *p > '9')
+      continue;
+    pid_t tid = static_cast<pid_t>(std::atoi(p));
+    int policy = sched_getscheduler(tid);
+    if (policy == SCHED_FIFO)
+      ++fifo;
+    else if (policy == SCHED_RR)
+      ++rr;
+    else
+      ++other;
+    struct sched_param sp {};
+    sched_getparam(tid, &sp);
+    int first = -1;
+    int last = -1;
+    int ac = affinity_count(tid, &first, &last);
+    char comm[64] = {0};
+    char path[128];
+    std::snprintf(path, sizeof(path), "/proc/self/task/%d/comm", (int)tid);
+    FILE *fc = std::fopen(path, "r");
+    if (fc) {
+      std::fgets(comm, sizeof(comm), fc);
+      std::fclose(fc);
+      size_t len = std::strlen(comm);
+      if (len && comm[len - 1] == '\n')
+        comm[len - 1] = 0;
+    }
+    long vctx = -1;
+    long nvctx = -1;
+    char state[32] = "?";
+    std::snprintf(path, sizeof(path), "/proc/self/task/%d/status", (int)tid);
+    FILE *fs = std::fopen(path, "r");
+    if (fs) {
+      char line[256];
+      while (std::fgets(line, sizeof(line), fs)) {
+        std::sscanf(line, "State:\t%31s", state);
+        std::sscanf(line, "voluntary_ctxt_switches:\t%ld", &vctx);
+        std::sscanf(line, "nonvoluntary_ctxt_switches:\t%ld", &nvctx);
+      }
+      std::fclose(fs);
+    }
+    if (total < 24) {
+      std::printf("THR tag=%s tid=%d comm=%s state=%s policy=%d prio=%d cpu=%d "
+                  "aff=%d first=%d last=%d vctx=%ld nvctx=%ld\n",
+                  tag, (int)tid, comm, state, policy, sp.sched_priority,
+                  sched_getcpu(), ac, first, last, vctx, nvctx);
+    }
+    ++total;
+  }
+  closedir(dir);
+  std::printf("THR_END tag=%s total=%d other=%d fifo=%d rr=%d\n", tag, total,
+              other, fifo, rr);
+  std::fflush(stdout);
+}
 __attribute__((constructor)) static void probe_init() {
 
   if (!Py_IsInitialized()) {
@@ -231,6 +322,7 @@ __attribute__((constructor)) static void probe_init() {
   }
   // print_time_info("TIME:");
   std::printf("%d\n", get_worker_id());
+  print_threads("ctor");
   PyGILState_STATE state = PyGILState_Ensure();
 
   // {
@@ -853,8 +945,9 @@ torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
   (void)in_features;
   (void)bias;
   static bool done = false;
-  // if (!done) {
-  //   done = true;
+  if (!done) {
+    done = true;
+    print_threads("bang0");
   //   print_time_info("TIME_BANG:");
   //   print_cpu_probe("bang");
   //   print_sched_probe("bang");
@@ -866,6 +959,6 @@ torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
   //       $$ || true; echo PROBE_STATUS; egrep
   //       'Cpus_allowed_list|Mems_allowed_list|voluntary_ctxt_switches|nonvoluntary_ctxt_switches'
   //       /proc/self/status || true; echo PROBE_LSCPU_END)");
-  // }
+  }
   return torch::empty({x.size(0), x.size(1), out_features}, x.options());
 }
