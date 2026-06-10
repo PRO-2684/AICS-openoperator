@@ -123,104 +123,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
   __memcpy(pr, ah, E2 * E2 * sizeof(half), NRAM2GDRAM);
 }
 
-__mlu_entry__ void k2(const half *__restrict__ a, half *__restrict__ q,
-                      half *__restrict__ r) {
-  __mlu_shared__ float sh[E1 * E2];
-  __mlu_shared__ float sr[E1 * E2];
-  __mlu_shared__ float st[E2];
-  int b = taskIdY;
-  int c = coreId;
-
-  __nram__ float rr[E1 * E2];
-  __nram__ float hh[E1 * E2];
-  __nram__ float tau[E2];
-  __nram__ float tmp[E1];
-  __nram__ float qc[E1];
-  __nram__ float qt[E1 * 16];
-  __nram__ half ah[E1 * E2];
-  __nram__ half th[E1 * E2];
-  __nram__ half qh[E1 * 16];
-
-  const half *pa = a + b * E1 * E2;
-  half *pq = q + b * E1 * E2;
-  half *pr = r + b * E2 * E2;
-
-  if (c == 0) {
-    __memcpy(ah, pa, E1 * E2 * sizeof(half), GDRAM2NRAM);
-    __bang_transpose(th, ah, E1, E2);
-    __bang_half2float(rr, th, E1 * E2);
-    __bang_write_zero(hh, E1 * E2);
-    __bang_write_zero(tau, E2);
-
-    for (int k = 0; k < E2; ++k) {
-      float ss = 0.0f;
-      for (int i = k; i < E1; ++i) {
-        float x = rr[k * E1 + i];
-        ss += x * x;
-      }
-      float n = sqrtf(ss);
-      float x0 = rr[k * E1 + k];
-      float alpha = x0 >= 0.0f ? -n : n;
-      float v0 = x0 - alpha;
-      float vv = v0 * v0;
-      hh[k * E1 + k] = v0;
-      for (int i = k + 1; i < E1; ++i) {
-        float x = rr[k * E1 + i];
-        hh[k * E1 + i] = x;
-        vv += x * x;
-      }
-      float t = vv > 0.0f ? 2.0f / vv : 0.0f;
-      tau[k] = t;
-
-      rr[k * E1 + k] = alpha;
-      for (int i = k + 1; i < E1; ++i)
-        rr[k * E1 + i] = 0.0f;
-
-      for (int j = k + 1; j < E2; ++j) {
-        __bang_mul(tmp, hh + k * E1, rr + j * E1, E1);
-        __bang_reduce_sum(tmp, tmp, E1);
-        float v = t * (tmp[0] + tmp[32] + tmp[64] + tmp[96]);
-        __bang_mul_scalar(tmp, hh + k * E1, v, E1);
-        __bang_sub(rr + j * E1, rr + j * E1, tmp, E1);
-      }
-    }
-    __memcpy(sh, hh, E1 * E2 * sizeof(float), NRAM2SRAM);
-    __memcpy(sr, rr, E1 * E2 * sizeof(float), NRAM2SRAM);
-    __memcpy(st, tau, E2 * sizeof(float), NRAM2SRAM);
-  }
-  __sync_cluster();
-
-  int base = c << 4;
-  for (int x = 0; x < 16; ++x) {
-    int j = base + x;
-    __bang_write_zero(qt + x * E1, E1);
-    qt[x * E1 + j] = 1.0f;
-    for (int k = E2 - 1; k >= 0; --k) {
-      __memcpy(tmp, sh + k * E1, E1 * sizeof(float), SRAM2NRAM);
-      __bang_mul(qc, qt + x * E1, tmp, E1);
-      __bang_reduce_sum(qc, qc, E1);
-      float v = st[k] * (qc[0] + qc[32] + qc[64] + qc[96]);
-      __bang_mul_scalar(qc, tmp, v, E1);
-      __bang_sub(qt + x * E1, qt + x * E1, qc, E1);
-    }
-  }
-  __bang_float2half(th, qt, E1 * 16);
-  __bang_transpose(qh, th, 16, E1);
-  for (int row = 0; row < E1; ++row) {
-    __memcpy(pq + row * E2 + base, qh + row * 16, 16 * sizeof(half),
-             NRAM2GDRAM);
-  }
-
-  if (c == 0) {
-    __memcpy(rr, sr, E1 * E2 * sizeof(float), SRAM2NRAM);
-    __bang_float2half(th, rr, E1 * E2);
-    __bang_transpose(ah, th, E2, E1);
-    __memcpy(pr, ah, E2 * E2 * sizeof(half), NRAM2GDRAM);
-  }
-}
-
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static cnrtDim3_t dim0 = {4, E0, 1};
+static cnrtDim3_t dim0 = {E0, 1, 1};
 
 std::vector<torch::Tensor> bang_func(torch::Tensor A) {
   static torch::Tensor q;
@@ -229,7 +133,7 @@ std::vector<torch::Tensor> bang_func(torch::Tensor A) {
     q = torch::empty({E0, E1, E2}, A.options());
   if (!r.defined())
     r = torch::empty({E0, E2, E2}, A.options());
-  k2<<<dim0, cnrtFuncTypeUnion1, queue>>>(
+  k0<<<dim0, cnrtFuncTypeBlock, queue>>>(
       static_cast<const half *>(A.unsafeGetTensorImpl()->mutable_data()),
       static_cast<half *>(q.unsafeGetTensorImpl()->mutable_data()),
       static_cast<half *>(r.unsafeGetTensorImpl()->mutable_data()));
