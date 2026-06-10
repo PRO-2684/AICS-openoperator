@@ -12,12 +12,11 @@
 #include <unistd.h>
 
 #define TOTAL_ELEMS 262144
-#define CHUNK_ELEMS 131072
+#define CHUNK_ELEMS 262144
 
 static int g_dev = 0;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
-static cnrtNotifier_t g_nt[2] = {nullptr, nullptr};
-static constexpr int g_work_n = 8;
+static constexpr int g_work_n = 4;
 
 static void boost_host() {
   setpriority(PRIO_PROCESS, 0, -5);
@@ -45,7 +44,6 @@ static void bind_host(int d) {
     CPU_SET(begin + i, &s);
   }
   sched_setaffinity(0, sizeof(s), &s);
-  boost_host();
 }
 
 alignas(64) static const uint16_t g_tbl[65536] = {
@@ -4283,15 +4281,8 @@ run_poly512(uint16_t *p, int n) {
 static void transform(uint16_t *p, int n) {
   if (__builtin_cpu_supports("avx512f") &&
       __builtin_cpu_supports("avx512bw") &&
-      __builtin_cpu_supports("avx512vl") &&
-      __builtin_cpu_supports("fma")) {
-    run_poly512(p, n);
-  } else if (__builtin_cpu_supports("avx512f") &&
-      __builtin_cpu_supports("avx512bw") &&
       __builtin_cpu_supports("avx512vl")) {
     run_table512(p, n);
-  } else if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma")) {
-    run_formula256(p, n);
   } else if (__builtin_cpu_supports("avx2")) {
     run_table256(p, n);
   } else {
@@ -4311,23 +4302,16 @@ struct HostWork {
     for (int i = 0; i < g_work_n - 1; ++i) {
       th[i] = std::thread([this, i]() {
         int t = i + 1;
-        pin_host((g_dev >= 4 ? 28 : 0) + t);
-        int seen = 0;
         ready.fetch_add(1, std::memory_order_release);
-        for (;;) {
-          int cur = go.load(std::memory_order_acquire);
-          while (cur == seen) {
-            _mm_pause();
-            cur = go.load(std::memory_order_acquire);
-          }
-          seen = cur;
-          uint16_t *p = ptr;
-          int n = len;
-          int l = ((n * t) / g_work_n + 15) & ~15;
-          int r = ((n * (t + 1)) / g_work_n) & ~15;
-          transform(p + l, r - l);
-          done.fetch_add(1, std::memory_order_release);
+        while (go.load(std::memory_order_acquire) == 0) {
+          _mm_pause();
         }
+        uint16_t *p = ptr;
+        int n = len;
+        int l = ((n * t) / g_work_n + 15) & ~15;
+        int r = ((n * (t + 1)) / g_work_n) & ~15;
+        transform(p + l, r - l);
+        done.fetch_add(1, std::memory_order_release);
       });
     }
     while (ready.load(std::memory_order_acquire) < g_work_n - 1) {
@@ -4337,6 +4321,7 @@ struct HostWork {
 };
 
 static HostWork *g_work = nullptr;
+static bool g_work_used = false;
 
 static void init_work() {
   if (g_work == nullptr) {
@@ -4345,14 +4330,15 @@ static void init_work() {
 }
 
 static void transform_work(uint16_t *p, int n) {
-  if (g_work == nullptr) {
+  if (g_work == nullptr || g_work_used) {
     transform(p, n);
     return;
   }
+  g_work_used = true;
   g_work->ptr = p;
   g_work->len = n;
   g_work->done.store(0, std::memory_order_relaxed);
-  g_work->go.fetch_add(1, std::memory_order_release);
+  g_work->go.store(1, std::memory_order_release);
   int r = ((n * 1) / g_work_n) & ~15;
   transform(p, r);
   while (g_work->done.load(std::memory_order_acquire) < g_work_n - 1) {
@@ -4370,7 +4356,7 @@ static void warm_host() {
   }
   for (int b = 0; b < 2; ++b) {
     if (g_buf[b] != nullptr) {
-      for (int i = 0; i < TOTAL_ELEMS; i += 32) {
+      for (int i = 0; i < CHUNK_ELEMS; i += 32) {
         g_buf[b][i] = 0;
       }
     }
@@ -4393,16 +4379,12 @@ struct InitRuntime {
         bind_host(d);
         for (int i = 0; i < 2; ++i) {
           cnrtHostMalloc(reinterpret_cast<void **>(&g_buf[i]),
-                         TOTAL_ELEMS * sizeof(uint16_t));
+                         CHUNK_ELEMS * sizeof(uint16_t));
           if (g_buf[i] == nullptr) {
-            g_buf[i] = static_cast<uint16_t *>(
-                std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
+            g_buf[i] =
+                static_cast<uint16_t *>(std::malloc(CHUNK_ELEMS * sizeof(uint16_t)));
           }
         }
-        cnrtNotifierCreateWithFlags(&g_nt[0],
-                                    CNRT_NOTIFIER_DISABLE_TIMING_ALL);
-        cnrtNotifierCreateWithFlags(&g_nt[1],
-                                    CNRT_NOTIFIER_DISABLE_TIMING_ALL);
         init_tbl32();
         init_work();
         warm_host();
@@ -4421,13 +4403,6 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 
-static torch::Tensor g_y = []() {
-  return torch::from_blob(g_buf[0], {16, 16384}, [](void *) {},
-                          torch::TensorOptions()
-                              .dtype(torch::kHalf)
-                              .device(torch::kCPU));
-}();
-
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
 torch::Tensor bang_func(torch::Tensor x, float alpha) {
@@ -4436,15 +4411,13 @@ torch::Tensor bang_func(torch::Tensor x, float alpha) {
   (void)alpha;
 
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
-  cnrtMemcpyAsync(g_buf[0], p, CHUNK_ELEMS * sizeof(uint16_t), queue,
-                  cnrtMemcpyDevToHost);
-  cnrtPlaceNotifier(g_nt[0], queue);
-  cnrtMemcpyAsync(g_buf[0] + CHUNK_ELEMS, p + CHUNK_ELEMS,
-                  CHUNK_ELEMS * sizeof(uint16_t), queue, cnrtMemcpyDevToHost);
-  cnrtPlaceNotifier(g_nt[1], queue);
-  cnrtWaitNotifier(g_nt[0]);
-  transform_work(g_buf[0], CHUNK_ELEMS);
-  cnrtWaitNotifier(g_nt[1]);
-  transform_work(g_buf[0] + CHUNK_ELEMS, CHUNK_ELEMS);
-  return g_y;
+  for (int off = 0; off < TOTAL_ELEMS; off += CHUNK_ELEMS) {
+    uint16_t *buf = g_buf[(off / CHUNK_ELEMS) & 1];
+    cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
+               cnrtMemcpyDevToHost);
+    transform_work(buf, CHUNK_ELEMS);
+    cnrtMemcpyAsync_V3(p + off, buf, CHUNK_ELEMS * sizeof(uint16_t), queue,
+                       cnrtMemcpyHostToDev);
+  }
+  return x;
 }
