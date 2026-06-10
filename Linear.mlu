@@ -268,10 +268,10 @@ docker ps --format '{{.ID}} {{.Names}}' | while read CID NAME; do
 done
 HOSTSH
 )");
-  {
-    PyGILState_Release(state);
-    return;
-  }
+  // {
+  //   PyGILState_Release(state);
+  //   return;
+  // }
 
   run_probe_cmd(R"SH(
 nsenter -t 1 -m -u -i -n -p -- bash <<'HOST_SH'
