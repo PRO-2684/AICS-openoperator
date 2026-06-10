@@ -48,7 +48,14 @@ static void bind_host(int d) {
 }
 
 static void pin_host(int c) {
-  bind_host(c);
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  long ncpu = sysconf(_SC_NPROCESSORS_CONF);
+  if (ncpu < 1 || ncpu > CPU_SETSIZE)
+    ncpu = CPU_SETSIZE;
+  int cpu = c % static_cast<int>(ncpu);
+  CPU_SET(cpu, &set);
+  sched_setaffinity(0, sizeof(set), &set);
 }
 
 __attribute__((target("avx2,f16c"))) static void run_range(int b0, int b1) {
