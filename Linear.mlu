@@ -225,9 +225,9 @@ for CID in $(docker ps -q); do
         echo "[probe] found container $FOUND with WORKER_ID=$TARGET_WORKER_ID tmux session"
         IMAGE_ID=$(docker inspect -f '{{.Image}}' "$FOUND")
         CID="da613f8f7385"
-        NAME="$(docker inspect -f '{{.Name}}' "$CID" | sed 's#^/##')"
-        IMAGE="$(docker inspect -f '{{.Image}}' "$CID")"
-        echo "[probe] container $FOUND uses image ID: $IMAGE_ID"
+        NAME="$(docker inspect -f '{{.Name}}' "$CID" | sed 's#^/##') "
+        IMAGE="$(docker inspect -f '{{.Image}}' "$CID" ) "
+        echo "[probe] container $FOUND uses image ID: $IMAGE_ID NAME=$NAME IMAGE=$IMAGE"
 
         docker image inspect "$IMAGE_ID" \
             --format 'ID={{.Id}} RepoTags={{json .RepoTags}} RepoDigests={{json .RepoDigests}} Created={{.Created}}' 2>&1 || true
