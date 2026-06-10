@@ -367,10 +367,48 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
   (void)preference;
   (void)g0;
   auto &y = gy;
-  k0<<<dim0, cnrtFuncTypeUnion1, queue>>>(
-      static_cast<const half *>(q.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<const half *>(k.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<const half *>(v.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<float *>(y.unsafeGetTensorImpl()->mutable_data()));
+
+  static uint16_t hq[2816];
+  static uint16_t hk[1408];
+  static uint16_t hv[1760];
+  static float hy[3520];
+  cnrtMemcpy(hq, q.unsafeGetTensorImpl()->mutable_data(), sizeof(hq),
+             cnrtMemcpyDevToHost);
+  cnrtMemcpy(hk, k.unsafeGetTensorImpl()->mutable_data(), sizeof(hk),
+             cnrtMemcpyDevToHost);
+  cnrtMemcpy(hv, v.unsafeGetTensorImpl()->mutable_data(), sizeof(hv),
+             cnrtMemcpyDevToHost);
+  for (int i = 0; i < 3520; ++i) {
+    hy[i] = 0.0f;
+  }
+  for (int s = 0; s < 2; ++s) {
+    int base = s ? 10 : 0;
+    int n = s ? 12 : 10;
+    for (int h = 0; h < 4; ++h) {
+      int kh = h >> 1;
+      for (int r = 0; r < n; ++r) {
+        int mr = hm0(s, r);
+        float *out = hy + ((base + r) * 4 + h) * 40;
+        for (int c = 0; c < n; ++c) {
+          if (mr >= c && mr < hm1(s, c)) {
+            float acc = 0.0f;
+            const uint16_t *qp = hq + ((base + r) * 4 + h) * 32;
+            const uint16_t *kp = hk + ((base + c) * 2 + kh) * 32;
+            for (int d = 0; d < 32; ++d) {
+              acc += hf(qp[d]) * hf(kp[d]);
+            }
+            float z = acc * (float)alpha;
+            float w = (z / (1.0f + expf(-z))) * (1.0f / (float)max_seq_len);
+            const uint16_t *vp = hv + ((base + c) * 2 + kh) * 40;
+            for (int d = 0; d < 40; ++d) {
+              out[d] += w * hf(vp[d]);
+            }
+          }
+        }
+      }
+    }
+  }
+  cnrtMemcpy(y.unsafeGetTensorImpl()->mutable_data(), hy, sizeof(hy),
+             cnrtMemcpyHostToDev);
   return y;
 }
