@@ -53,19 +53,17 @@ __attribute__((constructor(101))) static void init_runtime() {
 }
 
 static torch::Tensor gq = []() {
-  return torch::empty_strided(
-      {E0, E1, E2}, {E1 * E2, 1, E1},
-      torch::TensorOptions()
-          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-          .dtype(torch::kHalf));
+  return torch::empty(
+      {E0, E1, E2}, torch::TensorOptions()
+                        .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                        .dtype(torch::kHalf));
 }();
 
 static torch::Tensor gr = []() {
-  return torch::empty_strided(
-      {E0, E2, E2}, {E1 * E2, 1, E1},
-      torch::TensorOptions()
-          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-          .dtype(torch::kHalf));
+  return torch::empty(
+      {E0, E2, E2}, torch::TensorOptions()
+                        .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                        .dtype(torch::kHalf));
 }();
 
 __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
@@ -81,10 +79,11 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
   __nram__ float tmp[E1];
   __nram__ half ah[E1 * E2];
   __nram__ half th[E1 * E2];
+  __nram__ half qh[E1 * E2];
 
   const half *pa = a + b * E1 * E2;
   half *pq = q + b * E1 * E2;
-  half *pr = r + b * E1 * E2;
+  half *pr = r + b * E2 * E2;
 
   __memcpy(ah, pa, E1 * E2 * sizeof(half), GDRAM2NRAM);
   __bang_transpose(th, ah, E1, E2);
@@ -141,9 +140,11 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
   }
 
   __bang_float2half(th, qq, E1 * E2);
-  __memcpy(pq, th, E1 * E2 * sizeof(half), NRAM2GDRAM);
+  __bang_transpose(qh, th, E2, E1);
+  __memcpy(pq, qh, E1 * E2 * sizeof(half), NRAM2GDRAM);
   __bang_float2half(th, rr, E1 * E2);
-  __memcpy(pr, th, E1 * E2 * sizeof(half), NRAM2GDRAM);
+  __bang_transpose(ah, th, E2, E1);
+  __memcpy(pr, ah, E2 * E2 * sizeof(half), NRAM2GDRAM);
 }
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
