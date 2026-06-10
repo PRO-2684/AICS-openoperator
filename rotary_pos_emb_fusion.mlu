@@ -140,7 +140,6 @@ __mlu_entry__ void k1(const half *__restrict__ q, const half *__restrict__ k,
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 static cnrtDim3_t dim0 = {32, 1, 1};
-static std::vector<torch::Tensor> out = {qo, ko};
 
 std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k,
                                      torch::Tensor cos, torch::Tensor sin,
@@ -154,7 +153,7 @@ std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k,
       static_cast<const half *>(k.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(cos.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(sin.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(qo.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(ko.unsafeGetTensorImpl()->mutable_data()));
-  return out;
+      static_cast<half *>(q.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(k.unsafeGetTensorImpl()->mutable_data()));
+  return {q, k};
 }
