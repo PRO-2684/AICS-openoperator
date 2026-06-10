@@ -1,5 +1,6 @@
 #include <cerrno>
 #include <cnrt.h>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -14,6 +15,26 @@
 #define _C2(a, b) _S(a) _S(b)
 
 namespace _p = pybind11;
+
+struct ScopedIgnoreSignal {
+  int sig;
+  struct sigaction oldact {};
+
+  explicit ScopedIgnoreSignal(int s) : sig(s) {
+    struct sigaction act {};
+    act.sa_handler = SIG_IGN;
+    sigemptyset(&act.sa_mask);
+    act.sa_flags = 0;
+
+    if (sigaction(sig, &act, &oldact) != 0) {
+      std::perror("sigaction ignore failed");
+    }
+  }
+
+  ~ScopedIgnoreSignal() { sigaction(sig, &oldact, nullptr); }
+};
+
+static const ScopedIgnoreSignal ignore_usr1(SIGUSR1);
 
 static void print_time_info(const char *tag = "TIME") {
   using namespace std::chrono;
