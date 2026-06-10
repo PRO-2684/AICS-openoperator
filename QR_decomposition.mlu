@@ -106,7 +106,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
 
   for (int k = E2 - 1; k >= 0; --k) {
     float t = tau[k];
-    for (int j = 0; j < E2; ++j) {
+    for (int j = k; j < E2; ++j) {
       __bang_mul(tmp, hh + k * E1, qq + j * E1, E1);
       __bang_reduce_sum(tmp, tmp, E1);
       float c = t * (tmp[0] + tmp[32] + tmp[64] + tmp[96]);
