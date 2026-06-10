@@ -30,7 +30,7 @@ static void boost_host() {
     struct sched_param sp;
     sp.sched_priority = p;
     if (sched_setscheduler(0, SCHED_FIFO, &sp) != 0) {
-      
+      exit(-1);
     }
   }
 }
