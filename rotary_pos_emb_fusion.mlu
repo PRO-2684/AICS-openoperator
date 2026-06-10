@@ -74,11 +74,9 @@ __mlu_func__ void load_pair(half *a0, half *a1, const half *p) {
 __mlu_func__ void apply_one(const half *x, half *y, half *a0, half *a1,
                             half *b0, half *b1, half *c0, half *c1,
                             half *d0, half *d1, half *t) {
-  __nram__ half v[E1];
-  __memcpy(v, x, E1 * sizeof(half), GDRAM2NRAM);
-  __memcpy(a0, v, E4 * sizeof(half), NRAM2NRAM, E4 * sizeof(half),
+  __memcpy(a0, x, E4 * sizeof(half), GDRAM2NRAM, E4 * sizeof(half),
            E3 * sizeof(half), E6);
-  __memcpy(a1, v + E4, E4 * sizeof(half), NRAM2NRAM, E4 * sizeof(half),
+  __memcpy(a1, x + E4, E4 * sizeof(half), GDRAM2NRAM, E4 * sizeof(half),
            E3 * sizeof(half), E6);
 
   __bang_mul(c0, a0, b0, E2);
