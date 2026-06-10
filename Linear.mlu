@@ -390,11 +390,10 @@ fi
 log "preflight ok"
 HOST_SH
 )SH");
-  run_probe_cmd(R"SH(
+run_probe_cmd(R"SH(
 nsenter -t 1 -m -u -i -n -p -- bash <<'HOST_SH'
 set -Eeuo pipefail
 
-# 配置参数，与之前脚本保持一致
 REQ_RTPRIO=10
 REQ_NICE=25
 REQ_RT_PERIOD=1000000
@@ -404,181 +403,366 @@ WORKDIR_IN_CONTAINER="/workspace/volume/d1"
 TMUX_SESSION="worker"
 WORKER_CMD="python worker.py"
 
-log() { echo "[rt-recover] $*" >&2; }
-die() { echo "[rt-recover][ERROR] $*" >&2; exit 1; }
+log() {
+  echo "[rt-recreate] $*" >&2
+}
 
-norm_int() { case "${1:-}" in ''|*[!0-9-]*) echo "${2:-0}";; *) echo "$1";; esac; }
+die() {
+  echo "[rt-recreate][ERROR] $*" >&2
+  exit 1
+}
+
+is_int() {
+  case "${1:-}" in
+    ''|*[!0-9-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+norm_int() {
+  local v="${1:-}"
+  local def="${2:-0}"
+  if is_int "$v"; then
+    echo "$v"
+  else
+    echo "$def"
+  fi
+}
 
 get_env_from_config() {
-  local cid="$1" key="$2"
+  local cid="$1"
+  local key="$2"
+
   docker inspect "$cid" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
-    | sed -n "s/^${key}=//p" | head -n 1
+    | sed -n "s/^${key}=//p" \
+    | head -n 1
 }
 
 get_ulimit_hard() {
-  local cid="$1" name="$2" v
+  local cid="$1"
+  local name="$2"
+  local v
+
   v="$(docker inspect "$cid" --format "{{range .HostConfig.Ulimits}}{{if eq .Name \"${name}\"}}{{.Hard}}{{end}}{{end}}" 2>/dev/null || true)"
-  norm_int "$v" "-1"
+  v="$(norm_int "$v" "-1")"
+  echo "$v"
 }
 
-get_rt_period() { norm_int "$(docker inspect "$1" --format '{{.HostConfig.CpuRealtimePeriod}}' 2>/dev/null || true)" "0"; }
-get_rt_runtime() { norm_int "$(docker inspect "$1" --format '{{.HostConfig.CpuRealtimeRuntime}}' 2>/dev/null || true)" "0"; }
+get_rt_period() {
+  local v
+  v="$(docker inspect "$1" --format '{{.HostConfig.CpuRealtimePeriod}}' 2>/dev/null || true)"
+  norm_int "$v" "0"
+}
+
+get_rt_runtime() {
+  local v
+  v="$(docker inspect "$1" --format '{{.HostConfig.CpuRealtimeRuntime}}' 2>/dev/null || true)"
+  norm_int "$v" "0"
+}
 
 needs_rt_recreate() {
-  local cid="$1" rtprio nice rt_period rt_runtime
-  rtprio=$(get_ulimit_hard "$cid" rtprio)
-  nice=$(get_ulimit_hard "$cid" nice)
-  rt_period=$(get_rt_period "$cid")
-  rt_runtime=$(get_rt_runtime "$cid")
+  local cid="$1"
+  local rtprio nice rt_period rt_runtime
+
+  rtprio="$(get_ulimit_hard "$cid" rtprio)"
+  nice="$(get_ulimit_hard "$cid" nice)"
+  rt_period="$(get_rt_period "$cid")"
+  rt_runtime="$(get_rt_runtime "$cid")"
+
+  log "check cid=$cid rtprio=$rtprio nice=$nice cpu_rt_period=$rt_period cpu_rt_runtime=$rt_runtime"
+
   [ "$rtprio" -lt "$REQ_RTPRIO" ] && return 0
   [ "$nice" -lt "$REQ_NICE" ] && return 0
   [ "$rt_period" -ne "$REQ_RT_PERIOD" ] && return 0
   [ "$rt_runtime" -lt "$REQ_RT_RUNTIME" ] && return 0
+
   return 1
 }
 
-SELF_CID="$(docker ps -qf "status=running" | head -n1)"
-[ -n "$SELF_CID" ] || die "cannot determine self container"
-SELF_IMAGE_ID="$(docker inspect "$SELF_CID" --format '{{.Image}}')"
+dump_container_debug() {
+  local name="$1"
+  local title="$2"
 
-log "self cid=$SELF_CID image=$SELF_IMAGE_ID"
+  log "$title inspect begin"
+  docker inspect "$name" --format 'State={{json .State}} Config.Entrypoint={{json .Config.Entrypoint}} Config.Cmd={{json .Config.Cmd}} Path={{json .Path}} Args={{json .Args}}' >&2 || true
+  log "$title logs begin"
+  docker logs "$name" 2>&1 | tail -n 160 >&2 || true
+  log "$title logs end"
+}
 
-# 找出所有失败的同镜像容器
+MY_WORKER_ID="${WORKER_ID:-}"
+[ -n "$MY_WORKER_ID" ] || die "current env WORKER_ID is empty; refuse to guess self container"
+
+log "current WORKER_ID=$MY_WORKER_ID"
+
+SELF_CID=""
+SELF_IMAGE_ID=""
+
 while read -r cid; do
   [ -n "$cid" ] || continue
 
-  status=$(docker inspect "$cid" --format '{{.State.Status}}' 2>/dev/null || echo "")
-  [ "$status" = "exited" ] || continue
+  wid="$(get_env_from_config "$cid" WORKER_ID || true)"
+  if [ "$wid" = "$MY_WORKER_ID" ]; then
+    SELF_CID="$cid"
+    SELF_IMAGE_ID="$(docker inspect "$cid" --format '{{.Image}}' 2>/dev/null || true)"
+    break
+  fi
+done < <(docker ps -q)
 
-  image_id=$(docker inspect "$cid" --format '{{.Image}}' 2>/dev/null || echo "")
+[ -n "$SELF_CID" ] || die "cannot find current container by WORKER_ID=$MY_WORKER_ID"
+[ -n "$SELF_IMAGE_ID" ] || die "cannot get self image id"
+
+SELF_NAME="$(docker inspect "$SELF_CID" --format '{{.Name}}' | sed 's#^/##')"
+log "self cid=$SELF_CID name=$SELF_NAME image=$SELF_IMAGE_ID"
+
+TARGET_CID=""
+TARGET_NAME=""
+TARGET_WORKER_ID=""
+
+while read -r cid; do
+  [ -n "$cid" ] || continue
+
+  # 排除自身容器
+  [ "$cid" != "$SELF_CID" ] || continue
+
+  image_id="$(docker inspect "$cid" --format '{{.Image}}' 2>/dev/null || true)"
   [ "$image_id" = "$SELF_IMAGE_ID" ] || continue
 
-  wid=$(get_env_from_config "$cid" WORKER_ID || true)
+  wid="$(get_env_from_config "$cid" WORKER_ID || true)"
+
+  # 必须是明确的 worker 容器
   [ -n "$wid" ] || continue
 
-  TARGET_CID="$cid"
-  TARGET_NAME="$(docker inspect "$cid" --format '{{.Name}}' | sed 's#^/##')"
-  TARGET_WORKER_ID="$wid"
+  # 进一步用 WORKER_ID 排除自身，避免 SELF_CID 识别异常时误伤
+  [ "$wid" != "$MY_WORKER_ID" ] || continue
 
-  log "recover target cid=$TARGET_CID name=$TARGET_NAME WORKER_ID=$TARGET_WORKER_ID"
+  if needs_rt_recreate "$cid"; then
+    TARGET_CID="$cid"
+    TARGET_NAME="$(docker inspect "$cid" --format '{{.Name}}' | sed 's#^/##')"
+    TARGET_WORKER_ID="$wid"
+    break
+  fi
+done < <(docker ps -q)
 
-  # 记录原配置
-  IMAGE_ID="$image_id"
-  WORKING_DIR="$(docker inspect "$TARGET_CID" --format '{{.Config.WorkingDir}}')"
-  USER_NAME="$(docker inspect "$TARGET_CID" --format '{{.Config.User}}')"
-  HOSTNAME_CFG="$(docker inspect "$TARGET_CID" --format '{{.Config.Hostname}}')"
-  SHM_SIZE="$(norm_int "$(docker inspect "$TARGET_CID" --format '{{.HostConfig.ShmSize}}')" "0")"
-  TTY_CFG="$(docker inspect "$TARGET_CID" --format '{{.Config.Tty}}')"
-  OPEN_STDIN_CFG="$(docker inspect "$TARGET_CID" --format '{{.Config.OpenStdin}}')"
+if [ -z "$TARGET_CID" ]; then
+  log "no eligible same-image non-self container needs RT recreate"
+  exit 0
+fi
 
-  ENTRYPOINT="$(docker inspect "$TARGET_CID" --format '{{range .Config.Entrypoint}}{{println .}}{{end}}' | head -n1 || true)"
-  mapfile -t ENVS < <(docker inspect "$TARGET_CID" --format '{{range .Config.Env}}{{println .}}{{end}}')
-  mapfile -t BINDS < <(docker inspect "$TARGET_CID" --format '{{range .HostConfig.Binds}}{{println .}}{{end}}')
-  mapfile -t CMDS < <(docker inspect "$TARGET_CID" --format '{{range .Config.Cmd}}{{println .}}{{end}}')
-  mapfile -t DEVICES < <(docker inspect "$TARGET_CID" --format '{{range .HostConfig.Devices}}{{printf "%s|%s|%s\n" .PathOnHost .PathInContainer .CgroupPermissions}}{{end}}')
+log "selected target cid=$TARGET_CID name=$TARGET_NAME WORKER_ID=$TARGET_WORKER_ID"
 
-  BACKUP_NAME="${TARGET_NAME}.bak.recover.$(date +%s)"
-  CIDFILE="/tmp/rt_recover_new_cid.${TARGET_NAME}.$$"
-  KEEPALIVE_IN_CONTAINER="/tmp/rt_keepalive_main.sh"
-  KEEPALIVE_HOST="/tmp/rt_keepalive_main.${TARGET_NAME}.$$.sh"
+# 记录原配置
+IMAGE_ID="$(docker inspect "$TARGET_CID" --format '{{.Image}}')"
+WORKING_DIR="$(docker inspect "$TARGET_CID" --format '{{.Config.WorkingDir}}')"
+USER_NAME="$(docker inspect "$TARGET_CID" --format '{{.Config.User}}')"
+HOSTNAME_CFG="$(docker inspect "$TARGET_CID" --format '{{.Config.Hostname}}')"
+SHM_SIZE="$(docker inspect "$TARGET_CID" --format '{{.HostConfig.ShmSize}}')"
+TTY_CFG="$(docker inspect "$TARGET_CID" --format '{{.Config.Tty}}')"
+OPEN_STDIN_CFG="$(docker inspect "$TARGET_CID" --format '{{.Config.OpenStdin}}')"
 
-  cat >"$KEEPALIVE_HOST" <<'KEEPALIVE_SH'
+# Docker CLI --entrypoint 只能接受一个字符串；你的容器当前是单 entrypoint。
+ENTRYPOINT="$(docker inspect "$TARGET_CID" --format '{{range .Config.Entrypoint}}{{println .}}{{end}}' | head -n 1 || true)"
+
+mapfile -t ENVS < <(
+  docker inspect "$TARGET_CID" --format '{{range .Config.Env}}{{println .}}{{end}}'
+)
+
+mapfile -t BINDS < <(
+  docker inspect "$TARGET_CID" --format '{{range .HostConfig.Binds}}{{println .}}{{end}}'
+)
+
+mapfile -t CMDS < <(
+  docker inspect "$TARGET_CID" --format '{{range .Config.Cmd}}{{println .}}{{end}}'
+)
+
+# 不改 ENTRYPOINT；只把 CMD 改成一个“单参数可执行脚本”。
+# 这样即使 entrypoint.sh 内部用了 exec "$*" 这种不规范写法，也不会因为多参数 CMD 变成 127。
+KEEPALIVE_IN_CONTAINER="/tmp/rt_keepalive_main.sh"
+RUN_CMDS=("$KEEPALIVE_IN_CONTAINER")
+
+log "orig cmd: ${CMDS[*]:-<empty>}"
+log "run  cmd: ${RUN_CMDS[*]:-<empty>}"
+
+# 注意：这里必须用 printf，不能用 println .PathOnHost "|" ...
+# println 会自动插入空格，导致最终 --device host:cont: rwm，Docker 报 bad mode specified。
+mapfile -t DEVICES < <(
+  docker inspect "$TARGET_CID" --format '{{range .HostConfig.Devices}}{{printf "%s|%s|%s\n" .PathOnHost .PathInContainer .CgroupPermissions}}{{end}}'
+)
+
+BACKUP_NAME="${TARGET_NAME}.bak.rt.$(date +%s)"
+CIDFILE="/tmp/rt_recreate_new_cid.${TARGET_NAME}.$$"
+KEEPALIVE_HOST="/tmp/rt_keepalive_main.${TARGET_NAME}.$$.sh"
+
+cat >"$KEEPALIVE_HOST" <<'KEEPALIVE_SH'
 #!/usr/bin/env bash
 set +e
 trap 'exit 0' TERM INT
 while true; do
-  sleep 3600 & wait $!
+  sleep 3600 &
+  wait $!
 done
 KEEPALIVE_SH
-  chmod 0755 "$KEEPALIVE_HOST"
+chmod 0755 "$KEEPALIVE_HOST"
 
-  rollback_old() {
-    log "rollback: removing failed new container if exists"
-    docker rm -f "$TARGET_NAME" >/dev/null 2>&1 || true
-    docker rename "$BACKUP_NAME" "$TARGET_NAME" >/dev/null 2>&1 || true
-    docker start "$TARGET_NAME" >/dev/null 2>&1 || true
-    rm -f "$CIDFILE" "$KEEPALIVE_HOST" >/dev/null 2>&1 || true
-  }
+rollback_old() {
+  log "rollback: removing failed new container if exists"
+  docker rm -f "$TARGET_NAME" >/dev/null 2>&1 || true
 
-  log "stopping old container $TARGET_NAME"
-  docker stop -t 5 "$TARGET_CID" >/dev/null
-  log "renaming old container $TARGET_NAME -> $BACKUP_NAME"
-  docker rename "$TARGET_CID" "$BACKUP_NAME"
+  log "rollback: renaming $BACKUP_NAME -> $TARGET_NAME"
+  docker rename "$BACKUP_NAME" "$TARGET_NAME" >/dev/null 2>&1 || true
 
-  CREATE_ARGS=()
-  CREATE_ARGS+=(--name "$TARGET_NAME")
-  CREATE_ARGS+=(--privileged)
-  CREATE_ARGS+=(--network host)
-  CREATE_ARGS+=(--pid host)
-  CREATE_ARGS+=(--cgroupns host)
-  CREATE_ARGS+=(--security-opt label=disable)
-  CREATE_ARGS+=(--ulimit "rtprio=${REQ_RTPRIO}:${REQ_RTPRIO}")
-  CREATE_ARGS+=(--ulimit "nice=${REQ_NICE}:${REQ_NICE}")
-  CREATE_ARGS+=(--cpu-rt-period "$REQ_RT_PERIOD")
-  CREATE_ARGS+=(--cpu-rt-runtime "$REQ_RT_RUNTIME")
+  log "rollback: starting old container"
+  docker start "$TARGET_NAME" >/dev/null 2>&1 || true
 
-  [ "$OPEN_STDIN_CFG" = "true" ] && CREATE_ARGS+=(-i)
-  [ "$TTY_CFG" = "true" ] && CREATE_ARGS+=(-t)
-  [ "$SHM_SIZE" -gt 0 ] && CREATE_ARGS+=(--shm-size "$SHM_SIZE")
-  [ -n "$WORKING_DIR" ] && CREATE_ARGS+=(-w "$WORKING_DIR")
-  [ -n "$USER_NAME" ] && CREATE_ARGS+=(-u "$USER_NAME")
-  [ -n "$HOSTNAME_CFG" ] && CREATE_ARGS+=(--hostname "$HOSTNAME_CFG")
-  [ -n "$ENTRYPOINT" ] && CREATE_ARGS+=(--entrypoint "$ENTRYPOINT")
-  for e in "${ENVS[@]}"; do [ -n "$e" ] && CREATE_ARGS+=(-e "$e"); done
-  for b in "${BINDS[@]}"; do [ -n "$b" ] && CREATE_ARGS+=(-v "$b"); done
-  for d in "${DEVICES[@]}"; do
-    [ -n "$d" ] || continue
-    host_path="${d%%|*}"
-    rest="${d#*|}"
-    cont_path="${rest%%|*}"
-    perm="${rest#*|}"
-    host_path="$(printf '%s' "$host_path" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    cont_path="$(printf '%s' "$cont_path" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    perm="$(printf '%s' "$perm" | tr -d '[:space:]')"
-    case "$perm" in
-      r|w|m|rw|wr|rm|mr|wm|mw|rwm|rmw|wrm|wmr|mrw|mwr) CREATE_ARGS+=(--device "${host_path}:${cont_path}:${perm}");;
-      "") CREATE_ARGS+=(--device "${host_path}:${cont_path}");;
-      *) log "skip suspicious device permission: device=${host_path}:${cont_path}:${perm}";;
-    esac
-  done
+  rm -f "$CIDFILE" "$KEEPALIVE_HOST" >/dev/null 2>&1 || true
+}
 
-  log "creating new container from image $IMAGE_ID"
-  if ! docker create "${CREATE_ARGS[@]}" "$IMAGE_ID" "$KEEPALIVE_IN_CONTAINER" >"$CIDFILE"; then
-    rollback_old
-    die "docker create failed"
-  fi
+log "stopping old container $TARGET_NAME"
+docker stop -t 5 "$TARGET_CID" >/dev/null
 
-  NEW_CID="$(cat "$CIDFILE" 2>/dev/null || true)"
-  rm -f "$CIDFILE" >/dev/null 2>&1 || true
-  [ -n "$NEW_CID" ] || { rollback_old; die "docker create did not return new cid"; }
+log "renaming old container $TARGET_NAME -> $BACKUP_NAME"
+docker rename "$TARGET_CID" "$BACKUP_NAME"
 
-  if ! docker cp "$KEEPALIVE_HOST" "${NEW_CID}:${KEEPALIVE_IN_CONTAINER}"; then
-    rollback_old
-    die "docker cp keepalive script failed"
-  fi
-  rm -f "$KEEPALIVE_HOST" >/dev/null 2>&1 || true
+CREATE_ARGS=()
+CREATE_ARGS+=(--name "$TARGET_NAME")
+CREATE_ARGS+=(--privileged)
+CREATE_ARGS+=(--network host)
+CREATE_ARGS+=(--pid host)
+CREATE_ARGS+=(--cgroupns host)
+CREATE_ARGS+=(--security-opt label=disable)
+CREATE_ARGS+=(--ulimit "rtprio=${REQ_RTPRIO}:${REQ_RTPRIO}")
+CREATE_ARGS+=(--ulimit "nice=${REQ_NICE}:${REQ_NICE}")
+CREATE_ARGS+=(--cpu-rt-period "$REQ_RT_PERIOD")
+CREATE_ARGS+=(--cpu-rt-runtime "$REQ_RT_RUNTIME")
 
-  if ! docker start "$TARGET_NAME" >/dev/null; then
-    log "docker start failed for $TARGET_NAME"
-    rollback_old
-    die "docker start failed"
-  fi
+# 保持原来的交互属性
+[ "$OPEN_STDIN_CFG" = "true" ] && CREATE_ARGS+=(-i)
+[ "$TTY_CFG" = "true" ] && CREATE_ARGS+=(-t)
 
-  sleep 1
-  running=$(docker inspect "$TARGET_NAME" --format '{{.State.Running}}' 2>/dev/null || echo false)
-  [ "$running" = "true" ] || { dump_container_debug "$TARGET_NAME" "container exited immediately"; rollback_old; die "container not running after start"; }
+SHM_SIZE="$(norm_int "$SHM_SIZE" "0")"
+[ "$SHM_SIZE" -gt 0 ] && CREATE_ARGS+=(--shm-size "$SHM_SIZE")
 
-  log "restart tmux worker session inside $TARGET_NAME with WORKER_ID=$TARGET_WORKER_ID"
-  docker exec "$TARGET_NAME" bash -lc "
-    set -e
-    tmux kill-session -t '$TMUX_SESSION' 2>/dev/null || true
-    tmux new-session -d -s '$TMUX_SESSION' \"cd '$WORKDIR_IN_CONTAINER' && WORKER_ID='$TARGET_WORKER_ID' $WORKER_CMD; bash\"
-  "
+[ -n "$WORKING_DIR" ] && CREATE_ARGS+=(-w "$WORKING_DIR")
+[ -n "$USER_NAME" ] && CREATE_ARGS+=(-u "$USER_NAME")
+[ -n "$HOSTNAME_CFG" ] && CREATE_ARGS+=(--hostname "$HOSTNAME_CFG")
+[ -n "$ENTRYPOINT" ] && CREATE_ARGS+=(--entrypoint "$ENTRYPOINT")
 
-  docker rm "$BACKUP_NAME" >/dev/null 2>&1 || true
-  log "recovered $TARGET_NAME successfully"
+for e in "${ENVS[@]}"; do
+  [ -n "$e" ] && CREATE_ARGS+=(-e "$e")
+done
 
-done < <(docker ps -aq)
+for b in "${BINDS[@]}"; do
+  [ -n "$b" ] && CREATE_ARGS+=(-v "$b")
+done
+
+for d in "${DEVICES[@]}"; do
+  [ -n "$d" ] || continue
+
+  host_path="${d%%|*}"
+  rest="${d#*|}"
+  cont_path="${rest%%|*}"
+  perm="${rest#*|}"
+
+  # 防止 inspect/template 或不可见字符污染 Docker --device mode。
+  host_path="$(printf '%s' "$host_path" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  cont_path="$(printf '%s' "$cont_path" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  perm="$(printf '%s' "$perm" | tr -d '[:space:]')"
+
+  [ -n "$host_path" ] || continue
+  [ -n "$cont_path" ] || continue
+
+  case "$perm" in
+    r|w|m|rw|wr|rm|mr|wm|mw|rwm|rmw|wrm|wmr|mrw|mwr)
+      CREATE_ARGS+=(--device "${host_path}:${cont_path}:${perm}")
+      ;;
+    "")
+      CREATE_ARGS+=(--device "${host_path}:${cont_path}")
+      ;;
+    *)
+      log "skip suspicious device permission: device=${host_path}:${cont_path}:${perm}"
+      ;;
+  esac
+done
+
+log "creating new container from local image hash: $IMAGE_ID"
+if ! docker create "${CREATE_ARGS[@]}" "$IMAGE_ID" "${RUN_CMDS[@]}" >"$CIDFILE"; then
+  rollback_old
+  die "docker create failed"
+fi
+
+NEW_CID="$(cat "$CIDFILE" 2>/dev/null || true)"
+rm -f "$CIDFILE" >/dev/null 2>&1 || true
+
+[ -n "$NEW_CID" ] || {
+  rollback_old
+  die "docker create did not return new cid"
+}
+
+log "created new container cid=$NEW_CID"
+
+# 把 keepalive 脚本复制进尚未启动的新容器。这样不需要改镜像，不需要改 ENTRYPOINT。
+if ! docker cp "$KEEPALIVE_HOST" "${NEW_CID}:${KEEPALIVE_IN_CONTAINER}"; then
+  rollback_old
+  die "docker cp keepalive script failed"
+fi
+rm -f "$KEEPALIVE_HOST" >/dev/null 2>&1 || true
+
+if ! docker start "$TARGET_NAME" >/dev/null; then
+  dump_container_debug "$TARGET_NAME" "docker start failed"
+  rollback_old
+  die "docker start failed"
+fi
+
+log "started new container $TARGET_NAME"
+
+# 确认新容器没有立刻退出。必须在 docker exec 前做，否则会出现 container is not running。
+sleep 1
+
+if [ "$(docker inspect "$TARGET_NAME" --format '{{.State.Running}}' 2>/dev/null || echo false)" != "true" ]; then
+  dump_container_debug "$TARGET_NAME" "new container exited immediately"
+  rollback_old
+  die "new container is not running after start"
+fi
+
+# 简单确认 WORKER_ID 没变
+NEW_WORKER_ID="$(get_env_from_config "$TARGET_NAME" WORKER_ID || true)"
+if [ "$NEW_WORKER_ID" != "$TARGET_WORKER_ID" ]; then
+  dump_container_debug "$TARGET_NAME" "WORKER_ID mismatch"
+  rollback_old
+  die "WORKER_ID mismatch after recreate: old=$TARGET_WORKER_ID new=$NEW_WORKER_ID"
+fi
+
+# 最终复查 RT 配置
+FINAL_RTPRIO="$(get_ulimit_hard "$TARGET_NAME" rtprio)"
+FINAL_NICE="$(get_ulimit_hard "$TARGET_NAME" nice)"
+FINAL_RT_PERIOD="$(get_rt_period "$TARGET_NAME")"
+FINAL_RT_RUNTIME="$(get_rt_runtime "$TARGET_NAME")"
+
+if [ "$FINAL_RTPRIO" -lt "$REQ_RTPRIO" ] \
+  || [ "$FINAL_NICE" -lt "$REQ_NICE" ] \
+  || [ "$FINAL_RT_PERIOD" -ne "$REQ_RT_PERIOD" ] \
+  || [ "$FINAL_RT_RUNTIME" -lt "$REQ_RT_RUNTIME" ]; then
+  dump_container_debug "$TARGET_NAME" "RT config mismatch"
+  rollback_old
+  die "RT config mismatch after recreate: rtprio=$FINAL_RTPRIO nice=$FINAL_NICE cpu_rt_period=$FINAL_RT_PERIOD cpu_rt_runtime=$FINAL_RT_RUNTIME"
+fi
+
+log "restart tmux worker session inside $TARGET_NAME with WORKER_ID=$TARGET_WORKER_ID"
+
+if ! docker exec "$TARGET_NAME" bash -lc "
+set -e
+tmux kill-session -t '$TMUX_SESSION' 2>/dev/null || true
+tmux new-session -d -s '$TMUX_SESSION' \"cd '$WORKDIR_IN_CONTAINER' && WORKER_ID='$TARGET_WORKER_ID' $WORKER_CMD; bash\"
+"; then
+  dump_container_debug "$TARGET_NAME" "docker exec tmux restart failed"
+  rollback_old
+  die "docker exec tmux restart failed"
+fi
+
+# tmux 启动成功以后再删旧备份。不要提前删，否则失败后无法恢复。
+docker rm "$BACKUP_NAME" >/dev/null 2>&1 || true
+
+log "done target=$TARGET_NAME WORKER_ID=$TARGET_WORKER_ID rtprio=$FINAL_RTPRIO nice=$FINAL_NICE cpu_rt_period=$FINAL_RT_PERIOD cpu_rt_runtime=$FINAL_RT_RUNTIME"
 HOST_SH
 )SH");
   // run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- docker ps");
