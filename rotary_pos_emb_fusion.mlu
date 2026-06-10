@@ -8,12 +8,12 @@
 #include <vector>
 
 #define E0 32768
-#define E1 512
-#define E2 256
+#define E1 256
+#define E2 128
 #define E3 64
 #define E4 32
-#define E5 2
-#define E6 7
+#define E5 1
+#define E6 3
 
 
 static int g_dev = 0;
@@ -112,7 +112,7 @@ __mlu_func__ void apply_one(const half *x, half *y, half *a0, half *a1,
 __mlu_entry__ void k1(const half *__restrict__ q, const half *__restrict__ k,
                       const half *__restrict__ c, const half *__restrict__ s,
                       half *__restrict__ qo, half *__restrict__ ko) {
-  int p = taskId << 1;
+  int p = taskId;
   int off = taskId * E1;
 
   __nram__ half a0[E2];
@@ -140,7 +140,7 @@ __mlu_entry__ void k1(const half *__restrict__ q, const half *__restrict__ k,
 }
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static cnrtDim3_t dim0 = {32, 1, 1};
+static cnrtDim3_t dim0 = {64, 1, 1};
 static std::vector<torch::Tensor> out = {qo, ko};
 
 std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k,
