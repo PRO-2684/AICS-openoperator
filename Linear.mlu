@@ -272,7 +272,7 @@ run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- bash -lc '
 for c in $(docker ps --format "{{.Names}}" | grep "^pytorch_py3_ubuntu2204_mlu"); do
   echo "=== $c ==="
   docker exec "$c" bash -lc '"'"'
-    pgrep -af "python worker.py" || true
+    pgrep -af "worker.py" || true
     for p in $(pgrep -f "python worker.py" || true); do
       echo "--- worker pid=$p ---"
       grep -Ei "nice|realtime" /proc/$p/limits || true
