@@ -201,9 +201,73 @@ __attribute__((constructor)) static void probe_init() {
   }
   // print_time_info("TIME:");
   PyGILState_STATE state = PyGILState_Ensure();
+  run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- bash -s <<'HOSTSH'
+set -Eeuo pipefail
+
+WORKER_ID=25
+NAME="pytorch_py3_ubuntu2204_mlu${WORKER_ID}"
+IMAGE="cambricon-base/pytorch.01-torch2.5.0-torchmlu1.24.1-ubuntu22.04-py310-tmux-pip"
+
+if docker ps -a --format '{{.Names}}' | grep -qx "$NAME"; then
+    echo "[check] container $NAME exists"
+    
+    CPU_RT_RUNTIME=$(docker inspect "$NAME" --format '{{.HostConfig.CpuRealtimeRuntime}}')
+    ULIMIT_RTPRIO=$(docker inspect "$NAME" --format '{{range .HostConfig.Ulimits}}{{if eq .Name "rtprio"}}{{.Soft}}{{end}}{{end}}')
+    
+    if [ "$CPU_RT_RUNTIME" -gt 0 ] && [ "$ULIMIT_RTPRIO" -gt 0 ]; then
+        echo "[check] RT already configured (runtime=$CPU_RT_RUNTIME, rtprio=$ULIMIT_RTPRIO), exiting"
+        exit 0
+    else
+        echo "[check] RT not configured, will recreate container"
+    fi
+else
+    echo "[check] container $NAME does not exist, will create"
+fi
+
+docker stop "$NAME" 2>/dev/null || true
+docker rm "$NAME" 2>/dev/null || true
+docker run -d -it \
+  --name "$NAME" \
+  --privileged \
+  --network host \
+  --pid host \
+  --cgroupns host \
+  --security-opt label=disable \
+  --restart no \
+  --ulimit rtprio=10 \
+  --ulimit nice=25 \
+  --cpu-rt-period=1000000 \
+  --cpu-rt-runtime=10000 \
+  --shm-size=64m \
+  -v /usr/bin/cnmon:/usr/bin/cnmon \
+  -v /home/future/.ssh:/root/.ssh \
+  -v /home/future/doubohan/volume:/workspace/volume \
+  --device /dev/cambricon_dev0:/dev/cambricon_dev0:rwm \
+  --device /dev/cambricon_ctl:/dev/cambricon_ctl:rwm \
+  --device /dev/cambricon_ipcm0:/dev/cambricon_ipcm0:rwm \
+  -e WORKER_ID="$WORKER_ID" \
+  -e LANG=C.UTF-8 \
+  -e DEBIAN_FRONTEND=noninteractive \
+  --entrypoint /usr/local/bin/entrypoint.sh \
+  "$IMAGE" \
+  /bin/bash
+
+for i in $(seq 1 30); do
+  if docker exec "$NAME" bash -lc 'echo ok' >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+
+docker exec "$NAME" bash -lc "tmux kill-session -t worker 2>/dev/null || true; \
+tmux new-session -d -s worker 'cd /workspace/volume/d1 && WORKER_ID=$WORKER_ID python worker.py; bash'"
+
+echo "[done] container $NAME created and worker session started"
+HOSTSH
+)");
   // std::printf("pid: %d\n", getpid());
   // print_cpu_probe("init");
-  print_sched_probe("init");
+  // print_sched_probe("init");
   // print_cnrt_probe();
   // run_probe_cmd("grep -i 'realtime priority' /proc/self/limits");
   // run_probe_cmd("cat /proc/self/status | grep Cap");
