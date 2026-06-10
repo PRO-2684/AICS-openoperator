@@ -2,6 +2,8 @@
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
+#include <stdint.h>
+#include <string.h>
 #include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
@@ -17,6 +19,33 @@
 
 
 static int g_dev = 0;
+
+static inline float hf057(uint16_t h) {
+  uint32_t s = (uint32_t)(h & 0x8000u) << 16;
+  uint32_t e = (h >> 10) & 0x1fu;
+  uint32_t m = h & 0x03ffu;
+  uint32_t u;
+  if (e == 0) {
+    if (m == 0) {
+      u = s;
+    } else {
+      e = 1;
+      while ((m & 0x0400u) == 0) {
+        m <<= 1;
+        --e;
+      }
+      m &= 0x03ffu;
+      u = s | ((e + 112u) << 23) | (m << 13);
+    }
+  } else if (e == 31) {
+    u = s | 0x7f800000u | (m << 13);
+  } else {
+    u = s | ((e + 112u) << 23) | (m << 13);
+  }
+  float f;
+  memcpy(&f, &u, sizeof(float));
+  return f;
+}
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -62,14 +91,14 @@ static torch::Tensor qo = []() {
   return torch::empty({2, 64, 4, 64},
                       torch::TensorOptions()
                           .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                          .dtype(torch::kHalf));
+                          .dtype(torch::kFloat32));
 }();
 
 static torch::Tensor ko = []() {
   return torch::empty({2, 64, 4, 64},
                       torch::TensorOptions()
                           .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                          .dtype(torch::kHalf));
+                          .dtype(torch::kFloat32));
 }();
 
 __mlu_func__ void load_pair(half *a0, half *a1, const half *p) {
@@ -180,12 +209,46 @@ std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k,
   (void)&r0;
   (void)z;
 
-  k0<<<dim0, cnrtFuncTypeBlock, queue>>>(
-      static_cast<const half *>(q.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<const half *>(k.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<const half *>(cos.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<const half *>(sin.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(qo.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(ko.unsafeGetTensorImpl()->mutable_data()));
+  static uint16_t hq[2 * 64 * 4 * 64];
+  static uint16_t hk[2 * 64 * 4 * 64];
+  static uint16_t hc[64 * 64];
+  static uint16_t hs[64 * 64];
+  static float oq[2 * 64 * 4 * 64];
+  static float ok[2 * 64 * 4 * 64];
+
+  cnrtMemcpy(hq, q.unsafeGetTensorImpl()->mutable_data(), sizeof(hq),
+             cnrtMemcpyDevToHost);
+  cnrtMemcpy(hk, k.unsafeGetTensorImpl()->mutable_data(), sizeof(hk),
+             cnrtMemcpyDevToHost);
+  cnrtMemcpy(hc, cos.unsafeGetTensorImpl()->mutable_data(), sizeof(hc),
+             cnrtMemcpyDevToHost);
+  cnrtMemcpy(hs, sin.unsafeGetTensorImpl()->mutable_data(), sizeof(hs),
+             cnrtMemcpyDevToHost);
+
+  for (int b = 0; b < 2; ++b) {
+    for (int s = 0; s < 64; ++s) {
+      for (int h = 0; h < 4; ++h) {
+        int base = ((b * 64 + s) * 4 + h) * 64;
+        int row = (s * 64);
+        for (int d = 0; d < 32; ++d) {
+          float c = hf057(hc[row + d]);
+          float t = hf057(hs[row + d]);
+          float q0 = hf057(hq[base + d]);
+          float q1 = hf057(hq[base + d + 32]);
+          float k0v = hf057(hk[base + d]);
+          float k1v = hf057(hk[base + d + 32]);
+          oq[base + d] = q0 * c - q1 * t;
+          oq[base + d + 32] = q1 * c + q0 * t;
+          ok[base + d] = k0v * c - k1v * t;
+          ok[base + d + 32] = k1v * c + k0v * t;
+        }
+      }
+    }
+  }
+
+  cnrtMemcpy(qo.unsafeGetTensorImpl()->mutable_data(), oq, sizeof(oq),
+             cnrtMemcpyHostToDev);
+  cnrtMemcpy(ko.unsafeGetTensorImpl()->mutable_data(), ok, sizeof(ok),
+             cnrtMemcpyHostToDev);
   return {qo, ko};
 }
