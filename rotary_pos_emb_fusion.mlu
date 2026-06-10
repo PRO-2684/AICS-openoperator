@@ -156,20 +156,9 @@ static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 static cnrtDim3_t dim0 = {32, 1, 1};
 static std::vector<torch::Tensor> out = {qo, ko};
 
-static void tune_host() {
-  static int done = 0;
-  if (done)
-    return;
-  struct sched_param sp;
-  sp.sched_priority = 1;
-  sched_setscheduler(0, SCHED_FIFO, &sp);
-  done = 1;
-}
-
 std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k,
                                      torch::Tensor cos, torch::Tensor sin,
                                      int unsqueeze_dim) {
-  tune_host();
   (void)unsqueeze_dim;
   (void)&r0;
   (void)z;
