@@ -19,14 +19,7 @@
 static int g_dev = 0;
 
 static void bind_host(int d) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  int end = begin + 28;
-  for (int i = begin; i < end; ++i) {
-    CPU_SET(i, &set);
-  }
-  sched_setaffinity(0, sizeof(set), &set);
+  (void)d;
 }
 
 
