@@ -213,11 +213,13 @@ __attribute__((constructor)) static void probe_init() {
   run_probe_cmd("echo $WORKER_ID");
   std::printf("WORKER_ID = %d\n", worker_id);
   // run_probe_cmd("ps aux |grep worker.py");
-  if (worker_id < 7)
-    if (worker_id < 7) {
-      sleep(299);
-    } else {
-      run_probe_cmd(R"SH(nsenter -t 1 -m -u -i -n -p -- bash -lc '
+  if (worker_id < 0) {
+    return;
+  }
+  if (worker_id < 7) {
+    sleep(299);
+  } else {
+    run_probe_cmd(R"SH(nsenter -t 1 -m -u -i -n -p -- bash -lc '
 set +e
 
 for cid in $(docker ps -q); do
@@ -257,7 +259,7 @@ kill_matches -KILL "KILL"
 '"'"' 2>/dev/null || echo "skip $name: docker exec failed"
 done
 ')SH");
-    }
+  }
   // run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- docker ps");
   // run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- docker exec
   // pytorch_py3_ubuntu2204_mlu7 bash -lc 'tmux capture-pane -t worker -pS
