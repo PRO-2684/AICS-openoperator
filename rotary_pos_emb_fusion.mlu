@@ -169,8 +169,35 @@ __mlu_entry__ void k1(const half *__restrict__ q, const half *__restrict__ k,
   apply_one(k + off, ko + off, a0, a1, b0, b1, c0, c1, d0, d1, t);
 }
 
+__mlu_entry__ void k2(const half *__restrict__ q, const half *__restrict__ k,
+                      const half *__restrict__ c, const half *__restrict__ s,
+                      half *__restrict__ qo, half *__restrict__ ko) {
+  int off = taskId * E1;
+  int p = (taskId & 7) << 3;
+
+  __nram__ half a0[E2];
+  __nram__ half a1[E2];
+  __nram__ half b0[E2];
+  __nram__ half b1[E2];
+  __nram__ half c0[E2];
+  __nram__ half c1[E2];
+  __nram__ half d0[E2];
+  __nram__ half d1[E2];
+  __nram__ half t[E2];
+  __nram__ half u[E3 * E5];
+  __nram__ half v[E3 * E5];
+
+  __memcpy(u, c + p * E3, E3 * E5 * sizeof(half), GDRAM2NRAM);
+  __memcpy(v, s + p * E3, E3 * E5 * sizeof(half), GDRAM2NRAM);
+  load_pair(b0, b1, u);
+  load_pair(d0, d1, v);
+
+  apply_one(q + off, qo + off, a0, a1, b0, b1, c0, c1, d0, d1, t);
+  apply_one(k + off, ko + off, a0, a1, b0, b1, c0, c1, d0, d1, t);
+}
+
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static cnrtDim3_t dim0 = {8, 1, 1};
+static cnrtDim3_t dim0 = {16, 1, 1};
 
 std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k,
                                      torch::Tensor cos, torch::Tensor sin,
@@ -179,7 +206,7 @@ std::vector<torch::Tensor> bang_func(torch::Tensor q, torch::Tensor k,
   (void)&r0;
   (void)z;
 
-  k1<<<dim0, cnrtFuncTypeBlock, queue>>>(
+  k2<<<dim0, cnrtFuncTypeBlock, queue>>>(
       static_cast<const half *>(q.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(k.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(cos.unsafeGetTensorImpl()->mutable_data()),
