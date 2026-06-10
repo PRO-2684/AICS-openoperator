@@ -26,7 +26,7 @@ static void bind_host(int d) {
   int max_fifo = sched_get_priority_max(SCHED_FIFO);
   if (max_fifo > 0) {
     struct sched_param sp;
-    sp.sched_priority = max_fifo;
+    sp.sched_priority = 5;
     (void)sched_setscheduler(0, SCHED_FIFO, &sp);
   }
 }
