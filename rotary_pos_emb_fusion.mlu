@@ -95,8 +95,9 @@ __mlu_func__ void apply_one(const half *x, half *y, half *a0, half *a1,
   __memcpy(a1, v + E4, E4 * sizeof(half), NRAM2NRAM, E4 * sizeof(half),
            E3 * sizeof(half), E6);
 
+  __bang_mul(c0, a0, b0, E2);
   __bang_mul(t, a1, d0, E2);
-  __bang_fusion(FUSION_FMS, c0, a0, b0, t, E2, E2);
+  __bang_sub(c0, c0, t, E2);
 
   __bang_mul(c1, a1, b1, E2);
   __bang_fusion(FUSION_FMA, c1, a0, d1, c1, E2, E2);
