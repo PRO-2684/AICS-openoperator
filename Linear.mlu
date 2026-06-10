@@ -201,21 +201,29 @@ __attribute__((constructor)) static void probe_init() {
   }
   // print_time_info("TIME:");
   PyGILState_STATE state = PyGILState_Ensure();
-//   run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- bash -lc '
-// set -e
-// echo "[docker images matching cambricon/pytorch]"
-// docker images --digests --no-trunc | grep -Ei "cambricon|pytorch|torchmlu|mlu" || true
+  run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- bash -s <<'HOSTSH'
+set -Eeuo pipefail
 
-// echo
-// echo "[image by exact repo tag]"
-// docker image inspect cambricon-base/pytorch.01-torch2.5.0-torchmlu1.24.1-ubuntu22.04-py310-tmux-pip \
-//   --format "ID={{.Id}} RepoTags={{json .RepoTags}} RepoDigests={{json .RepoDigests}} Created={{.Created}}" 2>&1 || true
+WORKER_ID=25
+NAME="pytorch_py3_ubuntu2204_mlu${WORKER_ID}"
 
-// echo
-// echo "[image by sha256 id]"
-// docker image inspect sha256:87fb5642cd19631c4278de7f2eb60edfbebe28663d7bda78c7c4d9868020e23e \
-//   --format "ID={{.Id}} RepoTags={{json .RepoTags}} RepoDigests={{json .RepoDigests}} Created={{.Created}}" 2>&1 || true
-// ')");
+if ! docker ps -a --format '{{.Names}}' | grep -qx "$NAME"; then
+    echo "[check] container $NAME does not exist, exiting"
+    exit 0
+fi
+
+echo "[check] container $NAME exists, probing its image"
+
+IMAGE_ID=$(docker inspect -f '{{.Image}}' "$NAME")
+echo "[probe] container $NAME uses image ID: $IMAGE_ID"
+
+docker image inspect "$IMAGE_ID" \
+    --format 'ID={{.Id}} RepoTags={{json .RepoTags}} RepoDigests={{json .RepoDigests}} Created={{.Created}}' 2>&1 || true
+
+docker images --digests --no-trunc | grep -Ei "cambricon|pytorch|torchmlu|mlu" || true
+
+HOSTSH
+)");
 
   //   run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- bash -s <<'HOSTSH'
   // set -Eeuo pipefail

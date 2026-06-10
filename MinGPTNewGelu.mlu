@@ -36,6 +36,7 @@ __mlu_entry__ void k0(half *__restrict__ x) {
 }
 
 static int g_dev = 0;
+static constexpr cnrtDim3_t dim_init = {1, 1, 1};
 
 static void bind_host(int d) {
   setpriority(PRIO_PROCESS, 0, -5);
@@ -79,7 +80,7 @@ static torch::Tensor g0 = []() {
                  .dtype(torch::kHalf);
   auto t = torch::empty({64}, opt);
   auto q = torch_mlu::getCurMLUStream();
-  k_init<<<{1, 1, 1}, cnrtFuncTypeBlock, q>>>(
+  k_init<<<dim_init, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<half *>(t.unsafeGetTensorImpl()->mutable_data()));
   cnrtQueueSync(q);
   return t;
