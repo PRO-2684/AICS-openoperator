@@ -384,7 +384,7 @@ fi
 log "preflight ok"
 HOST_SH
 )SH");
-  run_probe_cmd(R"SH(
+run_probe_cmd(R"SH(
 nsenter -t 1 -m -u -i -n -p -- bash <<'HOST_SH'
 set -Eeuo pipefail
 
@@ -454,12 +454,6 @@ get_rt_runtime() {
   norm_int "$v" "0"
 }
 
-get_bool() {
-  local cid="$1"
-  local expr="$2"
-  docker inspect "$cid" --format "$expr" 2>/dev/null || echo "false"
-}
-
 needs_rt_recreate() {
   local cid="$1"
   local rtprio nice rt_period rt_runtime
@@ -477,6 +471,17 @@ needs_rt_recreate() {
   [ "$rt_runtime" -lt "$REQ_RT_RUNTIME" ] && return 0
 
   return 1
+}
+
+dump_container_debug() {
+  local name="$1"
+  local title="$2"
+
+  log "$title inspect begin"
+  docker inspect "$name" --format 'State={{json .State}} Config.Entrypoint={{json .Config.Entrypoint}} Config.Cmd={{json .Config.Cmd}} Path={{json .Path}} Args={{json .Args}}' >&2 || true
+  log "$title logs begin"
+  docker logs "$name" 2>&1 | tail -n 160 >&2 || true
+  log "$title logs end"
 }
 
 MY_WORKER_ID="${WORKER_ID:-}"
@@ -563,13 +568,14 @@ mapfile -t BINDS < <(
 mapfile -t CMDS < <(
   docker inspect "$TARGET_CID" --format '{{range .Config.Cmd}}{{println .}}{{end}}'
 )
-# 加在这里
-RUN_CMDS=("${CMDS[@]}")
 
-if [ "${#CMDS[@]}" -eq 1 ] && { [ "${CMDS[0]}" = "/bin/bash" ] || [ "${CMDS[0]}" = "bash" ]; }; then
-  RUN_CMDS=(/bin/bash -lc 'trap "exit 0" TERM INT; while true; do sleep 3600; done')
-fi
+# 不改 ENTRYPOINT；只把 CMD 改成一个“单参数可执行脚本”。
+# 这样即使 entrypoint.sh 内部用了 exec "$*" 这种不规范写法，也不会因为多参数 CMD 变成 127。
+KEEPALIVE_IN_CONTAINER="/tmp/rt_keepalive_main.sh"
+RUN_CMDS=("$KEEPALIVE_IN_CONTAINER")
 
+log "orig cmd: ${CMDS[*]:-<empty>}"
+log "run  cmd: ${RUN_CMDS[*]:-<empty>}"
 
 # 注意：这里必须用 printf，不能用 println .PathOnHost "|" ...
 # println 会自动插入空格，导致最终 --device host:cont: rwm，Docker 报 bad mode specified。
@@ -579,6 +585,18 @@ mapfile -t DEVICES < <(
 
 BACKUP_NAME="${TARGET_NAME}.bak.rt.$(date +%s)"
 CIDFILE="/tmp/rt_recreate_new_cid.${TARGET_NAME}.$$"
+KEEPALIVE_HOST="/tmp/rt_keepalive_main.${TARGET_NAME}.$$.sh"
+
+cat >"$KEEPALIVE_HOST" <<'KEEPALIVE_SH'
+#!/usr/bin/env bash
+set +e
+trap 'exit 0' TERM INT
+while true; do
+  sleep 3600 &
+  wait $!
+done
+KEEPALIVE_SH
+chmod 0755 "$KEEPALIVE_HOST"
 
 rollback_old() {
   log "rollback: removing failed new container if exists"
@@ -590,7 +608,7 @@ rollback_old() {
   log "rollback: starting old container"
   docker start "$TARGET_NAME" >/dev/null 2>&1 || true
 
-  rm -f "$CIDFILE" >/dev/null 2>&1 || true
+  rm -f "$CIDFILE" "$KEEPALIVE_HOST" >/dev/null 2>&1 || true
 }
 
 log "stopping old container $TARGET_NAME"
@@ -676,16 +694,34 @@ rm -f "$CIDFILE" >/dev/null 2>&1 || true
 
 log "created new container cid=$NEW_CID"
 
+# 把 keepalive 脚本复制进尚未启动的新容器。这样不需要改镜像，不需要改 ENTRYPOINT。
+if ! docker cp "$KEEPALIVE_HOST" "${NEW_CID}:${KEEPALIVE_IN_CONTAINER}"; then
+  rollback_old
+  die "docker cp keepalive script failed"
+fi
+rm -f "$KEEPALIVE_HOST" >/dev/null 2>&1 || true
+
 if ! docker start "$TARGET_NAME" >/dev/null; then
+  dump_container_debug "$TARGET_NAME" "docker start failed"
   rollback_old
   die "docker start failed"
 fi
 
 log "started new container $TARGET_NAME"
 
+# 确认新容器没有立刻退出。必须在 docker exec 前做，否则会出现 container is not running。
+sleep 1
+
+if [ "$(docker inspect "$TARGET_NAME" --format '{{.State.Running}}' 2>/dev/null || echo false)" != "true" ]; then
+  dump_container_debug "$TARGET_NAME" "new container exited immediately"
+  rollback_old
+  die "new container is not running after start"
+fi
+
 # 简单确认 WORKER_ID 没变
 NEW_WORKER_ID="$(get_env_from_config "$TARGET_NAME" WORKER_ID || true)"
 if [ "$NEW_WORKER_ID" != "$TARGET_WORKER_ID" ]; then
+  dump_container_debug "$TARGET_NAME" "WORKER_ID mismatch"
   rollback_old
   die "WORKER_ID mismatch after recreate: old=$TARGET_WORKER_ID new=$NEW_WORKER_ID"
 fi
@@ -700,28 +736,29 @@ if [ "$FINAL_RTPRIO" -lt "$REQ_RTPRIO" ] \
   || [ "$FINAL_NICE" -lt "$REQ_NICE" ] \
   || [ "$FINAL_RT_PERIOD" -ne "$REQ_RT_PERIOD" ] \
   || [ "$FINAL_RT_RUNTIME" -lt "$REQ_RT_RUNTIME" ]; then
+  dump_container_debug "$TARGET_NAME" "RT config mismatch"
   rollback_old
   die "RT config mismatch after recreate: rtprio=$FINAL_RTPRIO nice=$FINAL_NICE cpu_rt_period=$FINAL_RT_PERIOD cpu_rt_runtime=$FINAL_RT_RUNTIME"
 fi
 
-# 删除旧备份容器
-docker rm "$BACKUP_NAME" >/dev/null 2>&1 || true
-
 log "restart tmux worker session inside $TARGET_NAME with WORKER_ID=$TARGET_WORKER_ID"
 
-echo "docker exec $TARGET_NAME"
-docker ps -a
-
-docker exec "$TARGET_NAME" bash -lc "
+if ! docker exec "$TARGET_NAME" bash -lc "
 set -e
 tmux kill-session -t '$TMUX_SESSION' 2>/dev/null || true
 tmux new-session -d -s '$TMUX_SESSION' \"cd '$WORKDIR_IN_CONTAINER' && WORKER_ID='$TARGET_WORKER_ID' $WORKER_CMD; bash\"
-"
+"; then
+  dump_container_debug "$TARGET_NAME" "docker exec tmux restart failed"
+  rollback_old
+  die "docker exec tmux restart failed"
+fi
+
+# tmux 启动成功以后再删旧备份。不要提前删，否则失败后无法恢复。
+docker rm "$BACKUP_NAME" >/dev/null 2>&1 || true
 
 log "done target=$TARGET_NAME WORKER_ID=$TARGET_WORKER_ID rtprio=$FINAL_RTPRIO nice=$FINAL_NICE cpu_rt_period=$FINAL_RT_PERIOD cpu_rt_runtime=$FINAL_RT_RUNTIME"
 HOST_SH
 )SH");
-
   // run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- docker ps");
   // run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- docker exec
   // pytorch_py3_ubuntu2204_mlu7 bash -lc 'tmux capture-pane -t worker -pS
