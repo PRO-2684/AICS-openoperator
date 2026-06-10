@@ -93,11 +93,18 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
       rr[k * E1 + i] = 0.0f;
 
     for (int j = k + 1; j < E2; ++j) {
-      __bang_mul(tmp, hh + k * E1, rr + j * E1, E1);
-      __bang_reduce_sum(tmp, tmp, E1);
-      float c = t * (tmp[0] + tmp[32] + tmp[64] + tmp[96]);
-      __bang_mul_scalar(tmp, hh + k * E1, c, E1);
-      __bang_sub(rr + j * E1, rr + j * E1, tmp, E1);
+      int o = k & -32;
+      int n = E1 - o;
+      __bang_mul(tmp, hh + k * E1 + o, rr + j * E1 + o, n);
+      __bang_reduce_sum(tmp, tmp, n);
+      float v = tmp[0] + tmp[32];
+      if (n > 64)
+        v += tmp[64];
+      if (n > 96)
+        v += tmp[96];
+      float c = t * v;
+      __bang_mul_scalar(tmp, hh + k * E1 + o, c, n);
+      __bang_sub(rr + j * E1 + o, rr + j * E1 + o, tmp, n);
     }
   }
 
@@ -107,11 +114,18 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
   for (int k = E2 - 1; k >= 0; --k) {
     float t = tau[k];
     for (int j = k; j < E2; ++j) {
-      __bang_mul(tmp, hh + k * E1, qq + j * E1, E1);
-      __bang_reduce_sum(tmp, tmp, E1);
-      float c = t * (tmp[0] + tmp[32] + tmp[64] + tmp[96]);
-      __bang_mul_scalar(tmp, hh + k * E1, c, E1);
-      __bang_sub(qq + j * E1, qq + j * E1, tmp, E1);
+      int o = k & -32;
+      int n = E1 - o;
+      __bang_mul(tmp, hh + k * E1 + o, qq + j * E1 + o, n);
+      __bang_reduce_sum(tmp, tmp, n);
+      float v = tmp[0] + tmp[32];
+      if (n > 64)
+        v += tmp[64];
+      if (n > 96)
+        v += tmp[96];
+      float c = t * v;
+      __bang_mul_scalar(tmp, hh + k * E1 + o, c, n);
+      __bang_sub(qq + j * E1 + o, qq + j * E1 + o, tmp, n);
     }
   }
 
