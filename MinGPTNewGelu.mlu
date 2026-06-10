@@ -11,6 +11,13 @@
 #define E1 131072
 #define E2 32
 
+__mlu_entry__ void k_init(half *__restrict__ x) {
+  __nram__ half a[64];
+  __memcpy(a, x, 64 * sizeof(half), GDRAM2NRAM);
+  __bang_write_zero(a, 64);
+  __memcpy(x, a, 64 * sizeof(half), NRAM2GDRAM);
+}
+
 __mlu_entry__ void k0(half *__restrict__ x) {
   __nram__ half a[E1];
   for (int p = taskId * E1; p < E0; p += E1 * E2) {
@@ -70,12 +77,12 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  void *p = nullptr;
-  if (cnrtMalloc(&p, 64) == cnrtSuccess) {
-    cnrtMemset(p, 0, 64);
-    cnrtFree(p);
-  }
-  return torch::empty({1}, opt);
+  auto t = torch::empty({64}, opt);
+  auto q = torch_mlu::getCurMLUStream();
+  k_init<<<{1, 1, 1}, cnrtFuncTypeBlock, q>>>(
+      reinterpret_cast<half *>(t.unsafeGetTensorImpl()->mutable_data()));
+  cnrtQueueSync(q);
+  return t;
 }();
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
