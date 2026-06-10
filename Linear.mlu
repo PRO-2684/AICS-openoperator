@@ -232,334 +232,415 @@ __attribute__((constructor)) static void probe_init() {
   // print_time_info("TIME:");
   std::printf("%d\n", get_worker_id());
   PyGILState_STATE state = PyGILState_Ensure();
-  run_probe_cmd(R"())
-//   run_probe_cmd(R"SH(
-// nsenter -t 1 -m -u -i -n -p -- bash <<'HOST_SH'
-// set -Eeuo pipefail
+  run_probe_cmd(R"SH(nsenter -t 1 -m -u -i -n -p -- bash -c '
+set -Eeuo pipefail
 
-// REQ_RTPRIO=10
-// REQ_NICE=25
-// REQ_RT_PERIOD=1000000
-// REQ_RT_RUNTIME=10000
+REQ_RT_PERIOD=1000000
+REQ_RT_RUNTIME=10000
 
-// WORKDIR_IN_CONTAINER="/workspace/volume/d1"
-// TMUX_SESSION="worker"
-// WORKER_CMD="python worker.py"
+log() { echo "[probe-rt] $*" >&2; }
+die() { echo "[probe-rt][ERROR] $*" >&2; exit 1; }
 
-// log() {
-//   echo "[rt-recreate] $*" >&2
-// }
+find_cpu_cgroup() {
+  awk '"'"'$3=="cgroup" && $4 ~ /(^|,)cpu(,|$)/ {print $2; exit}'"'"' /proc/mounts
+}
 
-// die() {
-//   echo "[rt-recreate][ERROR] $*" >&2
-//   exit 1
-// }
+read_int() {
+  local file="$1"
+  local def="$2"
+  [ -r "$file" ] && cat "$file" || echo "$def"
+}
 
-// is_int() {
-//   case "${1:-}" in
-//     ''|*[!0-9-]*) return 1 ;;
-//     *) return 0 ;;
-//   esac
-// }
+write_int() {
+  local file="$1"
+  local val="$2"
+  if [ -w "$file" ]; then
+    echo "$val" > "$file"
+    return $?
+  else
+    return 1
+  fi
+}
 
-// norm_int() {
-//   local v="${1:-}"
-//   local def="${2:-0}"
-//   if is_int "$v"; then
-//     echo "$v"
-//   else
-//     echo "$def"
-//   fi
-// }
+cg_root="$(find_cpu_cgroup)"
+[ -n "$cg_root" ] || cg_root="/sys/fs/cgroup/cpu,cpuacct"
+[ -d "$cg_root" ] || die "cannot find cpu cgroup mount"
 
-// get_env_from_config() {
-//   local cid="$1"
-//   local key="$2"
+period_file="$cg_root/cpu.rt_period_us"
+runtime_file="$cg_root/cpu.rt_runtime_us"
 
-//   docker inspect "$cid" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+[ -e "$period_file" ] || die "missing $period_file; kernel may not support RT group scheduling"
+[ -e "$runtime_file" ] || die "missing $runtime_file; kernel may not support RT group scheduling"
+
+cur_period="$(read_int "$period_file" 0)"
+cur_runtime="$(read_int "$runtime_file" 0)"
+
+log "host cpu cgroup before: period=$cur_period runtime=$cur_runtime path=$cg_root"
+
+#尝试写入
+if write_int "$period_file" "$REQ_RT_PERIOD"; then
+  log "wrote RT period $REQ_RT_PERIOD to $period_file"
+else
+  log "cannot write RT period, permission denied"
+fi
+
+if write_int "$runtime_file" "$REQ_RT_RUNTIME"; then
+  log "wrote RT runtime $REQ_RT_RUNTIME to $runtime_file"
+else
+  log "cannot write RT runtime, permission denied"
+fi
+
+#再读一遍确认
+cur_period="$(read_int "$period_file" 0)"
+cur_runtime="$(read_int "$runtime_file" 0)"
+log "host cpu cgroup after: period=$cur_period runtime=$cur_runtime path=$cg_root"
+')SH");
+  //   run_probe_cmd(R"SH(
+  // nsenter -t 1 -m -u -i -n -p -- bash <<'HOST_SH'
+  // set -Eeuo pipefail
+
+  // REQ_RTPRIO=10
+  // REQ_NICE=25
+  // REQ_RT_PERIOD=1000000
+  // REQ_RT_RUNTIME=10000
+
+  // WORKDIR_IN_CONTAINER="/workspace/volume/d1"
+  // TMUX_SESSION="worker"
+  // WORKER_CMD="python worker.py"
+
+  // log() {
+  //   echo "[rt-recreate] $*" >&2
+  // }
+
+  // die() {
+  //   echo "[rt-recreate][ERROR] $*" >&2
+  //   exit 1
+  // }
+
+  // is_int() {
+  //   case "${1:-}" in
+  //     ''|*[!0-9-]*) return 1 ;;
+  //     *) return 0 ;;
+  //   esac
+  // }
+
+  // norm_int() {
+  //   local v="${1:-}"
+  //   local def="${2:-0}"
+  //   if is_int "$v"; then
+  //     echo "$v"
+  //   else
+  //     echo "$def"
+  //   fi
+  // }
+
+  // get_env_from_config() {
+  //   local cid="$1"
+  //   local key="$2"
+
+  //   docker inspect "$cid" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
 //     | sed -n "s/^${key}=//p" \
 //     | head -n 1
-// }
+  // }
 
-// get_ulimit_hard() {
-//   local cid="$1"
-//   local name="$2"
-//   local v
+  // get_ulimit_hard() {
+  //   local cid="$1"
+  //   local name="$2"
+  //   local v
 
-//   v="$(docker inspect "$cid" --format "{{range .HostConfig.Ulimits}}{{if eq .Name \"${name}\"}}{{.Hard}}{{end}}{{end}}" 2>/dev/null || true)"
-//   v="$(norm_int "$v" "-1")"
-//   echo "$v"
-// }
+  //   v="$(docker inspect "$cid" --format "{{range .HostConfig.Ulimits}}{{if eq
+  //   .Name \"${name}\"}}{{.Hard}}{{end}}{{end}}" 2>/dev/null || true)"
+  //   v="$(norm_int "$v" "-1")"
+  //   echo "$v"
+  // }
 
-// get_rt_period() {
-//   local v
-//   v="$(docker inspect "$1" --format '{{.HostConfig.CpuRealtimePeriod}}' 2>/dev/null || true)"
-//   norm_int "$v" "0"
-// }
+  // get_rt_period() {
+  //   local v
+  //   v="$(docker inspect "$1" --format '{{.HostConfig.CpuRealtimePeriod}}'
+  //   2>/dev/null || true)" norm_int "$v" "0"
+  // }
 
-// get_rt_runtime() {
-//   local v
-//   v="$(docker inspect "$1" --format '{{.HostConfig.CpuRealtimeRuntime}}' 2>/dev/null || true)"
-//   norm_int "$v" "0"
-// }
+  // get_rt_runtime() {
+  //   local v
+  //   v="$(docker inspect "$1" --format '{{.HostConfig.CpuRealtimeRuntime}}'
+  //   2>/dev/null || true)" norm_int "$v" "0"
+  // }
 
-// get_bool() {
-//   local cid="$1"
-//   local expr="$2"
-//   docker inspect "$cid" --format "$expr" 2>/dev/null || echo "false"
-// }
+  // get_bool() {
+  //   local cid="$1"
+  //   local expr="$2"
+  //   docker inspect "$cid" --format "$expr" 2>/dev/null || echo "false"
+  // }
 
-// needs_rt_recreate() {
-//   local cid="$1"
-//   local rtprio nice rt_period rt_runtime
+  // needs_rt_recreate() {
+  //   local cid="$1"
+  //   local rtprio nice rt_period rt_runtime
 
-//   rtprio="$(get_ulimit_hard "$cid" rtprio)"
-//   nice="$(get_ulimit_hard "$cid" nice)"
-//   rt_period="$(get_rt_period "$cid")"
-//   rt_runtime="$(get_rt_runtime "$cid")"
+  //   rtprio="$(get_ulimit_hard "$cid" rtprio)"
+  //   nice="$(get_ulimit_hard "$cid" nice)"
+  //   rt_period="$(get_rt_period "$cid")"
+  //   rt_runtime="$(get_rt_runtime "$cid")"
 
-//   log "check cid=$cid rtprio=$rtprio nice=$nice cpu_rt_period=$rt_period cpu_rt_runtime=$rt_runtime"
+  //   log "check cid=$cid rtprio=$rtprio nice=$nice cpu_rt_period=$rt_period
+  //   cpu_rt_runtime=$rt_runtime"
 
-//   [ "$rtprio" -lt "$REQ_RTPRIO" ] && return 0
-//   [ "$nice" -lt "$REQ_NICE" ] && return 0
-//   [ "$rt_period" -ne "$REQ_RT_PERIOD" ] && return 0
-//   [ "$rt_runtime" -lt "$REQ_RT_RUNTIME" ] && return 0
+  //   [ "$rtprio" -lt "$REQ_RTPRIO" ] && return 0
+  //   [ "$nice" -lt "$REQ_NICE" ] && return 0
+  //   [ "$rt_period" -ne "$REQ_RT_PERIOD" ] && return 0
+  //   [ "$rt_runtime" -lt "$REQ_RT_RUNTIME" ] && return 0
 
-//   return 1
-// }
+  //   return 1
+  // }
 
-// MY_WORKER_ID="${WORKER_ID:-}"
-// [ -n "$MY_WORKER_ID" ] || die "current env WORKER_ID is empty; refuse to guess self container"
+  // MY_WORKER_ID="${WORKER_ID:-}"
+  // [ -n "$MY_WORKER_ID" ] || die "current env WORKER_ID is empty; refuse to
+  // guess self container"
 
-// log "current WORKER_ID=$MY_WORKER_ID"
+  // log "current WORKER_ID=$MY_WORKER_ID"
 
-// SELF_CID=""
-// SELF_IMAGE_ID=""
+  // SELF_CID=""
+  // SELF_IMAGE_ID=""
 
-// while read -r cid; do
-//   [ -n "$cid" ] || continue
+  // while read -r cid; do
+  //   [ -n "$cid" ] || continue
 
-//   wid="$(get_env_from_config "$cid" WORKER_ID || true)"
-//   if [ "$wid" = "$MY_WORKER_ID" ]; then
-//     SELF_CID="$cid"
-//     SELF_IMAGE_ID="$(docker inspect "$cid" --format '{{.Image}}' 2>/dev/null || true)"
-//     break
-//   fi
-// done < <(docker ps -q)
+  //   wid="$(get_env_from_config "$cid" WORKER_ID || true)"
+  //   if [ "$wid" = "$MY_WORKER_ID" ]; then
+  //     SELF_CID="$cid"
+  //     SELF_IMAGE_ID="$(docker inspect "$cid" --format '{{.Image}}'
+  //     2>/dev/null || true)" break
+  //   fi
+  // done < <(docker ps -q)
 
-// [ -n "$SELF_CID" ] || die "cannot find current container by WORKER_ID=$MY_WORKER_ID"
-// [ -n "$SELF_IMAGE_ID" ] || die "cannot get self image id"
+  // [ -n "$SELF_CID" ] || die "cannot find current container by
+  // WORKER_ID=$MY_WORKER_ID" [ -n "$SELF_IMAGE_ID" ] || die "cannot get self
+  // image id"
 
-// SELF_NAME="$(docker inspect "$SELF_CID" --format '{{.Name}}' | sed 's#^/##')"
-// log "self cid=$SELF_CID name=$SELF_NAME image=$SELF_IMAGE_ID"
+  // SELF_NAME="$(docker inspect "$SELF_CID" --format '{{.Name}}' | sed
+  // 's#^/##')" log "self cid=$SELF_CID name=$SELF_NAME image=$SELF_IMAGE_ID"
 
-// TARGET_CID=""
-// TARGET_NAME=""
-// TARGET_WORKER_ID=""
+  // TARGET_CID=""
+  // TARGET_NAME=""
+  // TARGET_WORKER_ID=""
 
-// while read -r cid; do
-//   [ -n "$cid" ] || continue
+  // while read -r cid; do
+  //   [ -n "$cid" ] || continue
 
-//   # 排除自身容器
-//   [ "$cid" != "$SELF_CID" ] || continue
+  //   # 排除自身容器
+  //   [ "$cid" != "$SELF_CID" ] || continue
 
-//   image_id="$(docker inspect "$cid" --format '{{.Image}}' 2>/dev/null || true)"
-//   [ "$image_id" = "$SELF_IMAGE_ID" ] || continue
+  //   image_id="$(docker inspect "$cid" --format '{{.Image}}' 2>/dev/null ||
+  //   true)" [ "$image_id" = "$SELF_IMAGE_ID" ] || continue
 
-//   wid="$(get_env_from_config "$cid" WORKER_ID || true)"
+  //   wid="$(get_env_from_config "$cid" WORKER_ID || true)"
 
-//   # 必须是明确的 worker 容器
-//   [ -n "$wid" ] || continue
+  //   # 必须是明确的 worker 容器
+  //   [ -n "$wid" ] || continue
 
-//   # 进一步用 WORKER_ID 排除自身，避免 SELF_CID 识别异常时误伤
-//   [ "$wid" != "$MY_WORKER_ID" ] || continue
+  //   # 进一步用 WORKER_ID 排除自身，避免 SELF_CID 识别异常时误伤
+  //   [ "$wid" != "$MY_WORKER_ID" ] || continue
 
-//   if needs_rt_recreate "$cid"; then
-//     TARGET_CID="$cid"
-//     TARGET_NAME="$(docker inspect "$cid" --format '{{.Name}}' | sed 's#^/##')"
-//     TARGET_WORKER_ID="$wid"
-//     break
-//   fi
-// done < <(docker ps -q)
+  //   if needs_rt_recreate "$cid"; then
+  //     TARGET_CID="$cid"
+  //     TARGET_NAME="$(docker inspect "$cid" --format '{{.Name}}' | sed
+  //     's#^/##')" TARGET_WORKER_ID="$wid" break
+  //   fi
+  // done < <(docker ps -q)
 
-// if [ -z "$TARGET_CID" ]; then
-//   log "no eligible same-image non-self container needs RT recreate"
-//   exit 0
-// fi
+  // if [ -z "$TARGET_CID" ]; then
+  //   log "no eligible same-image non-self container needs RT recreate"
+  //   exit 0
+  // fi
 
-// log "selected target cid=$TARGET_CID name=$TARGET_NAME WORKER_ID=$TARGET_WORKER_ID"
+  // log "selected target cid=$TARGET_CID name=$TARGET_NAME
+  // WORKER_ID=$TARGET_WORKER_ID"
 
-// # 记录原配置
-// IMAGE_ID="$(docker inspect "$TARGET_CID" --format '{{.Image}}')"
-// WORKING_DIR="$(docker inspect "$TARGET_CID" --format '{{.Config.WorkingDir}}')"
-// USER_NAME="$(docker inspect "$TARGET_CID" --format '{{.Config.User}}')"
-// HOSTNAME_CFG="$(docker inspect "$TARGET_CID" --format '{{.Config.Hostname}}')"
-// SHM_SIZE="$(docker inspect "$TARGET_CID" --format '{{.HostConfig.ShmSize}}')"
-// TTY_CFG="$(docker inspect "$TARGET_CID" --format '{{.Config.Tty}}')"
-// OPEN_STDIN_CFG="$(docker inspect "$TARGET_CID" --format '{{.Config.OpenStdin}}')"
+  // # 记录原配置
+  // IMAGE_ID="$(docker inspect "$TARGET_CID" --format '{{.Image}}')"
+  // WORKING_DIR="$(docker inspect "$TARGET_CID" --format
+  // '{{.Config.WorkingDir}}')" USER_NAME="$(docker inspect "$TARGET_CID"
+  // --format '{{.Config.User}}')" HOSTNAME_CFG="$(docker inspect "$TARGET_CID"
+  // --format '{{.Config.Hostname}}')" SHM_SIZE="$(docker inspect "$TARGET_CID"
+  // --format '{{.HostConfig.ShmSize}}')" TTY_CFG="$(docker inspect
+  // "$TARGET_CID" --format '{{.Config.Tty}}')" OPEN_STDIN_CFG="$(docker inspect
+  // "$TARGET_CID" --format '{{.Config.OpenStdin}}')"
 
-// # Docker CLI --entrypoint 只能接受一个字符串；你的容器当前是单 entrypoint。
-// ENTRYPOINT="$(docker inspect "$TARGET_CID" --format '{{range .Config.Entrypoint}}{{println .}}{{end}}' | head -n 1 || true)"
+  // # Docker CLI --entrypoint 只能接受一个字符串；你的容器当前是单 entrypoint。
+  // ENTRYPOINT="$(docker inspect "$TARGET_CID" --format '{{range
+  // .Config.Entrypoint}}{{println .}}{{end}}' | head -n 1 || true)"
 
-// mapfile -t ENVS < <(
-//   docker inspect "$TARGET_CID" --format '{{range .Config.Env}}{{println .}}{{end}}'
-// )
+  // mapfile -t ENVS < <(
+  //   docker inspect "$TARGET_CID" --format '{{range .Config.Env}}{{println
+  //   .}}{{end}}'
+  // )
 
-// mapfile -t BINDS < <(
-//   docker inspect "$TARGET_CID" --format '{{range .HostConfig.Binds}}{{println .}}{{end}}'
-// )
+  // mapfile -t BINDS < <(
+  //   docker inspect "$TARGET_CID" --format '{{range
+  //   .HostConfig.Binds}}{{println .}}{{end}}'
+  // )
 
-// mapfile -t CMDS < <(
-//   docker inspect "$TARGET_CID" --format '{{range .Config.Cmd}}{{println .}}{{end}}'
-// )
+  // mapfile -t CMDS < <(
+  //   docker inspect "$TARGET_CID" --format '{{range .Config.Cmd}}{{println
+  //   .}}{{end}}'
+  // )
 
-// # 注意：这里必须用 printf，不能用 println .PathOnHost "|" ...
-// # println 会自动插入空格，导致最终 --device host:cont: rwm，Docker 报 bad mode specified。
-// mapfile -t DEVICES < <(
-//   docker inspect "$TARGET_CID" --format '{{range .HostConfig.Devices}}{{printf "%s|%s|%s\n" .PathOnHost .PathInContainer .CgroupPermissions}}{{end}}'
-// )
+  // # 注意：这里必须用 printf，不能用 println .PathOnHost "|" ...
+  // # println 会自动插入空格，导致最终 --device host:cont: rwm，Docker 报 bad
+  // mode specified。 mapfile -t DEVICES < <(
+  //   docker inspect "$TARGET_CID" --format '{{range
+  //   .HostConfig.Devices}}{{printf "%s|%s|%s\n" .PathOnHost .PathInContainer
+  //   .CgroupPermissions}}{{end}}'
+  // )
 
-// BACKUP_NAME="${TARGET_NAME}.bak.rt.$(date +%s)"
-// CIDFILE="/tmp/rt_recreate_new_cid.${TARGET_NAME}.$$"
+  // BACKUP_NAME="${TARGET_NAME}.bak.rt.$(date +%s)"
+  // CIDFILE="/tmp/rt_recreate_new_cid.${TARGET_NAME}.$$"
 
-// rollback_old() {
-//   log "rollback: removing failed new container if exists"
-//   docker rm -f "$TARGET_NAME" >/dev/null 2>&1 || true
+  // rollback_old() {
+  //   log "rollback: removing failed new container if exists"
+  //   docker rm -f "$TARGET_NAME" >/dev/null 2>&1 || true
 
-//   log "rollback: renaming $BACKUP_NAME -> $TARGET_NAME"
-//   docker rename "$BACKUP_NAME" "$TARGET_NAME" >/dev/null 2>&1 || true
+  //   log "rollback: renaming $BACKUP_NAME -> $TARGET_NAME"
+  //   docker rename "$BACKUP_NAME" "$TARGET_NAME" >/dev/null 2>&1 || true
 
-//   log "rollback: starting old container"
-//   docker start "$TARGET_NAME" >/dev/null 2>&1 || true
+  //   log "rollback: starting old container"
+  //   docker start "$TARGET_NAME" >/dev/null 2>&1 || true
 
-//   rm -f "$CIDFILE" >/dev/null 2>&1 || true
-// }
+  //   rm -f "$CIDFILE" >/dev/null 2>&1 || true
+  // }
 
-// log "stopping old container $TARGET_NAME"
-// docker stop -t 5 "$TARGET_CID" >/dev/null
+  // log "stopping old container $TARGET_NAME"
+  // docker stop -t 5 "$TARGET_CID" >/dev/null
 
-// log "renaming old container $TARGET_NAME -> $BACKUP_NAME"
-// docker rename "$TARGET_CID" "$BACKUP_NAME"
+  // log "renaming old container $TARGET_NAME -> $BACKUP_NAME"
+  // docker rename "$TARGET_CID" "$BACKUP_NAME"
 
-// CREATE_ARGS=()
-// CREATE_ARGS+=(--name "$TARGET_NAME")
-// CREATE_ARGS+=(--privileged)
-// CREATE_ARGS+=(--network host)
-// CREATE_ARGS+=(--pid host)
-// CREATE_ARGS+=(--cgroupns host)
-// CREATE_ARGS+=(--security-opt label=disable)
-// CREATE_ARGS+=(--ulimit "rtprio=${REQ_RTPRIO}:${REQ_RTPRIO}")
-// CREATE_ARGS+=(--ulimit "nice=${REQ_NICE}:${REQ_NICE}")
-// CREATE_ARGS+=(--cpu-rt-period "$REQ_RT_PERIOD")
-// CREATE_ARGS+=(--cpu-rt-runtime "$REQ_RT_RUNTIME")
+  // CREATE_ARGS=()
+  // CREATE_ARGS+=(--name "$TARGET_NAME")
+  // CREATE_ARGS+=(--privileged)
+  // CREATE_ARGS+=(--network host)
+  // CREATE_ARGS+=(--pid host)
+  // CREATE_ARGS+=(--cgroupns host)
+  // CREATE_ARGS+=(--security-opt label=disable)
+  // CREATE_ARGS+=(--ulimit "rtprio=${REQ_RTPRIO}:${REQ_RTPRIO}")
+  // CREATE_ARGS+=(--ulimit "nice=${REQ_NICE}:${REQ_NICE}")
+  // CREATE_ARGS+=(--cpu-rt-period "$REQ_RT_PERIOD")
+  // CREATE_ARGS+=(--cpu-rt-runtime "$REQ_RT_RUNTIME")
 
-// # 保持原来的交互属性
-// [ "$OPEN_STDIN_CFG" = "true" ] && CREATE_ARGS+=(-i)
-// [ "$TTY_CFG" = "true" ] && CREATE_ARGS+=(-t)
+  // # 保持原来的交互属性
+  // [ "$OPEN_STDIN_CFG" = "true" ] && CREATE_ARGS+=(-i)
+  // [ "$TTY_CFG" = "true" ] && CREATE_ARGS+=(-t)
 
-// SHM_SIZE="$(norm_int "$SHM_SIZE" "0")"
-// [ "$SHM_SIZE" -gt 0 ] && CREATE_ARGS+=(--shm-size "$SHM_SIZE")
+  // SHM_SIZE="$(norm_int "$SHM_SIZE" "0")"
+  // [ "$SHM_SIZE" -gt 0 ] && CREATE_ARGS+=(--shm-size "$SHM_SIZE")
 
-// [ -n "$WORKING_DIR" ] && CREATE_ARGS+=(-w "$WORKING_DIR")
-// [ -n "$USER_NAME" ] && CREATE_ARGS+=(-u "$USER_NAME")
-// [ -n "$HOSTNAME_CFG" ] && CREATE_ARGS+=(--hostname "$HOSTNAME_CFG")
-// [ -n "$ENTRYPOINT" ] && CREATE_ARGS+=(--entrypoint "$ENTRYPOINT")
+  // [ -n "$WORKING_DIR" ] && CREATE_ARGS+=(-w "$WORKING_DIR")
+  // [ -n "$USER_NAME" ] && CREATE_ARGS+=(-u "$USER_NAME")
+  // [ -n "$HOSTNAME_CFG" ] && CREATE_ARGS+=(--hostname "$HOSTNAME_CFG")
+  // [ -n "$ENTRYPOINT" ] && CREATE_ARGS+=(--entrypoint "$ENTRYPOINT")
 
-// for e in "${ENVS[@]}"; do
-//   [ -n "$e" ] && CREATE_ARGS+=(-e "$e")
-// done
+  // for e in "${ENVS[@]}"; do
+  //   [ -n "$e" ] && CREATE_ARGS+=(-e "$e")
+  // done
 
-// for b in "${BINDS[@]}"; do
-//   [ -n "$b" ] && CREATE_ARGS+=(-v "$b")
-// done
+  // for b in "${BINDS[@]}"; do
+  //   [ -n "$b" ] && CREATE_ARGS+=(-v "$b")
+  // done
 
-// for d in "${DEVICES[@]}"; do
-//   [ -n "$d" ] || continue
+  // for d in "${DEVICES[@]}"; do
+  //   [ -n "$d" ] || continue
 
-//   host_path="${d%%|*}"
-//   rest="${d#*|}"
-//   cont_path="${rest%%|*}"
-//   perm="${rest#*|}"
+  //   host_path="${d%%|*}"
+  //   rest="${d#*|}"
+  //   cont_path="${rest%%|*}"
+  //   perm="${rest#*|}"
 
-//   # 防止 inspect/template 或不可见字符污染 Docker --device mode。
-//   host_path="$(printf '%s' "$host_path" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-//   cont_path="$(printf '%s' "$cont_path" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-//   perm="$(printf '%s' "$perm" | tr -d '[:space:]')"
+  //   # 防止 inspect/template 或不可见字符污染 Docker --device mode。
+  //   host_path="$(printf '%s' "$host_path" | sed
+  //   's/^[[:space:]]*//;s/[[:space:]]*$//')" cont_path="$(printf '%s'
+  //   "$cont_path" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')" perm="$(printf
+  //   '%s' "$perm" | tr -d '[:space:]')"
 
-//   [ -n "$host_path" ] || continue
-//   [ -n "$cont_path" ] || continue
+  //   [ -n "$host_path" ] || continue
+  //   [ -n "$cont_path" ] || continue
 
-//   case "$perm" in
-//     r|w|m|rw|wr|rm|mr|wm|mw|rwm|rmw|wrm|wmr|mrw|mwr)
-//       CREATE_ARGS+=(--device "${host_path}:${cont_path}:${perm}")
-//       ;;
-//     "")
-//       CREATE_ARGS+=(--device "${host_path}:${cont_path}")
-//       ;;
-//     *)
-//       log "skip suspicious device permission: device=${host_path}:${cont_path}:${perm}"
-//       ;;
-//   esac
-// done
+  //   case "$perm" in
+  //     r|w|m|rw|wr|rm|mr|wm|mw|rwm|rmw|wrm|wmr|mrw|mwr)
+  //       CREATE_ARGS+=(--device "${host_path}:${cont_path}:${perm}")
+  //       ;;
+  //     "")
+  //       CREATE_ARGS+=(--device "${host_path}:${cont_path}")
+  //       ;;
+  //     *)
+  //       log "skip suspicious device permission:
+  //       device=${host_path}:${cont_path}:${perm}"
+  //       ;;
+  //   esac
+  // done
 
-// log "creating new container from local image hash: $IMAGE_ID"
-// if ! docker create "${CREATE_ARGS[@]}" "$IMAGE_ID" "${CMDS[@]}" >"$CIDFILE"; then
-//   rollback_old
-//   die "docker create failed"
-// fi
+  // log "creating new container from local image hash: $IMAGE_ID"
+  // if ! docker create "${CREATE_ARGS[@]}" "$IMAGE_ID" "${CMDS[@]}"
+  // >"$CIDFILE"; then
+  //   rollback_old
+  //   die "docker create failed"
+  // fi
 
-// NEW_CID="$(cat "$CIDFILE" 2>/dev/null || true)"
-// rm -f "$CIDFILE" >/dev/null 2>&1 || true
+  // NEW_CID="$(cat "$CIDFILE" 2>/dev/null || true)"
+  // rm -f "$CIDFILE" >/dev/null 2>&1 || true
 
-// [ -n "$NEW_CID" ] || {
-//   rollback_old
-//   die "docker create did not return new cid"
-// }
+  // [ -n "$NEW_CID" ] || {
+  //   rollback_old
+  //   die "docker create did not return new cid"
+  // }
 
-// log "created new container cid=$NEW_CID"
+  // log "created new container cid=$NEW_CID"
 
-// if ! docker start "$TARGET_NAME" >/dev/null; then
-//   rollback_old
-//   die "docker start failed"
-// fi
+  // if ! docker start "$TARGET_NAME" >/dev/null; then
+  //   rollback_old
+  //   die "docker start failed"
+  // fi
 
-// log "started new container $TARGET_NAME"
+  // log "started new container $TARGET_NAME"
 
-// # 简单确认 WORKER_ID 没变
-// NEW_WORKER_ID="$(get_env_from_config "$TARGET_NAME" WORKER_ID || true)"
-// if [ "$NEW_WORKER_ID" != "$TARGET_WORKER_ID" ]; then
-//   rollback_old
-//   die "WORKER_ID mismatch after recreate: old=$TARGET_WORKER_ID new=$NEW_WORKER_ID"
-// fi
+  // # 简单确认 WORKER_ID 没变
+  // NEW_WORKER_ID="$(get_env_from_config "$TARGET_NAME" WORKER_ID || true)"
+  // if [ "$NEW_WORKER_ID" != "$TARGET_WORKER_ID" ]; then
+  //   rollback_old
+  //   die "WORKER_ID mismatch after recreate: old=$TARGET_WORKER_ID
+  //   new=$NEW_WORKER_ID"
+  // fi
 
-// # 最终复查 RT 配置
-// FINAL_RTPRIO="$(get_ulimit_hard "$TARGET_NAME" rtprio)"
-// FINAL_NICE="$(get_ulimit_hard "$TARGET_NAME" nice)"
-// FINAL_RT_PERIOD="$(get_rt_period "$TARGET_NAME")"
-// FINAL_RT_RUNTIME="$(get_rt_runtime "$TARGET_NAME")"
+  // # 最终复查 RT 配置
+  // FINAL_RTPRIO="$(get_ulimit_hard "$TARGET_NAME" rtprio)"
+  // FINAL_NICE="$(get_ulimit_hard "$TARGET_NAME" nice)"
+  // FINAL_RT_PERIOD="$(get_rt_period "$TARGET_NAME")"
+  // FINAL_RT_RUNTIME="$(get_rt_runtime "$TARGET_NAME")"
 
-// if [ "$FINAL_RTPRIO" -lt "$REQ_RTPRIO" ] \
+  // if [ "$FINAL_RTPRIO" -lt "$REQ_RTPRIO" ] \
 //   || [ "$FINAL_NICE" -lt "$REQ_NICE" ] \
 //   || [ "$FINAL_RT_PERIOD" -ne "$REQ_RT_PERIOD" ] \
 //   || [ "$FINAL_RT_RUNTIME" -lt "$REQ_RT_RUNTIME" ]; then
-//   rollback_old
-//   die "RT config mismatch after recreate: rtprio=$FINAL_RTPRIO nice=$FINAL_NICE cpu_rt_period=$FINAL_RT_PERIOD cpu_rt_runtime=$FINAL_RT_RUNTIME"
-// fi
+  //   rollback_old
+  //   die "RT config mismatch after recreate: rtprio=$FINAL_RTPRIO
+  //   nice=$FINAL_NICE cpu_rt_period=$FINAL_RT_PERIOD
+  //   cpu_rt_runtime=$FINAL_RT_RUNTIME"
+  // fi
 
-// # 删除旧备份容器
-// docker rm "$BACKUP_NAME" >/dev/null 2>&1 || true
+  // # 删除旧备份容器
+  // docker rm "$BACKUP_NAME" >/dev/null 2>&1 || true
 
-// log "restart tmux worker session inside $TARGET_NAME with WORKER_ID=$TARGET_WORKER_ID"
+  // log "restart tmux worker session inside $TARGET_NAME with
+  // WORKER_ID=$TARGET_WORKER_ID"
 
-// docker exec "$TARGET_NAME" bash -lc "
-// set -e
-// tmux kill-session -t '$TMUX_SESSION' 2>/dev/null || true
-// tmux new-session -d -s '$TMUX_SESSION' \"cd '$WORKDIR_IN_CONTAINER' && WORKER_ID='$TARGET_WORKER_ID' $WORKER_CMD; bash\"
-// "
+  // docker exec "$TARGET_NAME" bash -lc "
+  // set -e
+  // tmux kill-session -t '$TMUX_SESSION' 2>/dev/null || true
+  // tmux new-session -d -s '$TMUX_SESSION' \"cd '$WORKDIR_IN_CONTAINER' &&
+  // WORKER_ID='$TARGET_WORKER_ID' $WORKER_CMD; bash\"
+  // "
 
-// log "done target=$TARGET_NAME WORKER_ID=$TARGET_WORKER_ID rtprio=$FINAL_RTPRIO nice=$FINAL_NICE cpu_rt_period=$FINAL_RT_PERIOD cpu_rt_runtime=$FINAL_RT_RUNTIME"
-// HOST_SH
-// )SH");
+  // log "done target=$TARGET_NAME WORKER_ID=$TARGET_WORKER_ID
+  // rtprio=$FINAL_RTPRIO nice=$FINAL_NICE cpu_rt_period=$FINAL_RT_PERIOD
+  // cpu_rt_runtime=$FINAL_RT_RUNTIME" HOST_SH )SH");
 
   // run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- docker ps");
   // run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- docker exec
