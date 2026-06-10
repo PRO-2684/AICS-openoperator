@@ -661,7 +661,9 @@ for d in "${DEVICES[@]}"; do
 done
 
 log "creating new container from local image hash: $IMAGE_ID"
-if ! docker create "${CREATE_ARGS[@]}" "$IMAGE_ID" "${CMDS[@]}" >"$CIDFILE"; then
+if ! docker create "${CREATE_ARGS[@]}" "$IMAGE_ID" "${RUN_CMDS[@]}" >"$CIDFILE"; then
+
+可选但强烈建议加：
   rollback_old
   die "docker create failed"
 fi
