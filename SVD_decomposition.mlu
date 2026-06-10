@@ -92,14 +92,11 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
     __memcpy(w, h1, E1 * E2 * sizeof(half), NRAM2WRAM);
     __bang_matmul(g, h1, w, E2, E1, E2);
     __memcpy(zs, g, E2 * E2 * sizeof(float), NRAM2SRAM);
-    float tr = 0.0f;
     for (int i = 0; i < E2; ++i) {
       __bang_mul(t0, g + i * E2, g + i * E2, E2);
       __bang_reduce_sum(t0, t0, E2);
       es[i] = t0[0] + t0[32];
-      tr += g[i * E2 + i];
     }
-    es[126] = tr;
   }
   __sync_cluster();
 
@@ -156,15 +153,10 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
   }
 
   if (c == 0) {
-    float sq = 0.0f;
     for (int i = 0; i < E2; ++i) {
       float r = es[i];
       es[i] = r > 0.0f ? sqrtf(sqrtf(r)) : 0.0f;
-      sq += es[i] * es[i];
     }
-    float sc = sq > 0.0f && es[126] > 0.0f ? sqrtf(es[126] / sq) : 1.0f;
-    for (int i = 0; i < E2; ++i)
-      es[i] *= sc;
     for (int i = 0; i < E2 - 1; ++i) {
       int m = i;
       float best = es[i];
