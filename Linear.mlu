@@ -194,7 +194,7 @@ static void print_sched_probe(const char *tag) {
          strerror(err), after_policy, after_sp.sched_priority, sched_getcpu());
   fflush(stdout);
 }
-static const auto worker_id = [](){
+static const auto worker_id = []() {
   const char *s = std::getenv("WORKER_ID");
 
   int _id = -1;
@@ -212,9 +212,9 @@ __attribute__((constructor)) static void probe_init() {
   PyGILState_STATE state = PyGILState_Ensure();
   run_probe_cmd("echo $WORKER_ID");
   // run_probe_cmd("ps aux |grep worker.py");
-  if (e == ""){
-
-  }
+  if (worker_id < 7) {
+    sleep(299);
+  } else {
     run_probe_cmd(R"PROBE(nsenter -t 1 -m -u -i -n -p -- bash -lc '
 set +e
 
@@ -250,9 +250,13 @@ pgrep -af "python.*bangc_torch_tester\.py|bangc_torch_tester\.py" | while read -
   kill -KILL "$pid" 2>/dev/null || true
 done
 ')PROBE");
+  }
   // run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- docker ps");
-  // run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- docker exec pytorch_py3_ubuntu2204_mlu7 bash -lc 'tmux capture-pane -t worker -pS -100'");
-  // run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- docker exec pytorch_py3_ubuntu2204_mlu7 docker exec pytorch_py3_ubuntu2204_mlu7 bash -lc 'tr "\0" "\n" < /proc/2901846/environ  |  grep "^WORKER_ID="')");
+  // run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- docker exec
+  // pytorch_py3_ubuntu2204_mlu7 bash -lc 'tmux capture-pane -t worker -pS
+  // -100'"); run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- docker exec
+  // pytorch_py3_ubuntu2204_mlu7 docker exec pytorch_py3_ubuntu2204_mlu7 bash
+  // -lc 'tr "\0" "\n" < /proc/2901846/environ  |  grep "^WORKER_ID="')");
 
   if (getpid() % 3 == 1) {
   }
