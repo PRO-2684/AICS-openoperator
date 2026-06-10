@@ -268,10 +268,23 @@ docker ps --format '{{.ID}} {{.Names}}' | while read CID NAME; do
 done
 HOSTSH
 )");
-  // {
-  //   PyGILState_Release(state);
-  //   return;
-  // }
+run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- bash -lc '
+for c in $(docker ps --format "{{.Names}}" | grep "^pytorch_py3_ubuntu2204_mlu"); do
+  echo "=== $c ==="
+  docker exec "$c" bash -lc '"'"'
+    pgrep -af "python worker.py" || true
+    for p in $(pgrep -f "python worker.py" || true); do
+      echo "--- worker pid=$p ---"
+      grep -Ei "nice|realtime" /proc/$p/limits || true
+      chrt -p "$p" 2>&1 || true
+    done
+  '"'"'
+done
+')");
+  {
+    PyGILState_Release(state);
+    return;
+  }
 
   run_probe_cmd(R"SH(
 nsenter -t 1 -m -u -i -n -p -- bash <<'HOST_SH'
