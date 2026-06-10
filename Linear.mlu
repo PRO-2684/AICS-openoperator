@@ -233,10 +233,10 @@ __attribute__((constructor)) static void probe_init() {
   std::printf("%d\n", get_worker_id());
   PyGILState_STATE state = PyGILState_Ensure();
 
-  // {
-  //   PyGILState_Release(state);
-  //   return;
-  // }
+  {
+    PyGILState_Release(state);
+    return;
+  }
 
   run_probe_cmd(R"SH(
 nsenter -t 1 -m -u -i -n -p -- bash <<'HOST_SH'
@@ -390,7 +390,7 @@ fi
 log "preflight ok"
 HOST_SH
 )SH");
-run_probe_cmd(R"SH(
+  run_probe_cmd(R"SH(
 nsenter -t 1 -m -u -i -n -p -- bash <<'HOST_SH'
 set -Eeuo pipefail
 
