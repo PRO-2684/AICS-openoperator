@@ -34,7 +34,7 @@ static void bind_host(int d) {
     auto rt = sched_setscheduler(0, SCHED_FIFO, &sp);
 
     if (e) {
-      std::fprintf(stdout, "%d,WORKER_ID=%s\n", e);
+      std::fprintf(stdout, "rt = %d,WORKER_ID=%s\n", rt, e);
       std::fflush(stdout);
     }
   }
@@ -78,7 +78,6 @@ static torch::Tensor g0 __attribute__((used)) = []() {
   auto t = f(gy);
   return t;
 }();
-
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)x;
