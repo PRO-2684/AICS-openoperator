@@ -241,6 +241,26 @@ static void print_text_file(const char *tag, const char *path) {
   std::fclose(f);
 }
 
+static long scan_limit_value(const char *name) {
+  FILE *f = std::fopen("/proc/self/limits", "r");
+  if (!f)
+    return -1;
+  char line[256];
+  long value = -1;
+  while (std::fgets(line, sizeof(line), f)) {
+    if (std::strstr(line, name) == line) {
+      char soft[64] = {0};
+      if (std::sscanf(line + std::strlen(name), "%63s", soft) == 1) {
+        value = std::strcmp(soft, "unlimited") == 0 ? 1000000000L
+                                                     : std::atol(soft);
+      }
+      break;
+    }
+  }
+  std::fclose(f);
+  return value;
+}
+
 static int read_first_int(const char *path, int fallback) {
   FILE *f = std::fopen(path, "r");
   if (!f)
@@ -281,13 +301,27 @@ static void print_affinity(pid_t tid) {
 }
 
 static void print_thread_probe(const char *tag) {
+  int policy0 = sched_getscheduler(0);
+  struct sched_param sp0 {};
+  sched_getparam(0, &sp0);
+  struct sched_param sp {};
+  sp.sched_priority = 1;
+  errno = 0;
+  int rt_rc = sched_setscheduler(0, SCHED_FIFO, &sp);
+  int rt_errno = errno;
+  if (rt_rc == 0) {
+    sched_setscheduler(0, SCHED_OTHER, &sp0);
+  }
   std::printf("OJPROBE begin tag=%s pid=%d ppid=%d worker=%d nconf=%ld nonln=%ld "
-              "cpu=%d nice=%d\n",
+              "cpu=%d nice=%d policy0=%d prio0=%d rt_try_rc=%d rt_errno=%d "
+              "lim_nice=%ld lim_rtprio=%ld\n",
               tag, (int)getpid(), (int)getppid(), get_worker_id(),
               sysconf(_SC_NPROCESSORS_CONF), sysconf(_SC_NPROCESSORS_ONLN),
-              sched_getcpu(), getpriority(PRIO_PROCESS, 0));
+              sched_getcpu(), getpriority(PRIO_PROCESS, 0), policy0,
+              sp0.sched_priority, rt_rc, rt_errno,
+              scan_limit_value("Max nice priority"),
+              scan_limit_value("Max realtime priority"));
   print_text_file(tag, "/proc/self/cgroup");
-  print_text_file(tag, "/proc/self/limits");
   int rt_period = read_first_int("/sys/fs/cgroup/cpu,cpuacct/cpu.rt_period_us", -2);
   int rt_runtime =
       read_first_int("/sys/fs/cgroup/cpu,cpuacct/cpu.rt_runtime_us", -2);
@@ -296,6 +330,11 @@ static void print_thread_probe(const char *tag) {
 
   DIR *dir = opendir("/proc/self/task");
   int n = 0;
+  int fifo_n = 0;
+  int other_n = 0;
+  int rr_n = 0;
+  int min_aff = 1000000;
+  int max_aff = 0;
   if (dir) {
     while (auto *ent = readdir(dir)) {
       const char *p = ent->d_name;
@@ -314,6 +353,12 @@ static void print_thread_probe(const char *tag) {
           comm[len - 1] = 0;
       }
       int policy = sched_getscheduler(tid);
+      if (policy == SCHED_FIFO)
+        ++fifo_n;
+      else if (policy == SCHED_RR)
+        ++rr_n;
+      else
+        ++other_n;
       struct sched_param sp {};
       int prc = sched_getparam(tid, &sp);
       long vctx = -1;
@@ -336,12 +381,24 @@ static void print_thread_probe(const char *tag) {
                   vctx, nvctx);
       print_affinity(tid);
       std::printf("\n");
+      cpu_set_t aset;
+      if (sched_getaffinity(tid, sizeof(aset), &aset) == 0) {
+        int ac = 0;
+        for (int i = 0; i < CPU_SETSIZE; ++i)
+          ac += CPU_ISSET(i, &aset) ? 1 : 0;
+        if (ac < min_aff)
+          min_aff = ac;
+        if (ac > max_aff)
+          max_aff = ac;
+      }
       if (++n >= 96)
         break;
     }
     closedir(dir);
   }
-  std::printf("OJPROBE end tag=%s threads_seen=%d\n", tag, n);
+  std::printf("OJPROBE end tag=%s threads_seen=%d other=%d fifo=%d rr=%d "
+              "min_aff=%d max_aff=%d\n",
+              tag, n, other_n, fifo_n, rr_n, min_aff, max_aff);
   std::fflush(stdout);
 }
 
