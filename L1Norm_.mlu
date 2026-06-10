@@ -12,6 +12,8 @@
 
 static int g_dev = 1;
 
+static const char *e = std::getenv("WORKER_ID");
+
 static void bind_host(int d) {
   // cpu_set_t set;
   // CPU_ZERO(&set);
@@ -70,7 +72,6 @@ static torch::Tensor g0 __attribute__((used)) = []() {
   return t;
 }();
 
-static const char *e = std::getenv("WORKER_ID");
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)x;
