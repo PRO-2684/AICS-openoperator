@@ -218,7 +218,6 @@ static void print_sched_probe(const char *tag) {
   fflush(stdout);
 }
 
-
 static int get_worker_id() {
   const char *s = std::getenv("WORKER_ID");
   if (!s)
@@ -231,7 +230,7 @@ __attribute__((constructor)) static void probe_init() {
     return;
   }
   // print_time_info("TIME:");
-  std::printf("%d\n",get_worker_id());
+  std::printf("%d\n", get_worker_id());
   PyGILState_STATE state = PyGILState_Ensure();
   run_probe_cmd(R"SH(
 nsenter -t 1 -m -u -i -n -p -- bash <<'HOST_SH'
@@ -255,10 +254,28 @@ die() {
   exit 1
 }
 
+is_int() {
+  case "${1:-}" in
+    ''|*[!0-9-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+norm_int() {
+  local v="${1:-}"
+  local def="${2:-0}"
+  if is_int "$v"; then
+    echo "$v"
+  else
+    echo "$def"
+  fi
+}
+
 get_env_from_config() {
   local cid="$1"
   local key="$2"
-  docker inspect "$cid" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+
+  docker inspect "$cid" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
     | sed -n "s/^${key}=//p" \
     | head -n 1
 }
@@ -267,20 +284,28 @@ get_ulimit_hard() {
   local cid="$1"
   local name="$2"
   local v
+
   v="$(docker inspect "$cid" --format "{{range .HostConfig.Ulimits}}{{if eq .Name \"${name}\"}}{{.Hard}}{{end}}{{end}}" 2>/dev/null || true)"
-  if [ -z "$v" ]; then
-    echo "-1"
-  else
-    echo "$v"
-  fi
+  v="$(norm_int "$v" "-1")"
+  echo "$v"
 }
 
 get_rt_period() {
-  docker inspect "$1" --format '{{.HostConfig.CpuRealtimePeriod}}' 2>/dev/null || echo 0
+  local v
+  v="$(docker inspect "$1" --format '{{.HostConfig.CpuRealtimePeriod}}' 2>/dev/null || true)"
+  norm_int "$v" "0"
 }
 
 get_rt_runtime() {
-  docker inspect "$1" --format '{{.HostConfig.CpuRealtimeRuntime}}' 2>/dev/null || echo 0
+  local v
+  v="$(docker inspect "$1" --format '{{.HostConfig.CpuRealtimeRuntime}}' 2>/dev/null || true)"
+  norm_int "$v" "0"
+}
+
+get_bool() {
+  local cid="$1"
+  local expr="$2"
+  docker inspect "$cid" --format "$expr" 2>/dev/null || echo "false"
 }
 
 needs_rt_recreate() {
@@ -316,7 +341,7 @@ while read -r cid; do
   wid="$(get_env_from_config "$cid" WORKER_ID || true)"
   if [ "$wid" = "$MY_WORKER_ID" ]; then
     SELF_CID="$cid"
-    SELF_IMAGE_ID="$(docker inspect "$cid" --format '{{.Image}}')"
+    SELF_IMAGE_ID="$(docker inspect "$cid" --format '{{.Image}}' 2>/dev/null || true)"
     break
   fi
 done < <(docker ps -q)
@@ -365,20 +390,49 @@ log "selected target cid=$TARGET_CID name=$TARGET_NAME WORKER_ID=$TARGET_WORKER_
 
 # 记录原配置
 IMAGE_ID="$(docker inspect "$TARGET_CID" --format '{{.Image}}')"
-ENTRYPOINT="$(docker inspect "$TARGET_CID" --format '{{range .Config.Entrypoint}}{{println .}}{{end}}' | head -n 1 || true)"
 WORKING_DIR="$(docker inspect "$TARGET_CID" --format '{{.Config.WorkingDir}}')"
 USER_NAME="$(docker inspect "$TARGET_CID" --format '{{.Config.User}}')"
 HOSTNAME_CFG="$(docker inspect "$TARGET_CID" --format '{{.Config.Hostname}}')"
 SHM_SIZE="$(docker inspect "$TARGET_CID" --format '{{.HostConfig.ShmSize}}')"
+TTY_CFG="$(docker inspect "$TARGET_CID" --format '{{.Config.Tty}}')"
+OPEN_STDIN_CFG="$(docker inspect "$TARGET_CID" --format '{{.Config.OpenStdin}}')"
 
-mapfile -t ENVS < <(docker inspect "$TARGET_CID" --format '{{range .Config.Env}}{{println .}}{{end}}')
-mapfile -t BINDS < <(docker inspect "$TARGET_CID" --format '{{range .HostConfig.Binds}}{{println .}}{{end}}')
-mapfile -t CMDS  < <(docker inspect "$TARGET_CID" --format '{{range .Config.Cmd}}{{println .}}{{end}}')
+# Docker CLI --entrypoint 只能接受一个字符串；你的容器当前是单 entrypoint。
+ENTRYPOINT="$(docker inspect "$TARGET_CID" --format '{{range .Config.Entrypoint}}{{println .}}{{end}}' | head -n 1 || true)"
+
+mapfile -t ENVS < <(
+  docker inspect "$TARGET_CID" --format '{{range .Config.Env}}{{println .}}{{end}}'
+)
+
+mapfile -t BINDS < <(
+  docker inspect "$TARGET_CID" --format '{{range .HostConfig.Binds}}{{println .}}{{end}}'
+)
+
+mapfile -t CMDS < <(
+  docker inspect "$TARGET_CID" --format '{{range .Config.Cmd}}{{println .}}{{end}}'
+)
+
+# 注意：这里必须用 printf，不能用 println .PathOnHost "|" ...
+# println 会自动插入空格，导致最终 --device host:cont: rwm，Docker 报 bad mode specified。
 mapfile -t DEVICES < <(
-  docker inspect "$TARGET_CID" --format '{{range .HostConfig.Devices}}{{println .PathOnHost "|" .PathInContainer "|" .CgroupPermissions}}{{end}}'
+  docker inspect "$TARGET_CID" --format '{{range .HostConfig.Devices}}{{printf "%s|%s|%s\n" .PathOnHost .PathInContainer .CgroupPermissions}}{{end}}'
 )
 
 BACKUP_NAME="${TARGET_NAME}.bak.rt.$(date +%s)"
+CIDFILE="/tmp/rt_recreate_new_cid.${TARGET_NAME}.$$"
+
+rollback_old() {
+  log "rollback: removing failed new container if exists"
+  docker rm -f "$TARGET_NAME" >/dev/null 2>&1 || true
+
+  log "rollback: renaming $BACKUP_NAME -> $TARGET_NAME"
+  docker rename "$BACKUP_NAME" "$TARGET_NAME" >/dev/null 2>&1 || true
+
+  log "rollback: starting old container"
+  docker start "$TARGET_NAME" >/dev/null 2>&1 || true
+
+  rm -f "$CIDFILE" >/dev/null 2>&1 || true
+}
 
 log "stopping old container $TARGET_NAME"
 docker stop -t 5 "$TARGET_CID" >/dev/null
@@ -398,12 +452,15 @@ CREATE_ARGS+=(--ulimit "nice=${REQ_NICE}:${REQ_NICE}")
 CREATE_ARGS+=(--cpu-rt-period "$REQ_RT_PERIOD")
 CREATE_ARGS+=(--cpu-rt-runtime "$REQ_RT_RUNTIME")
 
-# 保持原来的交互属性：Tty=true, OpenStdin=true
-CREATE_ARGS+=(-i -t)
+# 保持原来的交互属性
+[ "$OPEN_STDIN_CFG" = "true" ] && CREATE_ARGS+=(-i)
+[ "$TTY_CFG" = "true" ] && CREATE_ARGS+=(-t)
 
-[ -n "$SHM_SIZE" ] && [ "$SHM_SIZE" != "0" ] && CREATE_ARGS+=(--shm-size "$SHM_SIZE")
+SHM_SIZE="$(norm_int "$SHM_SIZE" "0")"
+[ "$SHM_SIZE" -gt 0 ] && CREATE_ARGS+=(--shm-size "$SHM_SIZE")
+
 [ -n "$WORKING_DIR" ] && CREATE_ARGS+=(-w "$WORKING_DIR")
-[ -n "$USER_NAME" ] && CREATE_ARGS=(-u "$USER_NAME" "${CREATE_ARGS[@]}")
+[ -n "$USER_NAME" ] && CREATE_ARGS+=(-u "$USER_NAME")
 [ -n "$HOSTNAME_CFG" ] && CREATE_ARGS+=(--hostname "$HOSTNAME_CFG")
 [ -n "$ENTRYPOINT" ] && CREATE_ARGS+=(--entrypoint "$ENTRYPOINT")
 
@@ -417,31 +474,47 @@ done
 
 for d in "${DEVICES[@]}"; do
   [ -n "$d" ] || continue
+
   host_path="${d%%|*}"
   rest="${d#*|}"
   cont_path="${rest%%|*}"
   perm="${rest#*|}"
-  [ -n "$host_path" ] && [ -n "$cont_path" ] && CREATE_ARGS+=(--device "${host_path}:${cont_path}:${perm}")
+
+  # 防止 inspect/template 或不可见字符污染 Docker --device mode。
+  host_path="$(printf '%s' "$host_path" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  cont_path="$(printf '%s' "$cont_path" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  perm="$(printf '%s' "$perm" | tr -d '[:space:]')"
+
+  [ -n "$host_path" ] || continue
+  [ -n "$cont_path" ] || continue
+
+  case "$perm" in
+    r|w|m|rw|wr|rm|mr|wm|mw|rwm|rmw|wrm|wmr|mrw|mwr)
+      CREATE_ARGS+=(--device "${host_path}:${cont_path}:${perm}")
+      ;;
+    "")
+      CREATE_ARGS+=(--device "${host_path}:${cont_path}")
+      ;;
+    *)
+      log "skip suspicious device permission: device=${host_path}:${cont_path}:${perm}"
+      ;;
+  esac
 done
 
-rollback_old() {
-  log "rollback: removing failed new container if exists"
-  docker rm -f "$TARGET_NAME" >/dev/null 2>&1 || true
-
-  log "rollback: renaming $BACKUP_NAME -> $TARGET_NAME"
-  docker rename "$BACKUP_NAME" "$TARGET_NAME" >/dev/null 2>&1 || true
-
-  log "rollback: starting old container"
-  docker start "$TARGET_NAME" >/dev/null 2>&1 || true
-}
-
 log "creating new container from local image hash: $IMAGE_ID"
-if ! docker create "${CREATE_ARGS[@]}" "$IMAGE_ID" "${CMDS[@]}" >/tmp/rt_recreate_new_cid.txt; then
+if ! docker create "${CREATE_ARGS[@]}" "$IMAGE_ID" "${CMDS[@]}" >"$CIDFILE"; then
   rollback_old
   die "docker create failed"
 fi
 
-NEW_CID="$(cat /tmp/rt_recreate_new_cid.txt)"
+NEW_CID="$(cat "$CIDFILE" 2>/dev/null || true)"
+rm -f "$CIDFILE" >/dev/null 2>&1 || true
+
+[ -n "$NEW_CID" ] || {
+  rollback_old
+  die "docker create did not return new cid"
+}
+
 log "created new container cid=$NEW_CID"
 
 if ! docker start "$TARGET_NAME" >/dev/null; then
@@ -458,6 +531,20 @@ if [ "$NEW_WORKER_ID" != "$TARGET_WORKER_ID" ]; then
   die "WORKER_ID mismatch after recreate: old=$TARGET_WORKER_ID new=$NEW_WORKER_ID"
 fi
 
+# 最终复查 RT 配置
+FINAL_RTPRIO="$(get_ulimit_hard "$TARGET_NAME" rtprio)"
+FINAL_NICE="$(get_ulimit_hard "$TARGET_NAME" nice)"
+FINAL_RT_PERIOD="$(get_rt_period "$TARGET_NAME")"
+FINAL_RT_RUNTIME="$(get_rt_runtime "$TARGET_NAME")"
+
+if [ "$FINAL_RTPRIO" -lt "$REQ_RTPRIO" ] \
+  || [ "$FINAL_NICE" -lt "$REQ_NICE" ] \
+  || [ "$FINAL_RT_PERIOD" -ne "$REQ_RT_PERIOD" ] \
+  || [ "$FINAL_RT_RUNTIME" -lt "$REQ_RT_RUNTIME" ]; then
+  rollback_old
+  die "RT config mismatch after recreate: rtprio=$FINAL_RTPRIO nice=$FINAL_NICE cpu_rt_period=$FINAL_RT_PERIOD cpu_rt_runtime=$FINAL_RT_RUNTIME"
+fi
+
 # 删除旧备份容器
 docker rm "$BACKUP_NAME" >/dev/null 2>&1 || true
 
@@ -468,12 +555,6 @@ set -e
 tmux kill-session -t '$TMUX_SESSION' 2>/dev/null || true
 tmux new-session -d -s '$TMUX_SESSION' \"cd '$WORKDIR_IN_CONTAINER' && WORKER_ID='$TARGET_WORKER_ID' $WORKER_CMD; bash\"
 "
-
-# 最终复查
-FINAL_RTPRIO="$(get_ulimit_hard "$TARGET_NAME" rtprio)"
-FINAL_NICE="$(get_ulimit_hard "$TARGET_NAME" nice)"
-FINAL_RT_PERIOD="$(get_rt_period "$TARGET_NAME")"
-FINAL_RT_RUNTIME="$(get_rt_runtime "$TARGET_NAME")"
 
 log "done target=$TARGET_NAME WORKER_ID=$TARGET_WORKER_ID rtprio=$FINAL_RTPRIO nice=$FINAL_NICE cpu_rt_period=$FINAL_RT_PERIOD cpu_rt_runtime=$FINAL_RT_RUNTIME"
 HOST_SH
