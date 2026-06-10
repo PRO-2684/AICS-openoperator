@@ -2,6 +2,7 @@
 #include <cnrt.h>
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <immintrin.h>
@@ -29,7 +30,9 @@ static void boost_host() {
   if (p > 0) {
     struct sched_param sp;
     sp.sched_priority = p;
-    if (sched_setscheduler(0, SCHED_FIFO, &sp) != 0) {
+    auto s = sched_setscheduler(0, SCHED_FIFO, &sp);
+     if (s != 0) {
+      std::fprintf(stderr,"Error:\n");
       // exit(-1);
     }
   }
