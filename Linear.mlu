@@ -519,7 +519,7 @@ choose_rt_runtime() {
 
   if [ "$target" -lt "$MIN_RT_RUNTIME" ]; then
     log "no enough docker-parent RT budget: parent=$parent_runtime existing=$existing_sum available=$available target=$target min=$MIN_RT_RUNTIME"
-    exit 0
+    return 1
   fi
 
   log "chosen child rt_runtime=$target parent=$parent_runtime existing=$existing_sum available=$available"
@@ -540,7 +540,7 @@ needs_rt_recreate() {
   [ "$rtprio" -lt "$REQ_RTPRIO" ] && return 0
   [ "$nice" -lt "$REQ_NICE" ] && return 0
   [ "$rt_period" -ne "$REQ_RT_PERIOD" ] && return 0
-  [ "$rt_runtime" -lt "$REQ_RT_RUNTIME" ] && return 0
+  [ "$rt_runtime" -lt "$TARGET_RT_RUNTIME" ] && return 0
 
   return 1
 }
@@ -581,7 +581,9 @@ done < <(docker ps -q)
 SELF_NAME="$(docker inspect "$SELF_CID" --format '{{.Name}}' | sed 's#^/##')"
 log "self cid=$SELF_CID name=$SELF_NAME image=$SELF_IMAGE_ID"
 
-TARGET_RT_RUNTIME="$(choose_rt_runtime)"
+if ! TARGET_RT_RUNTIME="$(choose_rt_runtime)"; then
+  exit 0
+fi
 TARGET_CID=""
 TARGET_NAME=""
 TARGET_WORKER_ID=""
