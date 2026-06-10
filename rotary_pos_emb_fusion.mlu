@@ -58,20 +58,6 @@ static torch::Tensor z = []() {
   return a + b;
 }();
 
-static torch::Tensor qo = []() {
-  return torch::empty({2, 64, 4, 64},
-                      torch::TensorOptions()
-                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                          .dtype(torch::kHalf));
-}();
-
-static torch::Tensor ko = []() {
-  return torch::empty({2, 64, 4, 64},
-                      torch::TensorOptions()
-                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                          .dtype(torch::kHalf));
-}();
-
 __mlu_func__ void load_pair(half *a0, half *a1, const half *p) {
 #pragma unroll
   for (int r = 0; r < E5; ++r) {
