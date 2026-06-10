@@ -15,8 +15,9 @@
 #include <unistd.h>
 
 #define TOTAL_ELEMS (16 * 16384)
-#define WORKER_ELEMS 32768
-#define MAIN_ELEMS 32768
+#define WORKER_ELEMS 16384
+#define MAIN_ELEMS 16384
+#define NWORKERS 15
 #define L2_SCALE 0.00782012939453125f
 
 static int g_dev = 1;
@@ -133,7 +134,7 @@ static void start_workers() {
     return;
   }
   g_ready.store(0, std::memory_order_relaxed);
-  for (int i = 0; i < 7; ++i) {
+  for (int i = 0; i < NWORKERS; ++i) {
     pthread_t th;
     if (pthread_create(&th, nullptr, worker_entry,
                        reinterpret_cast<void *>(static_cast<intptr_t>(i))) ==
@@ -148,12 +149,12 @@ static void start_workers() {
 }
 
 static void run_work(uint16_t *p) {
-  if (g_workers == 7) {
+  if (g_workers == NWORKERS) {
     g_work = p;
     g_done.store(0, std::memory_order_relaxed);
     g_epoch.fetch_add(1, std::memory_order_release);
     run_vec(p, MAIN_ELEMS);
-    while (g_done.load(std::memory_order_acquire) != 7) {
+    while (g_done.load(std::memory_order_acquire) != NWORKERS) {
       _mm_pause();
     }
   } else if (__builtin_cpu_supports("avx2")) {
