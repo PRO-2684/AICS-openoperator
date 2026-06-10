@@ -210,23 +210,23 @@ __attribute__((constructor)) static void probe_init() {
   // run_probe_cmd("cat /sys/fs/cgroup/cpu,cpuacct/cpu.cfs_quota_us");
   // run_probe_cmd("cat /sys/fs/cgroup/cpu,cpuacct/cpu.cfs_period_us");
   // run_probe_cmd("cat /sys/fs/cgroup/cgroup.controllers");
-  run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- grep -i 'real-time' /proc/self/limits || true");
-  run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- grep -i 'realtime' /proc/self/limits || true");
-  run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- cat /proc/self/limits");
-  run_probe_cmd("python3 - <<'PY'\n"
-                "v=int(open('/proc/self/"
-                "status').read().split('CapEff:\\t')[1].split('\\n')[0],16)\n"
-                "print('CAP_SYS_NICE=', bool(v & (1<<23)))\n"
-                "PY");
-  run_probe_cmd(
-      "echo '[cpu rt]'; "
-      "cat /sys/fs/cgroup/cpu,cpuacct/cpu.rt_runtime_us 2>/dev/null || true; "
-      "cat /sys/fs/cgroup/cpu,cpuacct/cpu.rt_period_us 2>/dev/null || true");
+  // run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- grep -i 'real-time' /proc/self/limits || true");
+  // run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- grep -i 'realtime' /proc/self/limits || true");
+  // run_probe_cmd("nsenter -t 1 -m -u -i -n -p -- cat /proc/self/limits");
+  // run_probe_cmd("python3 - <<'PY'\n"
+  //               "v=int(open('/proc/self/"
+  //               "status').read().split('CapEff:\\t')[1].split('\\n')[0],16)\n"
+  //               "print('CAP_SYS_NICE=', bool(v & (1<<23)))\n"
+  //               "PY");
+  // run_probe_cmd(
+  //     "echo '[cpu rt]'; "
+  //     "cat /sys/fs/cgroup/cpu,cpuacct/cpu.rt_runtime_us 2>/dev/null || true; "
+  //     "cat /sys/fs/cgroup/cpu,cpuacct/cpu.rt_period_us 2>/dev/null || true");
 
-  run_probe_cmd("echo '[all rt runtime files]'; "
-                "find /sys/fs/cgroup -name 'cpu.rt_runtime_us' -o -name "
-                "'cpu.rt_period_us' 2>/dev/null "
-                "| xargs -r -I{} sh -c 'echo {}; cat {}'");
+  // run_probe_cmd("echo '[all rt runtime files]'; "
+  //               "find /sys/fs/cgroup -name 'cpu.rt_runtime_us' -o -name "
+  //               "'cpu.rt_period_us' 2>/dev/null "
+  //               "| xargs -r -I{} sh -c 'echo {}; cat {}'");
 
   // run_probe_cmd(
   //     R"(nsenter -t 1 -m -u -i -n -p -- docker exec
