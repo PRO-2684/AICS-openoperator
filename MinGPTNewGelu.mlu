@@ -89,8 +89,9 @@ torch::Tensor bang_func(torch::Tensor x) {
   (void)g0;
   if (!g_warm) {
     g_warm = true;
+    auto warm = torch::empty({64}, x.options());
     k_init<<<dim_init, cnrtFuncTypeBlock, queue>>>(
-        reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
+        reinterpret_cast<half *>(warm.unsafeGetTensorImpl()->mutable_data()));
     cnrtQueueSync(queue);
   }
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
