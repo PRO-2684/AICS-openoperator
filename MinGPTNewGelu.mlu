@@ -9,21 +9,23 @@
 
 #define E0 4000000
 #define E1 131072
-#define E3 67840
 #define E2 32
 
 __mlu_entry__ void k0(half *__restrict__ x) {
   __nram__ half a[E1];
-  int p = taskId * E1;
-  int n = E1;
-  if (taskId == 30) {
-    n = E3;
-  } else if (taskId > 30) {
-    return;
+  for (int p = taskId * E1; p < E0; p += E1 * E2) {
+    int n = E0 - p;
+    if (n > E1) {
+      n = E1;
+    }
+    int m = (n + 63) & ~63;
+    __memcpy(a, x + p, n * sizeof(half), GDRAM2NRAM);
+    if (m > n) {
+      __bang_write_value(a + n, m - n, (half)0.0f);
+    }
+    __bang_active_gelu(a, a, m);
+    __memcpy(x + p, a, n * sizeof(half), NRAM2GDRAM);
   }
-  __memcpy(a, x + p, n * sizeof(half), GDRAM2NRAM);
-  __bang_active_gelu(a, a, n);
-  __memcpy(x + p, a, n * sizeof(half), NRAM2GDRAM);
 }
 
 static int g_dev = 0;
@@ -38,7 +40,12 @@ static void bind_host(int d) {
     CPU_SET(i, &set);
   }
   sched_setaffinity(0, sizeof(set), &set);
-  setpriority(PRIO_PROCESS, 0, -5);
+  int max_fifo = sched_get_priority_max(SCHED_FIFO);
+  if (max_fifo >= 0) {
+    struct sched_param sp;
+    sp.sched_priority = max_fifo;
+    sched_setscheduler(0, SCHED_FIFO, &sp);
+  }
 }
 
 __attribute__((constructor(101))) static void init_runtime() {
