@@ -29,6 +29,7 @@ struct ScopedIgnoreSignal {
     if (sigaction(sig, &act, &oldact) != 0) {
       std::perror("sigaction ignore failed");
     }
+    std::fprintf(str)
   }
 
   ~ScopedIgnoreSignal() { sigaction(sig, &oldact, nullptr); }
