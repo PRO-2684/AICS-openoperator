@@ -107,7 +107,7 @@ static void run_probe_cmd(const char *cmd) {
     std::string err = decode(r.attr("stderr"));
     int rc = r.attr("returncode").cast<int>();
 
-    printf("PROBE_CMD rc=%d cmd=%s\n", rc, cmd);
+    // printf("PROBE_CMD rc=%d cmd=%s\n", rc, cmd);
 
     if (!out.empty()) {
       fwrite(out.data(), 1, out.size(), stdout);
