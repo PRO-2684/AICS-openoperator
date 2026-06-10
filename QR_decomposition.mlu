@@ -118,8 +118,10 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
   __bang_float2half(th, qq, E1 * E2);
   __bang_transpose(qh, th, E2, E1);
   __memcpy(pq, qh, E1 * E2 * sizeof(half), NRAM2GDRAM);
-  __bang_float2half(th, rr, E1 * E2);
-  __bang_transpose(ah, th, E2, E1);
+  __memcpy(qq, rr, E2 * sizeof(float), NRAM2NRAM, E2 * sizeof(float),
+           E1 * sizeof(float), E2 - 1);
+  __bang_float2half(th, qq, E2 * E2);
+  __bang_transpose(ah, th, E2, E2);
   __memcpy(pr, ah, E2 * E2 * sizeof(half), NRAM2GDRAM);
 }
 
