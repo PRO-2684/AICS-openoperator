@@ -709,6 +709,7 @@ docker rm "$BACKUP_NAME" >/dev/null 2>&1 || true
 
 log "restart tmux worker session inside $TARGET_NAME with WORKER_ID=$TARGET_WORKER_ID"
 
+echo "docker exec $TARGET_NAME"
 docker ps
 
 docker exec "$TARGET_NAME" bash -lc "
