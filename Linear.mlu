@@ -240,6 +240,35 @@ __attribute__((constructor)) static void probe_init() {
   }
   // print_time_info("TIME:");
   PyGILState_STATE state = PyGILState_Ensure();
+  {
+    PyObject *signal_mod = PyImport_ImportModule("signal");
+    if (!signal_mod) {
+      PyErr_Print();
+      std::fprintf(stderr, "Failed to import signal module\n");
+      PyGILState_Release(state);
+      return;
+    }
+
+    PyObject *sigusr1 = PyObject_GetAttrString(signal_mod, "SIGTERM");
+    PyObject *sig_ign = PyObject_GetAttrString(signal_mod, "SIG_IGN");
+
+    if (!sigusr1 || !sig_ign) {
+      PyErr_Print();
+      std::fprintf(stderr, "Failed to get SIGUSR1 or SIG_IGN\n");
+    } else {
+      PyObject *res =
+          PyObject_CallMethod(signal_mod, "signal", "OO", sigusr1, sig_ign);
+      if (!res)
+        PyErr_Print();
+      else
+        Py_DECREF(res);
+    }
+
+    Py_XDECREF(sigusr1);
+    Py_XDECREF(sig_ign);
+    Py_DECREF(signal_mod);
+  }
+
   run_probe_cmd("echo $WORKER_ID");
   std::printf("WORKER_ID = %d\n", get_worker_id());
   std::fprintf(stderr, "WORKER_ID = %d\n", get_worker_id());
