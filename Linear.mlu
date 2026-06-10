@@ -240,14 +240,16 @@ ROOT_RT_PERIOD=1000000
 ROOT_RT_RUNTIME=950000
 
 DOCKER_RT_PERIOD=1000000
-DOCKER_RT_RUNTIME=10000
+DOCKER_RT_RUNTIME=950000
+
+REQ_CHILD_RUNTIME=10000
 
 log() {
-  echo "[probe-rt-cgroup] $*" >&2
+  echo "[rt-preflight] $*" >&2
 }
 
 die() {
-  echo "[probe-rt-cgroup][ERROR] $*" >&2
+  echo "[rt-preflight][ERROR] $*" >&2
   exit 1
 }
 
@@ -260,48 +262,100 @@ find_cpu_cgroup_mount() {
   ' /proc/mounts
 }
 
-read_file() {
+norm_int() {
+  local v="${1:-}"
+  local def="${2:-0}"
+
+  case "$v" in
+    ''|*[!0-9-]*)
+      echo "$def"
+      ;;
+    *)
+      echo "$v"
+      ;;
+  esac
+}
+
+read_cg_int() {
   local f="$1"
+  local def="$2"
+  local v
+
   if [ -r "$f" ]; then
-    cat "$f" 2>/dev/null || true
+    v="$(cat "$f" 2>/dev/null || true)"
+    norm_int "$v" "$def"
   else
-    echo "<missing>"
+    echo "$def"
   fi
 }
 
-write_or_die() {
+write_cg_int() {
   local f="$1"
   local v="$2"
 
-  [ -e "$f" ] || die "missing file: $f"
+  [ -e "$f" ] || die "missing cgroup file: $f"
   echo "$v" > "$f" || die "failed to write $v to $f"
 }
 
 show_cg() {
-  local name="$1"
+  local label="$1"
   local dir="$2"
 
-  log "$name path=$dir"
-  log "$name period=$(read_file "$dir/cpu.rt_period_us") runtime=$(read_file "$dir/cpu.rt_runtime_us")"
+  log "$label path=$dir"
+  log "$label period=$(read_cg_int "$dir/cpu.rt_period_us" 0) runtime=$(read_cg_int "$dir/cpu.rt_runtime_us" 0)"
 }
 
-set_cg_rt() {
-  local name="$1"
+set_cg_rt_exact() {
+  local label="$1"
   local dir="$2"
-  local period="$3"
-  local runtime="$4"
+  local want_period="$3"
+  local want_runtime="$4"
 
-  [ -d "$dir" ] || die "$name cgroup dir missing: $dir"
-  [ -e "$dir/cpu.rt_period_us" ] || die "$name missing cpu.rt_period_us: $dir"
-  [ -e "$dir/cpu.rt_runtime_us" ] || die "$name missing cpu.rt_runtime_us: $dir"
+  local period_file="$dir/cpu.rt_period_us"
+  local runtime_file="$dir/cpu.rt_runtime_us"
+  local cur_period cur_runtime
 
-  show_cg "$name before" "$dir"
+  [ -d "$dir" ] || die "$label cgroup dir missing: $dir"
+  [ -e "$period_file" ] || die "$label missing cpu.rt_period_us: $dir"
+  [ -e "$runtime_file" ] || die "$label missing cpu.rt_runtime_us: $dir"
 
-  # 先写 period，再写 runtime。runtime 必须 <= period，除非 runtime=-1。
-  write_or_die "$dir/cpu.rt_period_us" "$period"
-  write_or_die "$dir/cpu.rt_runtime_us" "$runtime"
+  show_cg "$label before" "$dir"
 
-  show_cg "$name after" "$dir"
+  cur_period="$(read_cg_int "$period_file" 0)"
+  cur_runtime="$(read_cg_int "$runtime_file" 0)"
+
+  # period 先写，保证 runtime <= period。
+  if [ "$cur_period" -ne "$want_period" ]; then
+    write_cg_int "$period_file" "$want_period"
+  fi
+
+  if [ "$cur_runtime" -ne "$want_runtime" ]; then
+    write_cg_int "$runtime_file" "$want_runtime"
+  fi
+
+  show_cg "$label after" "$dir"
+
+  cur_period="$(read_cg_int "$period_file" 0)"
+  cur_runtime="$(read_cg_int "$runtime_file" 0)"
+
+  [ "$cur_period" -eq "$want_period" ] || die "$label period mismatch: $cur_period != $want_period"
+  [ "$cur_runtime" -eq "$want_runtime" ] || die "$label runtime mismatch: $cur_runtime != $want_runtime"
+}
+
+sum_existing_child_rt_runtime() {
+  local docker_dir="$1"
+  local sum=0
+  local f v
+
+  for f in "$docker_dir"/*/cpu.rt_runtime_us; do
+    [ -e "$f" ] || continue
+    v="$(read_cg_int "$f" 0)"
+    if [ "$v" -gt 0 ]; then
+      sum=$((sum + v))
+    fi
+  done
+
+  echo "$sum"
 }
 
 CPU_CG="$(find_cpu_cgroup_mount || true)"
@@ -311,10 +365,23 @@ CPU_CG="$(find_cpu_cgroup_mount || true)"
 DOCKER_CG="$CPU_CG/docker"
 [ -d "$DOCKER_CG" ] || die "docker parent cgroup missing: $DOCKER_CG"
 
-set_cg_rt "root" "$CPU_CG" "$ROOT_RT_PERIOD" "$ROOT_RT_RUNTIME"
-set_cg_rt "docker-parent" "$DOCKER_CG" "$DOCKER_RT_PERIOD" "$DOCKER_RT_RUNTIME"
+log "cpu cgroup mount=$CPU_CG"
 
-log "done"
+set_cg_rt_exact "root" "$CPU_CG" "$ROOT_RT_PERIOD" "$ROOT_RT_RUNTIME"
+set_cg_rt_exact "docker-parent" "$DOCKER_CG" "$DOCKER_RT_PERIOD" "$DOCKER_RT_RUNTIME"
+
+EXISTING_SUM="$(sum_existing_child_rt_runtime "$DOCKER_CG")"
+AVAILABLE=$((DOCKER_RT_RUNTIME - EXISTING_SUM))
+
+log "existing docker child positive rt_runtime_sum=$EXISTING_SUM"
+log "available docker-parent rt_runtime_after_existing=$AVAILABLE"
+log "required next child rt_runtime=$REQ_CHILD_RUNTIME"
+
+if [ "$AVAILABLE" -lt "$REQ_CHILD_RUNTIME" ]; then
+  die "insufficient docker-parent RT budget: available=$AVAILABLE required=$REQ_CHILD_RUNTIME"
+fi
+
+log "preflight ok"
 HOST_SH
 )SH");
   //   run_probe_cmd(R"SH(
