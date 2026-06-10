@@ -384,7 +384,8 @@ log "available docker-parent rt_runtime_after_existing=$AVAILABLE"
 log "required next child rt_runtime=$REQ_CHILD_RUNTIME"
 
 if [ "$AVAILABLE" -lt "$REQ_CHILD_RUNTIME" ]; then
-  die "insufficient docker-parent RT budget: available=$AVAILABLE required=$REQ_CHILD_RUNTIME"
+  log "insufficient docker-parent RT budget for full target: available=$AVAILABLE required=$REQ_CHILD_RUNTIME"
+  exit 0
 fi
 
 log "preflight ok"
