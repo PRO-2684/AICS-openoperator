@@ -4,6 +4,7 @@
 #include <cnrt.h>
 #include <cstdint>
 #include <cstdlib>
+#include <dirent.h>
 #include <framework/core/MLUStream.h>
 #include <immintrin.h>
 #include <pthread.h>
@@ -26,16 +27,24 @@ static std::atomic<int> g_ready{0};
 static int g_workers = 0;
 
 static void bind_host(int d) {
-  int p = sched_get_priority_max(SCHED_FIFO);
-  if (p > 0) {
-    struct sched_param sp;
-    sp.sched_priority = 5;
-    auto s = sched_setscheduler(0, SCHED_FIFO, &sp);
-    if (s != 0) {
-      std::fprintf(stderr, "Error:%d\n", s);
-      // exit(-1);
+  (void)d;
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  long ncpu = sysconf(_SC_NPROCESSORS_CONF);
+  if (ncpu < 1 || ncpu > CPU_SETSIZE)
+    ncpu = CPU_SETSIZE;
+  for (int i = 0; i < ncpu; ++i)
+    CPU_SET(i, &set);
+  DIR *dir = opendir("/proc/self/task");
+  if (dir) {
+    while (auto *ent = readdir(dir)) {
+      const char *p = ent->d_name;
+      if (*p >= '0' && *p <= '9')
+        sched_setaffinity(static_cast<pid_t>(std::atoi(p)), sizeof(set), &set);
     }
+    closedir(dir);
   }
+  sched_setaffinity(0, sizeof(set), &set);
   setpriority(PRIO_PROCESS, 0, -5);
 }
 
