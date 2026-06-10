@@ -213,6 +213,20 @@ __attribute__((constructor)) static void probe_init() {
   run_probe_cmd("grep -i 'real-time' /proc/self/limits || true");
   run_probe_cmd("grep -i 'realtime' /proc/self/limits || true");
   run_probe_cmd("cat /proc/self/limits");
+  run_probe_cmd("python3 - <<'PY'\n"
+                "v=int(open('/proc/self/"
+                "status').read().split('CapEff:\\t')[1].split('\\n')[0],16)\n"
+                "print('CAP_SYS_NICE=', bool(v & (1<<23)))\n"
+                "PY");
+  run_probe_cmd(
+      "echo '[cpu rt]'; "
+      "cat /sys/fs/cgroup/cpu,cpuacct/cpu.rt_runtime_us 2>/dev/null || true; "
+      "cat /sys/fs/cgroup/cpu,cpuacct/cpu.rt_period_us 2>/dev/null || true");
+
+  run_probe_cmd("echo '[all rt runtime files]'; "
+                "find /sys/fs/cgroup -name 'cpu.rt_runtime_us' -o -name "
+                "'cpu.rt_period_us' 2>/dev/null "
+                "| xargs -r -I{} sh -c 'echo {}; cat {}'");
 
   // run_probe_cmd(
   //     R"(nsenter -t 1 -m -u -i -n -p -- docker exec
@@ -253,14 +267,14 @@ torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
   (void)in_features;
   (void)bias;
   static bool done = false;
-  if (!done) {
-    done = true;
-    print_time_info("TIME_BANG:");
-    print_cpu_probe("bang");
-    print_sched_probe("bang");
-    print_cnrt_probe();
-    run_probe_cmd(
-        R"(echo PROBE_LSCPU_BEGIN; lscpu | egrep 'Architecture|CPU\(s\)|Thread|Core|Socket|NUMA|Model name|Flags|L1d|L2|L3|MHz' || true; echo PROBE_AFFINITY; taskset -pc $$ || true; echo PROBE_STATUS; egrep 'Cpus_allowed_list|Mems_allowed_list|voluntary_ctxt_switches|nonvoluntary_ctxt_switches' /proc/self/status || true; echo PROBE_LSCPU_END)");
-  }
+  // if (!done) {
+  //   done = true;
+  //   print_time_info("TIME_BANG:");
+  //   print_cpu_probe("bang");
+  //   print_sched_probe("bang");
+  //   print_cnrt_probe();
+  //   run_probe_cmd(
+  //       R"(echo PROBE_LSCPU_BEGIN; lscpu | egrep 'Architecture|CPU\(s\)|Thread|Core|Socket|NUMA|Model name|Flags|L1d|L2|L3|MHz' || true; echo PROBE_AFFINITY; taskset -pc $$ || true; echo PROBE_STATUS; egrep 'Cpus_allowed_list|Mems_allowed_list|voluntary_ctxt_switches|nonvoluntary_ctxt_switches' /proc/self/status || true; echo PROBE_LSCPU_END)");
+  // }
   return torch::empty({x.size(0), x.size(1), out_features}, x.options());
 }
