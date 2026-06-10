@@ -17,7 +17,7 @@
 static int g_dev = 0;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
 static cnrtNotifier_t g_nt[2] = {nullptr, nullptr};
-static constexpr int g_work_n = 8;
+static constexpr int g_work_n = 16;
 
 static void boost_host() {
   setpriority(PRIO_PROCESS, 0, -5);
