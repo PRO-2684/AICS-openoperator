@@ -273,11 +273,11 @@ kill_matches() {
   pgrep -af "python.*bangc_torch_tester\.py|bangc_torch_tester\.py" 2>/dev/null | while read -r pid cmd; do
     [ -z "$pid" ] && continue
 
-    # 排除当前 docker exec 内部 bash 和父进程
+
     [ "$pid" = "$self" ] && continue
     [ "$pid" = "$parent" ] && continue
 
-    # 排除当前进程组，避免误杀 docker exec/bash 这条执行链
+
     pgrp="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d " ")"
     [ -n "$self_pgrp" ] && [ "$pgrp" = "$self_pgrp" ] && continue
 
@@ -286,9 +286,7 @@ kill_matches() {
   done
 }
 
-kill_matches -TERM "TERM"
-sleep 0.2
-kill_matches -KILL "KILL"
+kill_matches -USR1 "-USR1"
 '"'"' 2>/dev/null || echo "skip $name: docker exec failed"
 done
 ')SH");
