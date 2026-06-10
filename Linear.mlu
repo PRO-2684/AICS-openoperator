@@ -563,6 +563,13 @@ mapfile -t BINDS < <(
 mapfile -t CMDS < <(
   docker inspect "$TARGET_CID" --format '{{range .Config.Cmd}}{{println .}}{{end}}'
 )
+# 加在这里
+RUN_CMDS=("${CMDS[@]}")
+
+if [ "${#CMDS[@]}" -eq 1 ] && { [ "${CMDS[0]}" = "/bin/bash" ] || [ "${CMDS[0]}" = "bash" ]; }; then
+  RUN_CMDS=(/bin/bash -lc 'trap "exit 0" TERM INT; while true; do sleep 3600; done')
+fi
+
 
 # 注意：这里必须用 printf，不能用 println .PathOnHost "|" ...
 # println 会自动插入空格，导致最终 --device host:cont: rwm，Docker 报 bad mode specified。
