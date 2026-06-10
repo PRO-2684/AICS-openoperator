@@ -84,7 +84,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
 
   const half *pa = a + b * E1 * E2;
   half *pq = q + b * E1 * E2;
-  half *pr = r + b * E2 * E2;
+  half *pr = r + b * E1 * E2;
 
   __memcpy(ah, pa, E1 * E2 * sizeof(half), GDRAM2NRAM);
   __bang_transpose(th, ah, E1, E2);
