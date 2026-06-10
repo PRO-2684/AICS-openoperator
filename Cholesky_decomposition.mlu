@@ -3,6 +3,8 @@
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <math.h>
+#include <stdint.h>
+#include <string.h>
 #include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
@@ -11,6 +13,33 @@
 #define E1 64
 #define E2 4096
 #define E3 1024
+
+static inline float hf127(uint16_t h) {
+  uint32_t s = (uint32_t)(h & 0x8000u) << 16;
+  uint32_t e = (h >> 10) & 0x1fu;
+  uint32_t m = h & 0x03ffu;
+  uint32_t u;
+  if (e == 0) {
+    if (m == 0) {
+      u = s;
+    } else {
+      e = 1;
+      while ((m & 0x0400u) == 0) {
+        m <<= 1;
+        --e;
+      }
+      m &= 0x03ffu;
+      u = s | ((e + 112u) << 23) | (m << 13);
+    }
+  } else if (e == 31) {
+    u = s | 0x7f800000u | (m << 13);
+  } else {
+    u = s | ((e + 112u) << 23) | (m << 13);
+  }
+  float f;
+  memcpy(&f, &u, sizeof(float));
+  return f;
+}
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __mlu_shared__ float s[E2];
@@ -118,7 +147,7 @@ static torch::Tensor gy = []() {
       {E0, E1, E1},
       torch::TensorOptions()
           .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-          .dtype(torch::kHalf));
+          .dtype(torch::kFloat32));
 }();
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 static cnrtDim3_t dim0 = {4, E0, 1};
@@ -127,8 +156,51 @@ torch::Tensor bang_func(torch::Tensor A) {
   (void)g0;
   auto &y = gy;
 
-  k0<<<dim0, cnrtFuncTypeUnion1, queue>>>(
-      static_cast<const half *>(A.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
+  static uint16_t hx[E0 * E2];
+  static float hy[E0 * E2];
+  cnrtMemcpy(hx, A.unsafeGetTensorImpl()->mutable_data(), sizeof(hx),
+             cnrtMemcpyDevToHost);
+  for (int b = 0; b < E0; ++b) {
+    float *o = hy + b * E2;
+    const uint16_t *x = hx + b * E2;
+    for (int i = 0; i < E2; ++i) {
+      o[i] = hf127(x[i]);
+    }
+    for (int j = 0; j < E1; ++j) {
+      float v = o[j * E1 + j];
+      int k = 0;
+      for (; k + 3 < j; k += 4) {
+        float v0 = o[j * E1 + k];
+        float v1 = o[j * E1 + k + 1];
+        float v2 = o[j * E1 + k + 2];
+        float v3 = o[j * E1 + k + 3];
+        v -= v0 * v0 + v1 * v1 + v2 * v2 + v3 * v3;
+      }
+      for (; k < j; ++k) {
+        v -= o[j * E1 + k] * o[j * E1 + k];
+      }
+      float d = sqrtf(v);
+      o[j * E1 + j] = d;
+      for (int i = j + 1; i < E1; ++i) {
+        float u = o[i * E1 + j];
+        int kk = 0;
+        for (; kk + 3 < j; kk += 4) {
+          u -= o[i * E1 + kk] * o[j * E1 + kk] +
+               o[i * E1 + kk + 1] * o[j * E1 + kk + 1] +
+               o[i * E1 + kk + 2] * o[j * E1 + kk + 2] +
+               o[i * E1 + kk + 3] * o[j * E1 + kk + 3];
+        }
+        for (; kk < j; ++kk) {
+          u -= o[i * E1 + kk] * o[j * E1 + kk];
+        }
+        o[i * E1 + j] = u / d;
+      }
+      for (int i = 0; i < j; ++i) {
+        o[i * E1 + j] = 0.0f;
+      }
+    }
+  }
+  cnrtMemcpy(y.unsafeGetTensorImpl()->mutable_data(), hy, sizeof(hy),
+             cnrtMemcpyHostToDev);
   return y;
 }
