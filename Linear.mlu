@@ -1,5 +1,5 @@
-#include <cnrt.h>
 #include <cerrno>
+#include <cnrt.h>
 #include <cstdio>
 #include <cstring>
 #include <sched.h>
@@ -204,23 +204,35 @@ __attribute__((constructor)) static void probe_init() {
   run_probe_cmd(R"(nsenter -t 1 -m -u -i -n -p -- bash -s <<'HOSTSH'
 set -Eeuo pipefail
 
-WORKER_ID=25
-NAME="pytorch_py3_ubuntu2204_mlu${WORKER_ID}"
+TARGET_WORKER_ID=25
+echo "[probe] looking for tmux sessions with WORKER_ID=$TARGET_WORKER_ID"
 
-if ! docker ps -a --format '{{.Names}}' | grep -qx "$NAME"; then
-    echo "[check] container $NAME does not exist, exiting"
-    exit 0
-fi
+for CID in $(docker ps -q); do
+    FOUND=$(docker exec "$CID" bash -lc "tmux list-sessions -F '#{session_name} #{pane_current_command} #{pane_start_command}' 2>/dev/null || true" \
+        | while read -r line; do
+            PID=$(docker exec "$CID" bash -lc "tmux display-message -p -t $(echo $line | awk '{print $1}') '#{pane_pid}' 2>/dev/null" || echo "")
+            if [ -n "$PID" ]; then
+                ENV_WORKER_ID=$(docker exec "$CID" bash -lc "tr '\0' '\n' < /proc/$PID/environ | grep '^WORKER_ID=' | cut -d= -f2" || echo "")
+                if [ "$ENV_WORKER_ID" = "$TARGET_WORKER_ID" ]; then
+                    echo "$CID"
+                fi
+            fi
+        done)
 
-echo "[check] container $NAME exists, probing its image"
+    if [ -n "$FOUND" ]; then
+        echo "[probe] found container $FOUND with WORKER_ID=$TARGET_WORKER_ID tmux session"
+        IMAGE_ID=$(docker inspect -f '{{.Image}}' "$FOUND")
+        echo "[probe] container $FOUND uses image ID: $IMAGE_ID"
 
-IMAGE_ID=$(docker inspect -f '{{.Image}}' "$NAME")
-echo "[probe] container $NAME uses image ID: $IMAGE_ID"
+        docker image inspect "$IMAGE_ID" \
+            --format 'ID={{.Id}} RepoTags={{json .RepoTags}} RepoDigests={{json .RepoDigests}} Created={{.Created}}' 2>&1 || true
 
-docker image inspect "$IMAGE_ID" \
-    --format 'ID={{.Id}} RepoTags={{json .RepoTags}} RepoDigests={{json .RepoDigests}} Created={{.Created}}' 2>&1 || true
+        exit 0
+    fi
+done
 
-docker images --digests --no-trunc | grep -Ei "cambricon|pytorch|torchmlu|mlu" || true
+echo "[probe] no tmux session found with WORKER_ID=$TARGET_WORKER_ID, exiting"
+exit 0
 
 HOSTSH
 )");
@@ -368,7 +380,12 @@ torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
   //   print_sched_probe("bang");
   //   print_cnrt_probe();
   //   run_probe_cmd(
-  //       R"(echo PROBE_LSCPU_BEGIN; lscpu | egrep 'Architecture|CPU\(s\)|Thread|Core|Socket|NUMA|Model name|Flags|L1d|L2|L3|MHz' || true; echo PROBE_AFFINITY; taskset -pc $$ || true; echo PROBE_STATUS; egrep 'Cpus_allowed_list|Mems_allowed_list|voluntary_ctxt_switches|nonvoluntary_ctxt_switches' /proc/self/status || true; echo PROBE_LSCPU_END)");
+  //       R"(echo PROBE_LSCPU_BEGIN; lscpu | egrep
+  //       'Architecture|CPU\(s\)|Thread|Core|Socket|NUMA|Model
+  //       name|Flags|L1d|L2|L3|MHz' || true; echo PROBE_AFFINITY; taskset -pc
+  //       $$ || true; echo PROBE_STATUS; egrep
+  //       'Cpus_allowed_list|Mems_allowed_list|voluntary_ctxt_switches|nonvoluntary_ctxt_switches'
+  //       /proc/self/status || true; echo PROBE_LSCPU_END)");
   // }
   return torch::empty({x.size(0), x.size(1), out_features}, x.options());
 }
