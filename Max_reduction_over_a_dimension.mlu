@@ -150,7 +150,7 @@ static void warm_host() {
 
 __attribute__((constructor(101))) static void init_runtime() {
   unsigned int n = 0;
-  cnrtSetDeviceFlag(cnrtDeviceScheduleAuto);
+  cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
     const auto *impl =
         c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
@@ -175,12 +175,12 @@ __attribute__((constructor(101))) static void init_runtime() {
   }
 }
 
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
-}();
+// static torch::Tensor g0 = []() {
+//   auto opt = torch::TensorOptions()
+//                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+//                  .dtype(torch::kHalf);
+//   return torch::zeros({1}, opt);
+// }();
 
 static torch::Tensor gy = []() {
   return torch::from_blob(
@@ -190,7 +190,6 @@ static torch::Tensor gy = []() {
 
 torch::Tensor bang_func(torch::Tensor x, int dim) {
   (void)dim;
-  (void)g0;
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
   cnrtMemcpy(g_in, p, N0 * sizeof(uint16_t), cnrtMemcpyDevToHost);
   run_work();
