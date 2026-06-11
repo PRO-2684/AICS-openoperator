@@ -1,8 +1,6 @@
 #include <cstdint>
 #include <cstdlib>
-#include <dirent.h>
 #include <sched.h>
-#include <sys/resource.h>
 #include <torch/extension.h>
 
 alignas(64) static uint16_t z0 = 0;
@@ -41,36 +39,11 @@ static int cpus_from_current(cpu_set_t *dst) {
   return 1;
 }
 
-static void tune_thread(pid_t tid, const cpu_set_t *set, int policy, int prio) {
-  sched_setaffinity(tid, sizeof(*set), set);
-  setpriority(PRIO_PROCESS, tid, -10);
-  if (prio > 0) {
-    struct sched_param sp;
-    sp.sched_priority = prio;
-    sched_setscheduler(tid, policy, &sp);
-  }
-}
-
 __attribute__((constructor(101))) static void init_runtime() {
   cpu_set_t set;
   if (!cpus_from_current(&set))
     return;
-  int policy = SCHED_FIFO;
-  int prio = sched_get_priority_max(policy);
-  if (prio <= 0) {
-    policy = SCHED_RR;
-    prio = sched_get_priority_max(policy);
-  }
-  DIR *dir = opendir("/proc/self/task");
-  if (dir) {
-    while (auto *ent = readdir(dir)) {
-      const char *p = ent->d_name;
-      if (*p >= '0' && *p <= '9')
-        tune_thread(static_cast<pid_t>(std::atoi(p)), &set, policy, prio);
-    }
-    closedir(dir);
-  }
-  tune_thread(0, &set, policy, prio);
+  sched_setaffinity(0, sizeof(set), &set);
 }
 
 static torch::Tensor y = []() {
