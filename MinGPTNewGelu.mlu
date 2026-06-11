@@ -1,4 +1,5 @@
 #include <bang.h>
+#include <bang_device_functions_decls.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
 #include <cstdint>
@@ -25,7 +26,7 @@ __mlu_entry__ void k0(half *__restrict__ x) {
       __bang_write_value(a + n, m - n, (half)0.0f);
     }
     __bang_active_gelu(a, a, m);
-    __memcpy(x + p, a, n * sizeof(half), NRAM2GDRAM);
+    __memcpy_async(x + p, a, n * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -33,14 +34,14 @@ static int g_dev = 1;
 
 static void bind_host(int d) {
   setpriority(PRIO_PROCESS, 0, -5);
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  int end = begin + 28;
-  for (int i = begin; i < end; ++i) {
-    CPU_SET(i, &set);
-  }
-  sched_setaffinity(0, sizeof(set), &set);
+  // cpu_set_t set;
+  // CPU_ZERO(&set);
+  // int begin = d >= 4 ? 28 : 0;
+  // int end = begin + 28;
+  // for (int i = begin; i < end; ++i) {
+  //   CPU_SET(i, &set);
+  // }
+  // sched_setaffinity(0, sizeof(set), &set);
   // int max_fifo = sched_get_priority_max(SCHED_FIFO);
   // if (max_fifo >= 0) {
   //   struct sched_param sp;
