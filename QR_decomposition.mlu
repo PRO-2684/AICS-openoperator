@@ -148,8 +148,10 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
 
   __bang_float2half(th, qq, E1 * E2);
   __memcpy(pq, th, E1 * E2 * sizeof(half), NRAM2GDRAM);
-  __bang_float2half(th, rr, E1 * E2);
-  __memcpy(pr, th, E1 * E2 * sizeof(half), NRAM2GDRAM);
+  for (int j = 0; j < E2; ++j) {
+    __bang_float2half(th + j * E1, rr + j * E1, E2);
+    __memcpy(pr + j * E1, th + j * E1, E2 * sizeof(half), NRAM2GDRAM);
+  }
 }
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
