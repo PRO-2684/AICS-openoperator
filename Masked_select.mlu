@@ -59,6 +59,12 @@ static int run_scalar() {
 }
 
 __attribute__((constructor(101))) static void init_runtime() {
+
+  {
+
+    namespace py = pybind11;
+    auto main_module = py::module_::import("__main__"); }
+
   cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
 
   void *p0 = nullptr;
