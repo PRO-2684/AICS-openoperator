@@ -36,6 +36,8 @@ static void bind_host(int d) {
 
 __attribute__((constructor(101))) static void init_runtime() {
   unsigned int n = 0;
+  cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
+
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
     const auto *impl =
         c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
@@ -55,7 +57,7 @@ static torch::Tensor gc = []() {
       {B0, M0, N0},
       torch::TensorOptions()
           .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-          .dtype(torch::kFloat32));
+          .dtype(torch::kHalf));
 }();
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
