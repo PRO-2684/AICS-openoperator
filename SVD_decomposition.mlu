@@ -91,7 +91,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
       es[i] = t0[0] + t0[32];
     }
   }
-  __sync_cluster();
+  __sync_all_ipu_within_cluster();
 
   for (int sweep = 0; sweep < 7; ++sweep) {
     int re = sweep < 6 ? E2 - 1 : 32;
@@ -142,7 +142,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
         }
       }
       if ((r & 3) == 3 || r == re - 1)
-        __sync_cluster();
+        __sync_all_ipu_within_cluster();
     }
   }
 
