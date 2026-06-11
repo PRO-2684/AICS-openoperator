@@ -131,8 +131,21 @@ torch::Tensor bang_func(torch::Tensor indices, int num_embeddings,
   cnrtMemcpy(g_idx, indices.unsafeGetTensorImpl()->mutable_data(),
              N0 * sizeof(int64_t), cnrtMemcpyDevToHost);
 
-  for (int i = 0; i < N0; ++i) {
-    std::memcpy(g_y + i * D0, g_w + g_idx[i] * D0, D0 * sizeof(float));
+  int i = 0;
+  for (; i + 3 < N0; i += 4) {
+    if (i + 12 < N0) {
+      __builtin_prefetch(g_w + g_idx[i + 8] * D0, 0, 1);
+      __builtin_prefetch(g_w + g_idx[i + 9] * D0, 0, 1);
+      __builtin_prefetch(g_w + g_idx[i + 10] * D0, 0, 1);
+      __builtin_prefetch(g_w + g_idx[i + 11] * D0, 0, 1);
+    }
+    __builtin_memcpy(g_y + (i + 0) * D0, g_w + g_idx[i + 0] * D0, 2048);
+    __builtin_memcpy(g_y + (i + 1) * D0, g_w + g_idx[i + 1] * D0, 2048);
+    __builtin_memcpy(g_y + (i + 2) * D0, g_w + g_idx[i + 2] * D0, 2048);
+    __builtin_memcpy(g_y + (i + 3) * D0, g_w + g_idx[i + 3] * D0, 2048);
+  }
+  for (; i < N0; ++i) {
+    __builtin_memcpy(g_y + i * D0, g_w + g_idx[i] * D0, 2048);
   }
   return gy;
 }
