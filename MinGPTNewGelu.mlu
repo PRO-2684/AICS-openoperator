@@ -64,7 +64,25 @@ static torch::Tensor g0 = []() {
   return t;
 }();
 
-static cnrtQueue_t queue = (){torch_mlu::getCurMLUStream()};
+static cnrtQueue_t queue = []() {
+  unsigned int n = 0;
+  cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
+
+  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
+    const auto *impl =
+        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
+    int torch_n = static_cast<int>(impl->deviceCount());
+    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
+      int d = 1;
+      bind_host(d);
+      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
+      cnrtSetDevice(d);
+      g_dev = d;
+    }
+  }
+
+  return torch_mlu::getCurMLUStream();
+}();
 static constexpr cnrtDim3_t dim = {E2, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor x) {
