@@ -28,11 +28,11 @@ __attribute__((target("avx2"))) static int run_vec256() {
   int j = 0;
   for (int i = 0; i < E0; i += 16) {
     __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(g_in + i));
-    int m = _mm256_movemask_epi8(v) & 0xaaaaaaaau;
+    uint32_t m = static_cast<uint32_t>(_mm256_movemask_epi8(v)) & 0xaaaaaaaau;
     if (m == 0) {
       _mm256_storeu_si256(reinterpret_cast<__m256i *>(g_out + j), v);
       j += 16;
-    } else if (m != -1) {
+    } else if (m != 0xaaaaaaaau) {
       for (int k = 0; k < 16; ++k) {
         uint16_t x = g_in[i + k];
         g_out[j] = x;
@@ -108,7 +108,8 @@ torch::Tensor bang_func(torch::Tensor input, double threshold) {
   cnrtMemcpy(g_in, input.unsafeGetTensorImpl()->mutable_data(),
              E0 * sizeof(uint16_t), cnrtMemcpyDevToHost);
 
-  int j = g_mode == 2 ? run_vec512() : (g_mode == 1 ? run_vec256() : run_scalar());
+  int j =
+      g_mode == 2 ? run_vec512() : (g_mode == 1 ? run_vec256() : run_scalar());
 
   gout.resize_({static_cast<int64_t>(j)});
   return gout;
