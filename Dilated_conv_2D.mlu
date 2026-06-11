@@ -72,18 +72,14 @@ static cnrtDim3_t d1 = {32, 1, 1};
 static cnrtDim3_t d2 = {4, 8, 1};
 
 __mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ y) {
-  for (int i = taskId; i < 73728; i += taskDim) {
-    int t = i;
-    int kw = t % 3;
-    t /= 3;
-    int kh = t % 3;
-    t /= 3;
-    int ic = t % 64;
-    int oc = t / 64;
+  __nram__ half a[576];
+  __nram__ half b[576];
+  for (int oc = taskId; oc < 128; oc += taskDim) {
     int q = (oc & 3) + (((oc >> 6) & 1) << 2) + (((oc >> 2) & 7) << 3) +
             (((oc >> 5) & 1) << 6);
-    int p = (((q * 3 + kh) * 3 + kw) * 64 + ic);
-    y[p] = x[i];
+    __memcpy(a, x + oc * 576, 576 * sizeof(half), GDRAM2NRAM);
+    __bang_transpose(b, a, 64, 9);
+    __memcpy(y + q * 576, b, 576 * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -137,14 +133,10 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)dilation;
   (void)padding;
   (void)g0;
-  static void *last = nullptr;
   void *kp = kernel.unsafeGetTensorImpl()->mutable_data();
-  if (last != kp) {
-    k2<<<d1, cnrtFuncTypeBlock, q>>>(
-        static_cast<const half *>(kp),
-        static_cast<half *>(gw.unsafeGetTensorImpl()->mutable_data()));
-    last = kp;
-  }
+  k2<<<d1, cnrtFuncTypeBlock, q>>>(
+      static_cast<const half *>(kp),
+      static_cast<half *>(gw.unsafeGetTensorImpl()->mutable_data()));
   k1<<<d2, cnrtFuncTypeUnion1, q>>>(
       static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(gw.unsafeGetTensorImpl()->mutable_data()),
