@@ -131,7 +131,9 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
           }
           __memcpy(t0, zs + p * E2, E2 * sizeof(float), SRAM2NRAM);
           __memcpy(t1, zs + q * E2, E2 * sizeof(float), SRAM2NRAM);
-          float apq = zs[p * E2 + q];
+          __bang_mul(t2, t0, t1, E2);
+          __bang_reduce_sum(t2, t2, E2);
+          float apq = t2[0] + t2[32];
           float app = es[p];
           float aqq = es[q];
           if (fabsf(apq) > 0.00001f) {
