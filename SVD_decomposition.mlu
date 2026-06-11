@@ -109,7 +109,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
   __sync_cluster();
 
   for (int sweep = 0; sweep < 7; ++sweep) {
-    int re = sweep < 6 ? E2 - 1 : 20;
+    int re = sweep < 6 ? E2 - 1 : 10;
     for (int r = 0; r < re; ++r) {
       for (int g = 0; g < 8; ++g) {
         if (c < 4) {
@@ -155,6 +155,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
             es[q] = s2 * app + 2.0f * cs * apq + c2 * aqq;
           }
         }
+        if (sweep == 6 && g == 3)
+          __sync_cluster();
       }
       __sync_cluster();
     }
