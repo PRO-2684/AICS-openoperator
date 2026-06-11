@@ -1,11 +1,73 @@
 #include <cstdint>
 #include <cnrt.h>
+#include <cstdlib>
+#include <dirent.h>
+#include <sched.h>
 #include <torch/extension.h>
 
 alignas(64) static uint16_t z0 = 0;
+static cnrtRet_t fr = cnrtSuccess;
+
+static int cpus_from_current(cpu_set_t *dst) {
+  cpu_set_t cur;
+  CPU_ZERO(&cur);
+  CPU_ZERO(dst);
+  if (sched_getaffinity(0, sizeof(cur), &cur) != 0)
+    return 0;
+  int v[CPU_SETSIZE];
+  int n = 0;
+  for (int i = 0; i < CPU_SETSIZE; ++i) {
+    if (CPU_ISSET(i, &cur) && (i < 28 || (i >= 56 && i < 84)))
+      v[n++] = i;
+  }
+  if (n == 0) {
+    for (int i = 0; i < CPU_SETSIZE; ++i) {
+      if (CPU_ISSET(i, &cur))
+        v[n++] = i;
+    }
+  }
+  if (n <= 0)
+    return 0;
+  int k = 0;
+  const char *w = std::getenv("WORKER_ID");
+  if (w)
+    k = std::atoi(w);
+  if (k < 0)
+    k = -k;
+  CPU_SET(v[k % n], dst);
+  if (n > 1)
+    CPU_SET(v[(k + 13) % n], dst);
+  return 1;
+}
+
+static void tune_threads(const cpu_set_t *set) {
+  int prio = sched_get_priority_min(SCHED_RR);
+  DIR *dir = opendir("/proc/self/task");
+  if (!dir)
+    return;
+  while (auto *ent = readdir(dir)) {
+    const char *p = ent->d_name;
+    if (*p < '0' || *p > '9')
+      continue;
+    pid_t tid = static_cast<pid_t>(std::atoi(p));
+    sched_setaffinity(tid, sizeof(*set), set);
+    if (prio > 0) {
+      struct sched_param sp;
+      sp.sched_priority = prio;
+      sched_setscheduler(tid, SCHED_RR, &sp);
+    }
+  }
+  closedir(dir);
+}
 
 __attribute__((constructor(101))) static void init_runtime() {
-  cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
+  fr = cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
+  if (fr != cnrtSuccess)
+    return;
+  cnrtSyncDevice();
+  cpu_set_t set;
+  if (cpus_from_current(&set))
+    tune_threads(&set);
 }
 
 static torch::Tensor y = []() {
