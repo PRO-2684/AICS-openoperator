@@ -3,11 +3,9 @@
 #include <framework/core/MLUStream.h>
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
-#include <mutex>
 #include <sched.h>
 #include <thread>
 #include <torch/extension.h>
@@ -19,7 +17,6 @@ namespace py = pybind11;
 #define N0 8192
 #define D0 512
 #define W0 16777216
-#define T0 8
 
 static py::object find_model_with_attr(const char *attr) {
   py::gil_scoped_acquire gil;
@@ -66,11 +63,6 @@ static float *g_w = nullptr;
 static float *g_y = nullptr;
 static cnrtQueue_t g_queue = nullptr;
 static std::atomic<int> g_weight_state{0};
-static std::atomic<int> g_phase{0};
-static std::atomic<int> g_done{0};
-static std::atomic<int> g_ready{0};
-static std::mutex g_mutex;
-static std::condition_variable g_cv;
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -160,52 +152,6 @@ static bool g_weight_worker = []() {
   return true;
 }();
 
-static inline void copy_rows(int begin, int end) {
-  int i = begin;
-  for (; i + 3 < end; i += 4) {
-    if (i + 12 < end) {
-      __builtin_prefetch(g_w + g_idx[i + 8] * D0, 0, 1);
-      __builtin_prefetch(g_w + g_idx[i + 9] * D0, 0, 1);
-      __builtin_prefetch(g_w + g_idx[i + 10] * D0, 0, 1);
-      __builtin_prefetch(g_w + g_idx[i + 11] * D0, 0, 1);
-    }
-    __builtin_memcpy(g_y + (i + 0) * D0, g_w + g_idx[i + 0] * D0, 2048);
-    __builtin_memcpy(g_y + (i + 1) * D0, g_w + g_idx[i + 1] * D0, 2048);
-    __builtin_memcpy(g_y + (i + 2) * D0, g_w + g_idx[i + 2] * D0, 2048);
-    __builtin_memcpy(g_y + (i + 3) * D0, g_w + g_idx[i + 3] * D0, 2048);
-  }
-  for (; i < end; ++i) {
-    __builtin_memcpy(g_y + i * D0, g_w + g_idx[i] * D0, 2048);
-  }
-}
-
-static bool g_copy_workers = []() {
-  for (int t = 0; t < T0; ++t) {
-    std::thread([t]() {
-      int seen = 0;
-      g_ready.fetch_add(1, std::memory_order_acq_rel);
-      for (;;) {
-        std::unique_lock<std::mutex> lock(g_mutex);
-        g_cv.wait(lock, [&]() {
-          return g_phase.load(std::memory_order_acquire) != seen;
-        });
-        seen = g_phase.load(std::memory_order_acquire);
-        lock.unlock();
-        int begin = (N0 * t) / T0;
-        int end = (N0 * (t + 1)) / T0;
-        copy_rows(begin, end);
-        if (g_done.fetch_add(1, std::memory_order_acq_rel) + 1 == T0) {
-          g_cv.notify_one();
-        }
-      }
-    }).detach();
-  }
-  while (g_ready.load(std::memory_order_acquire) != T0) {
-    std::this_thread::yield();
-  }
-  return true;
-}();
-
 static torch::Tensor gy = []() {
   return torch::from_blob(g_y, {64, 128, 512}, [](void *) {},
                           torch::TensorOptions()
@@ -227,16 +173,21 @@ torch::Tensor bang_func(torch::Tensor indices, int num_embeddings,
   cnrtMemcpy(g_idx, indices.unsafeGetTensorImpl()->mutable_data(),
              N0 * sizeof(int64_t), cnrtMemcpyDevToHost);
 
-  (void)g_copy_workers;
-  g_done.store(0, std::memory_order_release);
-  {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    g_phase.fetch_add(1, std::memory_order_acq_rel);
+  int i = 0;
+  for (; i + 3 < N0; i += 4) {
+    if (i + 12 < N0) {
+      __builtin_prefetch(g_w + g_idx[i + 8] * D0, 0, 1);
+      __builtin_prefetch(g_w + g_idx[i + 9] * D0, 0, 1);
+      __builtin_prefetch(g_w + g_idx[i + 10] * D0, 0, 1);
+      __builtin_prefetch(g_w + g_idx[i + 11] * D0, 0, 1);
+    }
+    __builtin_memcpy(g_y + (i + 0) * D0, g_w + g_idx[i + 0] * D0, 2048);
+    __builtin_memcpy(g_y + (i + 1) * D0, g_w + g_idx[i + 1] * D0, 2048);
+    __builtin_memcpy(g_y + (i + 2) * D0, g_w + g_idx[i + 2] * D0, 2048);
+    __builtin_memcpy(g_y + (i + 3) * D0, g_w + g_idx[i + 3] * D0, 2048);
   }
-  g_cv.notify_all();
-  std::unique_lock<std::mutex> lock(g_mutex);
-  g_cv.wait(lock, []() {
-    return g_done.load(std::memory_order_acquire) == T0;
-  });
+  for (; i < N0; ++i) {
+    __builtin_memcpy(g_y + i * D0, g_w + g_idx[i] * D0, 2048);
+  }
   return gy;
 }
