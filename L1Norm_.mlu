@@ -6,7 +6,7 @@ alignas(64) static uint16_t z0 = 0;
 static cnrtRet_t fr = cnrtErrorNoDevice;
 
 __attribute__((constructor(101))) static void init_runtime() {
-  fr = cnrtSetDeviceFlag(cnrtDeviceScheduleYield);
+  fr = cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
 }
 
 static torch::Tensor y = []() {
