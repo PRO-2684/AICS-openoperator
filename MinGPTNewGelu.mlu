@@ -15,18 +15,59 @@
 
 __mlu_entry__ void k0(half *__restrict__ x) {
   __nram__ half a[E1];
+  half *o = a;
+  half *i = a + 65536;
   for (int p = taskId * E1; p < E0; p += E1 * E2) {
     int n = E0 - p;
     if (n > E1) {
       n = E1;
     }
-    int m = (n + 63) & ~63;
-    __memcpy(a, x + p, n * sizeof(half), GDRAM2NRAM);
-    if (m > n) {
-      __bang_write_value(a + n, m - n, (half)0.0f);
+    int r = n >> 15;
+    int t = n - (r << 15);
+    if (r > 0) {
+      __memcpy_async(i, x + p, 65536, GDRAM2NRAM);
+      __asm__ volatile("sync;");
     }
-    __bang_active_gelu(a, a, m);
-    __memcpy_async(x + p, a, n * sizeof(half), NRAM2GDRAM);
+    if (r > 1) {
+      __memcpy_async(i + 32768, x + p + 32768, 65536, GDRAM2NRAM);
+      __bang_active_gelu(o, i, 32768);
+      __asm__ volatile("sync;");
+    }
+    for (int q = 0; q < r - 2; ++q) {
+      int c = (q & 1) << 15;
+      int d = ((q + 1) & 1) << 15;
+      __memcpy_async(x + p + (q << 15), o + c, 65536, NRAM2GDRAM);
+      __memcpy_async(i + c, x + p + ((q + 2) << 15), 65536, GDRAM2NRAM);
+      __bang_active_gelu(o + d, i + d, 32768);
+      __asm__ volatile("sync;");
+    }
+    if (r > 1) {
+      __memcpy_async(x + p + ((r - 2) << 15), o + (((r - 2) & 1) << 15),
+                     65536, NRAM2GDRAM);
+    }
+    if (t > 0) {
+      __memcpy_async(i + ((r & 1) << 15), x + p + (r << 15),
+                     t * sizeof(half), GDRAM2NRAM);
+    }
+    if (r > 0) {
+      __bang_active_gelu(o + (((r - 1) & 1) << 15),
+                         i + (((r - 1) & 1) << 15), 32768);
+    }
+    __asm__ volatile("sync;");
+    if (r > 0) {
+      __memcpy_async(x + p + ((r - 1) << 15),
+                     o + (((r - 1) & 1) << 15), 65536, NRAM2GDRAM);
+    }
+    if (t > 0) {
+      int m = (t + 63) & ~63;
+      int c = (r & 1) << 15;
+      if (m > t) {
+        __bang_write_value(i + c + t, m - t, (half)0.0f);
+      }
+      __bang_active_gelu(o + c, i + c, m);
+      __asm__ volatile("sync;");
+      __memcpy_async(x + p + (r << 15), o + c, t * sizeof(half), NRAM2GDRAM);
+    }
   }
 }
 
