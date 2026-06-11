@@ -17,16 +17,35 @@
 static int g_dev = 1;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
 static constexpr int g_work_n = 8;
+static int g_mode = 0;
+
+static void boost_host() {
+  setpriority(PRIO_PROCESS, 0, -5);
+  int p = sched_get_priority_max(SCHED_FIFO);
+  if (p > 0) {
+    struct sched_param sp;
+    sp.sched_priority = p;
+    sched_setscheduler(0, SCHED_FIFO, &sp);
+  }
+}
+
+static void pin_host(int c) {
+  cpu_set_t s;
+  CPU_ZERO(&s);
+  CPU_SET(c, &s);
+  sched_setaffinity(0, sizeof(s), &s);
+  boost_host();
+}
 
 static void bind_host(int d) {
-  // cpu_set_t s;
-  // CPU_ZERO(&s);
-  // int begin = d >= 4 ? 28 : 0;
-  // for (int i = 0; i < 28; ++i) {
-  //   CPU_SET(begin + i, &s);
-  // }
-  // sched_setaffinity(0, sizeof(s), &s);
-  setpriority(PRIO_PROCESS, 0, -5);
+  cpu_set_t s;
+  CPU_ZERO(&s);
+  int begin = d >= 4 ? 28 : 0;
+  for (int i = 0; i < 28; ++i) {
+    CPU_SET(begin + i, &s);
+  }
+  sched_setaffinity(0, sizeof(s), &s);
+  boost_host();
 }
 
 alignas(64) static const uint16_t g_tbl[65536] = {
@@ -7373,7 +7392,13 @@ run_table512(uint16_t *p, int n) {
 }
 
 static void transform(uint16_t *p, int n) {
-  run_table(p, n);
+  if (g_mode == 3) {
+    run_table512(p, n);
+  } else if (g_mode == 1) {
+    run_table256(p, n);
+  } else {
+    run_table(p, n);
+  }
 }
 
 struct HostWork {
@@ -7388,16 +7413,23 @@ struct HostWork {
     for (int i = 0; i < g_work_n - 1; ++i) {
       th[i] = std::thread([this, i]() {
         int t = i + 1;
+        pin_host((g_dev >= 4 ? 28 : 0) + t);
         ready.fetch_add(1, std::memory_order_release);
+        int seen = 0;
         while (go.load(std::memory_order_acquire) == 0) {
-          _mm_pause();
+          int cur = go.load(std::memory_order_acquire);
+          while (cur == seen) {
+            _mm_pause();
+            cur = go.load(std::memory_order_acquire);
+          }
+          seen = cur;
+          uint16_t *p = ptr;
+          int n = len;
+          int l = ((n * t) / g_work_n + 15) & ~15;
+          int r = ((n * (t + 1)) / g_work_n) & ~15;
+          transform(p + l, r - l);
+          done.fetch_add(1, std::memory_order_release);
         }
-        uint16_t *p = ptr;
-        int n = len;
-        int l = ((n * t) / g_work_n + 15) & ~15;
-        int r = ((n * (t + 1)) / g_work_n) & ~15;
-        transform(p + l, r - l);
-        done.fetch_add(1, std::memory_order_release);
       });
     }
     while (ready.load(std::memory_order_acquire) < g_work_n - 1) {
@@ -7407,7 +7439,6 @@ struct HostWork {
 };
 
 static HostWork *g_work = nullptr;
-static bool g_work_used = false;
 
 static void init_work() {
   if (g_work == nullptr) {
@@ -7416,15 +7447,14 @@ static void init_work() {
 }
 
 static void transform_work(uint16_t *p, int n) {
-  if (g_work == nullptr || g_work_used) {
+  if (g_work == nullptr) {
     transform(p, n);
     return;
   }
-  g_work_used = true;
   g_work->ptr = p;
   g_work->len = n;
   g_work->done.store(0, std::memory_order_relaxed);
-  g_work->go.store(1, std::memory_order_release);
+  g_work->go.fetch_add(1, std::memory_order_release);
   int r = ((n * 1) / g_work_n) & ~15;
   transform(p, r);
   while (g_work->done.load(std::memory_order_acquire) < g_work_n - 1) {

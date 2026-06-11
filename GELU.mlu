@@ -17,6 +17,7 @@ static int g_dev = 0;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
 static cnrtNotifier_t g_nt[2] = {nullptr, nullptr};
 static constexpr int g_work_n = 8;
+static int g_mode = 0;
 
 static void boost_host() {
   setpriority(PRIO_PROCESS, 0, -5);
@@ -4247,13 +4248,11 @@ __attribute__((target("avx2,f16c,fma"))) static void run_formula256(uint16_t *p,
 }
 
 static void transform(uint16_t *p, int n) {
-  if (__builtin_cpu_supports("avx512f") &&
-      __builtin_cpu_supports("avx512bw") &&
-      __builtin_cpu_supports("avx512vl")) {
+  if (g_mode == 3) {
     run_table512(p, n);
-  } else if (__builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma")) {
+  } else if (g_mode == 2) {
     run_formula256(p, n);
-  } else if (__builtin_cpu_supports("avx2")) {
+  } else if (g_mode == 1) {
     run_table256(p, n);
   } else {
     run_table(p, n);
@@ -4367,6 +4366,16 @@ struct InitRuntime {
         cnrtNotifierCreateWithFlags(&g_nt[1],
                                     CNRT_NOTIFIER_DISABLE_TIMING_ALL);
         init_tbl32();
+        if (__builtin_cpu_supports("avx512f") &&
+            __builtin_cpu_supports("avx512bw") &&
+            __builtin_cpu_supports("avx512vl")) {
+          g_mode = 3;
+        } else if (__builtin_cpu_supports("avx2") &&
+                   __builtin_cpu_supports("fma")) {
+          g_mode = 2;
+        } else if (__builtin_cpu_supports("avx2")) {
+          g_mode = 1;
+        }
         init_work();
         warm_host();
         g_dev = d;
