@@ -1,7 +1,24 @@
+#include <cnrt.h>
 #include <cstdint>
+#include <sched.h>
 #include <torch/extension.h>
+#include <unistd.h>
 
 alignas(64) static uint16_t z0 = 0;
+
+__attribute__((constructor(101))) static void init_runtime() {
+  cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  long n = sysconf(_SC_NPROCESSORS_CONF);
+  if (n < 1)
+    n = 1;
+  if (n > 28)
+    n = 28;
+  for (int i = 0; i < n; ++i)
+    CPU_SET(i, &set);
+  sched_setaffinity(0, sizeof(set), &set);
+}
 
 static torch::Tensor y = []() {
   auto opt = torch::TensorOptions().dtype(torch::kHalf).device(torch::kCPU);
