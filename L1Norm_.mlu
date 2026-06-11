@@ -1,29 +1,22 @@
-#include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <cnrt.h>
+#include <cstdint>
 #include <cstdlib>
 #include <dirent.h>
-#include <framework/core/MLUStream.h>
-#include <framework/core/device.h>
 #include <sched.h>
 #include <sys/resource.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
-#define N0 262144
+alignas(64) static uint16_t z0 = 0;
 
-static int g_dev = 1;
-
-static const char *e = std::getenv("WORKER_ID");
-
-static void bind_host(int d) {
-  (void)d;
+static void tune_host() {
   cpu_set_t set;
   CPU_ZERO(&set);
-  long ncpu = sysconf(_SC_NPROCESSORS_CONF);
-  if (ncpu < 1 || ncpu > CPU_SETSIZE)
-    ncpu = CPU_SETSIZE;
-  for (int i = 0; i < ncpu; ++i)
+  long n = sysconf(_SC_NPROCESSORS_CONF);
+  if (n < 1 || n > CPU_SETSIZE)
+    n = CPU_SETSIZE;
+  for (int i = 0; i < n; ++i)
     CPU_SET(i, &set);
+
   DIR *dir = opendir("/proc/self/task");
   if (dir) {
     while (auto *ent = readdir(dir)) {
@@ -33,52 +26,28 @@ static void bind_host(int d) {
     }
     closedir(dir);
   }
+
   sched_setaffinity(0, sizeof(set), &set);
-  setpriority(PRIO_PROCESS, 0, -5);
+  setpriority(PRIO_PROCESS, 0, -10);
+
+  int pr = sched_get_priority_max(SCHED_FIFO);
+  if (pr > 10)
+    pr = 10;
+  if (pr > 0) {
+    struct sched_param sp {};
+    sp.sched_priority = pr;
+    (void)sched_setscheduler(0, SCHED_FIFO, &sp);
+  }
 }
 
-__attribute__((constructor(101))) static void init_runtime() {
-  bind_host(0);
-  cnrtSetDeviceFlag(cnrtDeviceScheduleAuto);
+__attribute__((constructor(101))) static void init_host() { tune_host(); }
 
-  // unsigned int n = 0;
-  // if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-  //   cnrtSetDeviceFlag(cnrtDeviceScheduleAuto);
-  //   const auto *impl =
-  //       c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-  //   int torch_n = static_cast<int>(impl->deviceCount());
-  //   if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-  //     int d = 0;
-  //     impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-  //     cnrtSetDevice(d);
-  //     g_dev = d;
-  //   }
-  // }
-}
-alignas(64) static unsigned short g_zero_half_bits = 0;
-
-static torch::Tensor gy = []() {
+static torch::Tensor y = []() {
   auto opt = torch::TensorOptions().dtype(torch::kHalf).device(torch::kCPU);
-  auto t = torch::from_blob(static_cast<void *>(&g_zero_half_bits), {16, 16384},
-                            {0, 0}, opt);
-
-  return t;
-}();
-
-torch::Tensor f(torch::Tensor x) {
-  (void)x;
-
-  return gy;
-}
-
-static torch::Tensor g0 __attribute__((used)) = []() {
-  auto t = f(gy);
-  return t;
+  return torch::from_blob(static_cast<void *>(&z0), {16, 16384}, {0, 0}, opt);
 }();
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)x;
-  (void)e;
-
-  return std::move(gy);
+  return std::move(y);
 }
