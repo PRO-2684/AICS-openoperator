@@ -95,9 +95,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
   __memcpy(ah, pa, E1 * E2 * sizeof(half), GDRAM2NRAM);
   __bang_transpose(th, ah, E1, E2);
   __bang_half2float(rr, th, E1 * E2);
-  __bang_write_zero(hh, E1 * E2);
   __bang_write_zero(qq, E1 * E2);
-  __bang_write_zero(tau, E2);
 
   for (int k = 0; k < E2; ++k) {
     float ss = 0.0f;
@@ -110,6 +108,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
     float alpha = x0 >= 0.0f ? -n : n;
     float v0 = x0 - alpha;
     float vv = v0 * v0;
+    for (int i = 0; i < k; ++i)
+      hh[k * E1 + i] = 0.0f;
     hh[k * E1 + k] = v0;
     for (int i = k + 1; i < E1; ++i) {
       float x = rr[k * E1 + i];
