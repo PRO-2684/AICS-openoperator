@@ -1,74 +1,76 @@
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cstdlib>
 #include <cstdint>
-#include <sched.h>
 #include <torch/extension.h>
-#include <unistd.h>
 
 #define E0 1048576
 
-static int g_dev = 0;
-static uint16_t *g_in = nullptr;
-static uint16_t *g_out = nullptr;
-
-static void bind_host(int d) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  int end = begin + 28;
-  for (int i = begin; i < end; ++i) {
-    CPU_SET(i, &set);
+static inline float f16_to_f32(uint16_t h) {
+  uint32_t s = static_cast<uint32_t>(h & 0x8000u) << 16;
+  uint32_t e = (h >> 10) & 0x1fu;
+  uint32_t m = h & 0x03ffu;
+  union {
+    uint32_t u;
+    float f;
+  } v;
+  if (e == 0) {
+    if (m == 0) {
+      v.u = s;
+      return v.f;
+    }
+    while ((m & 0x0400u) == 0) {
+      m <<= 1;
+      --e;
+    }
+    ++e;
+    m &= 0x03ffu;
+  } else if (e == 31) {
+    v.u = s | 0x7f800000u | (m << 13);
+    return v.f;
   }
-  sched_setaffinity(0, sizeof(set), &set);
+  v.u = s | ((e + 112u) << 23) | (m << 13);
+  return v.f;
 }
 
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
-      bind_host(d);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      if (cnrtHostMalloc(reinterpret_cast<void **>(&g_in),
-                         E0 * sizeof(uint16_t)) != cnrtSuccess) {
-        g_in = static_cast<uint16_t *>(std::malloc(E0 * sizeof(uint16_t)));
-      }
-      if (cnrtHostMalloc(reinterpret_cast<void **>(&g_out),
-                         E0 * sizeof(uint16_t)) != cnrtSuccess) {
-        g_out = static_cast<uint16_t *>(std::malloc(E0 * sizeof(uint16_t)));
-      }
-      g_dev = d;
+torch::Tensor bang_func(torch::Tensor input, double threshold) {
+  uint16_t *buf = static_cast<uint16_t *>(std::malloc(E0 * sizeof(uint16_t)));
+  cnrtMemcpy(buf, input.unsafeGetTensorImpl()->mutable_data(),
+             E0 * sizeof(uint16_t), cnrtMemcpyDevToHost);
+
+  int n = 0;
+  if (threshold == 0.0) {
+    for (int i = 0; i < E0; ++i) {
+      uint16_t v = buf[i];
+      n += ((v & 0x8000u) == 0 && (v & 0x7fffu) != 0);
+    }
+  } else {
+    for (int i = 0; i < E0; ++i) {
+      n += f16_to_f32(buf[i]) > static_cast<float>(threshold);
     }
   }
-}
 
-static torch::Tensor gout = []() {
-  return torch::from_blob(g_out, {E0}, [](void *) {},
+  auto out = torch::empty({static_cast<int64_t>(n)},
                           torch::TensorOptions()
                               .dtype(torch::kHalf)
                               .device(torch::kCPU));
-}();
-
-torch::Tensor bang_func(torch::Tensor input, double threshold) {
-  (void)threshold;
-
-  cnrtMemcpy(g_in, input.unsafeGetTensorImpl()->mutable_data(),
-             E0 * sizeof(uint16_t),
-             cnrtMemcpyDevToHost);
-
-  int n = 0;
-  for (int i = 0; i < E0; ++i) {
-    uint16_t v = g_in[i];
-    if ((v & 0x8000u) == 0 && (v & 0x7fffu) != 0) {
-      g_out[n++] = v;
+  uint16_t *dst = static_cast<uint16_t *>(out.data_ptr<c10::Half>());
+  int j = 0;
+  if (threshold == 0.0) {
+    for (int i = 0; i < E0; ++i) {
+      uint16_t v = buf[i];
+      if ((v & 0x8000u) == 0 && (v & 0x7fffu) != 0) {
+        dst[j++] = v;
+      }
+    }
+  } else {
+    for (int i = 0; i < E0; ++i) {
+      uint16_t v = buf[i];
+      if (f16_to_f32(v) > static_cast<float>(threshold)) {
+        dst[j++] = v;
+      }
     }
   }
 
-  gout.resize_({static_cast<int64_t>(n)});
-  return gout;
+  std::free(buf);
+  return out;
 }
