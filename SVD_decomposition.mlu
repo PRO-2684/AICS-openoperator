@@ -185,11 +185,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
     }
     for (int i = 0; i < E2; ++i) {
       ps[i] = es[i];
-      t0[i] = es[i] > 0.000001f ? es[i] : 1.0f;
-    }
-    __bang_active_recip(t1, t0, E2);
-    for (int i = 0; i < E2; ++i) {
-      pv[i * E2 + i] = es[i] > 0.000001f ? t1[i] : 0.0f;
+      es[E2 + i] = es[i] > 0.000001f ? 1.0f / es[i] : 0.0f;
+      pv[i * E2 + i] = es[E2 + i];
     }
   }
 }
