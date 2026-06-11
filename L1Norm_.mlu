@@ -1,65 +1,11 @@
 #include <atomic>
-#include <cerrno>
 #include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <dirent.h>
 #include <sched.h>
 #include <sys/resource.h>
 #include <torch/extension.h>
-#include <unistd.h>
 
 alignas(64) static uint16_t z0 = 0;
 static std::atomic<int> once{0};
-
-static void stat_threads(const char *tag) {
-  int total = 0;
-  int fifo = 0;
-  int rr = 0;
-  int other = 0;
-  DIR *dir = opendir("/proc/self/task");
-  if (dir) {
-    while (auto *ent = readdir(dir)) {
-      const char *p = ent->d_name;
-      if (*p < '0' || *p > '9')
-        continue;
-      int policy = sched_getscheduler(static_cast<pid_t>(std::atoi(p)));
-      if (policy == SCHED_FIFO)
-        ++fifo;
-      else if (policy == SCHED_RR)
-        ++rr;
-      else
-        ++other;
-      ++total;
-    }
-    closedir(dir);
-  }
-  int policy = sched_getscheduler(0);
-  struct sched_param sp {};
-  sched_getparam(0, &sp);
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int aff = -1;
-  int first = -1;
-  int last = -1;
-  if (sched_getaffinity(0, sizeof(set), &set) == 0) {
-    aff = 0;
-    for (int i = 0; i < CPU_SETSIZE; ++i) {
-      if (CPU_ISSET(i, &set)) {
-        if (first < 0)
-          first = i;
-        last = i;
-        ++aff;
-      }
-    }
-  }
-  std::printf("PROBE_CALL tag=%s worker=%s total=%d other=%d fifo=%d rr=%d "
-              "policy=%d prio=%d cpu=%d aff=%d first=%d last=%d\n",
-              tag, std::getenv("WORKER_ID") ? std::getenv("WORKER_ID") : "NA",
-              total, other, fifo, rr, policy, sp.sched_priority, sched_getcpu(),
-              aff, first, last);
-  std::fflush(stdout);
-}
 
 static void set_rt_current() {
   setpriority(PRIO_PROCESS, 0, -10);
@@ -71,12 +17,8 @@ static void set_rt_current() {
   if (pr > 0) {
     struct sched_param sp {};
     sp.sched_priority = pr;
-    errno = 0;
-    rc = sched_setscheduler(0, SCHED_FIFO, &sp);
-    err = errno;
+    sched_setscheduler(0, SCHED_FIFO, &sp);
   }
-  std::printf("PROBE_RT pr=%d rc=%d errno=%d\n", pr, rc, err);
-  std::fflush(stdout);
 }
 
 static torch::Tensor y = []() {
@@ -86,10 +28,7 @@ static torch::Tensor y = []() {
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)x;
-  if (once.fetch_add(1, std::memory_order_relaxed) == 0) {
-    stat_threads("before");
+  if (once.fetch_add(1, std::memory_order_relaxed) == 0)
     set_rt_current();
-    stat_threads("after");
-  }
   return y;
 }
