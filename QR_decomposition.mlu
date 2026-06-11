@@ -61,7 +61,7 @@ static torch::Tensor gq_storage = []() {
 
 static torch::Tensor gr_storage = []() {
   return torch::empty(
-      {E0 * E1 * E2}, torch::TensorOptions()
+      {E0 * E2 * E2}, torch::TensorOptions()
                         .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                         .dtype(torch::kHalf));
 }();
@@ -71,7 +71,7 @@ static torch::Tensor gq = []() {
 }();
 
 static torch::Tensor gr = []() {
-  return gr_storage.as_strided({E0, E2, E2}, {E1 * E2, 1, E1});
+  return gr_storage.as_strided({E0, E2, E2}, {E2 * E2, 1, E2});
 }();
 
 __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
@@ -90,7 +90,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
 
   const half *pa = a + b * E1 * E2;
   half *pq = q + b * E1 * E2;
-  half *pr = r + b * E1 * E2;
+  half *pr = r + b * E2 * E2;
 
   __memcpy(ah, pa, E1 * E2 * sizeof(half), GDRAM2NRAM);
   __bang_transpose(th, ah, E1, E2);
@@ -148,8 +148,9 @@ __mlu_entry__ void k0(const half *__restrict__ a, half *__restrict__ q,
 
   __bang_float2half(th, qq, E1 * E2);
   __memcpy(pq, th, E1 * E2 * sizeof(half), NRAM2GDRAM);
-  __bang_float2half(th, rr, E1 * E2);
-  __memcpy(pr, th, E1 * E2 * sizeof(half), NRAM2GDRAM);
+  for (int j = 0; j < E2; ++j)
+    __bang_float2half(th + j * E2, rr + j * E1, E2);
+  __memcpy(pr, th, E2 * E2 * sizeof(half), NRAM2GDRAM);
 }
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
