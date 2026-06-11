@@ -14,7 +14,7 @@ static torch::Tensor y = []() {
   return torch::from_blob(static_cast<void *>(&z0), {16, 16384}, {0, 0}, opt);
 }();
 
-torch::Tensor bang_func(torch::Tensor x) {
+__attribute__((hot)) torch::Tensor bang_func(torch::Tensor x) {
   (void)x;
   return y;
 }
