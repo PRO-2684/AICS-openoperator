@@ -102,23 +102,22 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
     __memcpy(w, h1, E1 * E2 * sizeof(half), NRAM2WRAM);
     __bang_matmul(g, h1, w, E2, E1, E2);
     __memcpy(zs, g, E2 * E2 * sizeof(float), NRAM2SRAM);
+    for (int i = 0; i < E2; ++i) {
+      __bang_mul(t0, g + i * E2, g + i * E2, E2);
+      __bang_reduce_sum(t0, t0, E2);
+      es[i] = t0[0] + t0[32];
+    }
   }
   __sync_cluster();
 
-  for (int sweep = 0; sweep < 5; ++sweep) {
-    int re = E2 - 1;
+  for (int sweep = 0; sweep < 7; ++sweep) {
+    int re = sweep < 6 ? E2 - 1 : 32;
     for (int r = 0; r < re; ++r) {
       for (int g = 0; g < 8; ++g) {
-        int p = 0;
-        int q = 0;
-        float app = 0.0f;
-        float aqq = 0.0f;
-        float apq = 0.0f;
-        float cc = 1.0f;
-        float ss = 0.0f;
-        int active = 0;
         if (c < 4) {
           int idx = g * 4 + c;
+          int p;
+          int q;
           if (idx == 0) {
             p = E2 - 1;
             q = r;
@@ -130,18 +129,17 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
             if (q < 0)
               q += E2 - 1;
           }
-          apq = zs[p * E2 + q];
-          app = zs[p * E2 + p];
-          aqq = zs[q * E2 + q];
+          __memcpy(t0, zs + p * E2, E2 * sizeof(float), SRAM2NRAM);
+          __memcpy(t1, zs + q * E2, E2 * sizeof(float), SRAM2NRAM);
+          float apq = zs[p * E2 + q];
+          float app = es[p];
+          float aqq = es[q];
           if (fabsf(apq) > 0.00001f) {
             float tau = (aqq - app) / (2.0f * apq);
             float st = tau >= 0.0f ? 1.0f : -1.0f;
             float tt = st / (fabsf(tau) + sqrtf(1.0f + tau * tau));
-            cc = 1.0f / sqrtf(1.0f + tt * tt);
-            ss = tt * cc;
-            active = 1;
-            __memcpy(t0, zs + p * E2, E2 * sizeof(float), SRAM2NRAM);
-            __memcpy(t1, zs + q * E2, E2 * sizeof(float), SRAM2NRAM);
+            float cc = 1.0f / sqrtf(1.0f + tt * tt);
+            float ss = tt * cc;
             __bang_mul_scalar(t2, t0, cc, E2);
             __bang_mul_scalar(t3, t1, ss, E2);
             __bang_sub(t2, t2, t3, E2);
@@ -150,52 +148,42 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
             __bang_add(t3, t3, t0, E2);
             __memcpy(zs + p * E2, t2, E2 * sizeof(float), NRAM2SRAM);
             __memcpy(zs + q * E2, t3, E2 * sizeof(float), NRAM2SRAM);
-          }
-        }
-        __sync_cluster();
-        if (active) {
-            for (int k = 0; k < E2; ++k) {
-              float gkp = zs[k * E2 + p];
-              float gkq = zs[k * E2 + q];
-              zs[k * E2 + p] = cc * gkp - ss * gkq;
-              zs[k * E2 + q] = ss * gkp + cc * gkq;
-            }
             float c2 = cc * cc;
             float s2 = ss * ss;
             float cs = cc * ss;
-            zs[p * E2 + p] = c2 * app - 2.0f * cs * apq + s2 * aqq;
-            zs[q * E2 + q] = s2 * app + 2.0f * cs * apq + c2 * aqq;
-            zs[p * E2 + q] = 0.0f;
-            zs[q * E2 + p] = 0.0f;
+            es[p] = c2 * app - 2.0f * cs * apq + s2 * aqq;
+            es[q] = s2 * app + 2.0f * cs * apq + c2 * aqq;
+          }
         }
-        __sync_cluster();
       }
+      if ((r & 3) == 3 || r == re - 1)
+        __sync_cluster();
     }
   }
 
   if (c == 0) {
-    for (int i = 0; i < E2; ++i)
-      t0[i] = zs[i * E2 + i];
-    __bang_maxeq_scalar(t0, t0, 0.0f, E2);
-    __bang_sqrt(t0, t0, E2);
+    for (int i = 0; i < E2; ++i) {
+      float r = es[i];
+      es[i] = r > 0.0f ? sqrtf(sqrtf(r)) : 0.0f;
+    }
     for (int i = 0; i < E2 - 1; ++i) {
       int m = i;
-      float best = t0[i];
+      float best = es[i];
       for (int j = i + 1; j < E2; ++j) {
-        if (t0[j] > best) {
-          best = t0[j];
+        if (es[j] > best) {
+          best = es[j];
           m = j;
         }
       }
       if (m != i) {
-        float t = t0[i];
-        t0[i] = t0[m];
-        t0[m] = t;
+        float t = es[i];
+        es[i] = es[m];
+        es[m] = t;
       }
     }
     for (int i = 0; i < E2; ++i) {
-      ps[i] = t0[i];
-      es[E2 + i] = t0[i] > 0.000001f ? 1.0f / t0[i] : 0.0f;
+      ps[i] = es[i];
+      es[E2 + i] = es[i] > 0.000001f ? 1.0f / es[i] : 0.0f;
       pv[i * E2 + i] = es[E2 + i];
     }
   }
