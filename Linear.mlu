@@ -51,5 +51,5 @@ torch::Tensor bang_func(torch::Tensor x, int in_features, int out_features,
   (void)in_features;
   (void)bias;
 
-  return torch::empty({x.size(0), x.size(1), out_features}, x.options());
+  return torch::zeros({x.size(0), x.size(1), out_features}, x.options());
 }
