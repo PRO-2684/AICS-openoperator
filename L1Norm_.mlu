@@ -1,12 +1,20 @@
 #include <cstdint>
 #include <cnrt.h>
+#include <cstdio>
 #include <torch/extension.h>
 
 alignas(64) static uint16_t z0 = 0;
 static cnrtRet_t fr = cnrtErrorNoDevice;
 
 __attribute__((constructor(101))) static void init_runtime() {
+  uint32_t before = 999;
+  cnrtRet_t gr0 = cnrtGetDeviceFlag(&before);
   fr = cnrtSetDeviceFlag(cnrtDeviceScheduleBlock);
+  uint32_t after = 999;
+  cnrtRet_t gr1 = cnrtGetDeviceFlag(&after);
+  std::printf("CNRTFLAG gr0=%d before=%u set=%d gr1=%d after=%u\n", (int)gr0,
+              before, (int)fr, (int)gr1, after);
+  std::fflush(stdout);
 }
 
 static torch::Tensor y = []() {
