@@ -42,21 +42,21 @@ __mlu_entry__ void k0(half *__restrict__ x) {
       __asm__ volatile("sync;");
     }
     if (r > 1) {
-      __memcpy_async(x + p + ((r - 2) << 15), o + (((r - 2) & 1) << 15),
-                     65536, NRAM2GDRAM);
+      __memcpy_async(x + p + ((r - 2) << 15), o + (((r - 2) & 1) << 15), 65536,
+                     NRAM2GDRAM);
     }
     if (t > 0) {
-      __memcpy_async(i + ((r & 1) << 15), x + p + (r << 15),
-                     t * sizeof(half), GDRAM2NRAM);
+      __memcpy_async(i + ((r & 1) << 15), x + p + (r << 15), t * sizeof(half),
+                     GDRAM2NRAM);
     }
     if (r > 0) {
-      __bang_active_gelu(o + (((r - 1) & 1) << 15),
-                         i + (((r - 1) & 1) << 15), 32768);
+      __bang_active_gelu(o + (((r - 1) & 1) << 15), i + (((r - 1) & 1) << 15),
+                         32768);
     }
     __asm__ volatile("sync;");
     if (r > 0) {
-      __memcpy_async(x + p + ((r - 1) << 15),
-                     o + (((r - 1) & 1) << 15), 65536, NRAM2GDRAM);
+      __memcpy_async(x + p + ((r - 1) << 15), o + (((r - 1) & 1) << 15), 65536,
+                     NRAM2GDRAM);
     }
     if (t > 0) {
       int m = (t + 63) & ~63;
@@ -117,7 +117,7 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  auto t = torch::zeros({20}, opt) + torch::zeros({2000}, opt);
+  auto t = torch::zeros({20}, opt) + torch::zeros({20}, opt);
   static uint16_t h[20] = {};
   cnrtMemcpyAsync_V3(t.unsafeGetTensorImpl()->mutable_data(), h, sizeof(h),
                      queue, cnrtMemcpyHostToDev);
