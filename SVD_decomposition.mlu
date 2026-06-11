@@ -165,7 +165,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
 
   if (c == 0) {
     __memcpy(t0, es, E2 * sizeof(float), SRAM2NRAM);
-    __bang_maximum_scalar(t0, t0, 0.0f, E2);
+    __bang_maxeq_scalar(t0, t0, 0.0f, E2);
     __bang_sqrt(t0, t0, E2);
     __bang_sqrt(t0, t0, E2);
     for (int i = 0; i < E2 - 1; ++i) {
