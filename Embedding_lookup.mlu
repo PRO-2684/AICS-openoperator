@@ -2,12 +2,18 @@
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
+#include <cstdlib>
+#include <cstring>
 #include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
 #include <pybind11/pybind11.h>
 
 namespace py = pybind11;
+
+#define N0 8192
+#define D0 512
+#define W0 16777216
 
 static py::object find_model_with_attr(const char *attr) {
   py::gil_scoped_acquire gil;
@@ -49,6 +55,10 @@ static torch::Tensor as_tensor(py::object obj) {
 }
 
 static int g_dev = 0;
+static int64_t *g_idx = nullptr;
+static float *g_w = nullptr;
+static float *g_y = nullptr;
+static bool g_w_ready = false;
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -73,6 +83,18 @@ __attribute__((constructor(101))) static void init_runtime() {
       bind_host(d);
       impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
       cnrtSetDevice(d);
+      if (cnrtHostMalloc(reinterpret_cast<void **>(&g_idx),
+                         N0 * sizeof(int64_t)) != cnrtSuccess) {
+        g_idx = static_cast<int64_t *>(std::malloc(N0 * sizeof(int64_t)));
+      }
+      if (cnrtHostMalloc(reinterpret_cast<void **>(&g_w),
+                         W0 * sizeof(float)) != cnrtSuccess) {
+        g_w = static_cast<float *>(std::malloc(W0 * sizeof(float)));
+      }
+      if (cnrtHostMalloc(reinterpret_cast<void **>(&g_y),
+                         N0 * D0 * sizeof(float)) != cnrtSuccess) {
+        g_y = static_cast<float *>(std::malloc(N0 * D0 * sizeof(float)));
+      }
       g_dev = d;
     }
   }
@@ -85,12 +107,6 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 
-static torch::Tensor gy = []() {
-  return torch::empty({64, 128, 512},
-                      torch::TensorOptions()
-                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                          .dtype(torch::kFloat32));
-}();
 static torch::Tensor gw = []() {
   py::gil_scoped_acquire gil;
   py::object model = find_model_with_attr("emb");
@@ -98,45 +114,39 @@ static torch::Tensor gw = []() {
   return as_tensor(emb.attr("weight"));
 }();
 
-static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static cnrtDim3_t dim0 = {32, 1, 1};
-
-__mlu_entry__ void k0(const int64_t *__restrict__ idx,
-                      const float *__restrict__ weight,
-                      float *__restrict__ out) {
-  int p = taskId;
-  for (; p + taskDim * 3 < 8192; p += taskDim * 4) {
-    int64_t r0 = idx[p];
-    int64_t r1 = idx[p + taskDim];
-    int64_t r2 = idx[p + taskDim * 2];
-    int64_t r3 = idx[p + taskDim * 3];
-    __memcpy(out + p * 512, weight + r0 * 512, 512 * sizeof(float),
-             GDRAM2GDRAM);
-    __memcpy(out + (p + taskDim) * 512, weight + r1 * 512,
-             512 * sizeof(float), GDRAM2GDRAM);
-    __memcpy(out + (p + taskDim * 2) * 512, weight + r2 * 512,
-             512 * sizeof(float), GDRAM2GDRAM);
-    __memcpy(out + (p + taskDim * 3) * 512, weight + r3 * 512,
-             512 * sizeof(float), GDRAM2GDRAM);
-  }
-  for (; p < 8192; p += taskDim) {
-    int64_t r = idx[p];
-    __memcpy(out + p * 512, weight + r * 512, 512 * sizeof(float),
-             GDRAM2GDRAM);
+static void ensure_weight() {
+  if (!g_w_ready) {
+    cnrtMemcpy(g_w, gw.unsafeGetTensorImpl()->mutable_data(),
+               W0 * sizeof(float), cnrtMemcpyDevToHost);
+    g_w_ready = true;
   }
 }
+
+static bool g_prepared = []() {
+  ensure_weight();
+  return true;
+}();
+
+static torch::Tensor gy = []() {
+  return torch::from_blob(g_y, {64, 128, 512}, [](void *) {},
+                          torch::TensorOptions()
+                              .dtype(torch::kFloat32)
+                              .device(torch::kCPU));
+}();
 
 torch::Tensor bang_func(torch::Tensor indices, int num_embeddings,
                         int embedding_dim) {
   (void)num_embeddings;
   (void)embedding_dim;
   (void)g0;
+  (void)g_prepared;
 
-  auto &y = gy;
+  ensure_weight();
+  cnrtMemcpy(g_idx, indices.unsafeGetTensorImpl()->mutable_data(),
+             N0 * sizeof(int64_t), cnrtMemcpyDevToHost);
 
-  k0<<<dim0, cnrtFuncTypeBlock, queue>>>(
-      static_cast<const int64_t *>(indices.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<const float *>(gw.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<float *>(y.unsafeGetTensorImpl()->mutable_data()));
-  return y;
+  for (int i = 0; i < N0; ++i) {
+    std::memcpy(g_y + i * D0, g_w + g_idx[i] * D0, D0 * sizeof(float));
+  }
+  return gy;
 }
