@@ -61,7 +61,7 @@ static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
 __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
                       float *__restrict__ v) {
-  __mlu_shared__ half zs[E2 * E2];
+  __mlu_shared__ float zs[E2 * E2];
   __mlu_shared__ float es[128];
   int b = taskIdY;
   int c = coreId;
@@ -84,8 +84,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
     __bang_transpose(h1, h0, E1, E2);
     __memcpy(w, h1, E1 * E2 * sizeof(half), NRAM2WRAM);
     __bang_matmul(g, h1, w, E2, E1, E2);
-    __bang_float2half_rn(h0, g, E2 * E2);
-    __memcpy(zs, h0, E2 * E2 * sizeof(half), NRAM2SRAM);
+    __memcpy(zs, g, E2 * E2 * sizeof(float), NRAM2SRAM);
     for (int i = 0; i < E2; ++i) {
       __bang_mul(t0, g + i * E2, g + i * E2, E2);
       __bang_reduce_sum(t0, t0, E2);
@@ -113,10 +112,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
             if (q < 0)
               q += E2 - 1;
           }
-          __memcpy(h0, zs + p * E2, E2 * sizeof(half), SRAM2NRAM);
-          __memcpy(h0 + E2, zs + q * E2, E2 * sizeof(half), SRAM2NRAM);
-          __bang_half2float(t0, h0, E2);
-          __bang_half2float(t1, h0 + E2, E2);
+          __memcpy(t0, zs + p * E2, E2 * sizeof(float), SRAM2NRAM);
+          __memcpy(t1, zs + q * E2, E2 * sizeof(float), SRAM2NRAM);
           __bang_mul(t2, t0, t1, E2);
           __bang_reduce_sum(t2, t2, E2);
           float apq = t2[0] + t2[32];
@@ -134,10 +131,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
             __bang_mul_scalar(t3, t0, ss, E2);
             __bang_mul_scalar(t0, t1, cc, E2);
             __bang_add(t3, t3, t0, E2);
-            __bang_float2half_rn(h0, t2, E2);
-            __bang_float2half_rn(h0 + E2, t3, E2);
-            __memcpy(zs + p * E2, h0, E2 * sizeof(half), NRAM2SRAM);
-            __memcpy(zs + q * E2, h0 + E2, E2 * sizeof(half), NRAM2SRAM);
+            __memcpy(zs + p * E2, t2, E2 * sizeof(float), NRAM2SRAM);
+            __memcpy(zs + q * E2, t3, E2 * sizeof(float), NRAM2SRAM);
             float c2 = cc * cc;
             float s2 = ss * ss;
             float cs = cc * ss;
@@ -146,7 +141,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
           }
         }
       }
-      if ((r & 3) == 3 || r == re - 1)
+      if ((r & 7) == 7 || r == re - 1)
         __sync_cluster();
     }
   }
