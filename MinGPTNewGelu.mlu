@@ -75,8 +75,8 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  auto t = torch::empty({200*200}, opt);
-  static uint16_t h[64] = {};
+  auto t = torch::zeros({2000*2000}, opt);
+  static uint16_t h[2000 * 2000] = {};
   cnrtMemcpyAsync_V3(t.unsafeGetTensorImpl()->mutable_data(), h, sizeof(h),
                      queue, cnrtMemcpyHostToDev);
   cnrtMemcpyAsync_V3(h, t.unsafeGetTensorImpl()->mutable_data(), sizeof(h),
