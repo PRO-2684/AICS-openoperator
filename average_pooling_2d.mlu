@@ -1,6 +1,6 @@
 #include <bang.h>
-#include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
 #include <torch/extension.h>
@@ -16,7 +16,6 @@
 #define A7 (A5 * A3 * A2)
 #define A8 (A5 * A1)
 
-
 static int g_dev = 0;
 
 static void bind_host(int d) {
@@ -29,7 +28,6 @@ static void bind_host(int d) {
   }
   sched_setaffinity(0, sizeof(set), &set);
 }
-
 
 __attribute__((constructor(101))) static void init_runtime() {
   cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
@@ -57,8 +55,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     int n0 = A1;
     if (n0 > A5)
       n0 = A5;
-    __memcpy_async(a, x + q * A2 * A2, n0 * A3 * A2 * sizeof(half),
-                   GDRAM2NRAM);
+    __memcpy_async(a, x + q * A2 * A2, n0 * A3 * A2 * sizeof(half), GDRAM2NRAM);
     __asm__ volatile("sync;\n\t");
 
     for (int u = 0; u < A6; ++u) {
@@ -90,11 +87,15 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 static cnrtDim3_t dim0 = {A4, 1, 1};
 
+static torch::Tensor y = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kBool);
+  return torch::empty({4, 32, A1, A1}, opt);
+}();
+
 torch::Tensor bang_func(torch::Tensor x, int kernel_size) {
   (void)kernel_size;
-  static torch::Tensor y;
-  if (!y.defined())
-    y = torch::empty({4, 32, A1, A1}, x.options());
 
   k0<<<dim0, cnrtFuncTypeBlock, queue>>>(
       static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
