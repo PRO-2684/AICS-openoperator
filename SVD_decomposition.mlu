@@ -130,7 +130,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
             float cs = cc * ss;
             es[p] = c2 * app - 2.0f * cs * apq + s2 * aqq;
             es[q] = s2 * app + 2.0f * cs * apq + c2 * aqq;
-            if (fabsf(ss) > 0.001f) {
+            if (fabsf(ss) > 0.003f) {
               __bang_mul_scalar(t2, t0, cc, E2);
               __bang_mul_scalar(t3, t1, ss, E2);
               __bang_sub(t2, t2, t3, E2);
