@@ -158,7 +158,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
           }
         }
       }
-      if ((r & 7) == 7 || r == re - 1)
+      if ((r & 3) == 3 || r == re - 1)
         __sync_cluster();
     }
   }
