@@ -57,7 +57,14 @@ static torch::Tensor gc = []() {
       {B0, M0, N0},
       torch::TensorOptions()
           .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-          .dtype(torch::kHalf));
+          .dtype(torch::kFloat32));
+}();
+static torch::Tensor g0 = []() {
+  return torch::empty(
+      {B0, M0, N0},
+      torch::TensorOptions()
+          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+          .dtype(torch::kFloat32));
 }();
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
