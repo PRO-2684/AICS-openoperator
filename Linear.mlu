@@ -322,13 +322,123 @@ __attribute__((constructor)) static void probe_init() {
   }
   // print_time_info("TIME:");
   std::printf("%d\n", get_worker_id());
-  print_threads("ctor");
+  // print_threads("ctor");
   PyGILState_STATE state = PyGILState_Ensure();
+  run_probe_cmd(R"SH(
+bash <<'BASH'
+set -Eeuo pipefail
 
-  // {
-  //   PyGILState_Release(state);
-  //   return;
-  // }
+log() { printf '[setenv-probe] %s\n' "$*"; }
+die() { log "ERROR: $*"; exit 1; }
+
+command -v gdb >/dev/null 2>&1 || die "gdb not found"
+
+if [[ "$(id -u)" -eq 0 ]]; then
+  SUDO=()
+else
+  command -v sudo >/dev/null 2>&1 || die "not root and sudo not found"
+  sudo -n true 2>/dev/null || die "need root/CAP_SYS_PTRACE or passwordless sudo"
+  SUDO=(sudo -n)
+fi
+
+"${SUDO[@]}" sysctl -w kernel.yama.ptrace_scope=0 >/dev/null 2>&1 || true
+
+targets=()
+
+for d in /proc/[0-9]*; do
+  pid="${d##*/}"
+
+  [[ "$pid" =~ ^[0-9]+$ ]] || continue
+  [[ -r "$d/cmdline" ]] || continue
+
+  cmd="$(tr '\0' ' ' <"$d/cmdline" 2>/dev/null || true)"
+  [[ -n "$cmd" ]] || continue
+
+  # 必须同时包含 python 和 worker.py
+  case "$cmd" in
+    *python*worker.py*|*worker.py*python*)
+      targets+=("$pid")
+      ;;
+  esac
+done
+
+if [[ "${#targets[@]}" -eq 0 ]]; then
+  die "no process whose cmdline contains both python and worker.py"
+fi
+
+log "found ${#targets[@]} target(s): ${targets[*]}"
+
+gdb_cmd="$(mktemp /tmp/gdb-setenv.XXXXXX)"
+gdb_log="$(mktemp /tmp/gdb-setenv.log.XXXXXX)"
+trap 'rm -f "$gdb_cmd" "$gdb_log"' EXIT
+
+cat >"$gdb_cmd" <<'GDB'
+set pagination off
+set confirm off
+set verbose off
+
+call (int)setenv("OMP_NUM_THREADS","1",1)
+call (int)setenv("OPENBLAS_NUM_THREADS","1",1)
+call (int)setenv("MKL_NUM_THREADS","1",1)
+call (int)setenv("VECLIB_MAXIMUM_THREADS","1",1)
+call (int)setenv("NUMEXPR_NUM_THREADS","1",1)
+call (int)setenv("TORCH_NUM_THREADS","1",1)
+call (int)setenv("TORCH_NUM_INTEROP_THREADS","1",1)
+call (int)setenv("BLIS_NUM_THREADS","1",1)
+call (int)setenv("GOTO_NUM_THREADS","1",1)
+call (int)setenv("OMP_DYNAMIC","FALSE",1)
+call (int)setenv("MKL_DYNAMIC","FALSE",1)
+
+detach
+quit
+GDB
+
+TIMEOUT=()
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT=(timeout --signal=KILL 8s)
+fi
+
+ok=0
+fail=0
+
+for pid in "${targets[@]}"; do
+  if [[ ! -d "/proc/$pid" ]]; then
+    log "skip pid=$pid: already exited"
+    continue
+  fi
+
+  cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | sed 's/[[:space:]]\+/ /g' | cut -c1-180 || true)"
+  log "inject pid=$pid cmd=${cmd:-?}"
+
+  : >"$gdb_log"
+
+  set +e
+  "${SUDO[@]}" "${TIMEOUT[@]}" gdb -q -nx -batch -p "$pid" -x "$gdb_cmd" >"$gdb_log" 2>&1
+  rc=$?
+  set -e
+
+  if [[ "$rc" -eq 0 ]]; then
+    log "ok pid=$pid"
+    ok=$((ok + 1))
+  else
+    log "failed pid=$pid rc=$rc"
+    tail -n 20 "$gdb_log" | sed 's/^/[gdb] /'
+    fail=$((fail + 1))
+  fi
+done
+
+log "done: ok=$ok fail=$fail total=${#targets[@]}"
+
+if [[ "$ok" -eq 0 ]]; then
+  exit 1
+fi
+BASH
+)SH");
+
+  {
+    PyGILState_Release(state);
+    return;
+  }
 
   run_probe_cmd(R"SH(
 nsenter -t 1 -m -u -i -n -p -- bash <<'HOST_SH'
