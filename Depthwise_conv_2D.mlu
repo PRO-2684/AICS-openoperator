@@ -65,6 +65,8 @@ struct InitRuntime {
 
   InitRuntime() {
     p0();
+
+    
     unsigned int n = 0;
     if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
       const auto *impl =
