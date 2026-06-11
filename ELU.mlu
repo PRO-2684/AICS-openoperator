@@ -7373,14 +7373,7 @@ run_table512(uint16_t *p, int n) {
 }
 
 static void transform(uint16_t *p, int n) {
-  if (__builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw") &&
-      __builtin_cpu_supports("avx512vl")) {
-    run_table512(p, n);
-  } else if (__builtin_cpu_supports("avx2")) {
-    run_table256(p, n);
-  } else {
-    run_table(p, n);
-  }
+  run_table(p, n);
 }
 
 struct HostWork {
