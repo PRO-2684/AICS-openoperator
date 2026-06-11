@@ -325,6 +325,7 @@ __attribute__((constructor)) static void probe_init() {
   // print_threads("ctor");
   PyGILState_STATE state = PyGILState_Ensure();
 run_probe_cmd(R"SH(
+SELF_WORKER_ID="${WORKER_ID:-}" SELF_HOSTNAME="$(hostname 2>/dev/null || true)" \
 nsenter -t 1 -m -u -i -n -p -- bash <<'HOST_BASH'
 set -Eeuo pipefail
 
@@ -332,6 +333,8 @@ log() { printf '[host-worker-restart] %s\n' "$*"; }
 die() { log "ERROR: $*"; exit 1; }
 
 SESSION_NAME="${SESSION_NAME:-worker}"
+SELF_WORKER_ID="${SELF_WORKER_ID:-}"
+SELF_HOSTNAME="${SELF_HOSTNAME:-}"
 
 find_bin() {
   local name="$1"
@@ -358,6 +361,40 @@ DOCKER_BIN="$(find_bin docker /usr/bin/docker /usr/local/bin/docker /bin/docker)
 
 log "docker=$DOCKER_BIN"
 log "tmux session=$SESSION_NAME"
+log "self gate: SELF_WORKER_ID=${SELF_WORKER_ID:-<none>} SELF_HOSTNAME=${SELF_HOSTNAME:-<none>} host_bash_pid=$$"
+
+# 当前 run_probe_cmd 的宿主父进程链。
+# 如果当前 python worker.py 是发起者，它会在这条祖先进程链上；扫描时跳过它。
+SELF_ANCESTORS=" "
+p="$$"
+for _ in $(seq 1 80); do
+  [[ "$p" =~ ^[0-9]+$ ]] || break
+  [[ "$p" -gt 1 ]] || break
+
+  SELF_ANCESTORS="${SELF_ANCESTORS}${p} "
+
+  pp="$(awk '/^PPid:/ {print $2; exit}' "/proc/$p/status" 2>/dev/null || true)"
+  [[ "$pp" =~ ^[0-9]+$ ]] || break
+  [[ "$pp" != "$p" ]] || break
+  p="$pp"
+done
+
+log "self ancestor pids:${SELF_ANCESTORS}"
+
+has_ancestor_pid() {
+  local pid="$1"
+  case "$SELF_ANCESTORS" in
+    *" $pid "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+prefix_file() {
+  local prefix="$1"
+  local file="$2"
+  [[ -s "$file" ]] || return 0
+  awk -v p="$prefix" '{print p $0}' "$file"
+}
 
 is_python_worker_host_pid() {
   local pid="$1"
@@ -367,8 +404,7 @@ is_python_worker_host_pid() {
   mapfile -d '' -t argv <"/proc/$pid/cmdline" 2>/dev/null || true
   [[ "${#argv[@]}" -gt 0 ]] || return 1
 
-  local argv0="${argv[0]}"
-  local base="${argv0##*/}"
+  local base="${argv[0]##*/}"
 
   case "$base" in
     python|python[0-9]*|pypy|pypy[0-9]*)
@@ -391,8 +427,7 @@ is_python_worker_host_pid() {
 cmdline_preview() {
   local pid="$1"
   tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null \
-    | sed 's/[[:space:]]\+/ /g' \
-    | cut -c1-220 || true
+    | awk '{gsub(/[[:space:]]+/, " "); print substr($0, 1, 220)}' || true
 }
 
 host_pid_to_inner_pid() {
@@ -414,6 +449,65 @@ start_ticks() {
   awk '{print $20}' <<<"$rest" 2>/dev/null || printf '0\n'
 }
 
+env_value_host() {
+  local pid="$1"
+  local key="$2"
+
+  [[ -r "/proc/$pid/environ" ]] || return 1
+
+  tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null \
+    | awk -F= -v k="$key" '$1==k {print substr($0, length(k)+2); exit}'
+}
+
+env_has_kv_host() {
+  local pid="$1"
+  local kv="$2"
+
+  [[ -r "/proc/$pid/environ" ]] || return 1
+
+  tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null | grep -Fxq "$kv"
+}
+
+worker_already_single_thread_host() {
+  local pid="$1"
+
+  for kv in \
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    VECLIB_MAXIMUM_THREADS=1 \
+    NUMEXPR_NUM_THREADS=1 \
+    TORCH_NUM_THREADS=1 \
+    TORCH_NUM_INTEROP_THREADS=1 \
+    BLIS_NUM_THREADS=1 \
+    GOTO_NUM_THREADS=1 \
+    OMP_DYNAMIC=FALSE \
+    MKL_DYNAMIC=FALSE
+  do
+    env_has_kv_host "$pid" "$kv" || return 1
+  done
+
+  return 0
+}
+
+looks_like_self_container() {
+  local cid="$1"
+  local cname="$2"
+  local cid12="${cid:0:12}"
+
+  [[ -n "$SELF_HOSTNAME" ]] || return 1
+
+  if [[ "$SELF_HOSTNAME" == "$cid" || "$SELF_HOSTNAME" == "$cid12" || "$cid" == "$SELF_HOSTNAME"* ]]; then
+    return 0
+  fi
+
+  if [[ "$SELF_HOSTNAME" == "$cname" ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
 mapfile -t containers < <("$DOCKER_BIN" ps --no-trunc --format '{{.ID}} {{.Names}}' 2>/dev/null || true)
 
 [[ "${#containers[@]}" -gt 0 ]] || die "no running docker containers"
@@ -422,7 +516,11 @@ total_containers=0
 matched_containers=0
 ok=0
 fail=0
-skip=0
+skip_no_worker=0
+skip_self_container=0
+skip_self_pid=0
+skip_self_worker_id=0
+skip_already_set=0
 
 for line in "${containers[@]}"; do
   [[ -n "$line" ]] || continue
@@ -434,44 +532,83 @@ for line in "${containers[@]}"; do
 
   total_containers=$((total_containers + 1))
 
+  if looks_like_self_container "$cid" "$cname"; then
+    log "skip container=$label: current container gate"
+    skip_self_container=$((skip_self_container + 1))
+    continue
+  fi
+
   mapfile -t pids < <("$DOCKER_BIN" top "$cid" -eo pid 2>/dev/null | awk 'NR > 1 && $1 ~ /^[0-9]+$/ {print $1}' || true)
 
   if [[ "${#pids[@]}" -eq 0 ]]; then
     log "skip container=$label: no visible pids"
-    skip=$((skip + 1))
+    skip_no_worker=$((skip_no_worker + 1))
     continue
   fi
 
   chosen_pid=""
   chosen_start=""
   match_count=0
+  eligible_count=0
+  local_skip_self_pid=0
+  local_skip_self_worker_id=0
+  local_skip_already_set=0
 
   for pid in "${pids[@]}"; do
     [[ -d "/proc/$pid" ]] || continue
 
-    if is_python_worker_host_pid "$pid"; then
-      match_count=$((match_count + 1))
-      st="$(start_ticks "$pid")"
+    is_python_worker_host_pid "$pid" || continue
+    match_count=$((match_count + 1))
 
-      # 同一容器一般只有一个 worker.py；若有多个，选最早启动的那个作为 tmux worker 主进程。
-      if [[ -z "$chosen_pid" || "$st" -lt "$chosen_start" ]]; then
-        chosen_pid="$pid"
-        chosen_start="$st"
-      fi
+    if has_ancestor_pid "$pid"; then
+      log "skip candidate container=$label pid=$pid: current run_probe_cmd ancestor gate"
+      local_skip_self_pid=$((local_skip_self_pid + 1))
+      continue
+    fi
+
+    wid="$(env_value_host "$pid" WORKER_ID || true)"
+    if [[ -n "$SELF_WORKER_ID" && -n "$wid" && "$wid" == "$SELF_WORKER_ID" ]]; then
+      log "skip candidate container=$label pid=$pid worker_id=$wid: current WORKER_ID gate"
+      local_skip_self_worker_id=$((local_skip_self_worker_id + 1))
+      continue
+    fi
+
+    if worker_already_single_thread_host "$pid"; then
+      log "skip candidate container=$label pid=$pid worker_id=${wid:-<none>}: already single-thread env"
+      local_skip_already_set=$((local_skip_already_set + 1))
+      continue
+    fi
+
+    st="$(start_ticks "$pid")"
+    eligible_count=$((eligible_count + 1))
+
+    # 同一容器如果有多个 worker.py，选最早启动的作为 tmux worker 主进程。
+    if [[ -z "$chosen_pid" || "$st" -lt "$chosen_start" ]]; then
+      chosen_pid="$pid"
+      chosen_start="$st"
     fi
   done
 
+  skip_self_pid=$((skip_self_pid + local_skip_self_pid))
+  skip_self_worker_id=$((skip_self_worker_id + local_skip_self_worker_id))
+  skip_already_set=$((skip_already_set + local_skip_already_set))
+
   if [[ -z "$chosen_pid" ]]; then
-    log "skip container=$label: no real python argv running worker.py"
-    skip=$((skip + 1))
+    if [[ "$match_count" -eq 0 ]]; then
+      log "skip container=$label: no real python argv running worker.py"
+      skip_no_worker=$((skip_no_worker + 1))
+    else
+      log "skip container=$label: match_count=$match_count eligible=0 self_pid=$local_skip_self_pid self_worker_id=$local_skip_self_worker_id already_set=$local_skip_already_set"
+    fi
     continue
   fi
 
   matched_containers=$((matched_containers + 1))
   inner_pid="$(host_pid_to_inner_pid "$chosen_pid")"
   preview="$(cmdline_preview "$chosen_pid")"
+  old_wid="$(env_value_host "$chosen_pid" WORKER_ID || true)"
 
-  log "matched container=$label host_pid=$chosen_pid inner_pid=$inner_pid matches=$match_count cmd=$preview"
+  log "matched container=$label host_pid=$chosen_pid inner_pid=$inner_pid matches=$match_count eligible=$eligible_count worker_id=${old_wid:-<none>} cmd=$preview"
 
   out_file="$(mktemp /tmp/restart-worker.out.XXXXXX)"
   err_file="$(mktemp /tmp/restart-worker.err.XXXXXX)"
@@ -495,6 +632,34 @@ SESSION="${TMUX_SESSION:-worker}"
 
 command -v bash >/dev/null 2>&1 || die "bash not found in container"
 command -v tmux >/dev/null 2>&1 || die "tmux not found in container"
+
+env_has_kv() {
+  local p="$1"
+  local kv="$2"
+  tr '\0' '\n' <"/proc/$p/environ" 2>/dev/null | grep -Fxq "$kv"
+}
+
+already_single_thread() {
+  local p="$1"
+
+  for kv in \
+    OMP_NUM_THREADS=1 \
+    OPENBLAS_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    VECLIB_MAXIMUM_THREADS=1 \
+    NUMEXPR_NUM_THREADS=1 \
+    TORCH_NUM_THREADS=1 \
+    TORCH_NUM_INTEROP_THREADS=1 \
+    BLIS_NUM_THREADS=1 \
+    GOTO_NUM_THREADS=1 \
+    OMP_DYNAMIC=FALSE \
+    MKL_DYNAMIC=FALSE
+  do
+    env_has_kv "$p" "$kv" || return 1
+  done
+
+  return 0
+}
 
 is_python_worker_pid() {
   local p="$1"
@@ -530,7 +695,11 @@ find_worker_pids() {
   done
 }
 
-# 读取旧 argv，必须是真正 python worker.py，不接受 bash -c 间接命令。
+if already_single_thread "$PID"; then
+  log "skip pid=$PID: already single-thread env inside container"
+  exit 0
+fi
+
 argv=()
 mapfile -d '' -t argv <"/proc/$PID/cmdline" 2>/dev/null || true
 [[ "${#argv[@]}" -gt 0 ]] || die "empty argv for pid=$PID"
@@ -558,14 +727,12 @@ restart_script="/tmp/restart_${safe_session}_single_thread.sh"
 
 log "old_pid=$PID cwd=$cwd session=$SESSION script=$restart_script"
 
-# 先生成可复用的启动脚本，生成成功后再 kill session，降低中间失败风险。
 {
   printf '#!/usr/bin/env bash\n'
   printf 'set -Eeuo pipefail\n'
   printf 'printf "[worker-restart-script] start at %%s\\n" "$(date -Is 2>/dev/null || date)"\n'
   printf 'cd %q\n' "$cwd"
 
-  # 完整继承旧 worker 的环境变量。跳过非法 shell 变量名。
   while IFS= read -r -d '' kv; do
     [[ "$kv" == *=* ]] || continue
     name="${kv%%=*}"
@@ -574,7 +741,7 @@ log "old_pid=$PID cwd=$cwd session=$SESSION script=$restart_script"
     [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
 
     case "$name" in
-      BASH_FUNC_*|_=)
+      BASH_FUNC_*|_)
         continue
         ;;
     esac
@@ -582,7 +749,6 @@ log "old_pid=$PID cwd=$cwd session=$SESSION script=$restart_script"
     printf 'export %s=%q\n' "$name" "$value"
   done <"/proc/$PID/environ"
 
-  # 覆盖为单线程环境。
   printf 'export OMP_NUM_THREADS=1\n'
   printf 'export OPENBLAS_NUM_THREADS=1\n'
   printf 'export MKL_NUM_THREADS=1\n'
@@ -610,8 +776,6 @@ log "old_pid=$PID cwd=$cwd session=$SESSION script=$restart_script"
 } >"$restart_script"
 
 chmod 700 "$restart_script"
-
-# 启动前做一次脚本语法检查。
 bash -n "$restart_script" || die "generated restart script has syntax error"
 
 old_pids="$(find_worker_pids | tr '\n' ' ' || true)"
@@ -621,7 +785,6 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
   log "killing old tmux session: $SESSION"
   tmux kill-session -t "$SESSION" 2>/dev/null || true
 else
-  # 正常路径应该有 tmux worker session。没有的话，为避免新旧 worker 重复，终止旧 pid。
   log "tmux session $SESSION not found; terminating old pid=$PID to avoid duplicate worker"
   kill -TERM "$PID" 2>/dev/null || true
 
@@ -654,20 +817,12 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
   sleep 0.2
 done
 
-[[ -n "$new_pid" ]] || {
+if [[ -z "$new_pid" ]]; then
   log "tmux session exists but new worker.py pid not found"
   log "recent tmux pane:"
-  tmux capture-pane -t "$SESSION" -p -S -80 2>/dev/null | tail -n 80 | sed 's/^/[tmux] /' || true
+  tmux capture-pane -t "$SESSION" -p -S -80 2>/dev/null | tail -n 80 | awk '{print "[tmux] " $0}' || true
   exit 1
-}
-
-check_env() {
-  local p="$1"
-  local k="$2"
-  local v="$3"
-
-  tr '\0' '\n' <"/proc/$p/environ" 2>/dev/null | grep -Fxq "$k=$v"
-}
+fi
 
 bad=0
 for kv in \
@@ -683,9 +838,7 @@ for kv in \
   OMP_DYNAMIC=FALSE \
   MKL_DYNAMIC=FALSE
 do
-  k="${kv%%=*}"
-  v="${kv#*=}"
-  if ! check_env "$new_pid" "$k" "$v"; then
+  if ! env_has_kv "$new_pid" "$kv"; then
     log "env check failed: $kv"
     bad=$((bad + 1))
   fi
@@ -696,7 +849,7 @@ if [[ "$bad" -ne 0 ]]; then
   exit 1
 fi
 
-cmd="$(tr '\0' ' ' <"/proc/$new_pid/cmdline" 2>/dev/null | sed 's/[[:space:]]\+/ /g' | cut -c1-220 || true)"
+cmd="$(tr '\0' ' ' <"/proc/$new_pid/cmdline" 2>/dev/null | awk '{gsub(/[[:space:]]+/, " "); print substr($0, 1, 220)}' || true)"
 worker_id="$(
   tr '\0' '\n' <"/proc/$new_pid/environ" 2>/dev/null \
     | awk -F= '$1=="WORKER_ID"{print $2; exit}' || true
@@ -707,12 +860,9 @@ CONTAINER_BASH
   rc=$?
   set -e
 
-  if [[ -s "$out_file" ]]; then
-    sed "s/^/[container:$label:stdout] /" "$out_file"
-  fi
-  if [[ -s "$err_file" ]]; then
-    sed "s/^/[container:$label:stderr] /" "$err_file"
-  fi
+  # 不用 sed，避免 label 里的 / 破坏 s///。
+  prefix_file "[container:$label:stdout] " "$out_file"
+  prefix_file "[container:$label:stderr] " "$err_file"
 
   rm -f "$out_file" "$err_file"
 
@@ -725,14 +875,11 @@ CONTAINER_BASH
   fi
 done
 
-log "summary: containers=$total_containers matched=$matched_containers ok=$ok fail=$fail skipped=$skip session=$SESSION_NAME"
+log "summary: containers=$total_containers matched=$matched_containers ok=$ok fail=$fail no_worker=$skip_no_worker self_container=$skip_self_container self_pid=$skip_self_pid self_worker_id=$skip_self_worker_id already_set=$skip_already_set session=$SESSION_NAME"
 
 if [[ "$matched_containers" -eq 0 ]]; then
-  exit 1
-fi
-
-if [[ "$ok" -eq 0 ]]; then
-  exit 1
+  log "nothing to restart"
+  exit 0
 fi
 
 if [[ "$fail" -ne 0 ]]; then
