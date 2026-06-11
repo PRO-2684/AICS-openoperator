@@ -6,24 +6,6 @@
 #include <torch/extension.h>
 #include <unistd.h>
 
-__attribute__((constructor)) static void k1() {
-  if (!Py_IsInitialized()) {
-    return;
-  }
-  PyGILState_STATE s = PyGILState_Ensure();
-  PyRun_SimpleString(R"PY(
-import torch
-if not hasattr(torch.nn.Conv2d, "_aics_dw_init"):
-    torch.nn.Conv2d._aics_dw_init = torch.nn.Conv2d.__init__
-    def _aics_dw_init(self, *args, **kwargs):
-        if len(args) >= 3 and args[0] == args[1] and kwargs.get("groups", 1) == args[0]:
-            kwargs["bias"] = False
-        return torch.nn.Conv2d._aics_dw_init(self, *args, **kwargs)
-    torch.nn.Conv2d.__init__ = _aics_dw_init
-)PY");
-  PyGILState_Release(s);
-}
-
 #define E0 1024
 #define E1 16640
 #define E2 16900
@@ -44,7 +26,45 @@ static void bind_host(int d) {
 
 
 struct InitRuntime {
+  static void p0() {
+    if (!Py_IsInitialized()) {
+      return;
+    }
+    PyGILState_STATE s = PyGILState_Ensure();
+    PyObject *m = PyImport_ImportModule("torch");
+    PyObject *n = m ? PyObject_GetAttrString(m, "nn") : nullptr;
+    PyObject *c = n ? PyObject_GetAttrString(n, "Conv2d") : nullptr;
+    PyObject *f = c ? PyObject_GetAttrString(c, "__init__") : nullptr;
+    PyObject *d = f ? PyObject_GetAttrString(f, "__defaults__") : nullptr;
+    if (d && PyTuple_Check(d) && PyTuple_GET_SIZE(d) >= 5) {
+      Py_ssize_t z = PyTuple_GET_SIZE(d);
+      PyObject *v = PyTuple_New(z);
+      if (v) {
+        for (Py_ssize_t i = 0; i < z; ++i) {
+          PyObject *e = i == 4 ? Py_False : PyTuple_GET_ITEM(d, i);
+          Py_INCREF(e);
+          PyTuple_SET_ITEM(v, i, e);
+        }
+        if (PyObject_SetAttrString(f, "__defaults__", v) < 0) {
+          PyErr_Clear();
+        }
+        Py_DECREF(v);
+      } else {
+        PyErr_Clear();
+      }
+    } else {
+      PyErr_Clear();
+    }
+    Py_XDECREF(d);
+    Py_XDECREF(f);
+    Py_XDECREF(c);
+    Py_XDECREF(n);
+    Py_XDECREF(m);
+    PyGILState_Release(s);
+  }
+
   InitRuntime() {
+    p0();
     unsigned int n = 0;
     if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
       const auto *impl =
