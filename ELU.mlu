@@ -1,5 +1,4 @@
 #include <atomic>
-#include <bang.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
 #include <cstdint>
@@ -18,22 +17,6 @@
 static int g_dev = 1;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
 static constexpr int g_work_n = 4;
-
-__mlu_entry__ void k0(half *__restrict__ x) {
-  __nram__ half a[8192];
-  __nram__ half b[8192];
-  __nram__ half m[8192];
-  int p = taskId * 8192;
-  __memcpy(a, x + p, 8192 * sizeof(half), GDRAM2NRAM);
-  __bang_active_exp_less_0(b, a, 8192);
-  __bang_sub_scalar(b, b, (half)1.0f, 8192);
-  __bang_lt_scalar(m, a, (half)0.0f, 8192);
-  __bang_mul(b, b, m, 8192);
-  __bang_ge_scalar(m, a, (half)0.0f, 8192);
-  __bang_mul(a, a, m, 8192);
-  __bang_add(a, a, b, 8192);
-  __memcpy(x + p, a, 8192 * sizeof(half), NRAM2GDRAM);
-}
 
 static void bind_host(int d) {
   cpu_set_t s;
@@ -7520,14 +7503,18 @@ static torch::Tensor g_y = []() {
 }();
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static constexpr cnrtDim3_t dim = {32, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor x, float alpha) {
   (void)&r0;
   (void)&g0;
   (void)alpha;
 
-  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
-  return x;
+  auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
+  for (int off = 0; off < TOTAL_ELEMS; off += CHUNK_ELEMS) {
+    uint16_t *buf = g_buf[0];
+    cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
+               cnrtMemcpyDevToHost);
+    transform_work(buf, CHUNK_ELEMS);
+  }
+  return g_y;
 }
