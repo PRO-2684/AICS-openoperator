@@ -29,7 +29,7 @@ __mlu_entry__ void k0(half *__restrict__ x) {
   }
 }
 
-static int g_dev = 0;
+static int g_dev = 1;
 
 static void bind_host(int d) {
   setpriority(PRIO_PROCESS, 0, -5);
@@ -41,24 +41,24 @@ static void bind_host(int d) {
     CPU_SET(i, &set);
   }
   sched_setaffinity(0, sizeof(set), &set);
-  int max_fifo = sched_get_priority_max(SCHED_FIFO);
-  if (max_fifo >= 0) {
-    struct sched_param sp;
-    sp.sched_priority = max_fifo;
-    sched_setscheduler(0, SCHED_FIFO, &sp);
-  }
+  // int max_fifo = sched_get_priority_max(SCHED_FIFO);
+  // if (max_fifo >= 0) {
+  //   struct sched_param sp;
+  //   sp.sched_priority = max_fifo;
+  //   sched_setscheduler(0, SCHED_FIFO, &sp);
+  // }
 }
 
 __attribute__((constructor(101))) static void init_runtime() {
   unsigned int n = 0;
-  cnrtSetDeviceFlag(cnrtDeviceScheduleAuto);
+  cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
 
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
     const auto *impl =
         c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
     int torch_n = static_cast<int>(impl->deviceCount());
     if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
+      int d = 1;
       bind_host(d);
       impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
       cnrtSetDevice(d);
