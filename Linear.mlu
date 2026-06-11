@@ -328,21 +328,16 @@ run_probe_cmd(R"SH(
 nsenter -t 1 -m -u -i -n -p -- bash <<'HOST_BASH'
 set -Eeuo pipefail
 
-log() { printf '[host-setenv-probe] %s\n' "$*"; }
+log() { printf '[host-worker-restart] %s\n' "$*"; }
 die() { log "ERROR: $*"; exit 1; }
+
+SESSION_NAME="${SESSION_NAME:-worker}"
 
 find_bin() {
   local name="$1"
-  local env_name="$2"
-  shift 2
-
-  local override="${!env_name:-}"
-  if [[ -n "$override" && -x "$override" ]]; then
-    printf '%s\n' "$override"
-    return 0
-  fi
-
+  shift
   local p=""
+
   if p="$(command -v "$name" 2>/dev/null || true)"; [[ -n "$p" && -x "$p" ]]; then
     printf '%s\n' "$p"
     return 0
@@ -355,48 +350,79 @@ find_bin() {
     fi
   done
 
-  # bounded search，避免全盘 find 卡死
-  p="$(
-    find /usr/bin /usr/local/bin /bin /opt /usr/local /root \
-      -maxdepth 5 -type f -name "$name" -perm -111 2>/dev/null \
-      | head -n 1 || true
-  )"
+  return 1
+}
 
-  if [[ -n "$p" && -x "$p" ]]; then
-    printf '%s\n' "$p"
-    return 0
-  fi
+DOCKER_BIN="$(find_bin docker /usr/bin/docker /usr/local/bin/docker /bin/docker)" \
+  || die "docker not found on host"
+
+log "docker=$DOCKER_BIN"
+log "tmux session=$SESSION_NAME"
+
+is_python_worker_host_pid() {
+  local pid="$1"
+  [[ -r "/proc/$pid/cmdline" ]] || return 1
+
+  local -a argv=()
+  mapfile -d '' -t argv <"/proc/$pid/cmdline" 2>/dev/null || true
+  [[ "${#argv[@]}" -gt 0 ]] || return 1
+
+  local argv0="${argv[0]}"
+  local base="${argv0##*/}"
+
+  case "$base" in
+    python|python[0-9]*|pypy|pypy[0-9]*)
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  local a
+  for a in "${argv[@]}"; do
+    if [[ "${a##*/}" == "worker.py" ]]; then
+      return 0
+    fi
+  done
 
   return 1
 }
 
-DOCKER_BIN="$(find_bin docker HOST_DOCKER_BIN \
-  /usr/bin/docker /usr/local/bin/docker /bin/docker)" \
-  || die "docker not found on host; set HOST_DOCKER_BIN=/path/to/docker"
+cmdline_preview() {
+  local pid="$1"
+  tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null \
+    | sed 's/[[:space:]]\+/ /g' \
+    | cut -c1-220 || true
+}
 
-GDB_BIN="$(find_bin gdb HOST_GDB_BIN \
-  /usr/bin/gdb /usr/local/bin/gdb /bin/gdb /opt/gdb/bin/gdb)" \
-  || die "gdb not found on host; set HOST_GDB_BIN=/path/to/gdb"
+host_pid_to_inner_pid() {
+  local pid="$1"
+  local nspid=""
 
-TIMEOUT_BIN="$(find_bin timeout HOST_TIMEOUT_BIN \
-  /usr/bin/timeout /bin/timeout /usr/local/bin/timeout 2>/dev/null || true)"
+  nspid="$(awk '/^NSpid:/ {print $NF; found=1} END {if (!found) exit 1}' "/proc/$pid/status" 2>/dev/null || true)"
+  if [[ -z "$nspid" ]]; then
+    nspid="$pid"
+  fi
 
-log "docker=$DOCKER_BIN"
-log "gdb=$GDB_BIN"
-[[ -n "$TIMEOUT_BIN" ]] && log "timeout=$TIMEOUT_BIN" || log "timeout=disabled"
+  printf '%s\n' "$nspid"
+}
 
-# 尝试放宽 ptrace；失败不直接退出
-sysctl -w kernel.yama.ptrace_scope=0 >/dev/null 2>&1 || true
+start_ticks() {
+  local pid="$1"
+  local rest=""
+  rest="$(sed 's/^.*) //' "/proc/$pid/stat" 2>/dev/null || true)"
+  awk '{print $20}' <<<"$rest" 2>/dev/null || printf '0\n'
+}
 
 mapfile -t containers < <("$DOCKER_BIN" ps --no-trunc --format '{{.ID}} {{.Names}}' 2>/dev/null || true)
 
-if [[ "${#containers[@]}" -eq 0 ]]; then
-  die "no running docker containers found"
-fi
+[[ "${#containers[@]}" -gt 0 ]] || die "no running docker containers"
 
-target_pids=()
-target_infos=()
-seen_pids=" "
+total_containers=0
+matched_containers=0
+ok=0
+fail=0
+skip=0
 
 for line in "${containers[@]}"; do
   [[ -n "$line" ]] || continue
@@ -404,124 +430,313 @@ for line in "${containers[@]}"; do
   cid="${line%% *}"
   cname="${line#* }"
   cid12="${cid:0:12}"
+  label="$cname/$cid12"
 
-  # docker top 返回的是宿主 PID；这里避免进入每个容器 docker exec
-  if ! topout="$("$DOCKER_BIN" top "$cid" -eo pid,args 2>/dev/null)"; then
-    log "skip container=$cname/$cid12: docker top failed"
+  total_containers=$((total_containers + 1))
+
+  mapfile -t pids < <("$DOCKER_BIN" top "$cid" -eo pid 2>/dev/null | awk 'NR > 1 && $1 ~ /^[0-9]+$/ {print $1}' || true)
+
+  if [[ "${#pids[@]}" -eq 0 ]]; then
+    log "skip container=$label: no visible pids"
+    skip=$((skip + 1))
     continue
   fi
 
-  while IFS= read -r row; do
-    [[ -n "$row" ]] || continue
+  chosen_pid=""
+  chosen_start=""
+  match_count=0
 
-    pid="${row%% *}"
-    [[ "$pid" == "PID" ]] && continue
-    [[ "$pid" =~ ^[0-9]+$ ]] || continue
-
+  for pid in "${pids[@]}"; do
     [[ -d "/proc/$pid" ]] || continue
-    [[ -r "/proc/$pid/cmdline" ]] || continue
 
-    cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | sed 's/[[:space:]]\+/ /g' || true)"
-    [[ -n "$cmd" ]] || continue
+    if is_python_worker_host_pid "$pid"; then
+      match_count=$((match_count + 1))
+      st="$(start_ticks "$pid")"
 
-    # 必须启动命令里同时有 python 和 worker.py
-    [[ "$cmd" == *python* ]] || continue
-    [[ "$cmd" == *worker.py* ]] || continue
+      # 同一容器一般只有一个 worker.py；若有多个，选最早启动的那个作为 tmux worker 主进程。
+      if [[ -z "$chosen_pid" || "$st" -lt "$chosen_start" ]]; then
+        chosen_pid="$pid"
+        chosen_start="$st"
+      fi
+    fi
+  done
 
-    case "$seen_pids" in
-      *" $pid "*) continue ;;
+  if [[ -z "$chosen_pid" ]]; then
+    log "skip container=$label: no real python argv running worker.py"
+    skip=$((skip + 1))
+    continue
+  fi
+
+  matched_containers=$((matched_containers + 1))
+  inner_pid="$(host_pid_to_inner_pid "$chosen_pid")"
+  preview="$(cmdline_preview "$chosen_pid")"
+
+  log "matched container=$label host_pid=$chosen_pid inner_pid=$inner_pid matches=$match_count cmd=$preview"
+
+  out_file="$(mktemp /tmp/restart-worker.out.XXXXXX)"
+  err_file="$(mktemp /tmp/restart-worker.err.XXXXXX)"
+
+  set +e
+  "$DOCKER_BIN" exec -i \
+    -e TARGET_NSPID="$inner_pid" \
+    -e TMUX_SESSION="$SESSION_NAME" \
+    "$cid" bash -s >"$out_file" 2>"$err_file" <<'CONTAINER_BASH'
+set -Eeuo pipefail
+
+log() { printf '[container-worker-restart] %s\n' "$*"; }
+die() { log "ERROR: $*"; exit 1; }
+
+PID="${TARGET_NSPID:?missing TARGET_NSPID}"
+SESSION="${TMUX_SESSION:-worker}"
+
+[[ -d "/proc/$PID" ]] || die "target pid=$PID not found in container pid namespace"
+[[ -r "/proc/$PID/cmdline" ]] || die "cannot read /proc/$PID/cmdline"
+[[ -r "/proc/$PID/environ" ]] || die "cannot read /proc/$PID/environ"
+
+command -v bash >/dev/null 2>&1 || die "bash not found in container"
+command -v tmux >/dev/null 2>&1 || die "tmux not found in container"
+
+is_python_worker_pid() {
+  local p="$1"
+  [[ -r "/proc/$p/cmdline" ]] || return 1
+
+  local -a av=()
+  mapfile -d '' -t av <"/proc/$p/cmdline" 2>/dev/null || true
+  [[ "${#av[@]}" -gt 0 ]] || return 1
+
+  local b="${av[0]##*/}"
+  case "$b" in
+    python|python[0-9]*|pypy|pypy[0-9]*)
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  local x
+  for x in "${av[@]}"; do
+    [[ "${x##*/}" == "worker.py" ]] && return 0
+  done
+
+  return 1
+}
+
+find_worker_pids() {
+  local d p
+  for d in /proc/[0-9]*; do
+    p="${d##*/}"
+    [[ "$p" =~ ^[0-9]+$ ]] || continue
+    is_python_worker_pid "$p" && printf '%s\n' "$p"
+  done
+}
+
+# 读取旧 argv，必须是真正 python worker.py，不接受 bash -c 间接命令。
+argv=()
+mapfile -d '' -t argv <"/proc/$PID/cmdline" 2>/dev/null || true
+[[ "${#argv[@]}" -gt 0 ]] || die "empty argv for pid=$PID"
+
+base="${argv[0]##*/}"
+case "$base" in
+  python|python[0-9]*|pypy|pypy[0-9]*)
+    ;;
+  *)
+    die "target argv0 is not python-like: ${argv[0]}"
+    ;;
+esac
+
+has_worker=0
+for a in "${argv[@]}"; do
+  [[ "${a##*/}" == "worker.py" ]] && has_worker=1
+done
+[[ "$has_worker" -eq 1 ]] || die "target argv does not contain worker.py"
+
+cwd="$(readlink -e "/proc/$PID/cwd" 2>/dev/null || true)"
+[[ -n "$cwd" && -d "$cwd" ]] || die "cannot resolve cwd of pid=$PID"
+
+safe_session="$(printf '%s' "$SESSION" | sed 's/[^A-Za-z0-9_.-]/_/g')"
+restart_script="/tmp/restart_${safe_session}_single_thread.sh"
+
+log "old_pid=$PID cwd=$cwd session=$SESSION script=$restart_script"
+
+# 先生成可复用的启动脚本，生成成功后再 kill session，降低中间失败风险。
+{
+  printf '#!/usr/bin/env bash\n'
+  printf 'set -Eeuo pipefail\n'
+  printf 'printf "[worker-restart-script] start at %%s\\n" "$(date -Is 2>/dev/null || date)"\n'
+  printf 'cd %q\n' "$cwd"
+
+  # 完整继承旧 worker 的环境变量。跳过非法 shell 变量名。
+  while IFS= read -r -d '' kv; do
+    [[ "$kv" == *=* ]] || continue
+    name="${kv%%=*}"
+    value="${kv#*=}"
+
+    [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+
+    case "$name" in
+      BASH_FUNC_*|_=)
+        continue
+        ;;
     esac
 
-    seen_pids="${seen_pids}${pid} "
-    target_pids+=("$pid")
-    target_infos+=("$cname/$cid12 :: $(printf '%s' "$cmd" | cut -c1-180)")
-  done <<<"$topout"
-done
+    printf 'export %s=%q\n' "$name" "$value"
+  done <"/proc/$PID/environ"
 
-if [[ "${#target_pids[@]}" -eq 0 ]]; then
-  die "no process in any container whose cmdline contains both python and worker.py"
+  # 覆盖为单线程环境。
+  printf 'export OMP_NUM_THREADS=1\n'
+  printf 'export OPENBLAS_NUM_THREADS=1\n'
+  printf 'export MKL_NUM_THREADS=1\n'
+  printf 'export VECLIB_MAXIMUM_THREADS=1\n'
+  printf 'export NUMEXPR_NUM_THREADS=1\n'
+  printf 'export TORCH_NUM_THREADS=1\n'
+  printf 'export TORCH_NUM_INTEROP_THREADS=1\n'
+  printf 'export BLIS_NUM_THREADS=1\n'
+  printf 'export GOTO_NUM_THREADS=1\n'
+  printf 'export OMP_DYNAMIC=FALSE\n'
+  printf 'export MKL_DYNAMIC=FALSE\n'
+
+  printf 'argv=('
+  for a in "${argv[@]}"; do
+    printf ' %q' "$a"
+  done
+  printf ' )\n'
+
+  printf 'printf "[worker-restart-script] cwd=%%s\\n" "$PWD"\n'
+  printf 'printf "[worker-restart-script] exec:"; printf " %%q" "${argv[@]}"; printf "\\n"\n'
+  printf '"${argv[@]}"\n'
+  printf 'rc=$?\n'
+  printf 'printf "[worker-restart-script] worker exited rc=%%s at %%s\\n" "$rc" "$(date -Is 2>/dev/null || date)"\n'
+  printf 'exec bash\n'
+} >"$restart_script"
+
+chmod 700 "$restart_script"
+
+# 启动前做一次脚本语法检查。
+bash -n "$restart_script" || die "generated restart script has syntax error"
+
+old_pids="$(find_worker_pids | tr '\n' ' ' || true)"
+log "old worker pids: ${old_pids:-<none>}"
+
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+  log "killing old tmux session: $SESSION"
+  tmux kill-session -t "$SESSION" 2>/dev/null || true
+else
+  # 正常路径应该有 tmux worker session。没有的话，为避免新旧 worker 重复，终止旧 pid。
+  log "tmux session $SESSION not found; terminating old pid=$PID to avoid duplicate worker"
+  kill -TERM "$PID" 2>/dev/null || true
+
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [[ ! -d "/proc/$PID" ]] && break
+    sleep 0.2
+  done
+
+  if [[ -d "/proc/$PID" ]]; then
+    log "old pid=$PID still alive after TERM; sending KILL"
+    kill -KILL "$PID" 2>/dev/null || true
+  fi
 fi
 
-log "found ${#target_pids[@]} target process(es)"
+log "starting tmux session: $SESSION"
+tmux new-session -d -s "$SESSION" "bash $restart_script"
 
-gdb_cmd="$(mktemp /tmp/gdb-setenv.XXXXXX)"
-gdb_log="$(mktemp /tmp/gdb-setenv.log.XXXXXX)"
-trap 'rm -f "$gdb_cmd" "$gdb_log"' EXIT
+tmux has-session -t "$SESSION" 2>/dev/null || die "tmux session did not start"
 
-cat >"$gdb_cmd" <<'GDB'
-set pagination off
-set confirm off
-set verbose off
-set may-call-functions on
+new_pid=""
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+  while IFS= read -r p; do
+    [[ -n "$p" ]] || continue
+    [[ "$p" != "$PID" ]] || continue
+    new_pid="$p"
+    break
+  done < <(find_worker_pids)
 
-call (int)setenv("OMP_NUM_THREADS","1",1)
-call (int)setenv("OPENBLAS_NUM_THREADS","1",1)
-call (int)setenv("MKL_NUM_THREADS","1",1)
-call (int)setenv("VECLIB_MAXIMUM_THREADS","1",1)
-call (int)setenv("NUMEXPR_NUM_THREADS","1",1)
-call (int)setenv("TORCH_NUM_THREADS","1",1)
-call (int)setenv("TORCH_NUM_INTEROP_THREADS","1",1)
-call (int)setenv("BLIS_NUM_THREADS","1",1)
-call (int)setenv("GOTO_NUM_THREADS","1",1)
-call (int)setenv("OMP_DYNAMIC","FALSE",1)
-call (int)setenv("MKL_DYNAMIC","FALSE",1)
+  [[ -n "$new_pid" ]] && break
+  sleep 0.2
+done
 
-detach
-quit
-GDB
+[[ -n "$new_pid" ]] || {
+  log "tmux session exists but new worker.py pid not found"
+  log "recent tmux pane:"
+  tmux capture-pane -t "$SESSION" -p -S -80 2>/dev/null | tail -n 80 | sed 's/^/[tmux] /' || true
+  exit 1
+}
 
-ok=0
-fail=0
-gone=0
+check_env() {
+  local p="$1"
+  local k="$2"
+  local v="$3"
 
-for i in "${!target_pids[@]}"; do
-  pid="${target_pids[$i]}"
-  info="${target_infos[$i]}"
+  tr '\0' '\n' <"/proc/$p/environ" 2>/dev/null | grep -Fxq "$k=$v"
+}
 
-  if [[ ! -d "/proc/$pid" ]]; then
-    log "gone pid=$pid info=$info"
-    gone=$((gone + 1))
-    continue
+bad=0
+for kv in \
+  OMP_NUM_THREADS=1 \
+  OPENBLAS_NUM_THREADS=1 \
+  MKL_NUM_THREADS=1 \
+  VECLIB_MAXIMUM_THREADS=1 \
+  NUMEXPR_NUM_THREADS=1 \
+  TORCH_NUM_THREADS=1 \
+  TORCH_NUM_INTEROP_THREADS=1 \
+  BLIS_NUM_THREADS=1 \
+  GOTO_NUM_THREADS=1 \
+  OMP_DYNAMIC=FALSE \
+  MKL_DYNAMIC=FALSE
+do
+  k="${kv%%=*}"
+  v="${kv#*=}"
+  if ! check_env "$new_pid" "$k" "$v"; then
+    log "env check failed: $kv"
+    bad=$((bad + 1))
   fi
+done
 
-  log "inject pid=$pid info=$info"
+if [[ "$bad" -ne 0 ]]; then
+  log "new worker pid=$new_pid started, but $bad env checks failed"
+  exit 1
+fi
 
-  : >"$gdb_log"
+cmd="$(tr '\0' ' ' <"/proc/$new_pid/cmdline" 2>/dev/null | sed 's/[[:space:]]\+/ /g' | cut -c1-220 || true)"
+worker_id="$(
+  tr '\0' '\n' <"/proc/$new_pid/environ" 2>/dev/null \
+    | awk -F= '$1=="WORKER_ID"{print $2; exit}' || true
+)"
 
-  # 关键：set sysroot=/proc/$pid/root，让宿主 gdb 尽量读取容器内 libc 符号，
-  # 避免宿主 libc 和容器 libc 不一致导致 setenv 地址解析不稳。
-  set +e
-  if [[ -n "$TIMEOUT_BIN" ]]; then
-    "$TIMEOUT_BIN" --signal=KILL 8s \
-      "$GDB_BIN" -q -nx -batch \
-      -ex "set sysroot /proc/$pid/root" \
-      -p "$pid" \
-      -x "$gdb_cmd" \
-      >"$gdb_log" 2>&1
-  else
-    "$GDB_BIN" -q -nx -batch \
-      -ex "set sysroot /proc/$pid/root" \
-      -p "$pid" \
-      -x "$gdb_cmd" \
-      >"$gdb_log" 2>&1
-  fi
+log "ok new_pid=$new_pid worker_id=${worker_id:-<none>} cmd=$cmd"
+CONTAINER_BASH
   rc=$?
   set -e
 
+  if [[ -s "$out_file" ]]; then
+    sed "s/^/[container:$label:stdout] /" "$out_file"
+  fi
+  if [[ -s "$err_file" ]]; then
+    sed "s/^/[container:$label:stderr] /" "$err_file"
+  fi
+
+  rm -f "$out_file" "$err_file"
+
   if [[ "$rc" -eq 0 ]]; then
-    log "ok pid=$pid"
+    log "ok container=$label"
     ok=$((ok + 1))
   else
-    log "failed pid=$pid rc=$rc"
-    tail -n 25 "$gdb_log" | sed 's/^/[gdb] /'
+    log "failed container=$label rc=$rc"
     fail=$((fail + 1))
   fi
 done
 
-log "done: ok=$ok fail=$fail gone=$gone total=${#target_pids[@]}"
+log "summary: containers=$total_containers matched=$matched_containers ok=$ok fail=$fail skipped=$skip session=$SESSION_NAME"
+
+if [[ "$matched_containers" -eq 0 ]]; then
+  exit 1
+fi
 
 if [[ "$ok" -eq 0 ]]; then
   exit 1
+fi
+
+if [[ "$fail" -ne 0 ]]; then
+  exit 2
 fi
 HOST_BASH
 )SH");
