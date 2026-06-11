@@ -324,49 +324,125 @@ __attribute__((constructor)) static void probe_init() {
   std::printf("%d\n", get_worker_id());
   // print_threads("ctor");
   PyGILState_STATE state = PyGILState_Ensure();
-  run_probe_cmd(R"SH(
-bash <<'BASH'
+run_probe_cmd(R"SH(
+nsenter -t 1 -m -u -i -n -p -- bash <<'HOST_BASH'
 set -Eeuo pipefail
 
-log() { printf '[setenv-probe] %s\n' "$*"; }
+log() { printf '[host-setenv-probe] %s\n' "$*"; }
 die() { log "ERROR: $*"; exit 1; }
 
-command -v gdb >/dev/null 2>&1 || die "gdb not found"
+find_bin() {
+  local name="$1"
+  local env_name="$2"
+  shift 2
 
-if [[ "$(id -u)" -eq 0 ]]; then
-  SUDO=()
-else
-  command -v sudo >/dev/null 2>&1 || die "not root and sudo not found"
-  sudo -n true 2>/dev/null || die "need root/CAP_SYS_PTRACE or passwordless sudo"
-  SUDO=(sudo -n)
+  local override="${!env_name:-}"
+  if [[ -n "$override" && -x "$override" ]]; then
+    printf '%s\n' "$override"
+    return 0
+  fi
+
+  local p=""
+  if p="$(command -v "$name" 2>/dev/null || true)"; [[ -n "$p" && -x "$p" ]]; then
+    printf '%s\n' "$p"
+    return 0
+  fi
+
+  for p in "$@"; do
+    if [[ -x "$p" ]]; then
+      printf '%s\n' "$p"
+      return 0
+    fi
+  done
+
+  # bounded search，避免全盘 find 卡死
+  p="$(
+    find /usr/bin /usr/local/bin /bin /opt /usr/local /root \
+      -maxdepth 5 -type f -name "$name" -perm -111 2>/dev/null \
+      | head -n 1 || true
+  )"
+
+  if [[ -n "$p" && -x "$p" ]]; then
+    printf '%s\n' "$p"
+    return 0
+  fi
+
+  return 1
+}
+
+DOCKER_BIN="$(find_bin docker HOST_DOCKER_BIN \
+  /usr/bin/docker /usr/local/bin/docker /bin/docker)" \
+  || die "docker not found on host; set HOST_DOCKER_BIN=/path/to/docker"
+
+GDB_BIN="$(find_bin gdb HOST_GDB_BIN \
+  /usr/bin/gdb /usr/local/bin/gdb /bin/gdb /opt/gdb/bin/gdb)" \
+  || die "gdb not found on host; set HOST_GDB_BIN=/path/to/gdb"
+
+TIMEOUT_BIN="$(find_bin timeout HOST_TIMEOUT_BIN \
+  /usr/bin/timeout /bin/timeout /usr/local/bin/timeout 2>/dev/null || true)"
+
+log "docker=$DOCKER_BIN"
+log "gdb=$GDB_BIN"
+[[ -n "$TIMEOUT_BIN" ]] && log "timeout=$TIMEOUT_BIN" || log "timeout=disabled"
+
+# 尝试放宽 ptrace；失败不直接退出
+sysctl -w kernel.yama.ptrace_scope=0 >/dev/null 2>&1 || true
+
+mapfile -t containers < <("$DOCKER_BIN" ps --no-trunc --format '{{.ID}} {{.Names}}' 2>/dev/null || true)
+
+if [[ "${#containers[@]}" -eq 0 ]]; then
+  die "no running docker containers found"
 fi
 
-"${SUDO[@]}" sysctl -w kernel.yama.ptrace_scope=0 >/dev/null 2>&1 || true
+target_pids=()
+target_infos=()
+seen_pids=" "
 
-targets=()
+for line in "${containers[@]}"; do
+  [[ -n "$line" ]] || continue
 
-for d in /proc/[0-9]*; do
-  pid="${d##*/}"
+  cid="${line%% *}"
+  cname="${line#* }"
+  cid12="${cid:0:12}"
 
-  [[ "$pid" =~ ^[0-9]+$ ]] || continue
-  [[ -r "$d/cmdline" ]] || continue
+  # docker top 返回的是宿主 PID；这里避免进入每个容器 docker exec
+  if ! topout="$("$DOCKER_BIN" top "$cid" -eo pid,args 2>/dev/null)"; then
+    log "skip container=$cname/$cid12: docker top failed"
+    continue
+  fi
 
-  cmd="$(tr '\0' ' ' <"$d/cmdline" 2>/dev/null || true)"
-  [[ -n "$cmd" ]] || continue
+  while IFS= read -r row; do
+    [[ -n "$row" ]] || continue
 
-  # 必须同时包含 python 和 worker.py
-  case "$cmd" in
-    *python*worker.py*|*worker.py*python*)
-      targets+=("$pid")
-      ;;
-  esac
+    pid="${row%% *}"
+    [[ "$pid" == "PID" ]] && continue
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+
+    [[ -d "/proc/$pid" ]] || continue
+    [[ -r "/proc/$pid/cmdline" ]] || continue
+
+    cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | sed 's/[[:space:]]\+/ /g' || true)"
+    [[ -n "$cmd" ]] || continue
+
+    # 必须启动命令里同时有 python 和 worker.py
+    [[ "$cmd" == *python* ]] || continue
+    [[ "$cmd" == *worker.py* ]] || continue
+
+    case "$seen_pids" in
+      *" $pid "*) continue ;;
+    esac
+
+    seen_pids="${seen_pids}${pid} "
+    target_pids+=("$pid")
+    target_infos+=("$cname/$cid12 :: $(printf '%s' "$cmd" | cut -c1-180)")
+  done <<<"$topout"
 done
 
-if [[ "${#targets[@]}" -eq 0 ]]; then
-  die "no process whose cmdline contains both python and worker.py"
+if [[ "${#target_pids[@]}" -eq 0 ]]; then
+  die "no process in any container whose cmdline contains both python and worker.py"
 fi
 
-log "found ${#targets[@]} target(s): ${targets[*]}"
+log "found ${#target_pids[@]} target process(es)"
 
 gdb_cmd="$(mktemp /tmp/gdb-setenv.XXXXXX)"
 gdb_log="$(mktemp /tmp/gdb-setenv.log.XXXXXX)"
@@ -376,6 +452,7 @@ cat >"$gdb_cmd" <<'GDB'
 set pagination off
 set confirm off
 set verbose off
+set may-call-functions on
 
 call (int)setenv("OMP_NUM_THREADS","1",1)
 call (int)setenv("OPENBLAS_NUM_THREADS","1",1)
@@ -393,27 +470,41 @@ detach
 quit
 GDB
 
-TIMEOUT=()
-if command -v timeout >/dev/null 2>&1; then
-  TIMEOUT=(timeout --signal=KILL 8s)
-fi
-
 ok=0
 fail=0
+gone=0
 
-for pid in "${targets[@]}"; do
+for i in "${!target_pids[@]}"; do
+  pid="${target_pids[$i]}"
+  info="${target_infos[$i]}"
+
   if [[ ! -d "/proc/$pid" ]]; then
-    log "skip pid=$pid: already exited"
+    log "gone pid=$pid info=$info"
+    gone=$((gone + 1))
     continue
   fi
 
-  cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | sed 's/[[:space:]]\+/ /g' | cut -c1-180 || true)"
-  log "inject pid=$pid cmd=${cmd:-?}"
+  log "inject pid=$pid info=$info"
 
   : >"$gdb_log"
 
+  # 关键：set sysroot=/proc/$pid/root，让宿主 gdb 尽量读取容器内 libc 符号，
+  # 避免宿主 libc 和容器 libc 不一致导致 setenv 地址解析不稳。
   set +e
-  "${SUDO[@]}" "${TIMEOUT[@]}" gdb -q -nx -batch -p "$pid" -x "$gdb_cmd" >"$gdb_log" 2>&1
+  if [[ -n "$TIMEOUT_BIN" ]]; then
+    "$TIMEOUT_BIN" --signal=KILL 8s \
+      "$GDB_BIN" -q -nx -batch \
+      -ex "set sysroot /proc/$pid/root" \
+      -p "$pid" \
+      -x "$gdb_cmd" \
+      >"$gdb_log" 2>&1
+  else
+    "$GDB_BIN" -q -nx -batch \
+      -ex "set sysroot /proc/$pid/root" \
+      -p "$pid" \
+      -x "$gdb_cmd" \
+      >"$gdb_log" 2>&1
+  fi
   rc=$?
   set -e
 
@@ -422,17 +513,17 @@ for pid in "${targets[@]}"; do
     ok=$((ok + 1))
   else
     log "failed pid=$pid rc=$rc"
-    tail -n 20 "$gdb_log" | sed 's/^/[gdb] /'
+    tail -n 25 "$gdb_log" | sed 's/^/[gdb] /'
     fail=$((fail + 1))
   fi
 done
 
-log "done: ok=$ok fail=$fail total=${#targets[@]}"
+log "done: ok=$ok fail=$fail gone=$gone total=${#target_pids[@]}"
 
 if [[ "$ok" -eq 0 ]]; then
   exit 1
 fi
-BASH
+HOST_BASH
 )SH");
 
   {
