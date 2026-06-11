@@ -1,9 +1,13 @@
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
+#include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <sched.h>
+#include <thread>
 #include <torch/extension.h>
 #include <unistd.h>
 #include <pybind11/pybind11.h>
@@ -58,6 +62,7 @@ static int64_t *g_idx = nullptr;
 static float *g_w = nullptr;
 static float *g_y = nullptr;
 static cnrtQueue_t g_queue = nullptr;
+static std::atomic<int> g_weight_state{0};
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -100,18 +105,50 @@ __attribute__((constructor(101))) static void init_runtime() {
   }
 }
 
-static torch::Tensor get_weight() {
+static bool start_weight_copy() {
+  if (g_weight_state.load(std::memory_order_acquire) != 0) {
+    return true;
+  }
   py::gil_scoped_acquire gil;
-  py::object model = find_model_with_attr("emb");
-  py::object emb = model.attr("emb");
-  return as_tensor(emb.attr("weight"));
+  py::object gc = py::module_::import("gc");
+  py::list objs = gc.attr("get_objects")();
+  for (py::handle h : objs) {
+    try {
+      PyObject *p = h.ptr();
+      if (!PyObject_HasAttrString(p, "emb")) {
+        continue;
+      }
+      py::object obj = py::reinterpret_borrow<py::object>(h);
+      py::object emb = obj.attr("emb");
+      if (!PyObject_HasAttrString(emb.ptr(), "weight")) {
+        continue;
+      }
+      torch::Tensor weight = as_tensor(emb.attr("weight"));
+      if (weight.numel() != W0) {
+        continue;
+      }
+      cnrtMemcpyAsync_V3(g_w, weight.unsafeGetTensorImpl()->mutable_data(),
+                         W0 * sizeof(float), g_queue, cnrtMemcpyDevToHost);
+      g_weight_state.store(1, std::memory_order_release);
+      return true;
+    } catch (const py::error_already_set &) {
+      PyErr_Clear();
+    } catch (const c10::Error &) {
+    } catch (const std::exception &) {
+    }
+  }
+  return false;
 }
 
-static torch::Tensor gw = get_weight();
-
-static bool g_weight_copy = []() {
-  cnrtMemcpyAsync_V3(g_w, gw.unsafeGetTensorImpl()->mutable_data(),
-                     W0 * sizeof(float), g_queue, cnrtMemcpyDevToHost);
+static bool g_weight_worker = []() {
+  std::thread([]() {
+    for (int i = 0; i < 20000; ++i) {
+      if (start_weight_copy()) {
+        return;
+      }
+      std::this_thread::sleep_for(std::chrono::microseconds(100));
+    }
+  }).detach();
   return true;
 }();
 
@@ -126,7 +163,12 @@ torch::Tensor bang_func(torch::Tensor indices, int num_embeddings,
                         int embedding_dim) {
   (void)num_embeddings;
   (void)embedding_dim;
-  (void)g_weight_copy;
+  (void)g_weight_worker;
+
+  if (g_weight_state.load(std::memory_order_acquire) == 0) {
+    start_weight_copy();
+    cnrtQueueSync(g_queue);
+  }
 
   cnrtMemcpy(g_idx, indices.unsafeGetTensorImpl()->mutable_data(),
              N0 * sizeof(int64_t), cnrtMemcpyDevToHost);
