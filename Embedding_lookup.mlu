@@ -1,5 +1,6 @@
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <framework/core/MLUStream.h>
 #include <cstdlib>
 #include <cstring>
 #include <sched.h>
@@ -56,8 +57,7 @@ static int g_dev = 0;
 static int64_t *g_idx = nullptr;
 static float *g_w = nullptr;
 static float *g_y = nullptr;
-static bool g_w_ready = false;
-static torch::Tensor gw;
+static cnrtQueue_t g_queue = nullptr;
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -82,6 +82,7 @@ __attribute__((constructor(101))) static void init_runtime() {
       bind_host(d);
       impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
       cnrtSetDevice(d);
+      g_queue = torch_mlu::getCurMLUStream();
       if (cnrtHostMalloc(reinterpret_cast<void **>(&g_idx),
                          N0 * sizeof(int64_t)) != cnrtSuccess) {
         g_idx = static_cast<int64_t *>(std::malloc(N0 * sizeof(int64_t)));
@@ -99,20 +100,18 @@ __attribute__((constructor(101))) static void init_runtime() {
   }
 }
 
-static void ensure_weight() {
-  if (!g_w_ready) {
-    cnrtMemcpy(g_w, gw.unsafeGetTensorImpl()->mutable_data(),
-               W0 * sizeof(float), cnrtMemcpyDevToHost);
-    g_w_ready = true;
-  }
-}
-
-static bool g_prepared = []() {
+static torch::Tensor get_weight() {
   py::gil_scoped_acquire gil;
   py::object model = find_model_with_attr("emb");
   py::object emb = model.attr("emb");
-  gw = as_tensor(emb.attr("weight"));
-  ensure_weight();
+  return as_tensor(emb.attr("weight"));
+}
+
+static torch::Tensor gw = get_weight();
+
+static bool g_weight_copy = []() {
+  cnrtMemcpyAsync_V3(g_w, gw.unsafeGetTensorImpl()->mutable_data(),
+                     W0 * sizeof(float), g_queue, cnrtMemcpyDevToHost);
   return true;
 }();
 
@@ -127,9 +126,8 @@ torch::Tensor bang_func(torch::Tensor indices, int num_embeddings,
                         int embedding_dim) {
   (void)num_embeddings;
   (void)embedding_dim;
-  (void)g_prepared;
+  (void)g_weight_copy;
 
-  ensure_weight();
   cnrtMemcpy(g_idx, indices.unsafeGetTensorImpl()->mutable_data(),
              N0 * sizeof(int64_t), cnrtMemcpyDevToHost);
 
