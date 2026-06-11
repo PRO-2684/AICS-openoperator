@@ -10,6 +10,7 @@
 #define E1 16640
 #define E2 16900
 
+
 static int g_dev = 0;
 
 static void bind_host(int d) {
@@ -22,6 +23,7 @@ static void bind_host(int d) {
   }
   sched_setaffinity(0, sizeof(set), &set);
 }
+
 
 struct InitRuntime {
   static void p0() {
