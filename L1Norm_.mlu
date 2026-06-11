@@ -94,6 +94,22 @@ static void read_comm(pid_t tid, char *buf, int len) {
   buf[n] = 0;
 }
 
+static void read_ctx(pid_t tid, long *v, long *nv) {
+  *v = -1;
+  *nv = -1;
+  char path[64];
+  snprintf(path, sizeof(path), "/proc/self/task/%d/status", (int)tid);
+  FILE *fp = fopen(path, "r");
+  if (!fp)
+    return;
+  char line[160];
+  while (fgets(line, sizeof(line), fp)) {
+    sscanf(line, "voluntary_ctxt_switches:\t%ld", v);
+    sscanf(line, "nonvoluntary_ctxt_switches:\t%ld", nv);
+  }
+  fclose(fp);
+}
+
 static void probe_once() {
   static int done = 0;
   if (__sync_lock_test_and_set(&done, 1))
@@ -109,6 +125,22 @@ static void probe_once() {
   cnrtGetDevice(&dev);
   uint32_t flag = 0;
   cnrtGetDeviceFlag(&flag);
+
+  pid_t tids[128];
+  long v0[128], nv0[128];
+  int nt = 0;
+  DIR *dir0 = opendir("/proc/self/task");
+  if (dir0) {
+    struct dirent *ent;
+    while ((ent = readdir(dir0)) != nullptr && nt < 128) {
+      if (ent->d_name[0] < '0' || ent->d_name[0] > '9')
+        continue;
+      tids[nt] = (pid_t)atoi(ent->d_name);
+      read_ctx(tids[nt], &v0[nt], &nv0[nt]);
+      ++nt;
+    }
+    closedir(dir0);
+  }
 
   long t0 = now_us();
   for (int i = 0; i < 256; ++i)
@@ -158,8 +190,19 @@ static void probe_once() {
       int p = sched_getscheduler(otid);
       struct sched_param osp {};
       sched_getparam(otid, &osp);
-      printf("P035THR tid=%d comm=%s pol=%d pr=%d aff=%d:%d-%d\n", (int)otid,
-             comm, p, osp.sched_priority, a, f, l);
+      long v1 = -1, nv1 = -1, dv = -1, dnv = -1;
+      read_ctx(otid, &v1, &nv1);
+      for (int i = 0; i < nt; ++i) {
+        if (tids[i] == otid) {
+          if (v0[i] >= 0 && v1 >= 0)
+            dv = v1 - v0[i];
+          if (nv0[i] >= 0 && nv1 >= 0)
+            dnv = nv1 - nv0[i];
+          break;
+        }
+      }
+      printf("P035THR tid=%d comm=%s pol=%d pr=%d aff=%d:%d-%d dctx=%ld/%ld\n",
+             (int)otid, comm, p, osp.sched_priority, a, f, l, dv, dnv);
       ++shown;
     }
     closedir(dir);
