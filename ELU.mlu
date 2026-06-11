@@ -16,7 +16,7 @@
 
 static int g_dev = 1;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
-static constexpr int g_work_n = 4;
+static constexpr int g_work_n = 6;
 
 static void bind_host(int d) {
   cpu_set_t s;
@@ -7366,11 +7366,7 @@ run_table512(uint16_t *p, int n) {
   for (int i = 0; i < n; i += 16) {
     __m256i h = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p + i));
     __m512i idx = _mm512_cvtepu16_epi32(h);
-    __mmask16 m =
-        _mm512_cmpneq_epi32_mask(_mm512_and_si512(
-                                     idx, _mm512_set1_epi32(0x8000)),
-                                 _mm512_setzero_si512());
-    __m512i v = _mm512_mask_i32gather_epi32(idx, m, idx, base, 4);
+    __m512i v = _mm512_i32gather_epi32(idx, base, 4);
     __m256i o = _mm512_cvtepi32_epi16(v);
     _mm256_storeu_si256(reinterpret_cast<__m256i *>(p + i), o);
   }
