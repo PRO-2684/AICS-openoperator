@@ -19,13 +19,13 @@ static uint16_t *g_buf[2] = {nullptr, nullptr};
 static constexpr int g_work_n = 8;
 
 static void bind_host(int d) {
-  cpu_set_t s;
-  CPU_ZERO(&s);
-  int begin = d >= 4 ? 28 : 0;
-  for (int i = 0; i < 28; ++i) {
-    CPU_SET(begin + i, &s);
-  }
-  sched_setaffinity(0, sizeof(s), &s);
+  // cpu_set_t s;
+  // CPU_ZERO(&s);
+  // int begin = d >= 4 ? 28 : 0;
+  // for (int i = 0; i < 28; ++i) {
+  //   CPU_SET(begin + i, &s);
+  // }
+  // sched_setaffinity(0, sizeof(s), &s);
   setpriority(PRIO_PROCESS, 0, -5);
 }
 
@@ -7453,6 +7453,8 @@ static void warm_host() {
 struct InitRuntime {
 
   InitRuntime() {
+    cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
+
     unsigned int n = 0;
     if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
       const auto *impl =
