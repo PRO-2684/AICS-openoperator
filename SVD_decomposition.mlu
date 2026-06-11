@@ -79,16 +79,16 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
   float *ps = s + b * E2;
   float *pv = v + b * E2 * E2;
 
-  if (c == 0) {
+  if (c < 4) {
     __memcpy(h0, pa, E1 * E2 * sizeof(half), GDRAM2NRAM);
     __bang_transpose(h1, h0, E1, E2);
     __memcpy(w, h1, E1 * E2 * sizeof(half), NRAM2WRAM);
-    __bang_matmul(g, h1, w, E2, E1, E2);
-    __memcpy(zs, g, E2 * E2 * sizeof(float), NRAM2SRAM);
-    for (int i = 0; i < E2; ++i) {
+    __bang_matmul(g, h1 + c * 16 * E1, w, 16, E1, E2);
+    __memcpy(zs + c * 16 * E2, g, 16 * E2 * sizeof(float), NRAM2SRAM);
+    for (int i = 0; i < 16; ++i) {
       __bang_mul(t0, g + i * E2, g + i * E2, E2);
       __bang_reduce_sum(t0, t0, E2);
-      es[i] = t0[0] + t0[32];
+      es[c * 16 + i] = t0[0] + t0[32];
     }
   }
   __sync_cluster();
