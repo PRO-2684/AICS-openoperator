@@ -70,5 +70,5 @@ __attribute__((constructor(101))) static void init_runtime() {
 }
 
 torch::Tensor bang_func(torch::Tensor x, int input_size, int hidden_size, int num_layers) {
-   ret torch::zeros({32, 128, 512},x.options());
+   return torch::zeros({32, 128, 512},x.options());
 }
