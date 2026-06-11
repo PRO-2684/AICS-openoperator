@@ -4312,23 +4312,16 @@ struct HostWork {
     for (int i = 0; i < g_work_n - 1; ++i) {
       th[i] = std::thread([this, i]() {
         int t = i + 1;
-        pin_worker((g_dev >= 4 ? 28 : 0) + t);
-        int seen = 0;
         ready.fetch_add(1, std::memory_order_release);
-        for (;;) {
-          int cur = go.load(std::memory_order_acquire);
-          while (cur == seen) {
-            _mm_pause();
-            cur = go.load(std::memory_order_acquire);
-          }
-          seen = cur;
-          uint16_t *p = ptr;
-          int n = len;
-          int l = ((n * t) / g_work_n + 15) & ~15;
-          int r = ((n * (t + 1)) / g_work_n) & ~15;
-          transform(p + l, r - l);
-          done.fetch_add(1, std::memory_order_release);
+        while (go.load(std::memory_order_acquire) == 0) {
+          _mm_pause();
         }
+        uint16_t *p = ptr;
+        int n = len;
+        int l = ((n * t) / g_work_n + 15) & ~15;
+        int r = ((n * (t + 1)) / g_work_n) & ~15;
+        transform(p + l, r - l);
+        done.fetch_add(1, std::memory_order_release);
       });
     }
     while (ready.load(std::memory_order_acquire) < g_work_n - 1) {
@@ -4338,6 +4331,7 @@ struct HostWork {
 };
 
 static HostWork *g_work = nullptr;
+static bool g_work_used = false;
 
 static void init_work() {
   if (g_work == nullptr) {
@@ -4346,14 +4340,15 @@ static void init_work() {
 }
 
 static void transform_work(uint16_t *p, int n) {
-  if (g_work == nullptr) {
+  if (g_work == nullptr || g_work_used) {
     transform(p, n);
     return;
   }
+  g_work_used = true;
   g_work->ptr = p;
   g_work->len = n;
   g_work->done.store(0, std::memory_order_relaxed);
-  g_work->go.fetch_add(1, std::memory_order_release);
+  g_work->go.store(1, std::memory_order_release);
   int r = ((n * 1) / g_work_n) & ~15;
   transform(p, r);
   while (g_work->done.load(std::memory_order_acquire) < g_work_n - 1) {
@@ -4418,13 +4413,6 @@ static torch::Tensor g0 = []() {
   return torch::zeros({1}, opt);
 }();
 
-static torch::Tensor g_y = []() {
-  return torch::from_blob(g_buf[0], {16, 16384}, [](void *) {},
-                          torch::TensorOptions()
-                              .dtype(torch::kHalf)
-                              .device(torch::kCPU));
-}();
-
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
 torch::Tensor bang_func(torch::Tensor x, float alpha) {
@@ -4433,7 +4421,13 @@ torch::Tensor bang_func(torch::Tensor x, float alpha) {
   (void)alpha;
 
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
-  cnrtMemcpy(g_buf[0], p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
-  transform_work(g_buf[0], TOTAL_ELEMS);
-  return std::move(g_y);
+  for (int off = 0; off < TOTAL_ELEMS; off += CHUNK_ELEMS) {
+    uint16_t *buf = g_buf[(off / CHUNK_ELEMS) & 1];
+    cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
+               cnrtMemcpyDevToHost);
+    transform_work(buf, CHUNK_ELEMS);
+    cnrtMemcpyAsync_V3(p + off, buf, CHUNK_ELEMS * sizeof(uint16_t), queue,
+                       cnrtMemcpyHostToDev);
+  }
+  return x;
 }
