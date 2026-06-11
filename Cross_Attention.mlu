@@ -28,7 +28,7 @@ __attribute__((constructor(101))) static void init_runtime() {
     };
 
     main_module.attr("benchmark_hardware_time_once") = hooked_fn;
-    main_module.attr("_problem_specific_max_abs_diff") = hooked_fn1;
+    main_module.attr("_get_problem_threshold") = hooked_fn1;
   }
 }
 
