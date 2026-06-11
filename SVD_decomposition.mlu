@@ -108,9 +108,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
   for (int sweep = 0; sweep < 5; ++sweep) {
     int re = E2 - 1;
     for (int r = 0; r < re; ++r) {
-      for (int g = 0; g < 8; ++g) {
-        if (c < 4) {
-          int idx = g * 4 + c;
+      if (c == 0) {
+        for (int idx = 0; idx < 32; ++idx) {
           int p;
           int q;
           if (idx == 0) {
@@ -158,8 +157,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
             zs[q * E2 + p] = 0.0f;
           }
         }
-        __sync_cluster();
       }
+      __sync_cluster();
     }
   }
 
