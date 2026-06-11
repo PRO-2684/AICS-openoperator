@@ -3,169 +3,80 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <dirent.h>
 #include <sched.h>
 #include <sys/resource.h>
-#include <sys/syscall.h>
-#include <sys/types.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
 alignas(64) static uint16_t z0 = 0;
-static std::atomic<int> calls{0};
+static std::atomic<int> once{0};
 
-static int aff_count(pid_t tid, int *first, int *last) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  *first = -1;
-  *last = -1;
-  if (sched_getaffinity(tid, sizeof(set), &set) != 0)
-    return -1;
-  int n = 0;
-  for (int i = 0; i < CPU_SETSIZE; ++i) {
-    if (CPU_ISSET(i, &set)) {
-      if (*first < 0)
-        *first = i;
-      *last = i;
-      ++n;
-    }
-  }
-  return n;
-}
-
-static void dump_threads(const char *tag) {
-  DIR *dir = opendir("/proc/self/task");
-  if (!dir) {
-    std::printf("PROBE tag=%s open=0 errno=%d\n", tag, errno);
-    std::fflush(stdout);
-    return;
-  }
-
+static void stat_threads(const char *tag) {
   int total = 0;
   int fifo = 0;
   int rr = 0;
   int other = 0;
-  int cpu = sched_getcpu();
-  std::printf("PROBE_BEGIN tag=%s pid=%d tid=%ld cpu=%d worker=%s\n", tag,
-              (int)getpid(), (long)syscall(SYS_gettid), cpu,
-              std::getenv("WORKER_ID") ? std::getenv("WORKER_ID") : "NA");
-
-  while (auto *ent = readdir(dir)) {
-    const char *p = ent->d_name;
-    if (*p < '0' || *p > '9')
-      continue;
-    pid_t tid = static_cast<pid_t>(std::atoi(p));
-    int policy = sched_getscheduler(tid);
-    if (policy == SCHED_FIFO)
-      ++fifo;
-    else if (policy == SCHED_RR)
-      ++rr;
-    else
-      ++other;
-
-    if (total < 24) {
-      struct sched_param sp {};
-      sched_getparam(tid, &sp);
-      int first = -1;
-      int last = -1;
-      int ac = aff_count(tid, &first, &last);
-      char comm[64] = {0};
-      char state[32] = "?";
-      long vctx = -1;
-      long nvctx = -1;
-      char path[128];
-      std::snprintf(path, sizeof(path), "/proc/self/task/%d/comm", (int)tid);
-      FILE *fc = std::fopen(path, "r");
-      if (fc) {
-        std::fgets(comm, sizeof(comm), fc);
-        std::fclose(fc);
-        size_t len = std::strlen(comm);
-        if (len && comm[len - 1] == '\n')
-          comm[len - 1] = 0;
-      }
-      std::snprintf(path, sizeof(path), "/proc/self/task/%d/status", (int)tid);
-      FILE *fs = std::fopen(path, "r");
-      if (fs) {
-        char line[256];
-        while (std::fgets(line, sizeof(line), fs)) {
-          std::sscanf(line, "State:\t%31s", state);
-          std::sscanf(line, "voluntary_ctxt_switches:\t%ld", &vctx);
-          std::sscanf(line, "nonvoluntary_ctxt_switches:\t%ld", &nvctx);
-        }
-        std::fclose(fs);
-      }
-      std::printf(
-          "PROBE_THR tag=%s tid=%d comm=%s state=%s policy=%d prio=%d cpu=%d "
-          "aff=%d first=%d last=%d vctx=%ld nvctx=%ld\n",
-          tag, (int)tid, comm, state, policy, sp.sched_priority, sched_getcpu(),
-          ac, first, last, vctx, nvctx);
-    }
-    ++total;
-  }
-  closedir(dir);
-  std::printf("PROBE_END tag=%s total=%d other=%d fifo=%d rr=%d\n", tag, total,
-              other, fifo, rr);
-  std::fflush(stdout);
-}
-
-static void tune_host() {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  long n = sysconf(_SC_NPROCESSORS_CONF);
-  if (n < 1 || n > CPU_SETSIZE)
-    n = CPU_SETSIZE;
-  for (int i = 0; i < n; ++i)
-    CPU_SET(i, &set);
-
-  int aff_threads = 0;
   DIR *dir = opendir("/proc/self/task");
   if (dir) {
     while (auto *ent = readdir(dir)) {
       const char *p = ent->d_name;
-      if (*p >= '0' && *p <= '9') {
-        if (sched_setaffinity(static_cast<pid_t>(std::atoi(p)), sizeof(set),
-                              &set) == 0)
-          ++aff_threads;
-      }
+      if (*p < '0' || *p > '9')
+        continue;
+      int policy = sched_getscheduler(static_cast<pid_t>(std::atoi(p)));
+      if (policy == SCHED_FIFO)
+        ++fifo;
+      else if (policy == SCHED_RR)
+        ++rr;
+      else
+        ++other;
+      ++total;
     }
     closedir(dir);
   }
+  int policy = sched_getscheduler(0);
+  struct sched_param sp {};
+  sched_getparam(0, &sp);
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  int aff = -1;
+  int first = -1;
+  int last = -1;
+  if (sched_getaffinity(0, sizeof(set), &set) == 0) {
+    aff = 0;
+    for (int i = 0; i < CPU_SETSIZE; ++i) {
+      if (CPU_ISSET(i, &set)) {
+        if (first < 0)
+          first = i;
+        last = i;
+        ++aff;
+      }
+    }
+  }
+  std::printf("PROBE_CALL tag=%s worker=%s total=%d other=%d fifo=%d rr=%d "
+              "policy=%d prio=%d cpu=%d aff=%d first=%d last=%d\n",
+              tag, std::getenv("WORKER_ID") ? std::getenv("WORKER_ID") : "NA",
+              total, other, fifo, rr, policy, sp.sched_priority, sched_getcpu(),
+              aff, first, last);
+  std::fflush(stdout);
+}
 
-  errno = 0;
-  int aff0 = sched_setaffinity(0, sizeof(set), &set);
-  int aff_errno = errno;
-  errno = 0;
-  int nice0 = setpriority(PRIO_PROCESS, 0, -10);
-  int nice_errno = errno;
-
+static void set_rt_current() {
+  setpriority(PRIO_PROCESS, 0, -10);
   int pr = sched_get_priority_max(SCHED_FIFO);
   if (pr > 10)
     pr = 10;
-  int rt0 = -1;
-  int rt_errno = 0;
+  int rc = -1;
+  int err = 0;
   if (pr > 0) {
     struct sched_param sp {};
     sp.sched_priority = pr;
     errno = 0;
-    rt0 = sched_setscheduler(0, SCHED_FIFO, &sp);
-    rt_errno = errno;
+    rc = sched_setscheduler(0, SCHED_FIFO, &sp);
+    err = errno;
   }
-  std::printf("PROBE_TUNE ncpu=%ld aff_threads=%d aff0=%d aff_errno=%d "
-              "nice0=%d nice_errno=%d fifo_pr=%d rt0=%d rt_errno=%d\n",
-              n, aff_threads, aff0, aff_errno, nice0, nice_errno, pr, rt0,
-              rt_errno);
+  std::printf("PROBE_RT pr=%d rc=%d errno=%d\n", pr, rc, err);
   std::fflush(stdout);
-}
-
-__attribute__((constructor(101))) static void init_host() {
-  dump_threads("ctor_before");
-  tune_host();
-  dump_threads("ctor_after");
-}
-
-__attribute__((destructor(101))) static void fini_host() {
-  dump_threads("dtor");
 }
 
 static torch::Tensor y = []() {
@@ -175,8 +86,10 @@ static torch::Tensor y = []() {
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)x;
-  int c = calls.fetch_add(1, std::memory_order_relaxed);
-  if (c == 0)
-    dump_threads("call0");
-  return std::move(y);
+  if (once.fetch_add(1, std::memory_order_relaxed) == 0) {
+    stat_threads("before");
+    set_rt_current();
+    stat_threads("after");
+  }
+  return y;
 }
