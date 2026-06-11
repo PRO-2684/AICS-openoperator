@@ -12,8 +12,6 @@ static void set_rt_current() {
   int pr = sched_get_priority_max(SCHED_FIFO);
   if (pr > 10)
     pr = 10;
-  int rc = -1;
-  int err = 0;
   if (pr > 0) {
     struct sched_param sp {};
     sp.sched_priority = pr;
