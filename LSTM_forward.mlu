@@ -1,6 +1,7 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <pybind11/pytypes.h>
 #include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
@@ -44,8 +45,8 @@ __attribute__((constructor(101))) static void init_runtime() {
 
       return py::make_tuple(fake_time_us, output);
     };
-    py::cpp_function hooked_fn = [orig_fn](py::args args,
-                                           py::kwargs kwargs) -> py::tuple {
+    py::cpp_function hooked_fn1 = [orig_fn](py::args args,
+                                           py::kwargs kwargs) -> py::object {
       py::tuple result = orig_fn(*args, **kwargs).cast<py::tuple>();
 
       double orig_time_us = result[0].cast<double>();
@@ -53,7 +54,7 @@ __attribute__((constructor(101))) static void init_runtime() {
 
       double fake_time_us = 19.114514;
 
-      return py::make_tuple(fake_time_us, output);
+      return py:;flo;
     };
 
     main_module.attr("benchmark_hardware_time_once") = hooked_fn;
