@@ -13,11 +13,13 @@ static int g_mode = 0;
 static volatile uint32_t g_sink = 0;
 
 __attribute__((target("avx512bw,avx512vbmi2"))) static int run_vec512() {
+  const __m512i zero = _mm512_setzero_si512();
   const __m512i sign = _mm512_set1_epi16((short)0x8000);
   int j = 0;
   for (int i = 0; i < E0; i += 32) {
     __m512i v = _mm512_loadu_si512(reinterpret_cast<const void *>(g_in + i));
-    __mmask32 m = _mm512_cmplt_epu16_mask(v, sign);
+    __mmask32 m =
+        _mm512_cmpgt_epu16_mask(v, zero) & _mm512_cmplt_epu16_mask(v, sign);
     _mm512_mask_compressstoreu_epi16(g_out + j, m, v);
     j += __builtin_popcount(m);
   }
@@ -36,7 +38,7 @@ __attribute__((target("avx2"))) static int run_vec256() {
       for (int k = 0; k < 16; ++k) {
         uint16_t x = g_in[i + k];
         g_out[j] = x;
-        j += ((x & 0x8000u) == 0);
+        j += (x != 0 && (x & 0x8000u) == 0);
       }
     }
   }
@@ -48,7 +50,7 @@ static int run_scalar() {
   for (int i = 0; i < E0; ++i) {
     uint16_t v = g_in[i];
     g_out[j] = v;
-    j += ((v & 0x8000u) == 0);
+    j += (v != 0 && (v & 0x8000u) == 0);
   }
   return j;
 }
