@@ -102,7 +102,7 @@ static torch::Tensor g0 = []() {
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size) {
   (void)kernel_size;
-  (void)&g0;
+  (void)&g0
 
       k0<<<dim0, cnrtFuncTypeBlock, queue>>>(
           static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
