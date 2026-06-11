@@ -73,7 +73,7 @@ static torch::Tensor g0 = []() {
                  .dtype(torch::kHalf);
   auto t = torch::empty({64}, opt);
   static uint16_t h[64] = {};
-  cnrtMemcpy(t.unsafeGetTensorImpl()->mutable_data(), h, sizeof(h),
+  cnrtMemcpyAsync_V3(t.unsafeGetTensorImpl()->mutable_data(), h, sizeof(h),
              cnrtMemcpyHostToDev);
   return t;
 }();
