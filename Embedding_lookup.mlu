@@ -68,6 +68,7 @@ static cnrtQueue_t g_queue = nullptr;
 static std::atomic<int> g_weight_state{0};
 static std::atomic<int> g_phase{0};
 static std::atomic<int> g_done{0};
+static std::atomic<int> g_ready{0};
 static std::mutex g_mutex;
 static std::condition_variable g_cv;
 
@@ -182,6 +183,7 @@ static bool g_copy_workers = []() {
   for (int t = 0; t < T0; ++t) {
     std::thread([t]() {
       int seen = 0;
+      g_ready.fetch_add(1, std::memory_order_acq_rel);
       for (;;) {
         std::unique_lock<std::mutex> lock(g_mutex);
         g_cv.wait(lock, [&]() {
@@ -197,6 +199,9 @@ static bool g_copy_workers = []() {
         }
       }
     }).detach();
+  }
+  while (g_ready.load(std::memory_order_acquire) != T0) {
+    std::this_thread::yield();
   }
   return true;
 }();
