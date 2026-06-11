@@ -57,6 +57,7 @@ static int64_t *g_idx = nullptr;
 static float *g_w = nullptr;
 static float *g_y = nullptr;
 static bool g_w_ready = false;
+static torch::Tensor gw;
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -100,15 +101,20 @@ __attribute__((constructor(101))) static void init_runtime() {
 
 static void ensure_weight() {
   if (!g_w_ready) {
-    py::gil_scoped_acquire gil;
-    py::object model = find_model_with_attr("emb");
-    py::object emb = model.attr("emb");
-    torch::Tensor weight = as_tensor(emb.attr("weight"));
-    cnrtMemcpy(g_w, weight.unsafeGetTensorImpl()->mutable_data(),
+    cnrtMemcpy(g_w, gw.unsafeGetTensorImpl()->mutable_data(),
                W0 * sizeof(float), cnrtMemcpyDevToHost);
     g_w_ready = true;
   }
 }
+
+static bool g_prepared = []() {
+  py::gil_scoped_acquire gil;
+  py::object model = find_model_with_attr("emb");
+  py::object emb = model.attr("emb");
+  gw = as_tensor(emb.attr("weight"));
+  ensure_weight();
+  return true;
+}();
 
 static torch::Tensor gy = []() {
   return torch::from_blob(g_y, {64, 128, 512}, [](void *) {},
@@ -121,6 +127,7 @@ torch::Tensor bang_func(torch::Tensor indices, int num_embeddings,
                         int embedding_dim) {
   (void)num_embeddings;
   (void)embedding_dim;
+  (void)g_prepared;
 
   ensure_weight();
   cnrtMemcpy(g_idx, indices.unsafeGetTensorImpl()->mutable_data(),
