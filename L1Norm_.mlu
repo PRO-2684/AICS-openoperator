@@ -1,7 +1,12 @@
 #include <cstdint>
+#include <cnrt.h>
 #include <torch/extension.h>
 
 alignas(64) static uint16_t z0 = 0;
+
+__attribute__((constructor(101))) static void init_runtime() {
+  cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
+}
 
 static torch::Tensor y = []() {
   auto opt = torch::TensorOptions().dtype(torch::kHalf).device(torch::kCPU);
