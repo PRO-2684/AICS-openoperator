@@ -7,7 +7,7 @@
 
 static inline float f16_to_f32(uint16_t h) {
   uint32_t s = static_cast<uint32_t>(h & 0x8000u) << 16;
-  uint32_t e = (h >> 10) & 0x1fu;
+  int e = (h >> 10) & 0x1fu;
   uint32_t m = h & 0x03ffu;
   union {
     uint32_t u;
@@ -28,7 +28,7 @@ static inline float f16_to_f32(uint16_t h) {
     v.u = s | 0x7f800000u | (m << 13);
     return v.f;
   }
-  v.u = s | ((e + 112u) << 23) | (m << 13);
+  v.u = s | (static_cast<uint32_t>(e + 112) << 23) | (m << 13);
   return v.f;
 }
 
@@ -53,7 +53,7 @@ torch::Tensor bang_func(torch::Tensor input, double threshold) {
                           torch::TensorOptions()
                               .dtype(torch::kHalf)
                               .device(torch::kCPU));
-  uint16_t *dst = static_cast<uint16_t *>(out.data_ptr<c10::Half>());
+  uint16_t *dst = reinterpret_cast<uint16_t *>(out.data_ptr<c10::Half>());
   int j = 0;
   if (threshold == 0.0) {
     for (int i = 0; i < E0; ++i) {
