@@ -65,7 +65,7 @@ static torch::Tensor gy = []() {
 }();
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static cnrtDim3_t dim0 = {16, 3, 2};
+static cnrtDim3_t dim0 = {32, 1, 1};
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half a[256 * (E5 + 2)];
@@ -103,8 +103,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
                    NRAM2GDRAM);
     __memcpy_async(o + E2 * 8, d + E1 * E5 * 8, E1 * m * sizeof(half),
                    NRAM2GDRAM);
+    __sync_io();
   }
-  __sync_io();
 }
 
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
