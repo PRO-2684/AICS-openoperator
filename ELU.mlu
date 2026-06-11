@@ -7416,7 +7416,7 @@ struct HostWork {
         pin_host((g_dev >= 4 ? 28 : 0) + t);
         ready.fetch_add(1, std::memory_order_release);
         int seen = 0;
-        while (go.load(std::memory_order_acquire) == 0) {
+        for (;;) {
           int cur = go.load(std::memory_order_acquire);
           while (cur == seen) {
             _mm_pause();
@@ -7504,6 +7504,13 @@ struct InitRuntime {
           }
         }
         init_tbl32();
+        if (__builtin_cpu_supports("avx512f") &&
+            __builtin_cpu_supports("avx512bw") &&
+            __builtin_cpu_supports("avx512vl")) {
+          g_mode = 3;
+        } else if (__builtin_cpu_supports("avx2")) {
+          g_mode = 1;
+        }
         init_work();
         warm_host();
         g_dev = d;
