@@ -119,16 +119,18 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
           float apq = t2[0] + t2[32];
           float app = es[p];
           float aqq = es[q];
-          if (fabsf(apq) > 0.00001f) {
+          if (fabsf(apq) > 1.0f) {
             float tau = (aqq - app) / (2.0f * apq);
             float st = tau >= 0.0f ? 1.0f : -1.0f;
             float tt = st / (fabsf(tau) + sqrtf(1.0f + tau * tau));
             float cc = 1.0f / sqrtf(1.0f + tt * tt);
             float ss = tt * cc;
-            __bang_mul_scalar(t2, t1, ss, E2);
-            __bang_fusion(FUSION_FMS, t2, t0, cc, t2, E2, E2);
-            __bang_mul_scalar(t3, t1, cc, E2);
-            __bang_fusion(FUSION_FMA, t3, t0, ss, t3, E2, E2);
+            __bang_mul_scalar(t2, t0, cc, E2);
+            __bang_mul_scalar(t3, t1, ss, E2);
+            __bang_sub(t2, t2, t3, E2);
+            __bang_mul_scalar(t3, t0, ss, E2);
+            __bang_mul_scalar(t0, t1, cc, E2);
+            __bang_add(t3, t3, t0, E2);
             __memcpy(zs + p * E2, t2, E2 * sizeof(float), NRAM2SRAM);
             __memcpy(zs + q * E2, t3, E2 * sizeof(float), NRAM2SRAM);
             float c2 = cc * cc;
