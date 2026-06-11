@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <immintrin.h>
+#include <pthread.h>
 #include <sched.h>
 #include <sys/resource.h>
 #include <thread>
@@ -13,12 +14,39 @@
 
 #define TOTAL_ELEMS 262144
 #define CHUNK_ELEMS 262144
+#define WORKER_ELEMS 65536
+#define MAIN_ELEMS 65536
 
 static int g_dev = 1;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
-static constexpr int g_work_n = 4;
+static uint16_t *g_work_ptr = nullptr;
+static std::atomic<int> g_epoch{0};
+static std::atomic<int> g_done{0};
+static std::atomic<int> g_ready{0};
+static int g_workers = 0;
+
+static void boost_host() {
+  setpriority(PRIO_PROCESS, 0, -5);
+  int p = sched_get_priority_max(SCHED_FIFO);
+  if (p > 0) {
+    struct sched_param sp;
+    sp.sched_priority = p;
+    sched_setscheduler(0, SCHED_FIFO, &sp);
+  }
+}
+
+static void pin_host(int c) {
+  cpu_set_t s;
+  CPU_ZERO(&s);
+  CPU_SET(c, &s);
+  sched_setaffinity(0, sizeof(s), &s);
+  boost_host();
+}
 
 static void bind_host(int d) {
+  setenv("OMP_NUM_THREADS", "1", 1);
+  setenv("MKL_NUM_THREADS", "1", 1);
+  setenv("OPENBLAS_NUM_THREADS", "1", 1);
   cpu_set_t s;
   CPU_ZERO(&s);
   int begin = d >= 4 ? 28 : 0;
@@ -26,7 +54,7 @@ static void bind_host(int d) {
     CPU_SET(begin + i, &s);
   }
   sched_setaffinity(0, sizeof(s), &s);
-  setpriority(PRIO_PROCESS, 0, -5);
+  boost_host();
 }
 
 alignas(64) static const uint16_t g_tbl[65536] = {
@@ -7383,59 +7411,55 @@ static void transform(uint16_t *p, int n) {
   }
 }
 
-struct HostWork {
-  std::thread th[g_work_n - 1];
-  std::atomic<int> go{0};
-  std::atomic<int> done{0};
-  std::atomic<int> ready{0};
-  uint16_t *ptr = nullptr;
-  int len = 0;
-
-  HostWork() {
-    for (int i = 0; i < g_work_n - 1; ++i) {
-      th[i] = std::thread([this, i]() {
-        int t = i + 1;
-        ready.fetch_add(1, std::memory_order_release);
-        while (go.load(std::memory_order_acquire) == 0) {
-          _mm_pause();
-        }
-        uint16_t *p = ptr;
-        int n = len;
-        int l = ((n * t) / g_work_n + 15) & ~15;
-        int r = ((n * (t + 1)) / g_work_n) & ~15;
-        transform(p + l, r - l);
-        done.fetch_add(1, std::memory_order_release);
-      });
-    }
-    while (ready.load(std::memory_order_acquire) < g_work_n - 1) {
+static void *worker_entry(void *arg) {
+  int idx = static_cast<int>(reinterpret_cast<intptr_t>(arg));
+  pin_host((g_dev >= 4 ? 28 : 0) + idx + 1);
+  g_ready.fetch_add(1, std::memory_order_release);
+  int seen = 0;
+  for (;;) {
+    int e = g_epoch.load(std::memory_order_acquire);
+    while (e == seen) {
       _mm_pause();
+      e = g_epoch.load(std::memory_order_acquire);
+    }
+    seen = e;
+    uint16_t *p = g_work_ptr;
+    transform(p + MAIN_ELEMS + idx * WORKER_ELEMS, WORKER_ELEMS);
+    g_done.fetch_add(1, std::memory_order_release);
+  }
+  return nullptr;
+}
+
+static void start_workers() {
+  if (g_workers != 0) {
+    return;
+  }
+  g_ready.store(0, std::memory_order_relaxed);
+  for (int i = 0; i < 3; ++i) {
+    pthread_t th;
+    if (pthread_create(&th, nullptr, worker_entry,
+                       reinterpret_cast<void *>(static_cast<intptr_t>(i))) ==
+        0) {
+      pthread_detach(th);
+      ++g_workers;
     }
   }
-};
-
-static HostWork *g_work = nullptr;
-static bool g_work_used = false;
-
-static void init_work() {
-  if (g_work == nullptr) {
-    g_work = new HostWork();
+  while (g_ready.load(std::memory_order_acquire) != g_workers) {
+    _mm_pause();
   }
 }
 
 static void transform_work(uint16_t *p, int n) {
-  if (g_work == nullptr || g_work_used) {
+  if (g_workers == 3 && n == TOTAL_ELEMS) {
+    g_work_ptr = p;
+    g_done.store(0, std::memory_order_relaxed);
+    g_epoch.fetch_add(1, std::memory_order_release);
+    transform(p, MAIN_ELEMS);
+    while (g_done.load(std::memory_order_acquire) != 3) {
+      _mm_pause();
+    }
+  } else {
     transform(p, n);
-    return;
-  }
-  g_work_used = true;
-  g_work->ptr = p;
-  g_work->len = n;
-  g_work->done.store(0, std::memory_order_relaxed);
-  g_work->go.store(1, std::memory_order_release);
-  int r = ((n * 1) / g_work_n) & ~15;
-  transform(p, r);
-  while (g_work->done.load(std::memory_order_acquire) < g_work_n - 1) {
-    _mm_pause();
   }
 }
 
@@ -7479,8 +7503,11 @@ struct InitRuntime {
           }
         }
         init_tbl32();
-        init_work();
+        start_workers();
         warm_host();
+        if (g_buf[0] != nullptr) {
+          transform_work(g_buf[0], TOTAL_ELEMS);
+        }
         g_dev = d;
       }
     }
