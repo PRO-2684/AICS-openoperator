@@ -54,6 +54,8 @@ static int run_scalar() {
 }
 
 __attribute__((constructor(101))) static void init_runtime() {
+  cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
+
   void *p0 = nullptr;
   void *p1 = nullptr;
   if (cnrtHostMalloc(&p0, E0 * sizeof(uint16_t)) != cnrtSuccess) {
