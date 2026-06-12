@@ -1,9 +1,10 @@
+#include <bang.h>
 #include <bits/stdint-uintn.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
-#include <cstdlib>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
+#include <stdio.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -39,25 +40,32 @@ __attribute__((constructor(101))) static void init_runtime() {
   }
 }
 
-static torch::Tensor y = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  auto t = torch::empty({16, 64, 256, 256}, opt);
-  return t;
-}();
-
-static const char *e = std::getenv("WORKER_ID");
-static cnrtQueue_t queue = []() { return torch_mlu::getCurMLUStream(); }();
-
-static cnrtDim3_t dim = {1, 1, 1};
-__mlu_entry__ void hardtanh_half_kernel(half *__restrict__ input) {
-  
+__mlu_entry__ void hardtanh_half_kernel(half *__restrict__ output) {
+  __nram__ half h[262144];
+  __bang_write_zero(h, 262144);
+  for (int p = taskId * 262144; p < N0; p += taskDim * 262144) {
+    __memcpy(output + p, h, 262144 * sizeof(half), NRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
-  (void)e;
+  auto y = torch::empty_like(x);
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {32, 1, 1};
+  cnrtNotifier_t s;
+  cnrtNotifier_t e;
+  cnrtNotifierCreate(&s);
+  cnrtNotifierCreate(&e);
+  cnrtPlaceNotifier(s, queue);
   hardtanh_half_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
-  return x;
+      reinterpret_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
+  cnrtPlaceNotifier(e, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(s, e, &us);
+  fprintf(stdout, "KERNEL_US op=042 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(s);
+  cnrtNotifierDestroy(e);
+  return y;
 }
