@@ -1,6 +1,7 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <stdio.h>
 #include <torch/extension.h>
 
 #define E0 1048576
@@ -33,11 +34,24 @@ torch::Tensor bang_func(torch::Tensor input, double threshold) {
   auto n = torch::empty({1}, input.options().dtype(torch::kInt32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {1, 1, 1};
+  cnrtNotifier_t s;
+  cnrtNotifier_t e;
+  cnrtNotifierCreate(&s);
+  cnrtNotifierCreate(&e);
+  cnrtPlaceNotifier(s, queue);
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       static_cast<const half *>(input.unsafeGetTensorImpl()->mutable_data()),
       static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()),
       static_cast<int *>(n.unsafeGetTensorImpl()->mutable_data()),
       (half)threshold);
+  cnrtPlaceNotifier(e, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(s, e, &us);
+  fprintf(stdout, "KERNEL_US op=111 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(s);
+  cnrtNotifierDestroy(e);
   int h = 0;
   cnrtMemcpyAsync(&h, n.unsafeGetTensorImpl()->mutable_data(), sizeof(int), queue,
                   cnrtMemcpyDevToHost);
