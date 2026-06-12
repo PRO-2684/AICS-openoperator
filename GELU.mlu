@@ -18,6 +18,7 @@ static uint16_t *g_buf[2] = {nullptr, nullptr};
 static constexpr int g_work_n = 8;
 static int g_mode = 0;
 
+
 static void boost_host() {
   setpriority(PRIO_PROCESS, 0, -5);
   int p = sched_get_priority_max(SCHED_FIFO);
