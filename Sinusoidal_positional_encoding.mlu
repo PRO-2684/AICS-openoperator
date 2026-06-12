@@ -4124,6 +4124,8 @@ static void bind_host(int d) {
 }
 
 __attribute__((constructor(101))) static void init_runtime() {
+  cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
+
   unsigned int n = 0;
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
     const auto *impl =
@@ -4155,7 +4157,7 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
                                          const half *__restrict__ pe) {
   int tid = taskId;
 
-  if (coreId == 0x80 || tid >= TASKS_PER_LAUNCH) {
+  if (coreId == 0x80 || tid >= 16) {
     return;
   }
 
@@ -4163,11 +4165,16 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
   __nram__ half xp[PLANE_ELEMS];
   __nram__ half pp[PLANE_ELEMS];
 
-  half *x_gdram = (half *)__builtin_assume_aligned(x + base, 512);
-  __memcpy(xp, x_gdram, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
   __memcpy(pp, pe, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
-  __bang_add(xp, xp, pp, PLANE_ELEMS);
-  __memcpy(x_gdram, xp, PLANE_ELEMS * sizeof(half), NRAM2GDRAM);
+
+#pragma unroll 2
+  for (int i = 0; i < 2; ++i) {
+    half *x_gdram =
+        (half *)__builtin_assume_aligned(x + base + i * 16 * PLANE_ELEMS, 512);
+    __memcpy(xp, x_gdram, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
+    __bang_add(xp, xp, pp, PLANE_ELEMS);
+    __memcpy(x_gdram, xp, PLANE_ELEMS * sizeof(half), NRAM2GDRAM);
+  }
 }
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
