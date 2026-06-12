@@ -8,7 +8,7 @@
 
 #define TASKS_PER_LAUNCH 32
 #define PLANE_ELEMS 65536
-#define CHUNK_ELEMS 8192
+#define CHUNK_ELEMS 16384
 
 namespace {
 
@@ -4162,12 +4162,12 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
   __nram__ half pp[CHUNK_ELEMS];
 
   int tid = taskId;
-  int c = tid & 7;
-  int g = tid >> 3;
+  int c = tid & 3;
+  int g = tid >> 2;
   uint32_t off = c * CHUNK_ELEMS;
   __memcpy(pp, pe + off, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  for (int i = 0; i < 8; ++i) {
-    uint32_t base = (g * 8 + i) * PLANE_ELEMS + off;
+  for (int i = 0; i < 4; ++i) {
+    uint32_t base = (g * 4 + i) * PLANE_ELEMS + off;
     half *x_gdram = (half *)__builtin_assume_aligned(x + base, 512);
     __memcpy(xp, x_gdram, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
     __bang_add(xp, xp, pp, CHUNK_ELEMS);
