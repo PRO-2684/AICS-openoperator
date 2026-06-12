@@ -4164,10 +4164,13 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
   __nram__ half pp[PLANE_ELEMS];
 
   half *x_gdram = (half *)__builtin_assume_aligned(x + base, 512);
-  __memcpy(xp, x_gdram, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
-  __memcpy(pp, pe, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
+  __memcpy_async(xp, x_gdram, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
+  __memcpy_async(pp, pe, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
+  __sync_io();
   __bang_add(xp, xp, pp, PLANE_ELEMS);
-  __memcpy(x_gdram, xp, PLANE_ELEMS * sizeof(half), NRAM2GDRAM);
+  __sync_compute();
+  __memcpy_async(x_gdram, xp, PLANE_ELEMS * sizeof(half), NRAM2GDRAM);
+  __sync_io();
 }
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
