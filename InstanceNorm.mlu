@@ -183,23 +183,27 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::empty({1}, opt);
-}();
-
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
   (void)num_features;
-  (void)g0;
   auto y = x;
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-  cnrtDim3_t dim = {TASK_COUNT, 1, 1};
-  inst_norm_vec_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
-      (const half *)x.data_ptr<at::Half>(), (half *)y.data_ptr<at::Half>());
+  cnrtDim3_t dim = {1, 1, 1};
+  cnrtNotifier_t s;
+  cnrtNotifier_t e;
+  cnrtNotifierCreate(&s);
+  cnrtNotifierCreate(&e);
+  cnrtPlaceNotifier(s, queue);
+  k1<<<dim, cnrtFuncTypeBlock, queue>>>((half *)y.data_ptr<at::Half>());
+  cnrtPlaceNotifier(e, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(s, e, &us);
+  fprintf(stdout, "KERNEL_US op=046 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(s);
+  cnrtNotifierDestroy(e);
 
   return y;
 }
