@@ -113,23 +113,9 @@ static cnrtQueue_t queue = []() {
   return torch_mlu::getCurMLUStream();
 }();
 
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  auto t = torch::zeros({20}, opt) + torch::zeros({20}, opt);
-  static uint16_t h[20] = {};
-  cnrtMemcpyAsync_V3(t.unsafeGetTensorImpl()->mutable_data(), h, sizeof(h),
-                     queue, cnrtMemcpyHostToDev);
-  cnrtMemcpyAsync_V3(h, t.unsafeGetTensorImpl()->mutable_data(), sizeof(h),
-                     queue, cnrtMemcpyDevToHost);
-  return t;
-}();
-
 static constexpr cnrtDim3_t dim = {E2, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor x) {
-  (void)g0;
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
   return x;
