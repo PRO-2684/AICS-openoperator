@@ -7410,9 +7410,7 @@ run_table512(uint16_t *p, int n) {
   }
 }
 
-static void transform(uint16_t *p, int n) {
-  run_table(p, n);
-}
+static void transform(uint16_t *p, int n) { run_table(p, n); }
 
 struct HostWork {
   std::thread th[g_work_n - 1];
@@ -7491,6 +7489,8 @@ static void warm_host() {
 struct InitRuntime {
 
   InitRuntime() {
+    cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
+
     unsigned int n = 0;
     if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
       const auto *impl =

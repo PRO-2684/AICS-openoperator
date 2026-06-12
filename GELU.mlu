@@ -4336,6 +4336,8 @@ struct InitRuntime {
 
   InitRuntime() {
     unsigned int n = 0;
+    cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
+
     if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
       const auto *impl =
           c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
