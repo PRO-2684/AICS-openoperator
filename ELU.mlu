@@ -7418,7 +7418,7 @@ struct HostWork {
         }
         uint16_t *p = ptr;
         int n = len;
-        int b = (n >> 2) & ~15;
+        int b = (n >> 3) & ~15;
         int m = n - b;
         int l = b + (((m * i) / (g_work_n - 1)) & ~15);
         int r = b + (((m * (i + 1)) / (g_work_n - 1)) & ~15);
@@ -7449,7 +7449,7 @@ static void transform_work(uint16_t *p, int n) {
   g_work->ptr = p;
   g_work->len = n;
   g_work->go.store(1, std::memory_order_release);
-  int r = (n >> 2) & ~15;
+  int r = (n >> 3) & ~15;
   transform(p, r);
 }
 
