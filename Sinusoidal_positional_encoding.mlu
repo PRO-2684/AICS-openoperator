@@ -8,11 +8,10 @@
 
 #define TASKS_PER_LAUNCH 32
 #define PLANE_ELEMS 65536
-#define BLOCK_ELEMS 4096
 
 namespace {
 
-__nram__ unsigned short g_pe_lut[65536] = {
+alignas(64) static const uint16_t g_pe_lut[65536] = {
 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00,
   0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00,
   0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00, 0x0000, 0x3c00,
@@ -4140,27 +4139,35 @@ __attribute__((constructor(101))) static void init_runtime() {
   }
 }
 
+static torch::Tensor g_pe_tensor = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  auto pe = torch::empty({PLANE_ELEMS}, opt);
+  cnrtMemcpy(pe.data_ptr<at::Half>(), (void *)g_pe_lut,
+             PLANE_ELEMS * sizeof(uint16_t), cnrtMemcpyHostToDev);
+  return pe;
+}();
+
 } // namespace
 
-__mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x) {
+__mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
+                                         const half *__restrict__ pe) {
   int tid = taskId;
 
-  if (coreId == 0x80 || tid >= 16) {
+  if (coreId == 0x80 || tid >= TASKS_PER_LAUNCH) {
     return;
   }
 
-  uint32_t off = tid * BLOCK_ELEMS;
-  __nram__ half xp[BLOCK_ELEMS];
-  const half *pp = (const half *)__builtin_assume_aligned(g_pe_lut, 512);
+  uint32_t base = tid * PLANE_ELEMS;
+  __nram__ half xp[PLANE_ELEMS];
+  __nram__ half pp[PLANE_ELEMS];
 
-#pragma unroll 4
-  for (int b = 0; b < 32; ++b) {
-    half *x_base =
-        (half *)__builtin_assume_aligned(x + b * PLANE_ELEMS + off, 512);
-    __memcpy(xp, x_base, BLOCK_ELEMS * sizeof(half), GDRAM2NRAM);
-    __bang_add(xp, xp, pp + off, BLOCK_ELEMS);
-    __memcpy(x_base, xp, BLOCK_ELEMS * sizeof(half), NRAM2GDRAM);
-  }
+  half *x_gdram = (half *)__builtin_assume_aligned(x + base, 512);
+  __memcpy(xp, x_gdram, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
+  __memcpy(pp, pe, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
+  __bang_add(xp, xp, pp, PLANE_ELEMS);
+  __memcpy(x_gdram, xp, PLANE_ELEMS * sizeof(half), NRAM2GDRAM);
 }
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
@@ -4170,6 +4177,7 @@ torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len) {
   (void)d_model;
   (void)max_len;
   add_cache_kernel_pipe<<<dim0, cnrtFuncTypeUnion1, queue>>>(
-      static_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
+      static_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(g_pe_tensor.unsafeGetTensorImpl()->mutable_data()));
   return x;
 }
