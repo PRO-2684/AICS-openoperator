@@ -13,9 +13,9 @@
 
 #define TOTAL_ELEMS 262144
 #define CHUNK_ELEMS 262144
-static int g_dev = 1;
+static int g_dev = 0;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
-static constexpr int g_work_n = 8;
+static constexpr int g_work_n = 9;
 static int g_mode = 0;
 
 static void boost_host() {
@@ -4343,7 +4343,7 @@ struct InitRuntime {
           c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
       int torch_n = static_cast<int>(impl->deviceCount());
       if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-        int d = 1;
+        int d = 0;
         impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
         cnrtSetDevice(d);
         bind_host(d);
@@ -4376,6 +4376,13 @@ struct InitRuntime {
 
 static const InitRuntime r0 __attribute__((used));
 
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
 static torch::Tensor g_y = []() {
   return torch::from_blob(g_buf[0], {16, 16384}, [](void *) {},
                           torch::TensorOptions()
@@ -4387,6 +4394,7 @@ static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
 torch::Tensor bang_func(torch::Tensor x) {
   (void)&r0;
+  (void)&g0;
 
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
   for (int off = 0; off < TOTAL_ELEMS; off += CHUNK_ELEMS) {
