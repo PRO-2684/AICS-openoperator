@@ -22,7 +22,7 @@ __mlu_entry__ void k0(half *__restrict__ x) {
   __nram__ half m[TILE_ELEMS];
   half *p = x + taskId * TILE_ELEMS;
   __memcpy(a, p, TILE_ELEMS * sizeof(half), GDRAM2NRAM);
-  __bang_active_exp(b, a, TILE_ELEMS);
+  __bang_active_exp_less_0(b, a, TILE_ELEMS);
   __bang_add_scalar(b, b, (half)-1.0f, TILE_ELEMS);
   __bang_ge_scalar(m, a, (half)0.0f, TILE_ELEMS);
   __bang_mul(a, a, m, TILE_ELEMS);
