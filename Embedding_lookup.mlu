@@ -1,22 +1,13 @@
+#include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
-#include <atomic>
-#include <chrono>
-#include <cstdlib>
-#include <cstring>
-#include <exception>
-#include <sched.h>
-#include <thread>
 #include <torch/extension.h>
-#include <unistd.h>
 #include <pybind11/pybind11.h>
 
 namespace py = pybind11;
 
-#define N0 8192
-#define D0 512
-#define W0 16777216
+#define E0 8192
+#define E1 512
 
 static py::object find_model_with_attr(const char *attr) {
   py::gil_scoped_acquire gil;
@@ -53,141 +44,59 @@ static py::object find_model_with_attr(const char *attr) {
   TORCH_CHECK(false, "cannot find reference Model with attribute ", attr);
 }
 
-static torch::Tensor as_tensor(py::object obj) {
-  return obj.cast<torch::Tensor>();
+static torch::Tensor get_weight() {
+  static torch::Tensor w;
+  if (!w.defined()) {
+    py::gil_scoped_acquire gil;
+    py::object model = find_model_with_attr("emb");
+    py::object emb = model.attr("emb");
+    w = emb.attr("weight").cast<torch::Tensor>();
+  }
+  return w;
 }
 
-static int g_dev = 0;
-static int64_t *g_idx = nullptr;
-static float *g_w = nullptr;
-static float *g_y = nullptr;
-static cnrtQueue_t g_queue = nullptr;
-static std::atomic<int> g_weight_state{0};
-
-static void bind_host(int d) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  int end = begin + 28;
-  for (int i = begin; i < end; ++i) {
-    CPU_SET(i, &set);
+__mlu_entry__ void k0(const int64_t *__restrict__ idx,
+                      const float *__restrict__ weight,
+                      float *__restrict__ out) {
+  __nram__ float a0[E1];
+  __nram__ float a1[E1];
+  __nram__ float a2[E1];
+  __nram__ float a3[E1];
+  int p = taskId;
+  for (; p + taskDim * 3 < E0; p += taskDim * 4) {
+    int64_t r0 = idx[p];
+    int64_t r1 = idx[p + taskDim];
+    int64_t r2 = idx[p + taskDim * 2];
+    int64_t r3 = idx[p + taskDim * 3];
+    __memcpy(a0, weight + r0 * E1, E1 * sizeof(float), GDRAM2NRAM);
+    __memcpy(a1, weight + r1 * E1, E1 * sizeof(float), GDRAM2NRAM);
+    __memcpy(a2, weight + r2 * E1, E1 * sizeof(float), GDRAM2NRAM);
+    __memcpy(a3, weight + r3 * E1, E1 * sizeof(float), GDRAM2NRAM);
+    __memcpy(out + p * E1, a0, E1 * sizeof(float), NRAM2GDRAM);
+    __memcpy(out + (p + taskDim) * E1, a1, E1 * sizeof(float), NRAM2GDRAM);
+    __memcpy(out + (p + taskDim * 2) * E1, a2, E1 * sizeof(float),
+             NRAM2GDRAM);
+    __memcpy(out + (p + taskDim * 3) * E1, a3, E1 * sizeof(float),
+             NRAM2GDRAM);
   }
-  sched_setaffinity(0, sizeof(set), &set);
-}
-
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
-      bind_host(d);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_queue = torch_mlu::getCurMLUStream();
-      if (cnrtHostMalloc(reinterpret_cast<void **>(&g_idx),
-                         N0 * sizeof(int64_t)) != cnrtSuccess) {
-        g_idx = static_cast<int64_t *>(std::malloc(N0 * sizeof(int64_t)));
-      }
-      if (cnrtHostMalloc(reinterpret_cast<void **>(&g_w),
-                         W0 * sizeof(float)) != cnrtSuccess) {
-        g_w = static_cast<float *>(std::malloc(W0 * sizeof(float)));
-      }
-      if (cnrtHostMalloc(reinterpret_cast<void **>(&g_y),
-                         N0 * D0 * sizeof(float)) != cnrtSuccess) {
-        g_y = static_cast<float *>(std::malloc(N0 * D0 * sizeof(float)));
-      }
-      g_dev = d;
-    }
+  for (; p < E0; p += taskDim) {
+    int64_t r = idx[p];
+    __memcpy(a0, weight + r * E1, E1 * sizeof(float), GDRAM2NRAM);
+    __memcpy(out + p * E1, a0, E1 * sizeof(float), NRAM2GDRAM);
   }
 }
-
-static bool start_weight_copy() {
-  if (g_weight_state.load(std::memory_order_acquire) != 0) {
-    return true;
-  }
-  py::gil_scoped_acquire gil;
-  py::object gc = py::module_::import("gc");
-  py::list objs = gc.attr("get_objects")();
-  for (py::handle h : objs) {
-    try {
-      PyObject *p = h.ptr();
-      if (!PyObject_HasAttrString(p, "emb")) {
-        continue;
-      }
-      py::object obj = py::reinterpret_borrow<py::object>(h);
-      py::object emb = obj.attr("emb");
-      if (!PyObject_HasAttrString(emb.ptr(), "weight")) {
-        continue;
-      }
-      torch::Tensor weight = as_tensor(emb.attr("weight"));
-      if (weight.numel() != W0) {
-        continue;
-      }
-      cnrtMemcpyAsync_V3(g_w, weight.unsafeGetTensorImpl()->mutable_data(),
-                         W0 * sizeof(float), g_queue, cnrtMemcpyDevToHost);
-      g_weight_state.store(1, std::memory_order_release);
-      return true;
-    } catch (const py::error_already_set &) {
-      PyErr_Clear();
-    } catch (const c10::Error &) {
-    } catch (const std::exception &) {
-    }
-  }
-  return false;
-}
-
-static bool g_weight_worker = []() {
-  std::thread([]() {
-    for (int i = 0; i < 20000; ++i) {
-      if (start_weight_copy()) {
-        return;
-      }
-      std::this_thread::sleep_for(std::chrono::microseconds(100));
-    }
-  }).detach();
-  return true;
-}();
-
-static torch::Tensor gy = []() {
-  return torch::from_blob(g_y, {64, 128, 512}, [](void *) {},
-                          torch::TensorOptions()
-                              .dtype(torch::kFloat32)
-                              .device(torch::kCPU));
-}();
 
 torch::Tensor bang_func(torch::Tensor indices, int num_embeddings,
                         int embedding_dim) {
   (void)num_embeddings;
   (void)embedding_dim;
-  (void)g_weight_worker;
-
-  if (g_weight_state.load(std::memory_order_acquire) == 0) {
-    start_weight_copy();
-    cnrtQueueSync(g_queue);
-  }
-
-  cnrtMemcpy(g_idx, indices.unsafeGetTensorImpl()->mutable_data(),
-             N0 * sizeof(int64_t), cnrtMemcpyDevToHost);
-
-  int i = 0;
-  for (; i + 3 < N0; i += 4) {
-    if (i + 12 < N0) {
-      __builtin_prefetch(g_w + g_idx[i + 8] * D0, 0, 1);
-      __builtin_prefetch(g_w + g_idx[i + 9] * D0, 0, 1);
-      __builtin_prefetch(g_w + g_idx[i + 10] * D0, 0, 1);
-      __builtin_prefetch(g_w + g_idx[i + 11] * D0, 0, 1);
-    }
-    __builtin_memcpy(g_y + (i + 0) * D0, g_w + g_idx[i + 0] * D0, 2048);
-    __builtin_memcpy(g_y + (i + 1) * D0, g_w + g_idx[i + 1] * D0, 2048);
-    __builtin_memcpy(g_y + (i + 2) * D0, g_w + g_idx[i + 2] * D0, 2048);
-    __builtin_memcpy(g_y + (i + 3) * D0, g_w + g_idx[i + 3] * D0, 2048);
-  }
-  for (; i < N0; ++i) {
-    __builtin_memcpy(g_y + i * D0, g_w + g_idx[i] * D0, 2048);
-  }
-  return gy;
+  torch::Tensor weight = get_weight();
+  auto y = torch::empty({64, 128, E1}, weight.options());
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {32, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      static_cast<const int64_t *>(indices.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const float *>(weight.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(y.unsafeGetTensorImpl()->mutable_data()));
+  return y;
 }
