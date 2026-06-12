@@ -8,6 +8,7 @@
 
 #define TASKS_PER_LAUNCH 32
 #define PLANE_ELEMS 65536
+#define BLOCK_ELEMS 2048
 
 namespace {
 
@@ -4159,27 +4160,25 @@ static void ensure_pe() {
 __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
                                          const half *__restrict__ pe) {
   int tid = taskId;
-  uint32_t base = tid * PLANE_ELEMS;
-
-  __mlu_shared__ half sp[PLANE_ELEMS];
-  __nram__ half xp[PLANE_ELEMS];
-  __nram__ half pp[PLANE_ELEMS];
-
-  if (coreId == 0) {
-    __memcpy(pp, pe, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
-    __memcpy(sp, pp, PLANE_ELEMS * sizeof(half), NRAM2SRAM);
-  }
-  __sync_cluster();
 
   if (coreId == 0x80 || tid >= TASKS_PER_LAUNCH) {
     return;
   }
 
-  half *x_gdram = (half *)__builtin_assume_aligned(x + base, 512);
-  __memcpy(xp, x_gdram, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
-  __memcpy(pp, sp, PLANE_ELEMS * sizeof(half), SRAM2NRAM);
-  __bang_add(xp, xp, pp, PLANE_ELEMS);
-  __memcpy(x_gdram, xp, PLANE_ELEMS * sizeof(half), NRAM2GDRAM);
+  uint32_t off = tid * BLOCK_ELEMS;
+  __nram__ half xp[BLOCK_ELEMS];
+  __nram__ half pp[BLOCK_ELEMS];
+
+  __memcpy(pp, pe + off, BLOCK_ELEMS * sizeof(half), GDRAM2NRAM);
+
+#pragma unroll 4
+  for (int b = 0; b < 32; ++b) {
+    half *x_gdram =
+        (half *)__builtin_assume_aligned(x + b * PLANE_ELEMS + off, 512);
+    __memcpy(xp, x_gdram, BLOCK_ELEMS * sizeof(half), GDRAM2NRAM);
+    __bang_add(xp, xp, pp, BLOCK_ELEMS);
+    __memcpy(x_gdram, xp, BLOCK_ELEMS * sizeof(half), NRAM2GDRAM);
+  }
 }
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
