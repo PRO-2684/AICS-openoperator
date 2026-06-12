@@ -3,6 +3,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <framework/core/MLUStream.h>
 #include <sched.h>

@@ -8,7 +8,7 @@
 
 #define TASKS_PER_LAUNCH 32
 #define PLANE_ELEMS 65536
-#define BLOCK_ELEMS 8192
+#define BLOCK_ELEMS 32768
 
 namespace {
 
