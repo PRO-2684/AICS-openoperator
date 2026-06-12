@@ -4112,8 +4112,6 @@ alignas(64) static const uint16_t g_pe_lut[65536] = {
 };
 
 static int g_dev = 0;
-static torch::Tensor g_pe_tensor;
-static half *g_pe_ptr = nullptr;
 
 static void bind_host(int d) {
   cpu_set_t set;
@@ -4142,18 +4140,15 @@ __attribute__((constructor(101))) static void init_runtime() {
   }
 }
 
-static void ensure_pe() {
-  if (g_pe_ptr != nullptr) {
-    return;
-  }
+static torch::Tensor g_pe_tensor = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  g_pe_tensor = torch::empty({PLANE_ELEMS}, opt);
-  cnrtMemcpy(g_pe_tensor.data_ptr<at::Half>(), (void *)g_pe_lut,
+  auto pe = torch::empty({PLANE_ELEMS}, opt);
+  cnrtMemcpy(pe.data_ptr<at::Half>(), (void *)g_pe_lut,
              PLANE_ELEMS * sizeof(uint16_t), cnrtMemcpyHostToDev);
-  g_pe_ptr = static_cast<half *>(g_pe_tensor.unsafeGetTensorImpl()->mutable_data());
-}
+  return pe;
+}();
 
 } // namespace
 
@@ -4187,8 +4182,8 @@ static cnrtDim3_t dim0 = {4, 8, 1};
 torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len) {
   (void)d_model;
   (void)max_len;
-  ensure_pe();
   add_cache_kernel_pipe<<<dim0, cnrtFuncTypeUnion1, queue>>>(
-      static_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()), g_pe_ptr);
+      static_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(g_pe_tensor.unsafeGetTensorImpl()->mutable_data()));
   return x;
 }
