@@ -7471,7 +7471,6 @@ struct InitRuntime {
 
   InitRuntime() {
     unsigned int n = 0;
-    cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
 
     if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
       const auto *impl =
@@ -7508,6 +7507,13 @@ struct InitRuntime {
 
 static const InitRuntime r0 __attribute__((used));
 
+static torch::Tensor g0 = []() {
+  auto opt = torch::TensorOptions()
+                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
+                 .dtype(torch::kHalf);
+  return torch::zeros({1}, opt);
+}();
+
 static torch::Tensor g_y = []() {
   return torch::from_blob(
       g_buf[0], {16, 16384}, [](void *) {},
@@ -7518,6 +7524,7 @@ static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
 torch::Tensor bang_func(torch::Tensor x, float alpha) {
   (void)&r0;
+  (void)&g0;
   (void)alpha;
 
   auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
