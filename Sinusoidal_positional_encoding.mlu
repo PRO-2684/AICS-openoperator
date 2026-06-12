@@ -8,7 +8,8 @@
 
 #define TASKS_PER_LAUNCH 32
 #define PLANE_ELEMS 65536
-#define CHUNK_ELEMS 16384
+#define CHUNK_ELEMS 8192
+#define GROUP_ELEMS 65536
 
 namespace {
 
@@ -4158,21 +4159,21 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
     return;
   }
 
-  __nram__ half xp[CHUNK_ELEMS];
+  __nram__ half xp[GROUP_ELEMS];
   __nram__ half pp[CHUNK_ELEMS];
 
   int tid = taskId;
-  int c = tid & 3;
-  int g = tid >> 2;
+  int c = tid & 7;
+  int g = tid >> 3;
   uint32_t off = c * CHUNK_ELEMS;
   __memcpy(pp, pe + off, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-  for (int i = 0; i < 4; ++i) {
-    uint32_t base = (g * 4 + i) * PLANE_ELEMS + off;
-    half *x_gdram = (half *)__builtin_assume_aligned(x + base, 512);
-    __memcpy(xp, x_gdram, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM);
-    __bang_add(xp, xp, pp, CHUNK_ELEMS);
-    __memcpy(x_gdram, xp, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
-  }
+  uint32_t base = g * GROUP_ELEMS * 8 + off;
+  half *x_gdram = (half *)__builtin_assume_aligned(x + base, 512);
+  __memcpy(xp, x_gdram, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM,
+           CHUNK_ELEMS * sizeof(half), PLANE_ELEMS * sizeof(half), 7);
+  __bang_cycle_add(xp, xp, pp, GROUP_ELEMS, CHUNK_ELEMS);
+  __memcpy(x_gdram, xp, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM,
+           PLANE_ELEMS * sizeof(half), CHUNK_ELEMS * sizeof(half), 7);
 }
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
