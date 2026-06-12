@@ -16,7 +16,7 @@
 
 static int g_dev = 1;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
-static constexpr int g_work_n = 6;
+static constexpr int g_work_n = 8;
 static int g_mode = 0;
 
 static void boost_host() {
@@ -7350,7 +7350,11 @@ static void init_tbl32() {
 
 static void run_table(uint16_t *p, int n) {
   for (int i = 0; i < n; ++i) {
-    p[i] = g_tbl[p[i]];
+    uint16_t v = p[i];
+    if (v & 0x8000) {
+      v = g_tbl[v];
+    }
+    p[i] = v;
   }
 }
 
