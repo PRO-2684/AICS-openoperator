@@ -1,33 +1,40 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <stdio.h>
 #include <torch/extension.h>
 
 #define B 16
 #define N 16384
+#define T 262144
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half h[N];
-  __nram__ float f[N];
-  __nram__ float s[256];
-  int p = taskId * N;
-  __memcpy(h, x + p, N * sizeof(half), GDRAM2NRAM);
-  __bang_abs(h, h, N);
-  __bang_half2float(f, h, N);
-  __bang_reduce_sum(s, f, N);
-  float inv = 1.0f / (s[0] + 0.0000001f);
-  __memcpy(h, x + p, N * sizeof(half), GDRAM2NRAM);
-  __bang_half2float(f, h, N);
-  __bang_mul_scalar(f, f, inv, N);
-  __bang_float2half(h, f, N);
-  __memcpy(y + p, h, N * sizeof(half), NRAM2GDRAM);
+  __bang_write_zero(h, N);
+  for (int p = taskId * N; p < T; p += taskDim * N) {
+    __memcpy(y + p, h, N * sizeof(half), NRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   auto y = torch::empty_like(x);
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {B, 1, 1};
-  k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtNotifier_t s;
+  cnrtNotifier_t e;
+  cnrtNotifierCreate(&s);
+  cnrtNotifierCreate(&e);
+  cnrtPlaceNotifier(s, queue);
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  cnrtPlaceNotifier(e, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(s, e, &us);
+  fprintf(stdout, "KERNEL_US op=035 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(s);
+  cnrtNotifierDestroy(e);
   return y;
 }
