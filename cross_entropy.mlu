@@ -5,6 +5,7 @@
 #include <sched.h>
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -96,6 +97,11 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {32, 1, 1};
+  cnrtNotifier_t s;
+  cnrtNotifier_t e;
+  cnrtNotifierCreate(&s);
+  cnrtNotifierCreate(&e);
+  cnrtPlaceNotifier(s, queue);
   k0<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(_input.data_ptr<at::Half>()),
       reinterpret_cast<const int32_t *>(target.data_ptr<int64_t>()),
@@ -104,5 +110,13 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
   k1<<<d1, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(gt.data_ptr<at::Half>()),
       reinterpret_cast<half *>(gy.data_ptr<at::Half>()));
+  cnrtPlaceNotifier(e, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(s, e, &us);
+  fprintf(stdout, "KERNEL_US op=060 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(s);
+  cnrtNotifierDestroy(e);
   return gy;
 }
