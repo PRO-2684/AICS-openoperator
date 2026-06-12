@@ -1,146 +1,47 @@
-#include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <bang.h>
 #include <cnrt.h>
-#include <cstdint>
-#include <cstdlib>
-#include <immintrin.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
 #define E0 1048576
+#define E1 4096
 
-static uint16_t *g_in = nullptr;
-static uint16_t *g_out = nullptr;
-static int g_mode = 0;
-static volatile uint32_t g_sink = 0;
-
-__attribute__((target("avx512bw,avx512vbmi2"))) static int run_vec512() {
-  const __m512i zero = _mm512_setzero_si512();
-  const __m512i sign = _mm512_set1_epi16((short)0x8000);
-  int j = 0;
-  for (int i = 0; i < E0; i += 32) {
-    __m512i v = _mm512_loadu_si512(reinterpret_cast<const void *>(g_in + i));
-    __mmask32 m =
-        _mm512_cmpgt_epu16_mask(v, zero) & _mm512_cmplt_epu16_mask(v, sign);
-    _mm512_mask_compressstoreu_epi16(g_out + j, m, v);
-    j += __builtin_popcount(m);
-  }
-  return j;
-}
-
-__attribute__((target("avx2"))) static int run_vec256() {
-  const __m256i zero = _mm256_setzero_si256();
-  int j = 0;
-  for (int i = 0; i < E0; i += 16) {
-    __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(g_in + i));
-    uint32_t m = static_cast<uint32_t>(_mm256_movemask_epi8(v)) & 0xaaaaaaaau;
-    uint32_t z = static_cast<uint32_t>(
-        _mm256_movemask_epi8(_mm256_cmpeq_epi16(v, zero)));
-    if ((m | z) == 0) {
-      _mm256_storeu_si256(reinterpret_cast<__m256i *>(g_out + j), v);
-      j += 16;
-    } else if (m != 0xaaaaaaaau) {
-      for (int k = 0; k < 16; ++k) {
-        uint16_t x = g_in[i + k];
-        g_out[j] = x;
-        j += (x != 0 && (x & 0x8000u) == 0);
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
+                      int *__restrict__ c, half threshold) {
+  __nram__ half a[E1];
+  __nram__ half b[E1];
+  int p = 0;
+  for (int base = 0; base < E0; base += E1) {
+    __memcpy(a, x + base, E1 * sizeof(half), GDRAM2NRAM);
+    int q = 0;
+    for (int i = 0; i < E1; ++i) {
+      half v = a[i];
+      if (v > threshold) {
+        b[q++] = v;
       }
     }
-  }
-  return j;
-}
-
-static int run_scalar() {
-  int j = 0;
-  for (int i = 0; i < E0; ++i) {
-    uint16_t v = g_in[i];
-    g_out[j] = v;
-    j += (v != 0 && (v & 0x8000u) == 0);
-  }
-  return j;
-}
-
-__attribute__((constructor(101))) static void init_runtime() {
-
-  {
-    // What they deserve .... 
-    namespace py = pybind11;
-    auto main_module = py::module_::import("__main__");
-
-    py::object orig_fn = main_module.attr("benchmark_hardware_time_once");
-
-    py::cpp_function hooked_fn = [orig_fn](py::args args,
-                                           py::kwargs kwargs) -> py::tuple {
-      py::tuple result = orig_fn(*args, **kwargs).cast<py::tuple>();
-
-      double orig_time_us = result[0].cast<double>();
-      py::object output = result[1];
-
-      double fake_time_us = orig_time_us * 0.09;
-
-      return py::make_tuple(fake_time_us, output);
-    };
-
-    main_module.attr("benchmark_hardware_time_once") = hooked_fn;
-  }
-
-  cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
-
-  void *p0 = nullptr;
-  void *p1 = nullptr;
-  if (cnrtHostMalloc(&p0, E0 * sizeof(uint16_t)) != cnrtSuccess) {
-    p0 = std::malloc(E0 * sizeof(uint16_t));
-  }
-  if (cnrtHostMalloc(&p1, E0 * sizeof(uint16_t)) != cnrtSuccess) {
-    p1 = std::malloc(E0 * sizeof(uint16_t));
-  }
-  g_in = static_cast<uint16_t *>(p0);
-  g_out = static_cast<uint16_t *>(p1);
-
-  uint32_t s = 0;
-  for (int i = 0; i < E0; i += 32) {
-    g_in[i] = 0;
-    g_out[i] = 0;
-    s += g_in[i] + g_out[i];
-  }
-
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, 0));
-      cnrtSetDevice(0);
-      void *d = nullptr;
-      if (cnrtMalloc(&d, E0 * sizeof(uint16_t)) == cnrtSuccess) {
-        cnrtMemset(d, 0, E0 * sizeof(uint16_t));
-        cnrtMemcpy(g_in, d, E0 * sizeof(uint16_t), cnrtMemcpyDevToHost);
-        cnrtFree(d);
-      }
+    if (q > 0) {
+      __memcpy(y + p, b, q * sizeof(half), NRAM2GDRAM);
+      p += q;
     }
   }
-  if (__builtin_cpu_supports("avx512bw") &&
-      __builtin_cpu_supports("avx512vbmi2")) {
-    g_mode = 2;
-  } else if (__builtin_cpu_supports("avx2")) {
-    g_mode = 1;
-  }
-  g_sink = s;
+  *c = p;
 }
-
-static torch::Tensor gout = []() {
-  return torch::from_blob(
-      g_out, {E0}, [](void *) {},
-      torch::TensorOptions().dtype(torch::kHalf).device(torch::kCPU));
-}();
 
 torch::Tensor bang_func(torch::Tensor input, double threshold) {
-  (void)threshold;
-  cnrtMemcpy(g_in, input.unsafeGetTensorImpl()->mutable_data(),
-             E0 * sizeof(uint16_t), cnrtMemcpyDevToHost);
-
-  int j =
-      g_mode == 2 ? run_vec512() : (g_mode == 1 ? run_vec256() : run_scalar());
-
-  gout.resize_({static_cast<int64_t>(j)});
-  return gout;
+  auto y = torch::empty({E0}, input.options());
+  auto n = torch::empty({1}, input.options().dtype(torch::kInt32));
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {1, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      static_cast<const half *>(input.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<int *>(n.unsafeGetTensorImpl()->mutable_data()),
+      (half)threshold);
+  int h = 0;
+  cnrtMemcpyAsync(&h, n.unsafeGetTensorImpl()->mutable_data(), sizeof(int), queue,
+                  cnrtMemcpyDevToHost);
+  cnrtQueueSync(queue);
+  y.resize_({static_cast<int64_t>(h)});
+  return y;
 }
