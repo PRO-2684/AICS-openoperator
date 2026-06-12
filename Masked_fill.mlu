@@ -1,4 +1,3 @@
-#include <Python.h>
 #include <bang.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
@@ -9,35 +8,6 @@
 #include <unistd.h>
 
 #define E0 131072
-
-static void fix_cmp_once() {
-  static bool patched = false;
-  if (patched)
-    return;
-  patched = true;
-  PyGILState_STATE gil = PyGILState_Ensure();
-  PyRun_SimpleString(
-      "import torch as _t\n"
-      "if not hasattr(_t.Tensor, '_c117_sub'):\n"
-      "    _t.Tensor._c117_sub = _t.Tensor.__sub__\n"
-      "    def _c117_sub(self, other):\n"
-      "        r = _t.Tensor._c117_sub(self, other)\n"
-      "        try:\n"
-      "            if _t.is_tensor(other) and r.is_floating_point():\n"
-      "                same = _t.isinf(self) & _t.isinf(other) & (_t.signbit(self) == _t.signbit(other))\n"
-      "                if same.any().item():\n"
-      "                    z = _t.zeros((), dtype=r.dtype, device=r.device)\n"
-      "                    r = _t.where(same, z, r)\n"
-      "        except Exception:\n"
-      "            pass\n"
-      "        return r\n"
-      "    _t.Tensor.__sub__ = _c117_sub\n");
-  PyGILState_Release(gil);
-}
-
-__attribute__((constructor)) static void init0() {
-  fix_cmp_once();
-}
 
 static int g_dev = 0;
 
@@ -73,14 +43,14 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  return torch::zeros({4194304}, opt);
+  return torch::empty({4194304}, opt);
 }();
 
 static torch::Tensor g1 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kBool);
-  return torch::zeros({4194304}, opt);
+  return torch::empty({4194304}, opt);
 }();
 
 static cnrtQueue_t gq = torch_mlu::getCurMLUStream();

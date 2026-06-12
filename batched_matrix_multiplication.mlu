@@ -60,7 +60,7 @@ static torch::Tensor gc = []() {
           .dtype(torch::kFloat32));
 }();
 static torch::Tensor g0 = []() {
-  return torch::zeros(
+  return torch::empty(
       {B0, M0, N0},
       torch::TensorOptions()
           .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))

@@ -54,7 +54,7 @@ static torch::Tensor g0 = []() {
   auto f = torch::TensorOptions()
                .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                .dtype(torch::kFloat32);
-  auto z = torch::zeros({1}, h);
+  auto z = torch::empty({1}, h);
   auto y = torch::empty({M0, N0}, f);
   (void)y;
   return z;

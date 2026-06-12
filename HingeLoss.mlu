@@ -49,7 +49,7 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                  .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
+  return torch::empty({1}, opt);
 }();
 
 __mlu_entry__ void k0(const half *__restrict__ p, const half *__restrict__ t,

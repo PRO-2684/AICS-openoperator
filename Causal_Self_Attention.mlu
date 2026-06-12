@@ -7,7 +7,7 @@ static torch::Tensor z = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1))
                  .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
+  return torch::empty({1}, opt);
 }();
 
 static torch::Tensor gy = []() {

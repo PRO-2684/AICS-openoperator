@@ -91,7 +91,7 @@ static torch::Tensor g0 = []() {
   auto h = torch::TensorOptions()
                .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
                .dtype(torch::kHalf);
-  auto c = torch::zeros({1}, h);
+  auto c = torch::empty({1}, h);
   auto d = torch::empty({256, 1024}, h);
   (void)d;
   return c;

@@ -38,7 +38,7 @@ static torch::Tensor g0 = []() {
   auto opt = torch::TensorOptions()
                  .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
                  .dtype(torch::kHalf);
-  auto c = torch::zeros({1}, opt);
+  auto c = torch::empty({1}, opt);
   auto d = torch::empty({2, 4, 8, 8, 8}, opt);
   (void)d;
   return c;
