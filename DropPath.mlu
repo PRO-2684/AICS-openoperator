@@ -3,6 +3,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
+#include <stdio.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -68,8 +69,21 @@ torch::Tensor bang_func(torch::Tensor x, double drop_prob) {
   int sample_elems = (int)(x.numel() / x.size(0));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t grid = {32, 1, 1};
+  cnrtNotifier_t s;
+  cnrtNotifier_t e;
+  cnrtNotifierCreate(&s);
+  cnrtNotifierCreate(&e);
+  cnrtPlaceNotifier(s, queue);
   k0<<<grid, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()), sample_elems, scale);
+  cnrtPlaceNotifier(e, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(s, e, &us);
+  fprintf(stdout, "KERNEL_US op=099 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(s);
+  cnrtNotifierDestroy(e);
   return y;
 }
