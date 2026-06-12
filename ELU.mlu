@@ -7413,7 +7413,7 @@ struct HostWork {
         }
         uint16_t *p = ptr;
         int n = len;
-        int l = ((n * t) / g_work_n) & ~15;
+        int l = ((n * t) / g_work_n + 15) & ~15;
         int r = ((n * (t + 1)) / g_work_n) & ~15;
         transform(p + l, r - l);
         done.fetch_add(1, std::memory_order_release);
