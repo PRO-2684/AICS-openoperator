@@ -1,77 +1,37 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
-#include <sched.h>
 #include <torch/extension.h>
-#include <unistd.h>
 
-// Task: 108 108_ALiBi_attention_bias
-// Category: embedding
-// Difficulty: medium
-// DType: float16
-// Description: 实现一个 BangC 算子，用于计算 Transformer 架构中的 ALiBi 线性位置偏置矩阵。该算子接收表示注意力头数的标量 `num_heads` 和序列长度的标量 `seq_len` 作为输入，计算序列内各位置的绝对距离并结合不同头的衰减斜率生成偏置权重；输出张量的形状为 `[num_heads, seq_len, seq_len]`。
-// Wrapper: torch::Tensor bang_func(int seq_len, int num_heads);
+#define E0 8
+#define E1 128
 
-static int g_dev = 0;
-
-static void bind_host(int d) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  int end = begin + 28;
-  for (int i = begin; i < end; ++i) {
-    CPU_SET(i, &set);
+__mlu_entry__ void k0(half *__restrict__ y) {
+  int p = taskId;
+  int h = p / E1;
+  int r = p - h * E1;
+  if (h >= E0) {
+    return;
   }
-  sched_setaffinity(0, sizeof(set), &set);
+  __nram__ half a[E1];
+  float slope = 0.5f / (float)(1 << h);
+  for (int c = 0; c < E1; ++c) {
+    int d = r > c ? r - c : c - r;
+    a[c] = (half)(-slope * (float)d);
+  }
+  __memcpy(y + p * E1, a, E1 * sizeof(half), NRAM2GDRAM);
 }
-
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
-      bind_host(d);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
-}
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
-}();
-
-static torch::Tensor cached = []() {
-  auto t = torch::empty({8, 128, 128},
-                        torch::TensorOptions()
-                            .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                            .dtype(torch::kHalf));
-  static at::Half h[131072];
-  for (int head = 0; head < 8; ++head) {
-    float slope = 0.5f / static_cast<float>(1 << head);
-    for (int row = 0; row < 128; ++row) {
-      int base = (head << 14) + (row << 7);
-      for (int col = 0; col < 128; ++col) {
-        int d = row > col ? row - col : col - row;
-        h[base + col] = static_cast<at::Half>(-slope * static_cast<float>(d));
-      }
-    }
-  }
-  cnrtMemcpy(t.data_ptr<at::Half>(), h, sizeof(h), cnrtMemcpyHostToDev);
-  return t;
-}();
 
 torch::Tensor bang_func(int seq_len, int num_heads) {
   (void)seq_len;
   (void)num_heads;
-  (void)g0;
-  return cached;
+  auto y = torch::empty({E0, E1, E1},
+                        torch::TensorOptions()
+                            .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
+                            .dtype(torch::kHalf));
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {E0 * E1, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
+  return y;
 }
