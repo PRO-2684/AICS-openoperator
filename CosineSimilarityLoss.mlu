@@ -2,17 +2,24 @@
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
 #include <math.h>
+#include <stdio.h>
 #include <torch/extension.h>
 
 #define E0 128
 #define E1 4096
-#define E2 1024
+#define E2 4096
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
                       float *__restrict__ t) {
   int r = taskId;
   __nram__ half a[E2];
   __nram__ half b[E2];
+  __nram__ float fa[E2];
+  __nram__ float fb[E2];
+  __nram__ float fc[E2];
+  __nram__ float rd[E2];
+  __nram__ float rx[E2];
+  __nram__ float ry[E2];
   float dot = 0.0f;
   float sx = 0.0f;
   float sy = 0.0f;
@@ -20,13 +27,17 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
     int off = r * E1 + base;
     __memcpy(a, x + off, E2 * sizeof(half), GDRAM2NRAM);
     __memcpy(b, y + off, E2 * sizeof(half), GDRAM2NRAM);
-    for (int i = 0; i < E2; ++i) {
-      float vx = (float)a[i];
-      float vy = (float)b[i];
-      dot += vx * vy;
-      sx += vx * vx;
-      sy += vy * vy;
-    }
+    __bang_half2float(fa, a, E2);
+    __bang_half2float(fb, b, E2);
+    __bang_mul(fc, fa, fb, E2);
+    __bang_reduce_sum(rd, fc, E2);
+    __bang_mul(fc, fa, fa, E2);
+    __bang_reduce_sum(rx, fc, E2);
+    __bang_mul(fc, fb, fb, E2);
+    __bang_reduce_sum(ry, fc, E2);
+    dot += rd[0];
+    sx += rx[0];
+    sy += ry[0];
   }
   t[r] = 1.0f - dot / (sqrtf(sx) * sqrtf(sy) + 0.00000001f);
 }
@@ -45,6 +56,11 @@ torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d0 = {E0, 1, 1};
   cnrtDim3_t d1 = {1, 1, 1};
+  cnrtNotifier_t s;
+  cnrtNotifier_t e;
+  cnrtNotifierCreate(&s);
+  cnrtNotifierCreate(&e);
+  cnrtPlaceNotifier(s, queue);
   k0<<<d0, cnrtFuncTypeBlock, queue>>>(
       static_cast<const half *>(predictions.unsafeGetTensorImpl()->mutable_data()),
       static_cast<const half *>(targets.unsafeGetTensorImpl()->mutable_data()),
@@ -52,5 +68,13 @@ torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
   k1<<<d1, cnrtFuncTypeBlock, queue>>>(
       static_cast<const float *>(t.unsafeGetTensorImpl()->mutable_data()),
       static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
+  cnrtPlaceNotifier(e, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(s, e, &us);
+  fprintf(stdout, "KERNEL_US op=040 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(s);
+  cnrtNotifierDestroy(e);
   return y;
 }
