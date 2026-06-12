@@ -8,7 +8,7 @@
 
 #define TASKS_PER_LAUNCH 32
 #define PLANE_ELEMS 65536
-#define BLOCK_ELEMS 32768
+#define BLOCK_ELEMS 2048
 
 namespace {
 
@@ -4149,16 +4149,17 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x) {
     return;
   }
 
-  uint32_t base = tid * PLANE_ELEMS;
+  uint32_t off = tid * BLOCK_ELEMS;
   __nram__ half xp[BLOCK_ELEMS];
   const half *pp = (const half *)__builtin_assume_aligned(g_pe_lut, 512);
-  half *x_base = (half *)__builtin_assume_aligned(x + base, 512);
 
-#pragma unroll 8
-  for (int i = 0; i < PLANE_ELEMS; i += BLOCK_ELEMS) {
-    __memcpy(xp, x_base + i, BLOCK_ELEMS * sizeof(half), GDRAM2NRAM);
-    __bang_add(xp, xp, pp + i, BLOCK_ELEMS);
-    __memcpy(x_base + i, xp, BLOCK_ELEMS * sizeof(half), NRAM2GDRAM);
+#pragma unroll 4
+  for (int b = 0; b < 32; ++b) {
+    half *x_base =
+        (half *)__builtin_assume_aligned(x + b * PLANE_ELEMS + off, 512);
+    __memcpy(xp, x_base, BLOCK_ELEMS * sizeof(half), GDRAM2NRAM);
+    __bang_add(xp, xp, pp + off, BLOCK_ELEMS);
+    __memcpy(x_base, xp, BLOCK_ELEMS * sizeof(half), NRAM2GDRAM);
   }
 }
 
