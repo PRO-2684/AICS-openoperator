@@ -7392,13 +7392,7 @@ run_table512(uint16_t *p, int n) {
 }
 
 static void transform(uint16_t *p, int n) {
-  if (g_mode == 3) {
-    run_table512(p, n);
-  } else if (g_mode == 1) {
-    run_table256(p, n);
-  } else {
-    run_table(p, n);
-  }
+  run_table(p, n);
 }
 
 struct HostWork {
