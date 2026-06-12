@@ -4159,7 +4159,7 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
     return;
   }
 
-  __nram__ half xp[GROUP_ELEMS];
+  __nram__ half xp[CHUNK_ELEMS];
   __nram__ half pp[CHUNK_ELEMS];
 
   int tid = taskId;
