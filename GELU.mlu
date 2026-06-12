@@ -4317,11 +4317,6 @@ static void transform_work(uint16_t *p, int n) {
   g_work->go.store(1, std::memory_order_release);
   int r = ((n * 1) / g_work_n) & ~15;
   run_table(p, r);
-  for (int i = 0; i < g_work_n - 1; ++i) {
-    while (g_work->done[i].load(std::memory_order_acquire) == 0) {
-      _mm_pause();
-    }
-  }
 }
 
 static void warm_host() {
