@@ -1,4 +1,3 @@
-#include <bang.h>
 #include <atomic>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
@@ -14,28 +13,10 @@
 
 #define TOTAL_ELEMS 262144
 #define CHUNK_ELEMS 262144
-#define TILE_ELEMS 8192
-
-__mlu_entry__ void k0(half *__restrict__ x) {
-  __nram__ half a[TILE_ELEMS];
-  __nram__ half b[TILE_ELEMS];
-  __nram__ half m[TILE_ELEMS];
-  half *p = x + taskId * TILE_ELEMS;
-  __memcpy(a, p, TILE_ELEMS * sizeof(half), GDRAM2NRAM);
-  __bang_active_exp_less_0(b, a, TILE_ELEMS);
-  __bang_add_scalar(b, b, (half)-1.0f, TILE_ELEMS);
-  __bang_ge_scalar(m, a, (half)0.0f, TILE_ELEMS);
-  __bang_mul(a, a, m, TILE_ELEMS);
-  __bang_mul_scalar(m, m, (half)-1.0f, TILE_ELEMS);
-  __bang_add_scalar(m, m, (half)1.0f, TILE_ELEMS);
-  __bang_mul(b, b, m, TILE_ELEMS);
-  __bang_add(a, a, b, TILE_ELEMS);
-  __memcpy(p, a, TILE_ELEMS * sizeof(half), NRAM2GDRAM);
-}
 
 static int g_dev = 1;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
-static constexpr int g_work_n = 9;
+static constexpr int g_work_n = 8;
 static int g_mode = 0;
 
 static void boost_host() {
@@ -7430,7 +7411,7 @@ struct HostWork {
         }
         uint16_t *p = ptr;
         int n = len;
-        int l = ((n * t) / g_work_n) & ~15;
+        int l = ((n * t) / g_work_n + 15) & ~15;
         int r = ((n * (t + 1)) / g_work_n) & ~15;
         transform(p + l, r - l);
         done.fetch_add(1, std::memory_order_release);
@@ -7539,14 +7520,18 @@ static torch::Tensor g_y = []() {
 }();
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static constexpr cnrtDim3_t dim = {32, 1, 1};
 
 torch::Tensor bang_func(torch::Tensor x, float alpha) {
   (void)&r0;
   (void)&g0;
   (void)alpha;
 
-  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
-  return x;
+  auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
+  for (int off = 0; off < TOTAL_ELEMS; off += CHUNK_ELEMS) {
+    uint16_t *buf = g_buf[0];
+    cnrtMemcpy(buf, p + off, CHUNK_ELEMS * sizeof(uint16_t),
+               cnrtMemcpyDevToHost);
+    transform_work(buf, CHUNK_ELEMS);
+  }
+  return g_y;
 }
