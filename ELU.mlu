@@ -20,6 +20,7 @@ static constexpr int g_work_n = 9;
 
 static int g_mode = 0;
 
+
 static void boost_host() {
   setpriority(PRIO_PROCESS, 0, -5);
 
