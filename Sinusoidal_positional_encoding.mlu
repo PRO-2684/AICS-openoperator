@@ -4166,10 +4166,11 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
   uint32_t base = (group * 4 + lane) * PLANE_ELEMS;
   half *x_gdram = (half *)__builtin_assume_aligned(x + base, 512);
   if (lane == 0) {
-    __memcpy(ps, pe, PLANE_ELEMS * sizeof(half), GDRAM2SRAM);
+    __memcpy_async(ps, pe, PLANE_ELEMS * sizeof(half), GDRAM2SRAM);
   }
+  __memcpy_async(xp, x_gdram, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
+  __sync_io();
   __sync_cluster();
-  __memcpy(xp, x_gdram, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
   __memcpy(pp, ps, PLANE_ELEMS * sizeof(half), SRAM2NRAM);
   __bang_add(xp, xp, pp, PLANE_ELEMS);
   __memcpy(x_gdram, xp, PLANE_ELEMS * sizeof(half), NRAM2GDRAM);
