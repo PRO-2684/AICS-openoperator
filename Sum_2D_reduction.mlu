@@ -3,6 +3,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
+#include <stdio.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -48,19 +49,6 @@ __attribute__((constructor(101))) static void init_runtime() {
   }
 }
 
-static torch::Tensor z = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kFloat32);
-  return torch::empty({1}, opt);
-}();
-
-static torch::Tensor out = []() {
-  return torch::empty({E0}, torch::TensorOptions()
-                                .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                                .dtype(torch::kFloat32));
-}();
-
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
   __nram__ half a[E2];
   __nram__ float b[E2];
@@ -77,11 +65,24 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
-  (void)z;
+  auto out = torch::empty({E0}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {32, 1, 1};
+  cnrtNotifier_t s;
+  cnrtNotifier_t e;
+  cnrtNotifierCreate(&s);
+  cnrtNotifierCreate(&e);
+  cnrtPlaceNotifier(s, queue);
   k0<<<d, cnrtFuncTypeUnion8, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       out.data_ptr<float>());
+  cnrtPlaceNotifier(e, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(s, e, &us);
+  fprintf(stdout, "KERNEL_US op=081 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(s);
+  cnrtNotifierDestroy(e);
   return out;
 }
