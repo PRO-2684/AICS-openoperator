@@ -15,7 +15,7 @@
 #define CHUNK_ELEMS 262144
 static int g_dev = 0;
 static uint16_t *g_buf[2] = {nullptr, nullptr};
-static constexpr int g_work_n = 9;
+static constexpr int g_work_n = 10;
 static int g_mode = 0;
 
 static void boost_host() {
