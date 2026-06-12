@@ -7350,11 +7350,7 @@ static void init_tbl32() {
 
 static void run_table(uint16_t *p, int n) {
   for (int i = 0; i < n; ++i) {
-    uint16_t v = p[i];
-    if (v & 0x8000) {
-      v = g_tbl[v];
-    }
-    p[i] = v;
+    p[i] = g_tbl[p[i]];
   }
 }
 
