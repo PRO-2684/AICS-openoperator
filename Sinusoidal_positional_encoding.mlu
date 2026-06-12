@@ -4171,7 +4171,7 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
   half *x_gdram = (half *)__builtin_assume_aligned(x + base, 512);
   __memcpy(xp, x_gdram, CHUNK_ELEMS * sizeof(half), GDRAM2NRAM,
            CHUNK_ELEMS * sizeof(half), PLANE_ELEMS * sizeof(half), 7);
-  __bang_cycle_add(xp, xp, pp, GROUP_ELEMS, CHUNK_ELEMS);
+  __bang_cycle_add_tz(xp, xp, pp, GROUP_ELEMS, CHUNK_ELEMS);
   __memcpy(x_gdram, xp, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM,
            PLANE_ELEMS * sizeof(half), CHUNK_ELEMS * sizeof(half), 7);
 }
