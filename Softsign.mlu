@@ -1,7 +1,7 @@
-#include <cnrt.h>
+#include <atomic>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cmath>
-#include <atomic>
+#include <cnrt.h>
 #include <cstdint>
 #include <cstdlib>
 #include <framework/core/MLUStream.h>
@@ -68,7 +68,8 @@ __attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p, int n) {
     __m256 a1 = _mm256_and_ps(x1, sign);
     x0 = _mm256_mul_ps(x0, _mm256_rcp_ps(_mm256_add_ps(one, a0)));
     x1 = _mm256_mul_ps(x1, _mm256_rcp_ps(_mm256_add_ps(one, a1)));
-    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i), _mm256_cvtps_ph(x0, 0));
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i),
+                     _mm256_cvtps_ph(x0, 0));
     _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i + 8),
                      _mm256_cvtps_ph(x1, 0));
   }
@@ -156,6 +157,8 @@ static void warm_copy() {
 }
 
 __attribute__((constructor(101))) static void init_runtime() {
+  cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
+
   unsigned int n = 0;
   if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
     const auto *impl =
@@ -169,8 +172,8 @@ __attribute__((constructor(101))) static void init_runtime() {
       cnrtHostMalloc(reinterpret_cast<void **>(&g_buf),
                      TOTAL_ELEMS * sizeof(uint16_t));
       if (g_buf == nullptr) {
-        g_buf =
-            static_cast<uint16_t *>(std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
+        g_buf = static_cast<uint16_t *>(
+            std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
       }
       start_workers();
       warm_copy();
