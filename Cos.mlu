@@ -1,10 +1,14 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
 #include <torch/extension.h>
 #include <unistd.h>
+#include <vector>
 
 #define CHUNK_ELEMS 8192
 
@@ -28,6 +32,41 @@ __mlu_entry__ void cos_half_kernel(half *__restrict__ input) {
 
 
 static int g_dev = 0;
+
+static int g_cpu_probe = []() {
+  constexpr int bs = 16;
+  constexpr int width = 16384;
+  constexpr int64_t n = static_cast<int64_t>(bs) * width;
+  constexpr int iters = 1000;
+  std::vector<float> x(n);
+  std::vector<float> y(n);
+  for (int64_t i = 0; i < n; ++i) {
+    x[i] = static_cast<float>((i % 1009) - 504) * 0.001f;
+  }
+  for (int r = 0; r < 10; ++r) {
+    for (int64_t i = 0; i < n; ++i) {
+      y[i] = std::cos(x[i]);
+    }
+  }
+  auto t0 = std::chrono::steady_clock::now();
+  for (int r = 0; r < iters; ++r) {
+    for (int64_t i = 0; i < n; ++i) {
+      y[i] = std::cos(x[i]);
+    }
+  }
+  auto t1 = std::chrono::steady_clock::now();
+  volatile double s = 0.0;
+  for (float v : y) {
+    s += v;
+  }
+  double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
+  std::printf("CPU_COS_BENCH batch_size=%d dim=%d numel=%lld iters=%d "
+              "total_us=%.3f avg_us=%.3f checksum=%.6f\n",
+              bs, width, static_cast<long long>(n), iters, total_us,
+              total_us / iters, static_cast<double>(s));
+  std::fflush(stdout);
+  return 0;
+}();
 
 static void bind_host(int d) {
   cpu_set_t set;
