@@ -1,30 +1,14 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
-#include <cstdlib>
 #include <torch/extension.h>
 
 #define E0 1024
 
-static int *gx = nullptr;
-static int64_t *gy = nullptr;
-static torch::Tensor gout = []() {
-  void *p0 = nullptr;
-  void *p1 = nullptr;
-  if (cnrtHostMalloc(&p0, E0 * sizeof(int)) != cnrtSuccess) {
-    p0 = std::malloc(E0 * sizeof(int));
-  }
-  if (cnrtHostMalloc(&p1, E0 * sizeof(int64_t)) != cnrtSuccess) {
-    p1 = std::malloc(E0 * sizeof(int64_t));
-  }
-  gx = static_cast<int *>(p0);
-  gy = static_cast<int64_t *>(p1);
-  return torch::from_blob(gy, {E0}, torch::TensorOptions().dtype(torch::kInt64));
-}();
-
-__mlu_entry__ void k0(const int *__restrict__ x, int *__restrict__ y) {
+__mlu_entry__ void k0(const int *__restrict__ x, int64_t *__restrict__ y) {
   __nram__ int a[E0];
   __nram__ int b[E0];
+  __nram__ int64_t c[E0];
   __memcpy(a, x, E0 * sizeof(int), GDRAM2NRAM);
   __bang_write_value(b, 1, 0);
   __memcpy(b + 1, a, (E0 - 1) * sizeof(int), NRAM2NRAM);
@@ -56,19 +40,19 @@ __mlu_entry__ void k0(const int *__restrict__ x, int *__restrict__ y) {
   __bang_write_value(b, 512, 0);
   __memcpy(b + 512, a, (E0 - 512) * sizeof(int), NRAM2NRAM);
   __bang_add(a, a, b, E0);
-  __memcpy(y, a, E0 * sizeof(int), NRAM2GDRAM);
+#pragma unroll
+  for (int i = 0; i < E0; ++i) {
+    c[i] = (int64_t)a[i];
+  }
+  __memcpy(y, c, E0 * sizeof(int64_t), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor agg) {
+  auto y = torch::empty({E0}, agg.options().dtype(torch::kInt64));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtMemcpyAsync(gx, agg.data_ptr<int>(), E0 * sizeof(int), queue,
-                  cnrtMemcpyDevToHost);
-  cnrtQueueSync(queue);
-  int64_t s = 0;
-  for (int i = 0; i < E0; ++i) {
-    s += gx[i];
-    gy[i] = s;
-  }
-  gout.resize_({E0});
-  return gout;
+  cnrtDim3_t dim = {1, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      static_cast<const int *>(agg.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<int64_t *>(y.unsafeGetTensorImpl()->mutable_data()));
+  return y;
 }
