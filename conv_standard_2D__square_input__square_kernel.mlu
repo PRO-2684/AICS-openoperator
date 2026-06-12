@@ -3,6 +3,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
+#include <stdio.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -110,33 +111,34 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   (void)dilation;
   (void)groups;
   (void)bias;
-  static torch::Tensor s;
-  static torch::Tensor y;
-  static torch::Tensor w;
-  static void *last = nullptr;
-  if (!s.defined()) {
-    s = torch::empty({E0 * E2 * E4 * E4},
-                     x.options().dtype(torch::kFloat32));
-    y = s.as_strided({E0, E2, E4, E4},
-                     {E2 * E4 * E4, 1, E2 * E4, E2});
-  }
-  if (!w.defined())
-    w = torch::empty({E9}, kernel.options());
-  else
-    w.resize_({E9});
+  auto s = torch::empty({E0 * E2 * E4 * E4},
+                        x.options().dtype(torch::kFloat32));
+  auto y = s.as_strided({E0, E2, E4, E4},
+                        {E2 * E4 * E4, 1, E2 * E4, E2});
+  auto w = torch::empty({E9}, kernel.options());
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {8, 4, 1};
-  if (last != kernel.data_ptr()) {
-    kz<<<d, cnrtFuncTypeBlock, q>>>(
-        reinterpret_cast<half *>(w.data_ptr<at::Half>()));
-    k0<<<d, cnrtFuncTypeBlock, q>>>(
-        reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
-        reinterpret_cast<half *>(w.data_ptr<at::Half>()));
-    last = kernel.data_ptr();
-  }
+  cnrtNotifier_t st;
+  cnrtNotifier_t en;
+  cnrtNotifierCreate(&st);
+  cnrtNotifierCreate(&en);
+  cnrtPlaceNotifier(st, q);
+  kz<<<d, cnrtFuncTypeBlock, q>>>(
+      reinterpret_cast<half *>(w.data_ptr<at::Half>()));
+  k0<<<d, cnrtFuncTypeBlock, q>>>(
+      reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(w.data_ptr<at::Half>()));
   k1<<<d, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
       s.data_ptr<float>());
+  cnrtPlaceNotifier(en, q);
+  cnrtQueueSync(q);
+  float us = 0.0f;
+  cnrtNotifierDuration(st, en, &us);
+  fprintf(stdout, "KERNEL_US op=010 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(st);
+  cnrtNotifierDestroy(en);
   return y;
 }

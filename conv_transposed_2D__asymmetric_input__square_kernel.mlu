@@ -1,6 +1,7 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <stdio.h>
 #include <torch/extension.h>
 
 #define E0 16
@@ -87,6 +88,11 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, int c0, int c1,
   auto z = torch::empty({E9}, x.options());
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {4, 8, 1};
+  cnrtNotifier_t st;
+  cnrtNotifier_t en;
+  cnrtNotifierCreate(&st);
+  cnrtNotifierCreate(&en);
+  cnrtPlaceNotifier(st, q);
   k0<<<d, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
       reinterpret_cast<half *>(z.data_ptr<at::Half>()));
@@ -94,5 +100,13 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, int c0, int c1,
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(z.data_ptr<at::Half>()),
       y.data_ptr<float>());
+  cnrtPlaceNotifier(en, q);
+  cnrtQueueSync(q);
+  float us = 0.0f;
+  cnrtNotifierDuration(st, en, &us);
+  fprintf(stdout, "KERNEL_US op=012 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(st);
+  cnrtNotifierDestroy(en);
   return y;
 }
