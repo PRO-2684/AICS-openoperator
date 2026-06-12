@@ -4153,24 +4153,26 @@ static torch::Tensor g_pe_tensor = []() {
 
 __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
                                          const half *__restrict__ pe) {
-  int tid = taskId;
-
-  if (coreId == 0x80 || tid >= TASKS_PER_LAUNCH) {
+  if (coreId == 0x80) {
     return;
   }
 
-  uint32_t base = tid * PLANE_ELEMS;
+  __mlu_shared__ half ps[PLANE_ELEMS];
   __nram__ half xp[PLANE_ELEMS];
   __nram__ half pp[PLANE_ELEMS];
 
+  int lane = taskIdX;
+  int group = taskIdY;
+  uint32_t base = (group * 4 + lane) * PLANE_ELEMS;
   half *x_gdram = (half *)__builtin_assume_aligned(x + base, 512);
-  __memcpy_async(xp, x_gdram, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
-  __memcpy_async(pp, pe, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
-  __sync_io();
+  if (lane == 0) {
+    __memcpy(ps, pe, PLANE_ELEMS * sizeof(half), GDRAM2SRAM);
+  }
+  __sync_cluster();
+  __memcpy(xp, x_gdram, PLANE_ELEMS * sizeof(half), GDRAM2NRAM);
+  __memcpy(pp, ps, PLANE_ELEMS * sizeof(half), SRAM2NRAM);
   __bang_add(xp, xp, pp, PLANE_ELEMS);
-  __sync_compute();
-  __memcpy_async(x_gdram, xp, PLANE_ELEMS * sizeof(half), NRAM2GDRAM);
-  __sync_io();
+  __memcpy(x_gdram, xp, PLANE_ELEMS * sizeof(half), NRAM2GDRAM);
 }
 
 static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
