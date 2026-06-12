@@ -3,6 +3,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
+#include <stdio.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -70,23 +71,6 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  auto c = torch::empty({1}, opt);
-  auto d = torch::empty({16, 32, 30, 30, 30}, opt);
-  (void)d;
-  return c;
-}();
-
-static torch::Tensor gy = []() {
-  return torch::empty({16, 32, 30, 30, 30},
-                      torch::TensorOptions()
-                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                          .dtype(torch::kHalf));
-}();
-
 torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
                         int padding, int dilation, bool return_indices,
                         bool ceil_mode) {
@@ -96,12 +80,24 @@ torch::Tensor bang_func(torch::Tensor x, int kernel_size, int stride,
   (void)dilation;
   (void)return_indices;
   (void)ceil_mode;
-  (void)g0;
-  auto &y = gy;
+  auto y = torch::empty({16, 32, 30, 30, 30}, x.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t g = {32, 1, 1};
+  cnrtNotifier_t s;
+  cnrtNotifier_t e;
+  cnrtNotifierCreate(&s);
+  cnrtNotifierCreate(&e);
+  cnrtPlaceNotifier(s, queue);
   k0<<<g, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  cnrtPlaceNotifier(e, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(s, e, &us);
+  fprintf(stdout, "KERNEL_US op=049 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(s);
+  cnrtNotifierDestroy(e);
   return y;
 }
