@@ -121,6 +121,8 @@ __mlu_entry__ void k0(const half *__restrict__ a, float *__restrict__ s,
           float app = es[p];
           float aqq = es[q];
           if (fabsf(apq) > 0.00001f) {
+            if (sweep >= 3 && fabsf(apq) < 0.5f * vt * fabsf(aqq - app))
+              continue;
             float tau = (aqq - app) / (2.0f * apq);
             float st = tau >= 0.0f ? 1.0f : -1.0f;
             float tt = st / (fabsf(tau) + sqrtf(1.0f + tau * tau));
