@@ -36,6 +36,7 @@ static void pin_host(int c) {
   CPU_ZERO(&s);
   CPU_SET(c, &s);
   sched_setaffinity(0, sizeof(s), &s);
+
   boost_host();
 }
 
