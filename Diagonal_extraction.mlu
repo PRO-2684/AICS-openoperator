@@ -1,62 +1,31 @@
+#include <bang.h>
+#include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-static int g_dev = 0;
+#define E0 32
+#define E1 512
 
-static void bind_host(int d) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  int end = begin + 28;
-  for (int i = begin; i < end; ++i) {
-    CPU_SET(i, &set);
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  int b = taskId;
+  if (b >= E0) {
+    return;
   }
-  sched_setaffinity(0, sizeof(set), &set);
+  __nram__ half a[E1];
+  const half *p = x + b * E1 * E1;
+  for (int i = 0; i < E1; ++i) {
+    a[i] = p[i * E1 + i];
+  }
+  __memcpy(y + b * E1, a, E1 * sizeof(half), NRAM2GDRAM);
 }
-
-struct InitRuntime {
-
-  InitRuntime() {
-    unsigned int n = 0;
-    if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-      const auto *impl =
-          c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-      int torch_n = static_cast<int>(impl->deviceCount());
-      if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-        int limit =
-            torch_n < static_cast<int>(n) ? torch_n : static_cast<int>(n);
-        int d = 0;
-        bind_host(d);
-        impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-        cnrtSetDevice(d);
-        g_dev = d;
-      }
-    }
-  }
-};
-static const InitRuntime r0 __attribute__((used));
-
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
-}();
-
-static torch::Tensor gy = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  auto out = torch::empty({32, 512}, opt);
-
-  return out;
-}();
 
 torch::Tensor bang_func(torch::Tensor A, int offset) {
   (void)offset;
-  // auto *p = A.unsafeGetTensorImpl();
-  // constexpr int64_t s[2] = {32, 512};
-  // constexpr int64_t t[2] = {262144, 513};
-  // p->set_sizes_and_strides(c10::IntArrayRef(s, 2), c10::IntArrayRef(t, 2));
-  // p->set_storage_offset(0);
-  return gy;
+  auto y = torch::empty({E0, E1}, A.options());
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {E0, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      static_cast<const half *>(A.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
+  return y;
 }
