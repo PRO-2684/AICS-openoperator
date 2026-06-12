@@ -6,6 +6,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
+#include <stdio.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -54,20 +55,23 @@ __mlu_entry__ void sqrt_abs_half_kernel_32task_pipeline2(half *__restrict__ inpu
   __memcpy(out0, buf0, CHUNK_ELEMS * sizeof(half), NRAM2GDRAM);
 }
 
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::empty({1}, opt);
-}();
-
-static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static constexpr cnrtDim3_t dim = {4, 8, 1};
-static constexpr cnrtFunctionType_t ktype = cnrtFuncTypeUnion1;
-
 torch::Tensor bang_func(torch::Tensor x) {
-  (void)g0;
-  sqrt_abs_half_kernel_32task_pipeline2<<<dim, ktype, queue>>>(
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim = {4, 8, 1};
+  cnrtNotifier_t s;
+  cnrtNotifier_t e;
+  cnrtNotifierCreate(&s);
+  cnrtNotifierCreate(&e);
+  cnrtPlaceNotifier(s, queue);
+  sqrt_abs_half_kernel_32task_pipeline2<<<dim, cnrtFuncTypeUnion1, queue>>>(
       reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+  cnrtPlaceNotifier(e, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(s, e, &us);
+  fprintf(stdout, "KERNEL_US op=070 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(s);
+  cnrtNotifierDestroy(e);
   return x;
 }
