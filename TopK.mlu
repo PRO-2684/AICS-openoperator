@@ -1,6 +1,7 @@
 #include <bang.h>
 #include <cnrt.h>
 #include <framework/core/MLUStream.h>
+#include <stdio.h>
 #include <torch/extension.h>
 
 #define E0 16
@@ -36,9 +37,22 @@ std::vector<torch::Tensor> bang_func(torch::Tensor x, int k, int dim) {
   auto z = torch::empty({E0, E2}, x.options().dtype(torch::kInt64));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim0 = {E0, 1, 1};
+  cnrtNotifier_t s;
+  cnrtNotifier_t e;
+  cnrtNotifierCreate(&s);
+  cnrtNotifierCreate(&e);
+  cnrtPlaceNotifier(s, queue);
   k0<<<dim0, cnrtFuncTypeBlock, queue>>>(
       static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
       static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()),
       static_cast<int64_t *>(z.unsafeGetTensorImpl()->mutable_data()));
+  cnrtPlaceNotifier(e, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(s, e, &us);
+  fprintf(stdout, "KERNEL_US op=075 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(s);
+  cnrtNotifierDestroy(e);
   return {y, z};
 }

@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
+#include <stdio.h>
 
 #define FLOAT_CHUNK_SIZE 65536
 #define HALF_CHUNK_SIZE 65536
@@ -100,15 +101,7 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::empty({1}, opt);
-}();
-
 torch::Tensor bang_func(torch::Tensor input, double scalar) {
-  (void)g0;
   uint32_t total = static_cast<uint32_t>(input.numel());
   float scalar_f = static_cast<float>(scalar);
 
@@ -119,6 +112,11 @@ torch::Tensor bang_func(torch::Tensor input, double scalar) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {TASK_COUNT, 1, 1};
   cnrtFunctionType_t ktype = cnrtFuncTypeBlock;
+  cnrtNotifier_t s;
+  cnrtNotifier_t e;
+  cnrtNotifierCreate(&s);
+  cnrtNotifierCreate(&e);
+  cnrtPlaceNotifier(s, queue);
 
   if (input.scalar_type() == at::kFloat) {
     matrix_scalar_mul_float_kernel<<<dim, ktype, queue>>>(
@@ -128,6 +126,14 @@ torch::Tensor bang_func(torch::Tensor input, double scalar) {
         reinterpret_cast<half *>(input.data_ptr<at::Half>()),
         reinterpret_cast<half *>(input.data_ptr<at::Half>()), total, scalar_f);
   }
+  cnrtPlaceNotifier(e, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(s, e, &us);
+  fprintf(stdout, "KERNEL_US op=002 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(s);
+  cnrtNotifierDestroy(e);
 
   return input;
 }
