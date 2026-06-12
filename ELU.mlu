@@ -47,6 +47,7 @@ static void bind_host(int d) {
   for (int i = 0; i < 28; ++i) {
     CPU_SET(begin + i, &s);
   }
+
   sched_setaffinity(0, sizeof(s), &s);
   boost_host();
 }
