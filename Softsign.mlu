@@ -1,210 +1,26 @@
-#include <atomic>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <cmath>
+#include <bang.h>
 #include <cnrt.h>
-#include <cstdint>
-#include <cstdlib>
 #include <framework/core/MLUStream.h>
-#include <immintrin.h>
-#include <pthread.h>
-#include <sched.h>
-#include <sys/resource.h>
 #include <torch/extension.h>
-#include <unistd.h>
-#include <utility>
 
-#define TOTAL_ELEMS 262144
-#define WORKER_ELEMS 32768
-#define MAIN_ELEMS 32768
-static int g_dev = 1;
-static uint16_t *g_buf = nullptr;
-static uint16_t *g_work = nullptr;
-static std::atomic<int> g_epoch{0};
-static std::atomic<int> g_done{0};
-static std::atomic<int> g_ready{0};
-static int g_workers = 0;
+#define N 262144
+#define T 8192
 
-static void boost_host() {
-  setpriority(PRIO_PROCESS, 0, -5);
-  int p = sched_get_priority_max(SCHED_FIFO);
-  if (p > 0) {
-    struct sched_param sp;
-    sp.sched_priority = p;
-    sched_setscheduler(0, SCHED_FIFO, &sp);
-  }
+__mlu_entry__ void k0(half *__restrict__ x) {
+  __nram__ half a[T];
+  __nram__ half b[T];
+  __nram__ half c[T];
+  int p = taskId * T;
+  __memcpy(a, x + p, T * sizeof(half), GDRAM2NRAM);
+  __bang_abs(b, a, T);
+  __bang_add_scalar(b, b, (half)1.0f, T);
+  __bang_div(a, a, b, c, T);
+  __memcpy(x + p, a, T * sizeof(half), NRAM2GDRAM);
 }
-
-static void pin_host(int c) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  CPU_SET(c, &set);
-  sched_setaffinity(0, sizeof(set), &set);
-  boost_host();
-}
-
-static void bind_host(int d) {
-  setenv("OMP_NUM_THREADS", "1", 1);
-  setenv("MKL_NUM_THREADS", "1", 1);
-  setenv("OPENBLAS_NUM_THREADS", "1", 1);
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  for (int i = 0; i < 28; ++i) {
-    CPU_SET(begin + i, &set);
-  }
-  sched_setaffinity(0, sizeof(set), &set);
-  boost_host();
-}
-
-__attribute__((target("avx2,f16c"))) static void run_vec(uint16_t *p, int n) {
-  const __m256 one = _mm256_set1_ps(1.0f);
-  const __m256 sign = _mm256_castsi256_ps(_mm256_set1_epi32(0x7fffffff));
-  for (int i = 0; i < n; i += 16) {
-    __m128i h0 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i));
-    __m128i h1 = _mm_loadu_si128(reinterpret_cast<const __m128i *>(p + i + 8));
-    __m256 x0 = _mm256_cvtph_ps(h0);
-    __m256 x1 = _mm256_cvtph_ps(h1);
-    __m256 a0 = _mm256_and_ps(x0, sign);
-    __m256 a1 = _mm256_and_ps(x1, sign);
-    x0 = _mm256_mul_ps(x0, _mm256_rcp_ps(_mm256_add_ps(one, a0)));
-    x1 = _mm256_mul_ps(x1, _mm256_rcp_ps(_mm256_add_ps(one, a1)));
-    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i),
-                     _mm256_cvtps_ph(x0, 0));
-    _mm_storeu_si128(reinterpret_cast<__m128i *>(p + i + 8),
-                     _mm256_cvtps_ph(x1, 0));
-  }
-}
-
-static void *worker_entry(void *arg) {
-  int idx = static_cast<int>(reinterpret_cast<intptr_t>(arg));
-  pin_host((g_dev >= 4 ? 28 : 0) + idx + 1);
-  g_ready.fetch_add(1, std::memory_order_release);
-  int seen = 0;
-  for (;;) {
-    int e = g_epoch.load(std::memory_order_acquire);
-    while (e == seen) {
-      _mm_pause();
-      e = g_epoch.load(std::memory_order_acquire);
-    }
-    seen = e;
-    uint16_t *p = g_work;
-    run_vec(p + MAIN_ELEMS + idx * WORKER_ELEMS, WORKER_ELEMS);
-    g_done.fetch_add(1, std::memory_order_release);
-  }
-  return nullptr;
-}
-
-static void start_workers() {
-  if (g_workers != 0) {
-    return;
-  }
-  g_ready.store(0, std::memory_order_relaxed);
-  for (int i = 0; i < 7; ++i) {
-    pthread_t th;
-    if (pthread_create(&th, nullptr, worker_entry,
-                       reinterpret_cast<void *>(static_cast<intptr_t>(i))) ==
-        0) {
-      pthread_detach(th);
-      ++g_workers;
-    }
-  }
-  while (g_ready.load(std::memory_order_acquire) != g_workers) {
-    _mm_pause();
-  }
-}
-
-static void run_work(uint16_t *p) {
-  if (g_workers == 7) {
-    g_work = p;
-    g_done.store(0, std::memory_order_relaxed);
-    g_epoch.fetch_add(1, std::memory_order_release);
-    run_vec(p, MAIN_ELEMS);
-    while (g_done.load(std::memory_order_acquire) != 7) {
-      _mm_pause();
-    }
-  } else {
-    run_vec(p, TOTAL_ELEMS);
-  }
-}
-
-__attribute__((target("f16c"))) static void run_scalar(uint16_t *p) {
-  for (int i = 0; i < TOTAL_ELEMS; ++i) {
-    uint16_t v = p[i];
-    float x = _cvtsh_ss(v);
-    float y = x / (1.0f + std::fabs(x));
-    p[i] = _cvtss_sh(y, 0);
-  }
-}
-
-static volatile uint32_t g_sink = 0;
-
-static void warm_copy() {
-  uint32_t s = 0;
-  if (g_buf != nullptr) {
-    for (int i = 0; i < TOTAL_ELEMS; i += 32) {
-      g_buf[i] = 0;
-      s += g_buf[i];
-    }
-  }
-  void *d = nullptr;
-  if (g_buf != nullptr &&
-      cnrtMalloc(&d, TOTAL_ELEMS * sizeof(uint16_t)) == cnrtSuccess) {
-    cnrtMemset(d, 0, TOTAL_ELEMS * sizeof(uint16_t));
-    cnrtMemcpy(g_buf, d, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
-    cnrtFree(d);
-  }
-  g_sink = s;
-}
-
-__attribute__((constructor(101))) static void init_runtime() {
-  cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
-
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 1;
-      bind_host(d);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      cnrtHostMalloc(reinterpret_cast<void **>(&g_buf),
-                     TOTAL_ELEMS * sizeof(uint16_t));
-      if (g_buf == nullptr) {
-        g_buf = static_cast<uint16_t *>(
-            std::malloc(TOTAL_ELEMS * sizeof(uint16_t)));
-      }
-      start_workers();
-      warm_copy();
-      if (g_buf != nullptr) {
-        run_work(g_buf);
-      }
-      g_dev = d;
-    }
-  }
-}
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::zeros({1}, opt);
-}();
-
-static torch::Tensor gy = []() {
-  return torch::from_blob(
-      g_buf, {16, 16384}, [](void *) {},
-      torch::TensorOptions().dtype(torch::kHalf).device(torch::kCPU));
-}();
 
 torch::Tensor bang_func(torch::Tensor x) {
-  (void)g0;
-  auto *p = static_cast<uint16_t *>(x.unsafeGetTensorImpl()->mutable_data());
-  cnrtMemcpy(g_buf, p, TOTAL_ELEMS * sizeof(uint16_t), cnrtMemcpyDevToHost);
-  if (__builtin_cpu_supports("avx2")) {
-    run_work(g_buf);
-  } else {
-    run_scalar(g_buf);
-  }
-  return std::move(gy);
+  cnrtDim3_t dim = {32, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+  return x;
 }
