@@ -1,20 +1,33 @@
-#include <cstdint>
+#include <bang.h>
 #include <cnrt.h>
+#include <framework/core/MLUStream.h>
 #include <torch/extension.h>
 
-alignas(64) static uint16_t z0 = 0;
-static cnrtRet_t fr = cnrtErrorNoDevice;
+#define B 16
+#define N 16384
 
-__attribute__((constructor(101))) static void init_runtime() {
-  fr = cnrtSetDeviceFlag(cnrtDeviceScheduleSpin);
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+  __nram__ half h[N];
+  __nram__ float f[N];
+  __nram__ float s[256];
+  int p = taskId * N;
+  __memcpy(h, x + p, N * sizeof(half), GDRAM2NRAM);
+  __bang_abs(h, h, N);
+  __bang_half2float(f, h, N);
+  __bang_reduce_sum(s, f, N);
+  float inv = 1.0f / (s[0] + 0.0000001f);
+  __memcpy(h, x + p, N * sizeof(half), GDRAM2NRAM);
+  __bang_half2float(f, h, N);
+  __bang_mul_scalar(f, f, inv, N);
+  __bang_float2half(h, f, N);
+  __memcpy(y + p, h, N * sizeof(half), NRAM2GDRAM);
 }
 
-static torch::Tensor y = []() {
-  auto opt = torch::TensorOptions().dtype(torch::kHalf).device(torch::kCPU);
-  return torch::from_blob(static_cast<void *>(&z0), {16, 16384}, {0, 0}, opt);
-}();
-
-__attribute__((hot)) torch::Tensor bang_func(torch::Tensor x) {
-  (void)x;
+torch::Tensor bang_func(torch::Tensor x) {
+  auto y = torch::empty_like(x);
+  cnrtDim3_t dim = {B, 1, 1};
+  k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   return y;
 }
