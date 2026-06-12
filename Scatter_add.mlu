@@ -3,6 +3,7 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
 #include <sched.h>
+#include <stdio.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -41,26 +42,6 @@ __attribute__((constructor(101))) static void init_runtime() {
     }
   }
 }
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::empty({1}, opt);
-}();
-
-static torch::Tensor gy = []() {
-  auto y = torch::empty({E2, E1},
-                        torch::TensorOptions()
-                            .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                            .dtype(torch::kFloat32));
-  cnrtMemsetAsync(y.data_ptr(), 0, E2 * E1 * sizeof(float),
-                  torch_mlu::getCurMLUStream());
-  return y;
-}();
-
-static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static cnrtDim3_t dim0 = {4, 8, 1};
-
 __mlu_entry__ void k0(float *__restrict__ y) {
   __nram__ float a[E3];
   __bang_write_value(a, E3, 0.0f);
@@ -86,12 +67,28 @@ __mlu_entry__ void k1(const half *__restrict__ x, const int64_t *__restrict__ w,
 
 torch::Tensor bang_func(torch::Tensor src, torch::Tensor index, int dim_size) {
   (void)dim_size;
-  (void)g0;
-  auto &y = gy;
+  auto y = torch::empty({E2, E1}, src.options().dtype(torch::kFloat32));
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim0 = {4, 8, 1};
+  cnrtNotifier_t s;
+  cnrtNotifier_t e;
+  cnrtNotifierCreate(&s);
+  cnrtNotifierCreate(&e);
+  cnrtPlaceNotifier(s, queue);
+  k0<<<dim0, cnrtFuncTypeUnion1, queue>>>(
+      static_cast<float *>(y.unsafeGetTensorImpl()->mutable_data()));
 
   k1<<<dim0, cnrtFuncTypeUnion1, queue>>>(
       static_cast<const half *>(src.unsafeGetTensorImpl()->mutable_data()),
       static_cast<int64_t *>(index.unsafeGetTensorImpl()->mutable_data()),
       static_cast<float *>(y.unsafeGetTensorImpl()->mutable_data()));
+  cnrtPlaceNotifier(e, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(s, e, &us);
+  fprintf(stdout, "KERNEL_US op=109 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(s);
+  cnrtNotifierDestroy(e);
   return y;
 }
