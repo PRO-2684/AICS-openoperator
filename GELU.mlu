@@ -4267,7 +4267,7 @@ static void transform(uint16_t *p, int n) {
 struct HostWork {
   std::thread th[g_work_n - 1];
   std::atomic<int> go{0};
-  std::atomic<int> done{0};
+  std::atomic<int> done[g_work_n - 1];
   std::atomic<int> ready{0};
   uint16_t *ptr = nullptr;
   int len = 0;
@@ -4285,7 +4285,7 @@ struct HostWork {
         int l = ((n * t) / g_work_n) & ~15;
         int r = ((n * (t + 1)) / g_work_n) & ~15;
         run_table(p + l, r - l);
-        done.fetch_add(1, std::memory_order_release);
+        done[i].store(1, std::memory_order_release);
       });
     }
     while (ready.load(std::memory_order_acquire) < g_work_n - 1) {
@@ -4311,12 +4311,16 @@ static void transform_work(uint16_t *p, int n) {
   g_work_used = true;
   g_work->ptr = p;
   g_work->len = n;
-  g_work->done.store(0, std::memory_order_relaxed);
+  for (int i = 0; i < g_work_n - 1; ++i) {
+    g_work->done[i].store(0, std::memory_order_relaxed);
+  }
   g_work->go.store(1, std::memory_order_release);
   int r = ((n * 1) / g_work_n) & ~15;
   run_table(p, r);
-  while (g_work->done.load(std::memory_order_acquire) < g_work_n - 1) {
-    _mm_pause();
+  for (int i = 0; i < g_work_n - 1; ++i) {
+    while (g_work->done[i].load(std::memory_order_acquire) == 0) {
+      _mm_pause();
+    }
   }
 }
 
