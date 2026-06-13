@@ -91,6 +91,10 @@ __mlu_entry__ void k3(const half *__restrict__ x, half *__restrict__ y) {
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
   (void)num_features;
   auto y = torch::empty_like(x);
+  auto m = torch::empty({E3}, x.options().dtype(torch::kFloat32));
+  auto v = torch::empty({E3}, x.options().dtype(torch::kFloat32));
+  auto a = torch::empty({E0}, x.options().dtype(torch::kFloat32));
+  auto b = torch::empty({E0}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {32, 1, 1};
   cnrtNotifier_t s;
@@ -98,8 +102,19 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
   cnrtNotifierCreate(&s);
   cnrtNotifierCreate(&e);
   cnrtPlaceNotifier(s, queue);
-  k3<<<d, cnrtFuncTypeBlock, queue>>>(
+  k0<<<d, cnrtFuncTypeBlock, queue>>>(
       static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(m.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(v.unsafeGetTensorImpl()->mutable_data()));
+  k1<<<d, cnrtFuncTypeBlock, queue>>>(
+      static_cast<const float *>(m.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const float *>(v.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(a.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(b.unsafeGetTensorImpl()->mutable_data()));
+  k2<<<d, cnrtFuncTypeBlock, queue>>>(
+      static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const float *>(a.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const float *>(b.unsafeGetTensorImpl()->mutable_data()),
       static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
   cnrtPlaceNotifier(e, queue);
   cnrtQueueSync(queue);

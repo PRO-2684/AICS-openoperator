@@ -8,7 +8,7 @@
 #define E1 3136
 #define E2 64
 
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
   __nram__ half h[E1];
   __nram__ float f[E1];
   __nram__ float s0[E1];
@@ -54,8 +54,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     __memcpy(h, x + base + c * E1, E1 * sizeof(half), GDRAM2NRAM);
     __bang_half2float(f, h, E1);
     __bang_mul(f, f, t, E1);
-    __bang_float2half_rn(h, f, E1);
-    __memcpy(y + base + c * E1, h, E1 * sizeof(half), NRAM2GDRAM);
+    __memcpy(y + base + c * E1, f, E1 * sizeof(float), NRAM2GDRAM);
 
     __bang_mul_scalar(s1, s1, 0.00002f, E1);
     __bang_add_scalar(s1, s1, 1.0f, E1);
@@ -66,8 +65,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     __memcpy(h, x + base + (c + 1) * E1, E1 * sizeof(half), GDRAM2NRAM);
     __bang_half2float(f, h, E1);
     __bang_mul(f, f, t, E1);
-    __bang_float2half_rn(h, f, E1);
-    __memcpy(y + base + (c + 1) * E1, h, E1 * sizeof(half), NRAM2GDRAM);
+    __memcpy(y + base + (c + 1) * E1, f, E1 * sizeof(float), NRAM2GDRAM);
 
     __bang_mul_scalar(s2, s2, 0.00002f, E1);
     __bang_add_scalar(s2, s2, 1.0f, E1);
@@ -78,8 +76,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     __memcpy(h, x + base + (c + 2) * E1, E1 * sizeof(half), GDRAM2NRAM);
     __bang_half2float(f, h, E1);
     __bang_mul(f, f, t, E1);
-    __bang_float2half_rn(h, f, E1);
-    __memcpy(y + base + (c + 2) * E1, h, E1 * sizeof(half), NRAM2GDRAM);
+    __memcpy(y + base + (c + 2) * E1, f, E1 * sizeof(float), NRAM2GDRAM);
 
     __bang_mul_scalar(s3, s3, 0.00002f, E1);
     __bang_add_scalar(s3, s3, 1.0f, E1);
@@ -90,8 +87,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     __memcpy(h, x + base + (c + 3) * E1, E1 * sizeof(half), GDRAM2NRAM);
     __bang_half2float(f, h, E1);
     __bang_mul(f, f, t, E1);
-    __bang_float2half_rn(h, f, E1);
-    __memcpy(y + base + (c + 3) * E1, h, E1 * sizeof(half), NRAM2GDRAM);
+    __memcpy(y + base + (c + 3) * E1, f, E1 * sizeof(float), NRAM2GDRAM);
   }
 }
 
@@ -108,7 +104,7 @@ torch::Tensor bang_func(torch::Tensor x, int size, double alpha, double beta, do
   (void)alpha;
   (void)beta;
   (void)k;
-  auto y = torch::empty_like(x);
+  auto y = torch::empty_like(x, x.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {32, 1, 1};
   cnrtNotifier_t s;
@@ -116,9 +112,9 @@ torch::Tensor bang_func(torch::Tensor x, int size, double alpha, double beta, do
   cnrtNotifierCreate(&s);
   cnrtNotifierCreate(&e);
   cnrtPlaceNotifier(s, queue);
-  k1<<<d, cnrtFuncTypeBlock, queue>>>(
+  k0<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+      y.data_ptr<float>());
   cnrtPlaceNotifier(e, queue);
   cnrtQueueSync(queue);
   float us = 0.0f;
