@@ -12,7 +12,6 @@
 #define BM 32
 #define C 8
 
-
 __mlu_entry__ void kp(const half *__restrict__ wi, const half *__restrict__ wh,
                       half *__restrict__ ip, half *__restrict__ hp, int k) {
   int col = taskId * G;

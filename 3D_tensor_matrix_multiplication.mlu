@@ -80,7 +80,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   }
 }
 
-
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto C = torch::empty({16, 1024, 768}, A.options().dtype(torch::kFloat32));
   auto W = torch::empty({TC * (K0 / TK) * TN * TK}, B.options());

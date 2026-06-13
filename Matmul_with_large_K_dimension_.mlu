@@ -14,7 +14,6 @@
 #define TT (TR * TC)
 #define KS 16384
 
-
 __mlu_entry__ void kprep(const half *__restrict__ b, half *__restrict__ w) {
   __nram__ half bh[TK * TN];
   __nram__ half bt[TN * TK];

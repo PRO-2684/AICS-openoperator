@@ -1,14 +1,11 @@
 #include <bang.h>
 #include <bang_device_functions_decls.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <cnrt.h>
 #include <cstdint>
 #include <framework/core/MLUStream.h>
-#include <sched.h>
 #include <stdio.h>
 #include <sys/resource.h>
 #include <torch/extension.h>
-#include <unistd.h>
 
 #define E0 4000000
 #define E1 131072
@@ -68,28 +65,6 @@ __mlu_entry__ void k0(half *__restrict__ x) {
       __bang_active_gelu(o + c, i + c, m);
       __asm__ volatile("sync;");
       __memcpy_async(x + p + (r << 15), o + c, t * sizeof(half), NRAM2GDRAM);
-    }
-  }
-}
-
-static int g_dev = 0;
-
-static void bind_host(int d) {
-  (void)d;
-}
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
-      bind_host(d);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
     }
   }
 }

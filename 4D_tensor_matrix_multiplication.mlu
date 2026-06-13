@@ -11,7 +11,6 @@
 #define TR 32768
 #define TC 3
 
-
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       float *__restrict__ c) {
   __nram__ half ah[TM * K0];

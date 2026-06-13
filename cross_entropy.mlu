@@ -1,66 +1,13 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
-#include <sched.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <torch/extension.h>
-#include <unistd.h>
 
 #define N0 512
 #define N1 32768
-
-static int g_dev = 0;
-
-static void bind_host(int d) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  int end = begin + 28;
-  for (int i = begin; i < end; ++i) {
-    CPU_SET(i, &set);
-  }
-  sched_setaffinity(0, sizeof(set), &set);
-}
-
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
-      bind_host(d);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
-}
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::empty({1}, opt);
-}();
-
-static torch::Tensor gy = []() {
-  return torch::empty(
-      {1}, torch::TensorOptions()
-               .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-               .dtype(torch::kHalf));
-}();
-
-static torch::Tensor gt = []() {
-  return torch::empty(
-      {32}, torch::TensorOptions()
-                .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                .dtype(torch::kHalf));
-}();
 
 __mlu_entry__ void k0(const half *__restrict__ x,
                       const int32_t *__restrict__ target,
@@ -93,7 +40,8 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
   (void)label_smoothing;
   (void)reduce_loss;
   (void)ignore_idx;
-  (void)g0;
+  auto y = torch::empty({1}, _input.options());
+  auto t = torch::empty({32}, _input.options());
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {32, 1, 1};
@@ -105,11 +53,11 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
   k0<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(_input.data_ptr<at::Half>()),
       reinterpret_cast<const int32_t *>(target.data_ptr<int64_t>()),
-      reinterpret_cast<half *>(gt.data_ptr<at::Half>()));
+      reinterpret_cast<half *>(t.data_ptr<at::Half>()));
   cnrtDim3_t d1 = {1, 1, 1};
   k1<<<d1, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(gt.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(gy.data_ptr<at::Half>()));
+      reinterpret_cast<const half *>(t.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   cnrtPlaceNotifier(e, queue);
   cnrtQueueSync(queue);
   float us = 0.0f;
@@ -118,5 +66,5 @@ torch::Tensor bang_func(torch::Tensor _input, torch::Tensor target,
   fflush(stdout);
   cnrtNotifierDestroy(s);
   cnrtNotifierDestroy(e);
-  return gy;
+  return y;
 }

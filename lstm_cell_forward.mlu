@@ -10,7 +10,6 @@
 #define E4 2
 #define E5 8
 
-
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ h,
                       const half *__restrict__ b0, const half *__restrict__ b1,
                       const half *__restrict__ c0, half *__restrict__ y) {

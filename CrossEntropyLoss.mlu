@@ -12,7 +12,6 @@
 #define LOCAL_ELEMS (ROWS_PER_TASK * COLS)
 #define C0 2.3247993f
 
-
 __mlu_entry__ void k0(const half *__restrict__ predictions,
                       const int64_t *__restrict__ targets,
                       half *__restrict__ out) {

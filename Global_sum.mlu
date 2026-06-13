@@ -1,11 +1,8 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
-#include <sched.h>
 #include <stdio.h>
 #include <torch/extension.h>
-#include <unistd.h>
 
 #define E0 32
 #define E1 16384
@@ -16,36 +13,6 @@ __mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y, int n) {
   __bang_sumpool(y, x, E2, 1, q, 1, q, 1, q);
   __bang_reduce_sum(y, y, E2);
   return y[0] + y[32] + y[64] + y[96] + y[128] + y[160] + y[192] + y[224];
-}
-
-static int g_dev = 0;
-
-static void bind_host(int d) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  int end = begin + 28;
-  for (int i = begin; i < end; ++i) {
-    CPU_SET(i, &set);
-  }
-  sched_setaffinity(0, sizeof(set), &set);
-}
-
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
-      bind_host(d);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
 }
 
 __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ t,

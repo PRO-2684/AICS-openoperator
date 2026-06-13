@@ -46,14 +46,10 @@ static py::object find_model_with_attr(const char *attr) {
 }
 
 static torch::Tensor get_weight() {
-  static torch::Tensor w;
-  if (!w.defined()) {
-    py::gil_scoped_acquire gil;
-    py::object model = find_model_with_attr("emb");
-    py::object emb = model.attr("emb");
-    w = emb.attr("weight").cast<torch::Tensor>();
-  }
-  return w;
+  py::gil_scoped_acquire gil;
+  py::object model = find_model_with_attr("emb");
+  py::object emb = model.attr("emb");
+  return emb.attr("weight").cast<torch::Tensor>();
 }
 
 __mlu_entry__ void k0(const int64_t *__restrict__ idx,

@@ -9,7 +9,6 @@
 #define E1 8192
 #define E2 16384
 
-
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       float *__restrict__ y) {
   __nram__ half x[E1];
