@@ -8,7 +8,7 @@
 #define E0 32
 #define E1 8192
 #define E2 16384
-#define ZT 32768
+#define ZT 131072
 #define ZO 524288
 
 __mlu_entry__ void kz(float *__restrict__ y) {

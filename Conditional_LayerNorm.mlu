@@ -12,7 +12,7 @@
 #define T0 128
 #define M0 8
 #define R0 4096
-#define ZT 32768
+#define ZT 131072
 #define ZO 2097152
 
 __mlu_entry__ void kz(half *__restrict__ y) {

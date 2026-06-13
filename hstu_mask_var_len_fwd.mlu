@@ -250,7 +250,7 @@ __mlu_entry__ void k2(const half *__restrict__ q, const half *__restrict__ k,
 
 __mlu_entry__ void kz(float *__restrict__ y) {
   __nram__ float z[ZT];
-  __bang_write_value(z, ZT, 0.0f);
+  __bang_write_zero(z, ZT);
   __memcpy(y, z, ZO * sizeof(float), NRAM2GDRAM);
 }
 

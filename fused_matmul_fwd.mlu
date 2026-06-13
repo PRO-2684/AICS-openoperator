@@ -12,7 +12,7 @@
 #define TR 4
 #define TC 8
 #define TT (TR * TC)
-#define ZT 32768
+#define ZT 131072
 #define ZO 262144
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
