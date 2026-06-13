@@ -6,6 +6,7 @@ import contextlib
 import importlib.util
 import inspect
 import json
+import math
 import os
 import re
 import statistics
@@ -72,6 +73,23 @@ def resolve_paths(op: str, source: str | None, ref: str | None) -> tuple[Path, P
 def wrapper_signature(op: str) -> str:
     task = load_tasks()[op.zfill(3)]
     return task["description"]["cpp_wrapper"].rstrip(";") + ";"
+
+
+def wrapper_params(op: str) -> list[tuple[str, str]]:
+    sig = wrapper_signature(op)
+    m = re.search(r"bang_func\s*\((.*)\)\s*;", sig)
+    if not m:
+        return []
+    body = m.group(1).strip()
+    if not body:
+        return []
+    out: list[tuple[str, str]] = []
+    for part in body.split(","):
+        part = part.strip()
+        pieces = part.rsplit(" ", 1)
+        if len(pieces) == 2:
+            out.append((pieces[0].strip(), pieces[1].strip()))
+    return out
 
 
 def module_name_for(op: str, source: Path) -> str:
@@ -157,6 +175,29 @@ def complete_init_inputs(model_cls: type, init_inputs: list[Any]) -> list[Any]:
             break
         out.append(p.default)
     return out
+
+
+def wrapper_init_inputs(op: str, raw_inputs: list[Any], model_init: list[Any]) -> list[Any]:
+    params = wrapper_params(op)
+    tensor_count = sum(1 for typ, _name in params if "torch::Tensor" in typ)
+    extra = params[tensor_count:]
+    vals = list(model_init[: len(extra)])
+    while len(vals) < len(extra):
+        vals.append(None)
+    fixed: list[Any] = []
+    for (typ, name), val in zip(extra, vals):
+        if val is None and name == "scale" and raw_inputs:
+            val = math.sqrt(raw_inputs[0].shape[-1])
+        elif val is None and name == "temperature":
+            val = 1.0
+        elif val is None and typ in {"double", "float"}:
+            val = 1.0
+        elif val is None and typ in {"int", "int64_t", "long"}:
+            val = 0
+        elif val is None and typ == "bool":
+            val = False
+        fixed.append(val)
+    return fixed
 
 
 def tolerances(dtype: torch.dtype) -> tuple[float, float]:
@@ -280,13 +321,14 @@ def main() -> int:
     ref_mod = load_py_module(f"ref_{op}", ref_path)
     init_inputs = complete_init_inputs(ref_mod.Model, list(ref_mod.get_init_inputs()))
     raw_inputs = list(ref_mod.get_inputs())
+    bang_init_inputs = wrapper_init_inputs(op, raw_inputs, init_inputs)
 
     model = ref_mod.Model(*init_inputs).eval()
     if is_float_dtype(dtype):
         model = model.to(dtype=dtype)
     model = model.to("mlu")
     mlu_inputs = cast_tree(raw_inputs, dtype, "mlu")
-    mlu_init = cast_tree(init_inputs, dtype, "mlu")
+    mlu_init = cast_tree(bang_init_inputs, dtype, "mlu")
 
     def ref_call():
         with torch.no_grad():
