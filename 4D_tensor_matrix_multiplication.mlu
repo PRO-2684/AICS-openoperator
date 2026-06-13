@@ -44,15 +44,10 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
 }
 
 __mlu_entry__ void kz(float *__restrict__ c) {
-  __nram__ float z[ZT];
-  __bang_write_zero(z, ZT);
-  for (int64_t p = (int64_t)taskId * ZT; p < (int64_t)ZO;
-       p += (int64_t)taskDim * ZT) {
-    int64_t n = (int64_t)ZO - p;
-    if (n > ZT)
-      n = ZT;
-    __memcpy(c + p, z, n * sizeof(float), NRAM2GDRAM);
-  }
+  __nram__ float z[128];
+  __bang_write_zero(z, 128);
+  if (taskId == 0)
+    __memcpy(c, z, 128 * sizeof(float), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
