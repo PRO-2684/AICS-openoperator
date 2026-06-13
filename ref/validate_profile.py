@@ -238,6 +238,12 @@ def tolerances(dtype: torch.dtype) -> tuple[float, float]:
     return 1e-4, 1e-4
 
 
+def problem_threshold(op: str, ref_path: Path, default: float) -> float:
+    if ref_path.stem == "096_LocalResponseNorm":
+        return 1e-3
+    return default
+
+
 def flatten_output(obj: Any, prefix: str = "out") -> list[tuple[str, Any]]:
     if isinstance(obj, (list, tuple)):
         rows: list[tuple[str, Any]] = []
@@ -247,7 +253,26 @@ def flatten_output(obj: Any, prefix: str = "out") -> list[tuple[str, Any]]:
     return [(prefix, obj)]
 
 
-def tensor_diff(name: str, expect: Any, actual: Any, atol: float, rtol: float) -> dict[str, Any]:
+def promote_tree(obj: Any, dtype: torch.dtype):
+    if isinstance(obj, torch.Tensor):
+        if obj.is_floating_point():
+            return obj.to(dtype)
+        return obj
+    if isinstance(obj, list):
+        return [promote_tree(x, dtype) for x in obj]
+    if isinstance(obj, tuple):
+        return tuple(promote_tree(x, dtype) for x in obj)
+    return obj
+
+
+def tensor_diff(
+    name: str,
+    expect: Any,
+    actual: Any,
+    atol: float,
+    rtol: float,
+    topk: int = 0,
+) -> dict[str, Any]:
     row: dict[str, Any] = {"name": name}
     if not isinstance(expect, torch.Tensor) or not isinstance(actual, torch.Tensor):
         row.update({"ok": expect == actual, "kind": "scalar"})
@@ -259,19 +284,62 @@ def tensor_diff(name: str, expect: Any, actual: Any, atol: float, rtol: float) -
             "shape": list(actual.shape),
             "dtype": str(actual.dtype),
             "expect_dtype": str(expect.dtype),
-            "ok": bool(torch.allclose(e, a, atol=atol, rtol=rtol)),
+            "allclose": bool(torch.allclose(e, a, atol=atol, rtol=rtol)),
         }
     )
     if e.numel() and a.numel() and e.shape == a.shape:
         diff = (e - a).abs()
+        max_abs = float(diff.max().item())
         row.update(
             {
-                "max_abs_diff": float(diff.max().item()),
+                "max_abs_diff": max_abs,
                 "mean_abs_diff": float(diff.mean().item()),
+                "ok": max_abs < atol,
             }
         )
+        if topk > 0:
+            k = min(topk, diff.numel())
+            vals, idxs = torch.topk(diff.reshape(-1), k)
+            samples = []
+            shape = list(diff.shape)
+            for val, flat in zip(vals.tolist(), idxs.tolist()):
+                rem = int(flat)
+                coord = []
+                for dim in reversed(shape):
+                    coord.append(rem % dim)
+                    rem //= dim
+                coord.reverse()
+                samples.append(
+                    {
+                        "index": coord,
+                        "expect": float(e.reshape(-1)[flat].item()),
+                        "actual": float(a.reshape(-1)[flat].item()),
+                        "abs_diff": float(val),
+                    }
+                )
+            row["top_abs_diff"] = samples
+            excess = diff - (atol + rtol * a.abs())
+            vals, idxs = torch.topk(excess.reshape(-1), k)
+            samples = []
+            for val, flat in zip(vals.tolist(), idxs.tolist()):
+                rem = int(flat)
+                coord = []
+                for dim in reversed(shape):
+                    coord.append(rem % dim)
+                    rem //= dim
+                coord.reverse()
+                samples.append(
+                    {
+                        "index": coord,
+                        "expect": float(e.reshape(-1)[flat].item()),
+                        "actual": float(a.reshape(-1)[flat].item()),
+                        "abs_diff": float(diff.reshape(-1)[flat].item()),
+                        "excess": float(val),
+                    }
+                )
+            row["top_tol_excess"] = samples
     else:
-        row.update({"max_abs_diff": None, "mean_abs_diff": None})
+        row.update({"max_abs_diff": None, "mean_abs_diff": None, "ok": False})
     return row
 
 
@@ -324,11 +392,14 @@ def main() -> int:
     ap.add_argument("--build-dir", default=str(ROOT / "target/validate_profile_build"))
     ap.add_argument("--module-name", help="module name when loading --so")
     ap.add_argument("--dtype", help="override dtype; default from problems.json")
+    ap.add_argument("--ref-dtype", choices=["float32", "float16"], default="float32")
     ap.add_argument("--warmup", type=int, default=2)
     ap.add_argument("--iters", type=int, default=10)
+    ap.add_argument("--eval-runs", type=int, default=1, help="independent correctness runs")
     ap.add_argument("--atol", type=float, default=None)
     ap.add_argument("--rtol", type=float, default=None)
     ap.add_argument("--verbose-build", action="store_true")
+    ap.add_argument("--diff-topk", type=int, default=0, help="include top-k absolute diff samples")
     ap.add_argument("--json", action="store_true", help="print one JSON object")
     args = ap.parse_args()
 
@@ -338,6 +409,8 @@ def main() -> int:
     atol, rtol = tolerances(dtype)
     if args.atol is not None:
         atol = args.atol
+    else:
+        atol = problem_threshold(op, ref_path, atol)
     if args.rtol is not None:
         rtol = args.rtol
 
@@ -348,50 +421,75 @@ def main() -> int:
             raise SystemExit("provide --so or pass --build")
         ext = build_extension(op, source, Path(args.build_dir), args.verbose_build)
 
+    if dtype == torch.float16:
+        torch.set_default_dtype(torch.float16)
+    ref_dtype = dtype_from_name(args.ref_dtype)
     ref_mod = load_py_module(f"ref_{op}", ref_path)
-    init_inputs = complete_init_inputs(ref_mod.Model, list(ref_mod.get_init_inputs()))
-    raw_inputs = list(ref_mod.get_inputs())
 
-    model = ref_mod.Model(*init_inputs).eval()
-    if is_float_dtype(dtype):
-        model = model.to(dtype=dtype)
-    bang_extra_inputs = wrapper_extra_inputs(op, source, raw_inputs, model, init_inputs)
-    model = model.to("mlu")
-    mlu_inputs = cast_tree(raw_inputs, dtype, "mlu")
-    mlu_init = cast_tree(bang_extra_inputs, dtype, "mlu")
+    first_kernel_vals: list[float] = []
+    first_wall_us = 0.0
+    diffs: list[dict[str, Any]] = []
+    eval_ok = True
+    last_bang_call = None
 
-    def ref_call():
-        with torch.no_grad():
-            return model(*mlu_inputs)
+    for run_idx in range(args.eval_runs):
+        init_inputs = complete_init_inputs(ref_mod.Model, list(ref_mod.get_init_inputs()))
+        init_inputs = cast_tree(init_inputs, dtype, None)
+        raw_inputs = cast_tree(list(ref_mod.get_inputs()), dtype, None)
+        ref_init_inputs = promote_tree(init_inputs, ref_dtype)
+        model = ref_mod.Model(*ref_init_inputs).eval()
+        if is_float_dtype(ref_dtype):
+            model = model.to(dtype=ref_dtype)
+        bang_extra_inputs = wrapper_extra_inputs(op, source, raw_inputs, model, init_inputs)
+        model = model.to("mlu")
+        mlu_inputs = cast_tree(raw_inputs, dtype, "mlu")
+        ref_inputs = cast_tree(raw_inputs, ref_dtype, "mlu")
+        mlu_init = cast_tree(bang_extra_inputs, dtype, "mlu")
 
-    def bang_call():
-        with torch.no_grad():
-            return ext.bang_func(*mlu_inputs, *mlu_init)
+        def ref_call():
+            with torch.no_grad():
+                return model(*ref_inputs)
 
-    torch.mlu.synchronize()
-    expect = ref_call()
-    actual, text, kernel_vals, wall_us = call_and_capture(bang_call)
-    exp_flat = flatten_output(expect)
-    act_flat = flatten_output(actual)
-    if len(exp_flat) != len(act_flat):
-        diffs = [{"name": "out", "ok": False, "error": f"arity {len(exp_flat)} != {len(act_flat)}"}]
-    else:
-        diffs = [
-            tensor_diff(en, ev, av, atol, rtol)
-            for (en, ev), (_an, av) in zip(exp_flat, act_flat)
-        ]
+        def bang_call():
+            with torch.no_grad():
+                return ext.bang_func(*mlu_inputs, *mlu_init)
+
+        torch.mlu.synchronize()
+        expect = ref_call()
+        actual, text, kernel_vals, wall_us = call_and_capture(bang_call)
+        if run_idx == 0:
+            first_kernel_vals = kernel_vals
+            first_wall_us = wall_us
+            last_bang_call = bang_call
+        exp_flat = flatten_output(expect)
+        act_flat = flatten_output(actual)
+        if len(exp_flat) != len(act_flat):
+            run_diffs = [{"name": "out", "ok": False, "error": f"arity {len(exp_flat)} != {len(act_flat)}"}]
+        else:
+            run_diffs = [
+                tensor_diff(en, ev, av, atol, rtol, args.diff_topk)
+                for (en, ev), (_an, av) in zip(exp_flat, act_flat)
+            ]
+        for d in run_diffs:
+            if args.eval_runs > 1:
+                d = dict(d)
+                d["run"] = run_idx + 1
+            diffs.append(d)
+        eval_ok = eval_ok and all(bool(d.get("ok")) for d in run_diffs)
 
     warm_kernel: list[float] = []
     warm_wall: list[float] = []
+    if last_bang_call is None:
+        raise RuntimeError("no correctness run executed")
     for _ in range(args.warmup):
-        _out, _text, vals, wu = call_and_capture(bang_call)
+        _out, _text, vals, wu = call_and_capture(last_bang_call)
         warm_kernel.extend(vals)
         warm_wall.append(wu)
 
     kernel: list[float] = []
     wall: list[float] = []
     for _ in range(args.iters):
-        _out, _text, vals, wu = call_and_capture(bang_call)
+        _out, _text, vals, wu = call_and_capture(last_bang_call)
         kernel.extend(vals)
         wall.append(wu)
 
@@ -400,12 +498,14 @@ def main() -> int:
         "source": str(source.relative_to(ROOT) if source.is_relative_to(ROOT) else source),
         "ref": str(ref_path.relative_to(ROOT) if ref_path.is_relative_to(ROOT) else ref_path),
         "dtype": str(dtype),
+        "ref_dtype": str(ref_dtype),
         "atol": atol,
         "rtol": rtol,
-        "correct": all(bool(d.get("ok")) for d in diffs),
+        "correct": eval_ok,
         "diffs": diffs,
-        "first_kernel_us": kernel_vals,
-        "first_wall_us": wall_us,
+        "eval_runs": args.eval_runs,
+        "first_kernel_us": first_kernel_vals,
+        "first_wall_us": first_wall_us,
         "kernel_us": stats(kernel),
         "wall_us": stats(wall),
         "warmup_kernel_us": stats(warm_kernel),

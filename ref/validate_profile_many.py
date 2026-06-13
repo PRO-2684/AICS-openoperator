@@ -29,6 +29,11 @@ def main() -> int:
     ap.add_argument("ops", nargs="+", help="op ids/ranges, e.g. 001 082-083 090,130")
     ap.add_argument("--iters", type=int, default=5)
     ap.add_argument("--warmup", type=int, default=2)
+    ap.add_argument("--eval-runs", type=int, default=1)
+    ap.add_argument("--ref-dtype", choices=["float32", "float16"], default="float32")
+    ap.add_argument("--atol", type=float)
+    ap.add_argument("--rtol", type=float)
+    ap.add_argument("--diff-topk", type=int, default=0)
     ap.add_argument("--build", action="store_true", default=True)
     ap.add_argument("--no-build", action="store_false", dest="build")
     ap.add_argument("--keep-going", action="store_true", default=True)
@@ -47,8 +52,18 @@ def main() -> int:
             str(args.iters),
             "--warmup",
             str(args.warmup),
+            "--eval-runs",
+            str(args.eval_runs),
+            "--ref-dtype",
+            args.ref_dtype,
             "--json",
         ]
+        if args.atol is not None:
+            cmd.extend(["--atol", str(args.atol)])
+        if args.rtol is not None:
+            cmd.extend(["--rtol", str(args.rtol)])
+        if args.diff_topk:
+            cmd.extend(["--diff-topk", str(args.diff_topk)])
         if args.build:
             cmd.append("--build")
         proc = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True)
