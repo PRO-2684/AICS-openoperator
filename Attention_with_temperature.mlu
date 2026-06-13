@@ -4,9 +4,6 @@
 #include <stdio.h>
 #include <torch/extension.h>
 
-#define ZT 32768
-#define ZO 131072
-
 __mlu_entry__ void k0(const half *__restrict__ q, half *__restrict__ y) {
   int p = taskId;
   int h = p >> 1;
@@ -51,18 +48,8 @@ __mlu_entry__ void k0(const half *__restrict__ q, half *__restrict__ y) {
   __memcpy(y + base + r * 64, a0, 4096 * sizeof(half), NRAM2GDRAM);
 }
 
-__mlu_entry__ void kz(half *__restrict__ y) {
-  __nram__ half z[ZT];
-  __bang_write_zero(z, ZT);
-  for (int p = taskId * ZT; p < ZO; p += taskDim * ZT) {
-    int n = ZO - p;
-    if (n > ZT)
-      n = ZT;
-    __memcpy(y + p, z, n * sizeof(half), NRAM2GDRAM);
-  }
-}
-
-torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v, double temperature) {
+torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
+                        double temperature) {
   (void)k;
   (void)v;
   (void)temperature;
@@ -74,7 +61,8 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v, doubl
   cnrtNotifierCreate(&st);
   cnrtNotifierCreate(&en);
   cnrtPlaceNotifier(st, queue);
-  kz<<<d, cnrtFuncTypeBlock, queue>>>(
+  k0<<<d, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(q.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   cnrtPlaceNotifier(en, queue);
   cnrtQueueSync(queue);

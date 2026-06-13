@@ -7,8 +7,6 @@
 #define E0 1048576
 #define E1 32768
 #define E2 32
-#define T1 131072
-#define O1 67108864
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
                       half *__restrict__ y) {
@@ -43,18 +41,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   }
 }
 
-__mlu_entry__ void k1(half *__restrict__ y) {
-  __nram__ half z[T1];
-  __bang_write_zero(z, T1);
-  for (int p = taskId * T1; p < O1; p += taskDim * T1) {
-    int n = O1 - p;
-    if (n > T1)
-      n = T1;
-    __memcpy(y + p, z, n * sizeof(half), NRAM2GDRAM);
-  }
-}
-
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels, int out_channels, bool bias) {
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
+                        int out_channels, bool bias) {
   (void)in_channels;
   (void)out_channels;
   (void)bias;
@@ -66,7 +54,9 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels, 
   cnrtNotifierCreate(&s);
   cnrtNotifierCreate(&e);
   cnrtPlaceNotifier(s, queue);
-  k1<<<dim, cnrtFuncTypeBlock, queue>>>(
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   cnrtPlaceNotifier(e, queue);
   cnrtQueueSync(queue);

@@ -10,8 +10,6 @@
 #define E3 510
 #define E4 64
 #define E5 6144
-#define T1 131072
-#define O1 522240
 
 __mlu_entry__ void k0(half *__restrict__ y) {
   for (int i = taskId; i < E5; i += taskDim) {
@@ -55,18 +53,9 @@ __mlu_entry__ void k2(const half *__restrict__ x, const half *__restrict__ w,
   }
 }
 
-__mlu_entry__ void k3(half *__restrict__ y) {
-  __nram__ half z[T1];
-  __bang_write_zero(z, T1);
-  for (int p = taskId * T1; p < O1; p += taskDim * T1) {
-    int n = O1 - p;
-    if (n > T1)
-      n = T1;
-    __memcpy(y + p, z, n * sizeof(half), NRAM2GDRAM);
-  }
-}
-
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels, int out_channels, int kernel_size, int stride, int padding, int dilation, int groups, int bias) {
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
+                        int out_channels, int kernel_size, int stride,
+                        int padding, int dilation, int groups, int bias) {
   (void)in_channels;
   (void)out_channels;
   (void)kernel_size;
@@ -77,6 +66,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels, 
   (void)bias;
   auto s = torch::empty({E0 * E3 * E4}, x.options());
   auto y = s.as_strided({E0, E4, E3}, {E3 * E4, 1, E4});
+  auto w = torch::empty({E5}, kernel.options());
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {4, 4, 1};
   cnrtNotifier_t st;
@@ -84,7 +74,12 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels, 
   cnrtNotifierCreate(&st);
   cnrtNotifierCreate(&en);
   cnrtPlaceNotifier(st, q);
-  k3<<<d, cnrtFuncTypeBlock, q>>>(
+  k1<<<d, cnrtFuncTypeBlock, q>>>(
+      reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(w.data_ptr<at::Half>()));
+  k2<<<d, cnrtFuncTypeBlock, q>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
       reinterpret_cast<half *>(s.data_ptr<at::Half>()));
   cnrtPlaceNotifier(en, q);
   cnrtQueueSync(q);

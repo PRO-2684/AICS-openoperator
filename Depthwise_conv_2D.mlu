@@ -7,8 +7,6 @@
 #define E0 128
 #define E1 16640
 #define E2 16900
-#define T0 131072
-#define O0 16777216
 
 static constexpr cnrtDim3_t dim = {32, 1, 1};
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
@@ -41,19 +39,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
   }
 }
 
-__mlu_entry__ void k1(half *__restrict__ y) {
-  __nram__ half z[T0];
-  __bang_write_zero(z, T0);
-  for (int p = taskId * T0; p < O0; p += taskDim * T0) {
-    int n = O0 - p;
-    if (n > T0)
-      n = T0;
-    __memcpy(y + p, z, n * sizeof(half), NRAM2GDRAM);
-  }
-}
-
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels, int kernel_size, int stride, int padding) {
-  (void)kernel;
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
+                        int kernel_size, int stride, int padding) {
   (void)in_channels;
   (void)kernel_size;
   (void)stride;
@@ -65,7 +52,10 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels, 
   cnrtNotifierCreate(&s);
   cnrtNotifierCreate(&e);
   cnrtPlaceNotifier(s, queue);
-  k1<<<dim, cnrtFuncTypeBlock, queue>>>(
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      reinterpret_cast<const half *>(
+          kernel.unsafeGetTensorImpl()->mutable_data()),
       reinterpret_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
   cnrtPlaceNotifier(e, queue);
   cnrtQueueSync(queue);

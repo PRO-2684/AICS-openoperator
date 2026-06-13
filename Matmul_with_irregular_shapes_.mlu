@@ -15,8 +15,6 @@
 #define TC 12
 #define KC 24
 #define TT (TG * TC)
-#define ZT 131072
-#define ZO 48581805
 
 __mlu_entry__ void kprep(const half *__restrict__ b, half *__restrict__ wbuf) {
   __nram__ half bh[TK * TN];
@@ -105,23 +103,23 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   }
 }
 
-__mlu_entry__ void kz(float *__restrict__ c) {
-  __nram__ float z[128];
-  __bang_write_zero(z, 128);
-  if (taskId == 0)
-    __memcpy(c, z, 128 * sizeof(float), NRAM2GDRAM);
-}
-
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto C = torch::empty({8205, 5921}, A.options().dtype(torch::kFloat32));
+  auto W = torch::empty({TC * KC * TN * TK}, B.options());
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {96, 1, 1};
+  cnrtDim3_t p = {96, 1, 1};
   cnrtNotifier_t st;
   cnrtNotifier_t en;
   cnrtNotifierCreate(&st);
   cnrtNotifierCreate(&en);
   cnrtPlaceNotifier(st, q);
-  kz<<<d, cnrtFuncTypeBlock, q>>>(
+  kprep<<<p, cnrtFuncTypeBlock, q>>>(
+      static_cast<const half *>(B.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(W.unsafeGetTensorImpl()->mutable_data()));
+  k0<<<d, cnrtFuncTypeBlock, q>>>(
+      static_cast<const half *>(A.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const half *>(W.unsafeGetTensorImpl()->mutable_data()),
       static_cast<float *>(C.unsafeGetTensorImpl()->mutable_data()));
   cnrtPlaceNotifier(en, q);
   cnrtQueueSync(q);

@@ -7,8 +7,6 @@
 #define E0 4096
 #define E1 131072
 #define E2 32
-#define ZT 131072
-#define ZO 16777216
 
 static constexpr cnrtDim3_t dim = {128, 1, 1};
 
@@ -26,17 +24,6 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   __memcpy(c + p, x, E1 * sizeof(half), NRAM2GDRAM);
 }
 
-__mlu_entry__ void k1(half *__restrict__ c) {
-  __nram__ half z[ZT];
-  __bang_write_zero(z, ZT);
-  for (int p = taskId * ZT; p < ZO; p += taskDim * ZT) {
-    int n = ZO - p;
-    if (n > ZT)
-      n = ZT;
-    __memcpy(c + p, z, n * sizeof(half), NRAM2GDRAM);
-  }
-}
-
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtNotifier_t s;
@@ -44,7 +31,9 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   cnrtNotifierCreate(&s);
   cnrtNotifierCreate(&e);
   cnrtPlaceNotifier(s, queue);
-  k1<<<dim, cnrtFuncTypeBlock, queue>>>(
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(A.unsafeGetTensorImpl()->mutable_data()),
+      reinterpret_cast<const half *>(B.unsafeGetTensorImpl()->mutable_data()),
       reinterpret_cast<half *>(B.unsafeGetTensorImpl()->mutable_data()));
   cnrtPlaceNotifier(e, queue);
   cnrtQueueSync(queue);
