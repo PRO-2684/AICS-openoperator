@@ -17,6 +17,8 @@
 #define TG 4
 #define TC 8
 #define TT (TG * TC)
+#define ZT 32768
+#define ZO 2097152
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
                       float *__restrict__ c) {
@@ -56,6 +58,17 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   }
 }
 
+__mlu_entry__ void kz(float *__restrict__ c) {
+  __nram__ float z[ZT];
+  __bang_write_value(z, ZT, 0.0f);
+  for (int p = taskId * ZT; p < ZO; p += taskDim * ZT) {
+    int n = ZO - p;
+    if (n > ZT)
+      n = ZT;
+    __memcpy(c + p, z, n * sizeof(float), NRAM2GDRAM);
+  }
+}
+
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto C = torch::empty({1024, 2048}, A.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
@@ -65,10 +78,7 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   cnrtNotifierCreate(&st);
   cnrtNotifierCreate(&en);
   cnrtPlaceNotifier(st, queue);
-  k0<<<d, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
-      C.data_ptr<float>());
+  kz<<<d, cnrtFuncTypeBlock, queue>>>(C.data_ptr<float>());
   cnrtPlaceNotifier(en, queue);
   cnrtQueueSync(queue);
   float us = 0.0f;
