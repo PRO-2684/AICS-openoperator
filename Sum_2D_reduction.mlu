@@ -16,23 +16,26 @@ __mlu_func__ float f0(float *__restrict__ x, float *__restrict__ y, int n) {
   return y[0];
 }
 
-__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ t) {
   __nram__ half a[E2];
   __nram__ float b[E2];
   __nram__ float c[E3];
-  if (taskId < E0)
-    y[taskId] = 0.0f;
-  __sync_all_ipu();
   int r = taskId >> 1;
   int p = r * E1 + (taskId & 1) * E2;
   __memcpy(a, x + p, E2 * sizeof(half), GDRAM2NRAM);
   __bang_half2float(b, a, E2);
-  c[0] = f0(b, c, E2);
-  __bang_atomic_reduce_add(y + r, c, 1);
+  t[taskId] = f0(b, c, E2);
+}
+
+__mlu_entry__ void k1(const float *__restrict__ t, float *__restrict__ y) {
+  if (taskId < E0) {
+    y[taskId] = t[taskId << 1] + t[(taskId << 1) + 1];
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
   auto out = torch::empty({E0}, x.options().dtype(torch::kFloat32));
+  auto tmp = torch::empty({32}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {32, 1, 1};
   cnrtNotifier_t s;
@@ -40,9 +43,12 @@ torch::Tensor bang_func(torch::Tensor x) {
   cnrtNotifierCreate(&s);
   cnrtNotifierCreate(&e);
   cnrtPlaceNotifier(s, queue);
-  k0<<<d, cnrtFuncTypeUnion8, queue>>>(
+  k0<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      out.data_ptr<float>());
+      tmp.data_ptr<float>());
+  cnrtDim3_t d1 = {16, 1, 1};
+  k1<<<d1, cnrtFuncTypeBlock, queue>>>(tmp.data_ptr<float>(),
+                                       out.data_ptr<float>());
   cnrtPlaceNotifier(e, queue);
   cnrtQueueSync(queue);
   float us = 0.0f;
