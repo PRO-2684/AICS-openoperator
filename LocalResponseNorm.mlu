@@ -4,34 +4,41 @@
 #include <stdio.h>
 #include <torch/extension.h>
 
-#define E0 1024
+#define E0 512
 #define E1 3136
 #define E2 64
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half h[E1];
   __nram__ float f[E1];
-  __nram__ float s[E1];
+  __nram__ float s0[E1];
+  __nram__ float s1[E1];
   __nram__ float t[E1];
   __nram__ float u[E1];
   for (int p = taskId; p < E0; p += taskDim) {
-    int n = p >> 6;
-    int c = p & 63;
+    int n = p >> 5;
+    int c = (p & 31) << 1;
     int base = n * E2 * E1;
-    __bang_write_value(s, E1, 0.0f);
-    for (int d = -2; d <= 2; ++d) {
+    __bang_write_value(s0, E1, 0.0f);
+    __bang_write_value(s1, E1, 0.0f);
+    for (int d = -2; d <= 3; ++d) {
       int cc = c + d;
       if ((unsigned)cc < E2) {
         __memcpy(h, x + base + cc * E1, E1 * sizeof(half), GDRAM2NRAM);
         __bang_half2float(t, h, E1);
         __bang_mul(t, t, t, E1);
-        __bang_add(s, s, t, E1);
+        if (d <= 2) {
+          __bang_add(s0, s0, t, E1);
+        }
+        if (d >= -1) {
+          __bang_add(s1, s1, t, E1);
+        }
       }
     }
-    __bang_mul_scalar(s, s, 0.00002f, E1);
-    __bang_add_scalar(s, s, 1.0f, E1);
-    __bang_rsqrt(t, s, E1);
-    __bang_sqrt(u, s, E1);
+    __bang_mul_scalar(s0, s0, 0.00002f, E1);
+    __bang_add_scalar(s0, s0, 1.0f, E1);
+    __bang_rsqrt(t, s0, E1);
+    __bang_sqrt(u, s0, E1);
     __bang_rsqrt(u, u, E1);
     __bang_mul(t, t, u, E1);
     __memcpy(h, x + base + c * E1, E1 * sizeof(half), GDRAM2NRAM);
@@ -39,6 +46,18 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
     __bang_mul(f, f, t, E1);
     __bang_float2half_rn(h, f, E1);
     __memcpy(y + base + c * E1, h, E1 * sizeof(half), NRAM2GDRAM);
+
+    __bang_mul_scalar(s1, s1, 0.00002f, E1);
+    __bang_add_scalar(s1, s1, 1.0f, E1);
+    __bang_rsqrt(t, s1, E1);
+    __bang_sqrt(u, s1, E1);
+    __bang_rsqrt(u, u, E1);
+    __bang_mul(t, t, u, E1);
+    __memcpy(h, x + base + (c + 1) * E1, E1 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(f, h, E1);
+    __bang_mul(f, f, t, E1);
+    __bang_float2half_rn(h, f, E1);
+    __memcpy(y + base + (c + 1) * E1, h, E1 * sizeof(half), NRAM2GDRAM);
   }
 }
 
