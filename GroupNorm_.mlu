@@ -11,7 +11,7 @@
 #define E4 524288
 #define T0 32768
 
-__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half h[T0];
   __nram__ float a[T0];
   __nram__ float b[T0];
@@ -44,7 +44,8 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
       __bang_half2float(a, h, T0);
       __bang_sub_scalar(a, a, m, T0);
       __bang_mul_scalar(a, a, r, T0);
-      __memcpy(y + p + off, a, T0 * sizeof(float), NRAM2GDRAM);
+      __bang_float2half(h, a, T0);
+      __memcpy(y + p + off, h, T0 * sizeof(half), NRAM2GDRAM);
     }
   }
 }
@@ -52,7 +53,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
 torch::Tensor bang_func(torch::Tensor x, int num_groups, int num_features) {
   (void)num_groups;
   (void)num_features;
-  auto y = torch::empty_like(x, x.options().dtype(torch::kFloat32));
+  auto y = torch::empty_like(x);
   cnrtDim3_t d = {128, 1, 1};
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtNotifier_t s;
@@ -62,7 +63,7 @@ torch::Tensor bang_func(torch::Tensor x, int num_groups, int num_features) {
   cnrtPlaceNotifier(s, queue);
   k0<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      y.data_ptr<float>());
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   cnrtPlaceNotifier(e, queue);
   cnrtQueueSync(queue);
   float us = 0.0f;
