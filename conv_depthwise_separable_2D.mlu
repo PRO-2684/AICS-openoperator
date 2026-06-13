@@ -7,7 +7,7 @@
 #define E0 32
 #define E1 32512
 #define E2 33280
-#define T1 32768
+#define T1 131072
 #define O1 66064384
 
 #define DO_ONE(dst, ch)                                                        \
@@ -62,7 +62,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ dw,
 
 __mlu_entry__ void k1(float *__restrict__ y) {
   __nram__ float z[T1];
-  __bang_write_value(z, T1, 0.0f);
+  __bang_write_zero(z, T1);
   for (int p = taskId * T1; p < O1; p += taskDim * T1) {
     int n = O1 - p;
     if (n > T1)

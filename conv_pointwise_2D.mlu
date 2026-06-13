@@ -7,6 +7,7 @@
 #define E0 1048576
 #define E1 32768
 #define E2 32
+#define T1 131072
 #define O1 67108864
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
@@ -43,12 +44,12 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
 }
 
 __mlu_entry__ void k1(half *__restrict__ y) {
-  __nram__ half z[E1];
-  __bang_write_value(z, E1, (half)0.0f);
-  for (int p = taskId * E1; p < O1; p += taskDim * E1) {
+  __nram__ half z[T1];
+  __bang_write_zero(z, T1);
+  for (int p = taskId * T1; p < O1; p += taskDim * T1) {
     int n = O1 - p;
-    if (n > E1)
-      n = E1;
+    if (n > T1)
+      n = T1;
     __memcpy(y + p, z, n * sizeof(half), NRAM2GDRAM);
   }
 }
