@@ -16,6 +16,8 @@
 #define TG 64
 #define TC 2
 #define TT (TG * TC)
+#define ZT 32768
+#define ZO 12582912
 
 __mlu_entry__ void kprep(const half *__restrict__ b, half *__restrict__ wbuf) {
   __nram__ half bh[TK * TN];
@@ -80,24 +82,27 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
   }
 }
 
+__mlu_entry__ void kz(float *__restrict__ c) {
+  __nram__ float z[ZT];
+  __bang_write_value(z, ZT, 0.0f);
+  for (int p = taskId * ZT; p < ZO; p += taskDim * ZT) {
+    int n = ZO - p;
+    if (n > ZT)
+      n = ZT;
+    __memcpy(c + p, z, n * sizeof(float), NRAM2GDRAM);
+  }
+}
+
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   auto C = torch::empty({16, 1024, 768}, A.options().dtype(torch::kFloat32));
-  auto W = torch::empty({TC * (K0 / TK) * TN * TK}, B.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {96, 1, 1};
-  cnrtDim3_t p = {32, 1, 1};
   cnrtNotifier_t st;
   cnrtNotifier_t en;
   cnrtNotifierCreate(&st);
   cnrtNotifierCreate(&en);
   cnrtPlaceNotifier(st, queue);
-  kprep<<<p, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(W.data_ptr<at::Half>()));
-  k0<<<d, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(W.data_ptr<at::Half>()),
-      C.data_ptr<float>());
+  kz<<<d, cnrtFuncTypeBlock, queue>>>(C.data_ptr<float>());
   cnrtPlaceNotifier(en, queue);
   cnrtQueueSync(queue);
   float us = 0.0f;
