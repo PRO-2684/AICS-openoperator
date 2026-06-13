@@ -7,17 +7,20 @@
 #define N 262144
 #define T 8192
 
-__mlu_entry__ void k0(half *__restrict__ x) {
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
   __nram__ half a[T];
+  __nram__ float b[T];
   int p = taskId * T;
   __memcpy(a, x + p, T * sizeof(half), GDRAM2NRAM);
-  __bang_active_exp(a, a, T);
-  __bang_add_scalar(a, a, (half)1.0f, T);
-  __bang_active_log(a, a, T);
-  __memcpy(x + p, a, T * sizeof(half), NRAM2GDRAM);
+  __bang_half2float(b, a, T);
+  __bang_active_exp(b, b, T);
+  __bang_add_scalar(b, b, 1.0f, T);
+  __bang_active_log(b, b, T);
+  __memcpy(y + p, b, T * sizeof(float), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor x) {
+  auto y = torch::empty_like(x, x.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {32, 1, 1};
   cnrtNotifier_t s;
@@ -26,7 +29,7 @@ torch::Tensor bang_func(torch::Tensor x) {
   cnrtNotifierCreate(&e);
   cnrtPlaceNotifier(s, queue);
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()), y.data_ptr<float>());
   cnrtPlaceNotifier(e, queue);
   cnrtQueueSync(queue);
   float us = 0.0f;
@@ -35,5 +38,5 @@ torch::Tensor bang_func(torch::Tensor x) {
   fflush(stdout);
   cnrtNotifierDestroy(s);
   cnrtNotifierDestroy(e);
-  return x;
+  return y;
 }

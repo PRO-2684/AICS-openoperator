@@ -35,23 +35,25 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ y,
     __bang_reduce_sum(rx, fc, E2);
     __bang_mul(fc, fb, fb, E2);
     __bang_reduce_sum(ry, fc, E2);
-    dot += rd[0];
-    sx += rx[0];
-    sy += ry[0];
+    for (int i = 0; i < E2; i += 32) {
+      dot += rd[i];
+      sx += rx[i];
+      sy += ry[i];
+    }
   }
   t[r] = 1.0f - dot / (sqrtf(sx) * sqrtf(sy) + 0.00000001f);
 }
 
-__mlu_entry__ void k1(const float *__restrict__ t, half *__restrict__ y) {
+__mlu_entry__ void k1(const float *__restrict__ t, float *__restrict__ y) {
   float s = 0.0f;
   for (int i = 0; i < E0; ++i) {
     s += t[i];
   }
-  *y = (half)(s * 0.0078125f);
+  *y = s * 0.0078125f;
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
-  auto y = torch::empty({}, predictions.options());
+  auto y = torch::empty({}, predictions.options().dtype(torch::kFloat32));
   auto t = torch::empty({E0}, predictions.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d0 = {E0, 1, 1};
@@ -67,7 +69,7 @@ torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
       static_cast<float *>(t.unsafeGetTensorImpl()->mutable_data()));
   k1<<<d1, cnrtFuncTypeBlock, queue>>>(
       static_cast<const float *>(t.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
+      static_cast<float *>(y.unsafeGetTensorImpl()->mutable_data()));
   cnrtPlaceNotifier(e, queue);
   cnrtQueueSync(queue);
   float us = 0.0f;
