@@ -10,7 +10,7 @@
 #define TN 256
 #define TR 32768
 #define TC 3
-#define ZT 32768
+#define ZT 131072
 #define ZO 1610612736
 
 __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
@@ -45,7 +45,7 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
 
 __mlu_entry__ void kz(float *__restrict__ c) {
   __nram__ float z[ZT];
-  __bang_write_value(z, ZT, 0.0f);
+  __bang_write_zero(z, ZT);
   for (int64_t p = (int64_t)taskId * ZT; p < (int64_t)ZO;
        p += (int64_t)taskDim * ZT) {
     int64_t n = (int64_t)ZO - p;
