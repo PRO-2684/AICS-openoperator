@@ -6,12 +6,12 @@
 #define B 32
 #define T 128
 #define H 512
-#define T1 32768
+#define T1 131072
 #define O1 2097152
 
 __mlu_entry__ void k0(half *__restrict__ out) {
   __nram__ half z[T1];
-  __bang_write_value(z, T1, (half)0.0f);
+  __bang_write_zero(z, T1);
   for (int p = taskId * T1; p < O1; p += taskDim * T1) {
     int n = O1 - p;
     if (n > T1)

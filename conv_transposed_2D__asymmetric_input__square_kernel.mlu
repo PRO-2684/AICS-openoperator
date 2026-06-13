@@ -17,7 +17,7 @@
 #define E10 74880
 #define E11 115584
 #define E12 33024
-#define T1 32768
+#define T1 131072
 #define O1 34344960
 
 __mlu_entry__ void k0(const half *__restrict__ w, half *__restrict__ z) {
@@ -68,7 +68,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
 
 __mlu_entry__ void k2(float *__restrict__ y) {
   __nram__ float z[T1];
-  __bang_write_value(z, T1, 0.0f);
+  __bang_write_zero(z, T1);
   for (int p = taskId * T1; p < O1; p += taskDim * T1) {
     int n = O1 - p;
     if (n > T1)
