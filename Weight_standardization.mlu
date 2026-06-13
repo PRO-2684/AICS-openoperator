@@ -11,9 +11,9 @@
 #define E3 8
 #define E4 128
 #define E5 130
-#define E6 4
-#define E7 6
-#define E8 32
+#define E6 6
+#define E7 8
+#define E8 22
 #define E9 64
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
@@ -69,9 +69,12 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
   __memcpy(ww, w, E2 * sizeof(half), GDRAM2WRAM);
 
   for (int t = taskId; t < E3 * E8; t += taskDim) {
-    int n = t >> 5;
-    int oh = (t & 31) * E6;
+    int n = t / E8;
+    int oh = (t - n * E8) * E6;
     int ih0 = oh - 1;
+    int rows = E6;
+    if (oh + rows > E4)
+      rows = E4 - oh;
     __bang_write_value(a, E7 * E5 * E0, 0.0f);
 #pragma unroll
     for (int r = 0; r < E7; ++r) {
@@ -87,7 +90,7 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     __bang_transpose(aa, a, E0, E7 * E5);
     __bang_conv(c, aa, ww, E0, E7, E5, 3, 3, 1, 1, E9);
     __memcpy(y + n * E4 * E4 * E9 + oh * E4 * E9, c,
-             E6 * E4 * E9 * sizeof(float), NRAM2GDRAM);
+             rows * E4 * E9 * sizeof(float), NRAM2GDRAM);
   }
 }
 
