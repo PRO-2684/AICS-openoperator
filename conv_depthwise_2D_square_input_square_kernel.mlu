@@ -55,7 +55,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   cnrtNotifierCreate(&s);
   cnrtNotifierCreate(&e);
   cnrtPlaceNotifier(s, queue);
-  k0<<<dim, cnrtFuncTypeUnion1, queue>>>(
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
       reinterpret_cast<const half *>(
           kernel.unsafeGetTensorImpl()->mutable_data()),
