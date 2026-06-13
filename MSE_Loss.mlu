@@ -6,6 +6,13 @@
 
 #define E0 524288
 #define E1 32768
+#define E2 256
+
+__mlu_func__ float sum0(float *__restrict__ x, float *__restrict__ y) {
+  __bang_sumpool(y, x, E2, 1, E1 / E2, 1, E1 / E2, 1, E1 / E2);
+  __bang_reduce_sum(y, y, E2);
+  return y[0] + y[32] + y[64] + y[96] + y[128] + y[160] + y[192] + y[224];
+}
 
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ t,
                       float *__restrict__ tmp) {
@@ -13,6 +20,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ t,
   __nram__ half b[E1];
   __nram__ float fa[E1];
   __nram__ float fb[E1];
+  __nram__ float r[E2];
   float s = 0.0f;
   for (int base = taskId * E1; base < E0; base += taskDim * E1) {
     __memcpy(a, x + base, E1 * sizeof(half), GDRAM2NRAM);
@@ -21,9 +29,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ t,
     __bang_half2float(fb, b, E1);
     __bang_sub(fa, fa, fb, E1);
     __bang_mul(fa, fa, fa, E1);
-    for (int i = 0; i < E1; ++i) {
-      s += fa[i];
-    }
+    s += sum0(fa, r);
   }
   tmp[taskId] = s;
 }
