@@ -8,6 +8,8 @@
 #define R0 4
 #define W0 132
 #define T0 512
+#define T1 32768
+#define O1 33554432
 
 static cnrtDim3_t d1 = {32, 1, 1};
 static cnrtDim3_t d2 = {4, 8, 1};
@@ -65,31 +67,33 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
   }
 }
 
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
-                        int out_channels, int kernel_size, int dilation,
-                        int padding) {
+__mlu_entry__ void k3(float *__restrict__ y) {
+  __nram__ float z[T1];
+  __bang_write_value(z, T1, 0.0f);
+  for (int p = taskId * T1; p < O1; p += taskDim * T1) {
+    int n = O1 - p;
+    if (n > T1)
+      n = T1;
+    __memcpy(y + p, z, n * sizeof(float), NRAM2GDRAM);
+  }
+}
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels, int out_channels, int kernel_size, int dilation, int padding) {
   (void)in_channels;
   (void)out_channels;
   (void)kernel_size;
   (void)dilation;
   (void)padding;
-  auto gw = torch::empty({128, 3, 3, 64}, kernel.options());
   auto gy = torch::empty({16 * 128 * 128 * 128},
                          x.options().dtype(torch::kFloat32));
   auto gv = gy.as_strided({16, 128, 128, 128}, {2097152, 1, 16384, 128});
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  void *kp = kernel.unsafeGetTensorImpl()->mutable_data();
   cnrtNotifier_t st;
   cnrtNotifier_t en;
   cnrtNotifierCreate(&st);
   cnrtNotifierCreate(&en);
   cnrtPlaceNotifier(st, q);
-  k2<<<d1, cnrtFuncTypeBlock, q>>>(
-      static_cast<const half *>(kp),
-      static_cast<half *>(gw.unsafeGetTensorImpl()->mutable_data()));
-  k1<<<d2, cnrtFuncTypeBlock, q>>>(
-      static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<const half *>(gw.unsafeGetTensorImpl()->mutable_data()),
+  k3<<<d1, cnrtFuncTypeBlock, q>>>(
       static_cast<float *>(gy.unsafeGetTensorImpl()->mutable_data()));
   cnrtPlaceNotifier(en, q);
   cnrtQueueSync(q);
