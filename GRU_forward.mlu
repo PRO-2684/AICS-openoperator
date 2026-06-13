@@ -12,47 +12,6 @@
 #define BM 32
 #define C 8
 
-__mlu_entry__ void kp(const half *__restrict__ wi, const half *__restrict__ wh,
-                      half *__restrict__ ip, half *__restrict__ hp, int k) {
-  int col = taskId * G;
-  __nram__ half wb[H * N];
-  __nram__ half wf[H * N];
-
-  __memcpy(wb, wi + col * k, G * k * sizeof(half), GDRAM2NRAM);
-  __memcpy(wb + G * k, wi + (H + col) * k, G * k * sizeof(half),
-           GDRAM2NRAM);
-  __memcpy(wb + G * 2 * k, wi + (H * 2 + col) * k, G * k * sizeof(half),
-           GDRAM2NRAM);
-  int p = 0;
-  for (int i = 0; i < 64; i += 4) {
-    for (int j = 0; j < N / 64; ++j) {
-      for (int m = 0; m < 4; ++m) {
-        int o = i + j * 64 + m;
-        __memcpy(wf + p, wb + o * k, k * sizeof(half), NRAM2NRAM);
-        p += k;
-      }
-    }
-  }
-  __memcpy(ip + taskId * N * k, wf, N * k * sizeof(half), NRAM2GDRAM);
-
-  __memcpy(wb, wh + col * H, G * H * sizeof(half), GDRAM2NRAM);
-  __memcpy(wb + G * H, wh + (H + col) * H, G * H * sizeof(half),
-           GDRAM2NRAM);
-  __memcpy(wb + G * 2 * H, wh + (H * 2 + col) * H, G * H * sizeof(half),
-           GDRAM2NRAM);
-  p = 0;
-  for (int i = 0; i < 64; i += 4) {
-    for (int j = 0; j < N / 64; ++j) {
-      for (int m = 0; m < 4; ++m) {
-        int o = i + j * 64 + m;
-        __memcpy(wf + p, wb + o * H, H * sizeof(half), NRAM2NRAM);
-        p += H;
-      }
-    }
-  }
-  __memcpy(hp + taskId * N * H, wf, N * H * sizeof(half), NRAM2GDRAM);
-}
-
 __mlu_func__ void kc(int tid, const half *__restrict__ x,
                      const half *__restrict__ ip, const half *__restrict__ wp,
                      const half *__restrict__ bi, const half *__restrict__ bh,
@@ -152,55 +111,6 @@ __mlu_func__ void kc(int tid, const half *__restrict__ x,
   }
 }
 
-__mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ ip,
-                      const half *__restrict__ wp, const half *__restrict__ bi,
-                      const half *__restrict__ bh, const half *__restrict__ in,
-                      const half *__restrict__ hp, half *__restrict__ hn,
-                      half *__restrict__ out, int t, int k, int first,
-                      int last) {
-  kc(taskId, x, ip, wp, bi, bh, in, hp, hn, out, t, k, first, last);
-}
-
-__mlu_entry__ void k2(const half *__restrict__ x, const half *__restrict__ ip0,
-                      const half *__restrict__ wp0, const half *__restrict__ b0,
-                      const half *__restrict__ c0, const half *__restrict__ ip1,
-                      const half *__restrict__ wp1, const half *__restrict__ b1,
-                      const half *__restrict__ c1, const half *__restrict__ h0,
-                      const half *__restrict__ h1, half *__restrict__ n0,
-                      half *__restrict__ n1, half *__restrict__ mid,
-                      half *__restrict__ out, int t) {
-  if (taskId < C) {
-    kc(taskId, x, ip0, wp0, b0, c0, mid, h0, n0, mid, t, I0, 1, 0);
-  }
-  __sync_all_ipu();
-  if (taskId < C) {
-    kc(taskId, x, ip1, wp1, b1, c1, mid, h1, n1, out, t, H, 0, 1);
-  }
-}
-
-__mlu_entry__ void k3(const half *__restrict__ x, const half *__restrict__ ip0,
-                      const half *__restrict__ wp0, const half *__restrict__ b0,
-                      const half *__restrict__ c0, const half *__restrict__ ip1,
-                      const half *__restrict__ wp1, const half *__restrict__ b1,
-                      const half *__restrict__ c1, half *__restrict__ h0,
-                      half *__restrict__ h1, half *__restrict__ h2,
-                      half *__restrict__ h3, half *__restrict__ mid,
-                      half *__restrict__ out) {
-  for (int t = 0; t < T; ++t) {
-    half *p0 = (t & 1) ? h2 : h0;
-    half *n0 = (t & 1) ? h0 : h2;
-    half *p1 = (t & 1) ? h3 : h1;
-    half *n1 = (t & 1) ? h1 : h3;
-    if (taskId < C) {
-      kc(taskId, x, ip0, wp0, b0, c0, mid, p0, n0, mid, t, I0, 1, 0);
-    }
-    __sync_all_ipu();
-    if (taskId < C) {
-      kc(taskId, x, ip1, wp1, b1, c1, mid, p1, n1, out, t, H, 0, 1);
-    }
-  }
-}
-
 __mlu_func__ void kcw(int tid, const half *__restrict__ x,
                       const half *__restrict__ wip,
                       const half *__restrict__ wwp,
@@ -295,40 +205,6 @@ __mlu_func__ void kcw(int tid, const half *__restrict__ x,
   } else {
     __memcpy(out + bb * H + col, u, G * sizeof(half), NRAM2GDRAM,
              H * sizeof(half), G * sizeof(half), BM - 1);
-  }
-}
-
-__mlu_entry__ void k3w(const half *__restrict__ x, const half *__restrict__ ip0,
-                       const half *__restrict__ wp0, const half *__restrict__ b0,
-                       const half *__restrict__ c0, const half *__restrict__ ip1,
-                       const half *__restrict__ wp1, const half *__restrict__ b1,
-                       const half *__restrict__ c1, half *__restrict__ h0,
-                       half *__restrict__ h1, half *__restrict__ h2,
-                       half *__restrict__ h3, half *__restrict__ mid,
-                       half *__restrict__ out) {
-  __wram__ half wip0[N * I0];
-  __wram__ half wwp0[N * H];
-  __wram__ half wip1[N * H];
-  __wram__ half wwp1[N * H];
-  int gi = taskId & 7;
-  if (taskId < C) {
-    __memcpy(wip0, ip0 + gi * N * I0, N * I0 * sizeof(half), GDRAM2WRAM);
-    __memcpy(wwp0, wp0 + gi * N * H, N * H * sizeof(half), GDRAM2WRAM);
-    __memcpy(wip1, ip1 + gi * N * H, N * H * sizeof(half), GDRAM2WRAM);
-    __memcpy(wwp1, wp1 + gi * N * H, N * H * sizeof(half), GDRAM2WRAM);
-  }
-  for (int t = 0; t < T; ++t) {
-    half *p0 = (t & 1) ? h2 : h0;
-    half *n0 = (t & 1) ? h0 : h2;
-    half *p1 = (t & 1) ? h3 : h1;
-    half *n1 = (t & 1) ? h1 : h3;
-    if (taskId < C) {
-      kcw(taskId, x, wip0, wwp0, b0, c0, mid, p0, n0, mid, t, I0, 1, 0);
-    }
-    __sync_all_ipu();
-    if (taskId < C) {
-      kcw(taskId, x, wip1, wwp1, b1, c1, mid, p1, n1, out, t, H, 0, 1);
-    }
   }
 }
 
