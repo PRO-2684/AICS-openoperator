@@ -1,73 +1,12 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
-#include <sched.h>
 #include <torch/extension.h>
-#include <unistd.h>
 
 #define T 4096
 #define P 4096
 #define Q 512
 
-
-static int g_dev = 0;
-
-static void bind_host(int d) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  int end = begin + 28;
-  for (int i = begin; i < end; ++i) {
-    CPU_SET(i, &set);
-  }
-  sched_setaffinity(0, sizeof(set), &set);
-}
-
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
-      bind_host(d);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
-}
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::empty({1}, opt);
-}();
-
-static torch::Tensor gy = []() {
-  return torch::empty(
-      {4, 64, 64, 64},
-      torch::TensorOptions()
-          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-          .dtype(torch::kHalf));
-}();
-
-static torch::Tensor go = []() {
-  return torch::empty(
-      {4, P * 4}, torch::TensorOptions()
-                      .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                      .dtype(torch::kInt32));
-}();
-
-static torch::Tensor gc = []() {
-  return torch::empty(
-      {4, P * 4}, torch::TensorOptions()
-                      .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                      .dtype(torch::kHalf));
-}();
 
 __mlu_entry__ void kprep(const half *__restrict__ g, int *__restrict__ off,
                          half *__restrict__ cf) {
@@ -246,20 +185,34 @@ __mlu_entry__ void k2(const half *__restrict__ x, const half *__restrict__ g,
   }
 }
 
-static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static cnrtDim3_t dim0 = {128, 1, 1};
-
 torch::Tensor bang_func(torch::Tensor input, torch::Tensor grid) {
-  (void)g0;
+  auto y = torch::empty({4, 64, 64, 64}, input.options());
+  auto off = torch::empty({4, P * 4}, input.options().dtype(torch::kInt32));
+  auto cf = torch::empty({4, P * 4}, input.options());
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim0 = {128, 1, 1};
   cnrtDim3_t dprep = {32, 1, 1};
+  cnrtNotifier_t st;
+  cnrtNotifier_t en;
+  cnrtNotifierCreate(&st);
+  cnrtNotifierCreate(&en);
+  cnrtPlaceNotifier(st, queue);
   kprep<<<dprep, cnrtFuncTypeBlock, queue>>>(
       static_cast<const half *>(grid.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<int *>(go.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(gc.unsafeGetTensorImpl()->mutable_data()));
+      static_cast<int *>(off.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(cf.unsafeGetTensorImpl()->mutable_data()));
   k0<<<dim0, cnrtFuncTypeBlock, queue>>>(
       static_cast<const half *>(input.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<const int *>(go.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<const half *>(gc.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(gy.unsafeGetTensorImpl()->mutable_data()));
-  return gy;
+      static_cast<const int *>(off.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const half *>(cf.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
+  cnrtPlaceNotifier(en, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(st, en, &us);
+  fprintf(stdout, "KERNEL_US op=116 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(st);
+  cnrtNotifierDestroy(en);
+  return y;
 }

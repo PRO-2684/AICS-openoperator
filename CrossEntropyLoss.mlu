@@ -1,12 +1,9 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
-#include <sched.h>
 #include <math.h>
 #include <stdint.h>
 #include <torch/extension.h>
-#include <unistd.h>
 
 #define ROWS 4096
 #define COLS 10
@@ -15,49 +12,6 @@
 #define LOCAL_ELEMS (ROWS_PER_TASK * COLS)
 #define C0 2.3247993f
 
-
-static int g_dev = 0;
-
-static void bind_host(int d) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  int end = begin + 28;
-  for (int i = begin; i < end; ++i) {
-    CPU_SET(i, &set);
-  }
-  sched_setaffinity(0, sizeof(set), &set);
-}
-
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
-      bind_host(d);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
-}
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  return torch::empty({1}, opt);
-}();
-
-static torch::Tensor gy = []() {
-  return torch::empty(
-      {}, torch::TensorOptions()
-              .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-              .dtype(torch::kHalf));
-}();
 
 __mlu_entry__ void k0(const half *__restrict__ predictions,
                       const int64_t *__restrict__ targets,
@@ -117,15 +71,25 @@ __mlu_entry__ void k0(const half *__restrict__ predictions,
 }
 
 torch::Tensor bang_func(torch::Tensor predictions, torch::Tensor targets) {
-  (void)g0;
-
+  auto y = torch::empty({}, predictions.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {TASKS, 1, 1};
-
+  cnrtNotifier_t st;
+  cnrtNotifier_t en;
+  cnrtNotifierCreate(&st);
+  cnrtNotifierCreate(&en);
+  cnrtPlaceNotifier(st, queue);
   k0<<<dim, cnrtFuncTypeUnion8, queue>>>(
       reinterpret_cast<const half *>(predictions.data_ptr<at::Half>()),
       reinterpret_cast<const int64_t *>(targets.data_ptr<int64_t>()),
-      reinterpret_cast<half *>(gy.data_ptr<at::Half>()));
-
-  return gy;
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  cnrtPlaceNotifier(en, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(st, en, &us);
+  fprintf(stdout, "KERNEL_US op=041 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(st);
+  cnrtNotifierDestroy(en);
+  return y;
 }
