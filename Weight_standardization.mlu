@@ -11,17 +11,19 @@
 #define E3 8
 #define E4 128
 #define E5 130
-#define E6 6
-#define E7 8
-#define E8 22
+#define E6 4
+#define E7 6
+#define E8 32
 #define E9 64
 
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
+                      half *__restrict__ z) {
   int o = taskId;
   if (o >= E0)
     return;
 
   __nram__ half h[E1];
+  __nram__ half rh[E1];
   __nram__ float a[E1];
   __nram__ float b[E1];
   __nram__ float t[E1];
@@ -44,8 +46,12 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   for (int i = 0; i < 18; ++i) {
     q += t[i * 32];
   }
-  float r = 1.0f / (sqrtf(q * 0.0017391304347826088f) + 1.0e-5f);
-  __bang_mul_scalar(a, a, r, E1);
+  float rr = 1.0f / (sqrtf(q * 0.0017391304347826088f) + 1.0e-5f);
+  __bang_mul_scalar(a, a, rr, E1);
+  __bang_float2half_rn(h, a, E1);
+  __bang_half2float(b, h, E1);
+  __bang_sub(b, a, b, E1);
+  __bang_float2half_rn(rh, b, E1);
 
   for (int c = 0; c < E0; ++c) {
 #pragma unroll
@@ -53,28 +59,27 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
 #pragma unroll
       for (int kw = 0; kw < 3; ++kw) {
         y[((o * 3 + kh) * 3 + kw) * E0 + c] =
-            (half)a[(c * 3 + kh) * 3 + kw];
+            h[(c * 3 + kh) * 3 + kw];
+        z[((o * 3 + kh) * 3 + kw) * E0 + c] =
+            rh[(c * 3 + kh) * 3 + kw];
       }
     }
   }
 }
 
 __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
-                      float *__restrict__ y) {
+                      const half *__restrict__ wr, float *__restrict__ y) {
   __nram__ float a[E7 * E5 * E0];
   __nram__ float aa[E7 * E5 * E0];
   __nram__ half h[E4];
   __nram__ float c[E6 * E4 * E0];
+  __nram__ float d[E6 * E4 * E0];
   __wram__ half ww[E2];
-  __memcpy(ww, w, E2 * sizeof(half), GDRAM2WRAM);
 
   for (int t = taskId; t < E3 * E8; t += taskDim) {
-    int n = t / E8;
-    int oh = (t - n * E8) * E6;
+    int n = t >> 5;
+    int oh = (t & 31) * E6;
     int ih0 = oh - 1;
-    int rows = E6;
-    if (oh + rows > E4)
-      rows = E4 - oh;
     __bang_write_value(a, E7 * E5 * E0, 0.0f);
 #pragma unroll
     for (int r = 0; r < E7; ++r) {
@@ -88,9 +93,13 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
       }
     }
     __bang_transpose(aa, a, E0, E7 * E5);
+    __memcpy(ww, w, E2 * sizeof(half), GDRAM2WRAM);
     __bang_conv(c, aa, ww, E0, E7, E5, 3, 3, 1, 1, E9);
+    __memcpy(ww, wr, E2 * sizeof(half), GDRAM2WRAM);
+    __bang_conv(d, aa, ww, E0, E7, E5, 3, 3, 1, 1, E9);
+    __bang_add(c, c, d, E6 * E4 * E9);
     __memcpy(y + n * E4 * E4 * E9 + oh * E4 * E9, c,
-             rows * E4 * E9 * sizeof(float), NRAM2GDRAM);
+             E6 * E4 * E9 * sizeof(float), NRAM2GDRAM);
   }
 }
 
@@ -105,6 +114,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, int in_channels,
   auto y = out_buf.as_strided({8, 64, 128, 128},
                               {128 * 128 * 64, 1, 128 * 64, 64});
   auto w = torch::empty({E2}, weight.options().dtype(torch::kHalf));
+  auto wr = torch::empty({E2}, weight.options().dtype(torch::kHalf));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtNotifier_t st;
@@ -115,12 +125,14 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, int in_channels,
   cnrtDim3_t g = {E0, 1, 1};
   k0<<<g, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(weight.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(w.data_ptr<at::Half>()));
+      reinterpret_cast<half *>(w.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(wr.data_ptr<at::Half>()));
 
   cnrtDim3_t d = {32, 1, 1};
   k1<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
+      reinterpret_cast<const half *>(wr.data_ptr<at::Half>()),
       out_buf.data_ptr<float>());
   cnrtPlaceNotifier(en, queue);
   cnrtQueueSync(queue);
