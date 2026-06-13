@@ -7,7 +7,7 @@
 #define E0 128
 #define E1 16640
 #define E2 16900
-#define T0 32768
+#define T0 131072
 #define O0 16777216
 
 static constexpr cnrtDim3_t dim = {32, 1, 1};
@@ -43,7 +43,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
 
 __mlu_entry__ void k1(half *__restrict__ y) {
   __nram__ half z[T0];
-  __bang_write_value(z, T0, (half)0.0f);
+  __bang_write_zero(z, T0);
   for (int p = taskId * T0; p < O0; p += taskDim * T0) {
     int n = O0 - p;
     if (n > T0)
