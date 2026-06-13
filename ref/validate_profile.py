@@ -70,13 +70,29 @@ def resolve_paths(op: str, source: str | None, ref: str | None) -> tuple[Path, P
     return src.resolve(), ref_path.resolve()
 
 
-def wrapper_signature(op: str) -> str:
+def source_wrapper_signature(source: Path) -> str | None:
+    text = source.read_text(encoding="utf-8")
+    m = re.search(
+        r"((?:torch::Tensor|std::vector<torch::Tensor>)\s+bang_func\s*\([^)]*\))\s*\{",
+        text,
+        flags=re.S,
+    )
+    if not m:
+        return None
+    return re.sub(r"\s+", " ", m.group(1)).strip() + ";"
+
+
+def wrapper_signature(op: str, source: Path | None = None) -> str:
+    if source is not None:
+        sig = source_wrapper_signature(source)
+        if sig:
+            return sig
     task = load_tasks()[op.zfill(3)]
     return task["description"]["cpp_wrapper"].rstrip(";") + ";"
 
 
-def wrapper_params(op: str) -> list[tuple[str, str]]:
-    sig = wrapper_signature(op)
+def wrapper_params(op: str, source: Path | None = None) -> list[tuple[str, str]]:
+    sig = wrapper_signature(op, source)
     m = re.search(r"bang_func\s*\((.*)\)\s*;", sig)
     if not m:
         return []
@@ -104,7 +120,7 @@ def build_extension(op: str, source: Path, build_dir: Path, verbose: bool):
     binding = module_dir / f"{name}_binding.cpp"
     binding.write_text(
         "#include <torch/extension.h>\n\n"
-        f"{wrapper_signature(op)}\n\n"
+        f"{wrapper_signature(op, source)}\n\n"
         f"PYBIND11_MODULE({name}, m) {{\n"
         '  m.def("bang_func", &bang_func, "BangC torch extension entry");\n'
         "}\n",
@@ -177,15 +193,29 @@ def complete_init_inputs(model_cls: type, init_inputs: list[Any]) -> list[Any]:
     return out
 
 
-def wrapper_init_inputs(op: str, raw_inputs: list[Any], model_init: list[Any]) -> list[Any]:
-    params = wrapper_params(op)
-    tensor_count = sum(1 for typ, _name in params if "torch::Tensor" in typ)
-    extra = params[tensor_count:]
-    vals = list(model_init[: len(extra)])
-    while len(vals) < len(extra):
-        vals.append(None)
+def wrapper_extra_inputs(
+    op: str,
+    source: Path,
+    raw_inputs: list[Any],
+    model: torch.nn.Module,
+    model_init: list[Any],
+) -> list[Any]:
+    params = wrapper_params(op, source)
+    extra = params[len(raw_inputs) :]
+    init_left = list(model_init)
+    model_tensors = list(model.parameters()) + list(model.buffers())
     fixed: list[Any] = []
-    for (typ, name), val in zip(extra, vals):
+    for typ, name in extra:
+        val = None
+        if "torch::Tensor" in typ:
+            for i, candidate in enumerate(init_left):
+                if isinstance(candidate, torch.Tensor):
+                    val = init_left.pop(i)
+                    break
+            if val is None and model_tensors:
+                val = model_tensors.pop(0).detach()
+        elif init_left:
+            val = init_left.pop(0)
         if val is None and name == "scale" and raw_inputs:
             val = math.sqrt(raw_inputs[0].shape[-1])
         elif val is None and name == "temperature":
@@ -321,14 +351,14 @@ def main() -> int:
     ref_mod = load_py_module(f"ref_{op}", ref_path)
     init_inputs = complete_init_inputs(ref_mod.Model, list(ref_mod.get_init_inputs()))
     raw_inputs = list(ref_mod.get_inputs())
-    bang_init_inputs = wrapper_init_inputs(op, raw_inputs, init_inputs)
 
     model = ref_mod.Model(*init_inputs).eval()
     if is_float_dtype(dtype):
         model = model.to(dtype=dtype)
+    bang_extra_inputs = wrapper_extra_inputs(op, source, raw_inputs, model, init_inputs)
     model = model.to("mlu")
     mlu_inputs = cast_tree(raw_inputs, dtype, "mlu")
-    mlu_init = cast_tree(bang_init_inputs, dtype, "mlu")
+    mlu_init = cast_tree(bang_extra_inputs, dtype, "mlu")
 
     def ref_call():
         with torch.no_grad():
