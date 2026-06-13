@@ -139,12 +139,6 @@ __mlu_entry__ void k4(const half *__restrict__ x, const float *__restrict__ s,
   }
 }
 
-__mlu_entry__ void k5(half *__restrict__ y) {
-  if (taskId == 0) {
-    y[0] = y[0];
-  }
-}
-
 torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bias,
                         torch::Tensor running_mean, torch::Tensor running_var,
                         int num_features) {

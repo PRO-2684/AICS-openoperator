@@ -42,12 +42,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   }
 }
 
-__mlu_entry__ void k1(half *__restrict__ y) {
-  if (taskId == 0) {
-    y[0] = y[0];
-  }
-}
-
 torch::Tensor bang_func(torch::Tensor x, int size, double alpha, double beta,
                         double k) {
   (void)size;
