@@ -4,6 +4,7 @@
 #include <framework/core/MLUStream.h>
 #include <sched.h>
 #include <math.h>
+#include <stdio.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
@@ -146,19 +147,18 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor cond,
                         int dim, int cond_dim) {
   (void)dim;
   (void)cond_dim;
-  static torch::Tensor y;
-  static torch::Tensor g;
-  static torch::Tensor b;
-  if (!y.defined())
-    y = torch::empty_like(x);
-  if (!g.defined())
-    g = torch::empty({B0, D0}, x.options().dtype(torch::kFloat32));
-  if (!b.defined())
-    b = torch::empty({B0, D0}, x.options().dtype(torch::kFloat32));
+  auto y = torch::empty_like(x);
+  auto g = torch::empty({B0, D0}, x.options().dtype(torch::kFloat32));
+  auto b = torch::empty({B0, D0}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d0 = {16, 1, 1};
   cnrtDim3_t d1 = {128, 1, 1};
   int tr = gamma_weight.size(0) == C0 ? 1 : 0;
+  cnrtNotifier_t st;
+  cnrtNotifier_t en;
+  cnrtNotifierCreate(&st);
+  cnrtNotifierCreate(&en);
+  cnrtPlaceNotifier(st, q);
   k0<<<d0, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(cond.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(gamma_weight.data_ptr<at::Half>()),
@@ -170,5 +170,13 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor cond,
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       g.data_ptr<float>(), b.data_ptr<float>(),
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  cnrtPlaceNotifier(en, q);
+  cnrtQueueSync(q);
+  float us = 0.0f;
+  cnrtNotifierDuration(st, en, &us);
+  fprintf(stdout, "KERNEL_US op=125 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(st);
+  cnrtNotifierDestroy(en);
   return y;
 }
