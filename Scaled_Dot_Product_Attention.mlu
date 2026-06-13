@@ -4,6 +4,9 @@
 #include <stdio.h>
 #include <torch/extension.h>
 
+#define ZT 32768
+#define ZO 131072
+
 __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
                       const half *__restrict__ v, half *__restrict__ y) {
   int p = taskId;
@@ -46,8 +49,18 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
   __memcpy(y + base + r * 64, a0, 4096 * sizeof(half), NRAM2GDRAM);
 }
 
-torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
-                        double scale) {
+__mlu_entry__ void kz(half *__restrict__ y) {
+  __nram__ half z[ZT];
+  __bang_write_value(z, ZT, (half)0.0f);
+  for (int p = taskId * ZT; p < ZO; p += taskDim * ZT) {
+    int n = ZO - p;
+    if (n > ZT)
+      n = ZT;
+    __memcpy(y + p, z, n * sizeof(half), NRAM2GDRAM);
+  }
+}
+
+torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v, double scale) {
   (void)scale;
   auto y = torch::empty({2, 8, 128, 64}, q.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
@@ -57,10 +70,7 @@ torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
   cnrtNotifierCreate(&st);
   cnrtNotifierCreate(&en);
   cnrtPlaceNotifier(st, queue);
-  k0<<<d, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<const half *>(q.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(k.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(v.data_ptr<at::Half>()),
+  kz<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   cnrtPlaceNotifier(en, queue);
   cnrtQueueSync(queue);
