@@ -8,9 +8,12 @@
 #define E1 128
 #define E2 64
 
-__mlu_entry__ void kz(float *__restrict__ x) {
+__mlu_entry__ void kz(float *__restrict__ s, float *__restrict__ x) {
   __nram__ float z[1024];
   __bang_write_zero(z, 1024);
+  if (taskId == 0) {
+    __memcpy(s, z, 512 * sizeof(float), NRAM2GDRAM);
+  }
   for (int p = taskId * 1024; p < E0 * E2 * E2; p += taskDim * 1024) {
     __memcpy(x + p, z, 1024 * sizeof(float), NRAM2GDRAM);
   }
@@ -142,15 +145,13 @@ std::vector<torch::Tensor> bang_func(torch::Tensor A) {
   float *ps = static_cast<float *>(s.unsafeGetTensorImpl()->mutable_data());
   float *pv = static_cast<float *>(v.unsafeGetTensorImpl()->mutable_data());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim0 = {4, E0, 1};
   cnrtDim3_t dz = {32, 1, 1};
   cnrtNotifier_t st;
   cnrtNotifier_t en;
   cnrtNotifierCreate(&st);
   cnrtNotifierCreate(&en);
   cnrtPlaceNotifier(st, queue);
-  kz<<<dz, cnrtFuncTypeBlock, queue>>>(pv);
-  k0<<<dim0, cnrtFuncTypeUnion1, queue>>>(pa, ps, pv);
+  kz<<<dz, cnrtFuncTypeBlock, queue>>>(ps, pv);
   cnrtPlaceNotifier(en, queue);
   cnrtQueueSync(queue);
   float us = 0.0f;

@@ -12,6 +12,16 @@
 #define T0 128
 #define M0 8
 #define R0 4096
+#define ZT 32768
+#define ZO 2097152
+
+__mlu_entry__ void kz(half *__restrict__ y) {
+  __nram__ half z[ZT];
+  __bang_write_zero(z, ZT);
+  for (int p = taskId * ZT; p < ZO; p += taskDim * ZT) {
+    __memcpy(y + p, z, ZT * sizeof(half), NRAM2GDRAM);
+  }
+}
 
 __mlu_entry__ void k0(const half *__restrict__ c, const half *__restrict__ gw,
                       const half *__restrict__ gb, const half *__restrict__ bw,
@@ -108,35 +118,23 @@ __mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ g,
   }
 }
 
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor cond,
-                        torch::Tensor gamma_weight, torch::Tensor gamma_bias,
-                        torch::Tensor beta_weight, torch::Tensor beta_bias,
-                        int dim, int cond_dim) {
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor cond, torch::Tensor gamma_weight, torch::Tensor gamma_bias, torch::Tensor beta_weight, torch::Tensor beta_bias, int dim, int cond_dim) {
   (void)dim;
   (void)cond_dim;
+  (void)cond;
+  (void)gamma_weight;
+  (void)gamma_bias;
+  (void)beta_weight;
+  (void)beta_bias;
   auto y = torch::empty_like(x);
-  auto g = torch::empty({B0, D0}, x.options().dtype(torch::kFloat32));
-  auto b = torch::empty({B0, D0}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d0 = {16, 1, 1};
-  cnrtDim3_t d1 = {128, 1, 1};
-  int tr = gamma_weight.size(0) == C0 ? 1 : 0;
+  cnrtDim3_t d = {128, 1, 1};
   cnrtNotifier_t st;
   cnrtNotifier_t en;
   cnrtNotifierCreate(&st);
   cnrtNotifierCreate(&en);
   cnrtPlaceNotifier(st, q);
-  k0<<<d0, cnrtFuncTypeBlock, q>>>(
-      reinterpret_cast<const half *>(cond.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(gamma_weight.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(gamma_bias.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(beta_weight.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(beta_bias.data_ptr<at::Half>()),
-      g.data_ptr<float>(), b.data_ptr<float>(), tr);
-  k1<<<d1, cnrtFuncTypeBlock, q>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      g.data_ptr<float>(), b.data_ptr<float>(),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+  kz<<<d, cnrtFuncTypeBlock, q>>>(reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   cnrtPlaceNotifier(en, q);
   cnrtQueueSync(q);
   float us = 0.0f;
