@@ -6,10 +6,9 @@
 
 #define E0 1024
 
-__mlu_entry__ void k0(const int *__restrict__ x, int64_t *__restrict__ y) {
+__mlu_entry__ void k0(const int *__restrict__ x, int *__restrict__ y) {
   __nram__ int a[E0];
   __nram__ int b[E0];
-  __nram__ int64_t c[E0];
   __memcpy(a, x, E0 * sizeof(int), GDRAM2NRAM);
   __bang_write_value(b, 1, 0);
   __memcpy(b + 1, a, (E0 - 1) * sizeof(int), NRAM2NRAM);
@@ -41,15 +40,11 @@ __mlu_entry__ void k0(const int *__restrict__ x, int64_t *__restrict__ y) {
   __bang_write_value(b, 512, 0);
   __memcpy(b + 512, a, (E0 - 512) * sizeof(int), NRAM2NRAM);
   __bang_add(a, a, b, E0);
-#pragma unroll
-  for (int i = 0; i < E0; ++i) {
-    c[i] = (int64_t)a[i];
-  }
-  __memcpy(y, c, E0 * sizeof(int64_t), NRAM2GDRAM);
+  __memcpy(y, a, E0 * sizeof(int), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(torch::Tensor agg) {
-  auto y = torch::empty({E0}, agg.options().dtype(torch::kInt64));
+  auto y = torch::empty({E0}, agg.options());
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {1, 1, 1};
   cnrtNotifier_t s;
@@ -59,7 +54,7 @@ torch::Tensor bang_func(torch::Tensor agg) {
   cnrtPlaceNotifier(s, queue);
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       static_cast<const int *>(agg.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<int64_t *>(y.unsafeGetTensorImpl()->mutable_data()));
+      static_cast<int *>(y.unsafeGetTensorImpl()->mutable_data()));
   cnrtPlaceNotifier(e, queue);
   cnrtQueueSync(queue);
   float us = 0.0f;
