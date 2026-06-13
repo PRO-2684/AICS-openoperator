@@ -81,8 +81,9 @@ def module_name_for(op: str, source: Path) -> str:
 
 def build_extension(op: str, source: Path, build_dir: Path, verbose: bool):
     name = module_name_for(op, source)
-    build_dir.mkdir(parents=True, exist_ok=True)
-    binding = build_dir / f"{name}_binding.cpp"
+    module_dir = build_dir / name
+    module_dir.mkdir(parents=True, exist_ok=True)
+    binding = module_dir / f"{name}_binding.cpp"
     binding.write_text(
         "#include <torch/extension.h>\n\n"
         f"{wrapper_signature(op)}\n\n"
@@ -94,7 +95,7 @@ def build_extension(op: str, source: Path, build_dir: Path, verbose: bool):
     return load(
         name=name,
         sources=[str(source), str(binding)],
-        build_directory=str(build_dir),
+        build_directory=str(module_dir),
         verbose=verbose,
         with_bang=True,
         extra_cflags=["-O3"],
