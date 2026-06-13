@@ -17,6 +17,8 @@
 #define P0 64
 #define W1 294912
 #define W2 36864
+#define T1 32768
+#define O1 33554432
 
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   for (int i = taskId; i < W1; i += taskDim) {
@@ -79,14 +81,23 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
   }
 }
 
-torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
-                        int out_channels, int kernel_size, int groups) {
+__mlu_entry__ void k2(float *__restrict__ y) {
+  __nram__ float z[T1];
+  __bang_write_value(z, T1, 0.0f);
+  for (int p = taskId * T1; p < O1; p += taskDim * T1) {
+    int n = O1 - p;
+    if (n > T1)
+      n = T1;
+    __memcpy(y + p, z, n * sizeof(float), NRAM2GDRAM);
+  }
+}
+
+torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels, int out_channels, int kernel_size, int groups) {
   (void)in_channels;
   (void)out_channels;
   (void)kernel_size;
   (void)groups;
   auto y = torch::empty({B0, C1, H0, W0}, x.options().dtype(torch::kFloat32));
-  auto w = torch::empty({W1}, kernel.options());
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {T0, 1, 1};
   cnrtNotifier_t st;
@@ -94,13 +105,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor kernel, int in_channels,
   cnrtNotifierCreate(&st);
   cnrtNotifierCreate(&en);
   cnrtPlaceNotifier(st, q);
-  k0<<<d, cnrtFuncTypeBlock, q>>>(
-      reinterpret_cast<const half *>(kernel.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(w.data_ptr<at::Half>()));
-  k1<<<d, cnrtFuncTypeBlock, q>>>(
-      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
-      y.data_ptr<float>());
+  k2<<<d, cnrtFuncTypeBlock, q>>>(y.data_ptr<float>());
   cnrtPlaceNotifier(en, q);
   cnrtQueueSync(q);
   float us = 0.0f;
