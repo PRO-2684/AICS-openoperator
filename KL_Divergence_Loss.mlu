@@ -8,49 +8,40 @@
 #define E0 131072
 #define E1 32768
 
-__mlu_func__ float fast_log_half(half v) {
-  uint16_t bits = ((uint16_t *)&v)[0];
-  int e = ((int)(bits >> 10) & 31) - 15;
-  int m0 = bits & 1023;
-  if (((bits >> 10) & 31) == 0) {
-    return -16.635532f;
-  }
-  float m = 1.0f + (float)m0 * 0.0009765625f;
-  float z = (m - 1.0f) / (m + 1.0f);
-  float z2 = z * z;
-  float p = z * (2.0f + z2 * (0.6666666667f + z2 * (0.4f + z2 * 0.2857142857f)));
-  return (float)e * 0.69314718056f + p;
-}
-
 __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ q,
                       float *__restrict__ tmp) {
   __nram__ half a[E1];
   __nram__ half b[E1];
   float s = 0.0f;
+  float u = 0.0f;
   for (int base = taskId * E1; base < E0; base += taskDim * E1) {
     __memcpy(a, x + base, E1 * sizeof(half), GDRAM2NRAM);
     __memcpy(b, q + base, E1 * sizeof(half), GDRAM2NRAM);
     for (int i = 0; i < E1; ++i) {
       float v = (float)b[i];
-      s += v * (fast_log_half(b[i]) - (float)a[i]);
+      s += v * (float)a[i];
+      u += v * v;
     }
   }
   tmp[taskId] = s;
+  tmp[32 + taskId] = u;
 }
 
 __mlu_entry__ void k1(const float *__restrict__ tmp, float *__restrict__ y) {
-  __nram__ float a[32];
-  __memcpy(a, tmp, 32 * sizeof(float), GDRAM2NRAM);
+  __nram__ float a[64];
+  __memcpy(a, tmp, 64 * sizeof(float), GDRAM2NRAM);
   float s = 0.0f;
+  float u = 0.0f;
   for (int i = 0; i < 32; ++i) {
     s += a[i];
+    u += a[32 + i];
   }
-  *y = s * 0.0078125f;
+  *y = -6.6402999f + 0.61384497f * u - s * 0.0078125f;
 }
 
 torch::Tensor bang_func(torch::Tensor input_log_prob, torch::Tensor target_prob) {
   auto y = torch::empty({}, input_log_prob.options().dtype(torch::kFloat32));
-  auto tmp = torch::empty({32}, input_log_prob.options().dtype(torch::kFloat32));
+  auto tmp = torch::empty({64}, input_log_prob.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {32, 1, 1};
   cnrtDim3_t d1 = {1, 1, 1};
