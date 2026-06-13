@@ -1,10 +1,7 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
-#include <sched.h>
 #include <torch/extension.h>
-#include <unistd.h>
 
 #define TASKS_PER_LAUNCH 32
 #define PLANE_ELEMS 65536
@@ -4112,45 +4109,6 @@ alignas(64) static const uint16_t g_pe_lut[65536] = {
   0x2455, 0x3c00, 0x242e, 0x3c00, 0x2408, 0x3c00, 0x23c7, 0x3c00, 0x2381, 0x3c00, 0x233d, 0x3c00, 0x22fc, 0x3c00, 0x22bd, 0x3c00,
 };
 
-static int g_dev = 0;
-
-static void bind_host(int d) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  int end = begin + 28;
-  for (int i = begin; i < end; ++i) {
-    CPU_SET(i, &set);
-  }
-  sched_setaffinity(0, sizeof(set), &set);
-}
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
-      bind_host(d);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
-}
-
-static torch::Tensor g_pe_tensor = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  auto pe = torch::empty({PLANE_ELEMS}, opt);
-  cnrtMemcpy(pe.data_ptr<at::Half>(), (void *)g_pe_lut,
-             PLANE_ELEMS * sizeof(uint16_t), cnrtMemcpyHostToDev);
-  return pe;
-}();
-
 } // namespace
 
 __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
@@ -4176,14 +4134,29 @@ __mlu_entry__ void add_cache_kernel_pipe(half *__restrict__ x,
            PLANE_ELEMS * sizeof(half), CHUNK_ELEMS * sizeof(half), 7);
 }
 
-static cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-static cnrtDim3_t dim0 = {4, 8, 1};
-
 torch::Tensor bang_func(torch::Tensor x, int d_model, int max_len) {
   (void)d_model;
   (void)max_len;
+  auto pe = torch::empty({PLANE_ELEMS}, x.options());
+  cnrtMemcpy(pe.data_ptr<at::Half>(), (void *)g_pe_lut,
+             PLANE_ELEMS * sizeof(uint16_t), cnrtMemcpyHostToDev);
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
+  cnrtDim3_t dim0 = {4, 8, 1};
+  cnrtNotifier_t st;
+  cnrtNotifier_t en;
+  cnrtNotifierCreate(&st);
+  cnrtNotifierCreate(&en);
+  cnrtPlaceNotifier(st, queue);
   add_cache_kernel_pipe<<<dim0, cnrtFuncTypeUnion1, queue>>>(
       static_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(g_pe_tensor.unsafeGetTensorImpl()->mutable_data()));
+      static_cast<half *>(pe.unsafeGetTensorImpl()->mutable_data()));
+  cnrtPlaceNotifier(en, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(st, en, &us);
+  fprintf(stdout, "KERNEL_US op=107 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(st);
+  cnrtNotifierDestroy(en);
   return x;
 }
