@@ -6,34 +6,62 @@
 
 #define E0 1048576
 #define E1 4096
+#define B0 256
 
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y,
-                      int *__restrict__ c, half threshold) {
+__mlu_entry__ void k0(const half *__restrict__ x, int *__restrict__ c,
+                      half threshold) {
   __nram__ half a[E1];
-  __nram__ half b[E1];
-  int p = 0;
-  for (int base = 0; base < E0; base += E1) {
-    __memcpy(a, x + base, E1 * sizeof(half), GDRAM2NRAM);
-    int q = 0;
-    for (int i = 0; i < E1; ++i) {
-      half v = a[i];
-      if (v > threshold) {
-        b[q++] = v;
-      }
-    }
-    if (q > 0) {
-      __memcpy(y + p, b, q * sizeof(half), NRAM2GDRAM);
-      p += q;
+  int tid = taskId;
+  if (tid >= B0) {
+    return;
+  }
+  __memcpy(a, x + tid * E1, E1 * sizeof(half), GDRAM2NRAM);
+  int q = 0;
+  for (int i = 0; i < E1; ++i) {
+    if (a[i] > threshold) {
+      ++q;
     }
   }
-  *c = p;
+  c[tid + 1] = q;
+}
+
+__mlu_entry__ void k1(int *__restrict__ c) {
+  int s = 0;
+  for (int i = 0; i < B0; ++i) {
+    int v = c[i + 1];
+    c[i] = s;
+    s += v;
+  }
+  c[B0] = s;
+}
+
+__mlu_entry__ void k2(const half *__restrict__ x, half *__restrict__ y,
+                      const int *__restrict__ c, half threshold) {
+  __nram__ half a[E1];
+  __nram__ half b[E1];
+  int tid = taskId;
+  if (tid >= B0) {
+    return;
+  }
+  __memcpy(a, x + tid * E1, E1 * sizeof(half), GDRAM2NRAM);
+  int q = 0;
+  for (int i = 0; i < E1; ++i) {
+    half v = a[i];
+    if (v > threshold) {
+      b[q++] = v;
+    }
+  }
+  if (q > 0) {
+    __memcpy(y + c[tid], b, q * sizeof(half), NRAM2GDRAM);
+  }
 }
 
 torch::Tensor bang_func(torch::Tensor input, double threshold) {
   auto y = torch::empty({E0}, input.options());
-  auto n = torch::empty({1}, input.options().dtype(torch::kInt32));
+  auto n = torch::empty({B0 + 1}, input.options().dtype(torch::kInt32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {1, 1, 1};
+  cnrtDim3_t dim = {B0, 1, 1};
+  cnrtDim3_t one = {1, 1, 1};
   cnrtNotifier_t s;
   cnrtNotifier_t e;
   cnrtNotifierCreate(&s);
@@ -41,8 +69,14 @@ torch::Tensor bang_func(torch::Tensor input, double threshold) {
   cnrtPlaceNotifier(s, queue);
   k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       static_cast<const half *>(input.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()),
       static_cast<int *>(n.unsafeGetTensorImpl()->mutable_data()),
+      (half)threshold);
+  k1<<<one, cnrtFuncTypeBlock, queue>>>(
+      static_cast<int *>(n.unsafeGetTensorImpl()->mutable_data()));
+  k2<<<dim, cnrtFuncTypeBlock, queue>>>(
+      static_cast<const half *>(input.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const int *>(n.unsafeGetTensorImpl()->mutable_data()),
       (half)threshold);
   cnrtPlaceNotifier(e, queue);
   cnrtQueueSync(queue);
@@ -53,7 +87,7 @@ torch::Tensor bang_func(torch::Tensor input, double threshold) {
   cnrtNotifierDestroy(s);
   cnrtNotifierDestroy(e);
   int h = 0;
-  cnrtMemcpyAsync(&h, n.unsafeGetTensorImpl()->mutable_data(), sizeof(int), queue,
+  cnrtMemcpyAsync(&h, static_cast<int *>(n.unsafeGetTensorImpl()->mutable_data()) + B0, sizeof(int), queue,
                   cnrtMemcpyDevToHost);
   cnrtQueueSync(queue);
   y.resize_({static_cast<int64_t>(h)});
