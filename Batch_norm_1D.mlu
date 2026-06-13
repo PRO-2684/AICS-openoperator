@@ -153,15 +153,29 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bia
   (void)running_mean;
   (void)running_var;
   (void)num_features;
+  auto y = torch::empty_like(x);
+  auto s = torch::empty({E1}, x.options().dtype(torch::kFloat32));
+  auto q = torch::empty({E1}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t g = {1, 1, 1};
+  cnrtDim3_t g = {E2, 1, 1};
   cnrtNotifier_t ns;
   cnrtNotifier_t ne;
   cnrtNotifierCreate(&ns);
   cnrtNotifierCreate(&ne);
   cnrtPlaceNotifier(ns, queue);
-  k5<<<g, cnrtFuncTypeBlock, queue>>>(
-      static_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
+  k0<<<g, cnrtFuncTypeBlock, queue>>>(
+      static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(s.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(q.unsafeGetTensorImpl()->mutable_data()));
+  cnrtDim3_t g1 = {1, 1, 1};
+  k3<<<g1, cnrtFuncTypeBlock, queue>>>(
+      static_cast<float *>(s.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(q.unsafeGetTensorImpl()->mutable_data()));
+  k4<<<g, cnrtFuncTypeBlock, queue>>>(
+      static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const float *>(s.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const float *>(q.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
   cnrtPlaceNotifier(ne, queue);
   cnrtQueueSync(queue);
   float us = 0.0f;
@@ -170,5 +184,5 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor weight, torch::Tensor bia
   fflush(stdout);
   cnrtNotifierDestroy(ns);
   cnrtNotifierDestroy(ne);
-  return x;
+  return y;
 }
