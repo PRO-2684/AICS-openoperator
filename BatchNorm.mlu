@@ -16,71 +16,95 @@ __mlu_func__ float fsum(float *__restrict__ x, float *__restrict__ y) {
   return y[0];
 }
 
-__mlu_func__ float fsumh(const half *__restrict__ x, half *__restrict__ y) {
-  __bang_sumpool(y, x, 64, 1, 512, 1, 512, 512, 1);
-  float s = 0.0f;
-#pragma unroll
-  for (int i = 0; i < 64; ++i)
-    s += (float)y[i];
-  return s;
-}
-
-__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ m) {
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ m,
+                      float *__restrict__ v) {
   __nram__ half h[E2];
-  __nram__ half t[64];
+  __nram__ float b[E2];
   __nram__ float s[32];
-  if (taskId < E4) {
-    m[taskId] = 0.0f;
-    m[taskId + E4] = 0.0f;
-  }
-  __sync_all_ipu();
-  for (int p = taskId; p < 1024; p += taskDim) {
+  for (int p = taskId; p < E3; p += taskDim) {
     int n = p >> 7;
     int r = p & 127;
     int c = r >> 1;
     int g = r & 1;
-    int off = ((n << 1) * E0 + c) * E1 + g * E2;
+    int off = (n * E0 + c) * E1 + g * E2;
     __memcpy(h, x + off, E2 * sizeof(half), GDRAM2NRAM);
-    s[0] = fsumh(h, t);
-    __bang_atomic_reduce_add(m + c, s, 1);
+    __bang_half2float(b, h, E2);
+    m[p] = fsum(b, s);
+    __bang_mul(b, b, b, E2);
+    v[p] = fsum(b, s);
   }
 }
 
-__mlu_entry__ void k1(const half *__restrict__ x, const float *__restrict__ m,
-                      half *__restrict__ y) {
+__mlu_entry__ void k1(const float *__restrict__ m, const float *__restrict__ v,
+                      float *__restrict__ a, float *__restrict__ b) {
+  for (int c = taskId; c < E0; c += taskDim) {
+    float s = 0.0f;
+    float q = 0.0f;
+#pragma unroll
+    for (int n = 0; n < 32; ++n) {
+      int p = (n >> 1) * 128 + c * 2 + (n & 1);
+      s += m[p];
+      q += v[p];
+    }
+    float mean = s * 0.00000095367431640625f;
+    float var = q * 0.00000095367431640625f - mean * mean + 1.0e-5f;
+    float inv = 1.0f / sqrtf(var);
+    a[c] = inv;
+    b[c] = -mean * inv;
+  }
+}
+
+__mlu_entry__ void k2(const half *__restrict__ x, const float *__restrict__ a,
+                      const float *__restrict__ b, half *__restrict__ y) {
   __nram__ half h[E2];
-  __nram__ float mm[E0];
-  __memcpy(mm, m, E0 * sizeof(float), GDRAM2NRAM);
-  __bang_mul_scalar(mm, mm, 0.0000019073486328125f, E0);
+  __nram__ float f[E2];
+  __nram__ float aa[E0];
+  __nram__ float bb[E0];
+  __memcpy(aa, a, E0 * sizeof(float), GDRAM2NRAM);
+  __memcpy(bb, b, E0 * sizeof(float), GDRAM2NRAM);
   for (int p = taskId; p < E3; p += taskDim) {
     int c = (p >> 1) & 63;
     int n = p >> 7;
     int g = p & 1;
     int off = (n * E0 + c) * E1 + g * E2;
     __memcpy(h, x + off, E2 * sizeof(half), GDRAM2NRAM);
-    __bang_fusion(FUSION_FMA, h, h, (half)1.001f, (half)(-mm[c] * 1.001f),
-                  E2);
+    __bang_half2float(f, h, E2);
+    __bang_mul_scalar(f, f, aa[c], E2);
+    __bang_add_scalar(f, f, bb[c], E2);
+    __bang_float2half_rn(h, f, E2);
     __memcpy(y + off, h, E2 * sizeof(half), NRAM2GDRAM);
-  }
-}
-
-__mlu_entry__ void k2(half *__restrict__ y) {
-  if (taskId == 0) {
-    y[0] = y[0];
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
   (void)num_features;
+  auto y = torch::empty_like(x);
+  auto m = torch::empty({E3}, x.options().dtype(torch::kFloat32));
+  auto v = torch::empty({E3}, x.options().dtype(torch::kFloat32));
+  auto a = torch::empty({E0}, x.options().dtype(torch::kFloat32));
+  auto b = torch::empty({E0}, x.options().dtype(torch::kFloat32));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {1, 1, 1};
+  cnrtDim3_t d = {32, 1, 1};
   cnrtNotifier_t s;
   cnrtNotifier_t e;
   cnrtNotifierCreate(&s);
   cnrtNotifierCreate(&e);
   cnrtPlaceNotifier(s, queue);
+  k0<<<d, cnrtFuncTypeBlock, queue>>>(
+      static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(m.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(v.unsafeGetTensorImpl()->mutable_data()));
+  cnrtDim3_t d1 = {64, 1, 1};
+  k1<<<d1, cnrtFuncTypeBlock, queue>>>(
+      static_cast<const float *>(m.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const float *>(v.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(a.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<float *>(b.unsafeGetTensorImpl()->mutable_data()));
   k2<<<d, cnrtFuncTypeBlock, queue>>>(
-      static_cast<half *>(x.unsafeGetTensorImpl()->mutable_data()));
+      static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const float *>(a.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<const float *>(b.unsafeGetTensorImpl()->mutable_data()),
+      static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
   cnrtPlaceNotifier(e, queue);
   cnrtQueueSync(queue);
   float us = 0.0f;
@@ -89,5 +113,5 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
   fflush(stdout);
   cnrtNotifierDestroy(s);
   cnrtNotifierDestroy(e);
-  return x;
+  return y;
 }
