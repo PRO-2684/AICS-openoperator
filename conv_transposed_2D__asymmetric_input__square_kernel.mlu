@@ -80,16 +80,16 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, int c0, int c1,
                               {E5 * E6 * E2, 1, E6 * E2, E2});
   auto z = torch::empty({E9}, x.options());
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {4, 8, 1};
+  cnrtDim3_t d = {32, 1, 1};
   cnrtNotifier_t st;
   cnrtNotifier_t en;
   cnrtNotifierCreate(&st);
   cnrtNotifierCreate(&en);
   cnrtPlaceNotifier(st, q);
-  k0<<<d, cnrtFuncTypeUnion1, q>>>(
+  k0<<<d, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(w.data_ptr<at::Half>()),
       reinterpret_cast<half *>(z.data_ptr<at::Half>()));
-  k1<<<d, cnrtFuncTypeUnion1, q>>>(
+  k1<<<d, cnrtFuncTypeBlock, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(z.data_ptr<at::Half>()),
       out_buf.data_ptr<float>());
