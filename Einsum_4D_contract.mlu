@@ -35,7 +35,7 @@ torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
   cnrtNotifierCreate(&st);
   cnrtNotifierCreate(&en);
   cnrtPlaceNotifier(st, queue);
-  k0<<<d, cnrtFuncTypeUnion1, queue>>>(
+  k0<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
       y.data_ptr<float>());
