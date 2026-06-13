@@ -1,10 +1,7 @@
 #include <bang.h>
 #include <cnrt.h>
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <framework/core/MLUStream.h>
-#include <sched.h>
 #include <torch/extension.h>
-#include <unistd.h>
 
 #pragma bang walign(64)
 
@@ -84,76 +81,31 @@ __mlu_entry__ void k0(const half *__restrict__ a, const half *__restrict__ b,
 }
 
 
-static int g_dev = 0;
-
-static void bind_host(int d) {
-  cpu_set_t set;
-  CPU_ZERO(&set);
-  int begin = d >= 4 ? 28 : 0;
-  int end = begin + 28;
-  for (int i = begin; i < end; ++i) {
-    CPU_SET(i, &set);
-  }
-  sched_setaffinity(0, sizeof(set), &set);
-}
-
-
-__attribute__((constructor(101))) static void init_runtime() {
-  unsigned int n = 0;
-  if (c10::impl::hasDeviceGuardImpl(c10::DeviceType::PrivateUse1)) {
-    const auto *impl =
-        c10::impl::getDeviceGuardImpl(c10::DeviceType::PrivateUse1);
-    int torch_n = static_cast<int>(impl->deviceCount());
-    if (cnrtGetDeviceCount(&n) == cnrtSuccess && n > 0 && torch_n > 0) {
-      int d = 0;
-      bind_host(d);
-      impl->setDevice(c10::Device(c10::DeviceType::PrivateUse1, d));
-      cnrtSetDevice(d);
-      g_dev = d;
-    }
-  }
-}
-static torch::Tensor g0 = []() {
-  auto h = torch::TensorOptions()
-               .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-               .dtype(torch::kHalf);
-  auto f = torch::TensorOptions()
-               .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-               .dtype(torch::kFloat32);
-  auto c = torch::empty({1}, h);
-  auto d = torch::empty({16, 1024, 768}, f);
-  auto e = torch::empty({TC * (K0 / TK) * TN * TK}, h);
-  (void)d;
-  (void)e;
-  return c;
-}();
-
-static torch::Tensor gC = []() {
-  return torch::empty({16, 1024, 768},
-                      torch::TensorOptions()
-                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                          .dtype(torch::kFloat32));
-}();
-
-static torch::Tensor gW = []() {
-  return torch::empty({TC * (K0 / TK) * TN * TK},
-                      torch::TensorOptions()
-                          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                          .dtype(torch::kHalf));
-}();
-
 torch::Tensor bang_func(torch::Tensor A, torch::Tensor B) {
-  (void)g0;
-  auto &C = gC;
-  auto &W = gW;
+  auto C = torch::empty({16, 1024, 768}, A.options().dtype(torch::kFloat32));
+  auto W = torch::empty({TC * (K0 / TK) * TN * TK}, B.options());
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {96, 1, 1};
   cnrtDim3_t p = {32, 1, 1};
-  kprep<<<p, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtNotifier_t st;
+  cnrtNotifier_t en;
+  cnrtNotifierCreate(&st);
+  cnrtNotifierCreate(&en);
+  cnrtPlaceNotifier(st, queue);
+  kprep<<<p, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(B.data_ptr<at::Half>()),
       reinterpret_cast<half *>(W.data_ptr<at::Half>()));
-  k0<<<d, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  k0<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(A.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(W.data_ptr<at::Half>()),
       C.data_ptr<float>());
+  cnrtPlaceNotifier(en, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(st, en, &us);
+  fprintf(stdout, "KERNEL_US op=013 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(st);
+  cnrtNotifierDestroy(en);
   return C;
 }
