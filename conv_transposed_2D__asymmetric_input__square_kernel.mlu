@@ -36,7 +36,6 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
   __nram__ half a[E10];
   __nram__ half aa[E10];
   __nram__ float b[E11];
-  __nram__ float d[E12];
   __wram__ half e[E9];
   __memcpy(e, w, E9 * sizeof(half), GDRAM2WRAM);
   for (int g = taskId; g < E0 * 26; g += taskDim) {
@@ -60,17 +59,8 @@ __mlu_entry__ void k1(const half *__restrict__ x, const half *__restrict__ w,
     }
     __bang_transpose(aa, a, E1, ih * E7);
     __bang_conv(b, aa, e, E1, ih, E7, 3, 3, 1, 1, E2);
-    for (int rr = 0; rr < h; rr += 2) {
-      int rows = 2;
-      if (rr + rows > h)
-        rows = h - rr;
-      __bang_transpose(d, b + rr * E6 * E2, E6 * rows, E2);
-      for (int co = 0; co < E2; ++co) {
-        __memcpy(y + (n * E2 + co) * E5 * E6 + (r + rr) * E6,
-                 d + co * E6 * rows, rows * E6 * sizeof(float),
-                 NRAM2GDRAM);
-      }
-    }
+    __memcpy(y + n * E5 * E6 * E2 + r * E6 * E2, b,
+             h * E6 * E2 * sizeof(float), NRAM2GDRAM);
   }
 }
 
@@ -84,7 +74,10 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, int c0, int c1,
   (void)o;
   (void)g;
   (void)b;
-  auto y = torch::empty({E0, E2, E5, E6}, x.options().dtype(torch::kFloat32));
+  auto out_buf = torch::empty({E0 * E5 * E6 * E2},
+                              x.options().dtype(torch::kFloat32));
+  auto y = out_buf.as_strided({E0, E2, E5, E6},
+                              {E5 * E6 * E2, 1, E6 * E2, E2});
   auto z = torch::empty({E9}, x.options());
   cnrtQueue_t q = torch_mlu::getCurMLUStream();
   cnrtDim3_t d = {4, 8, 1};
@@ -99,7 +92,7 @@ torch::Tensor bang_func(torch::Tensor x, torch::Tensor w, int c0, int c1,
   k1<<<d, cnrtFuncTypeUnion1, q>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
       reinterpret_cast<const half *>(z.data_ptr<at::Half>()),
-      y.data_ptr<float>());
+      out_buf.data_ptr<float>());
   cnrtPlaceNotifier(en, q);
   cnrtQueueSync(q);
   float us = 0.0f;
