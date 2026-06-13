@@ -13,7 +13,6 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ t,
   __nram__ half b[E1];
   __nram__ float fa[E1];
   __nram__ float fb[E1];
-  __nram__ float r[E1];
   float s = 0.0f;
   for (int base = taskId * E1; base < E0; base += taskDim * E1) {
     __memcpy(a, x + base, E1 * sizeof(half), GDRAM2NRAM);
@@ -22,8 +21,9 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ t,
     __bang_half2float(fb, b, E1);
     __bang_sub(fa, fa, fb, E1);
     __bang_mul(fa, fa, fa, E1);
-    __bang_reduce_sum(r, fa, E1);
-    s += r[0];
+    for (int i = 0; i < E1; ++i) {
+      s += fa[i];
+    }
   }
   tmp[taskId] = s;
 }
