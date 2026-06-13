@@ -150,13 +150,13 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
-  cnrtDim3_t dim = {4, 8, 1};
+  cnrtDim3_t dim = {32, 1, 1};
   cnrtNotifier_t s;
   cnrtNotifier_t e;
   cnrtNotifierCreate(&s);
   cnrtNotifierCreate(&e);
   cnrtPlaceNotifier(s, queue);
-  inst_norm_split_kernel<<<dim, cnrtFuncTypeUnion1, queue>>>(
+  inst_norm_vec_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
       static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
   cnrtPlaceNotifier(e, queue);
