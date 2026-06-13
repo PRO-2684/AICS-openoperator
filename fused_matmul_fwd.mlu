@@ -56,7 +56,7 @@ __mlu_entry__ void k0(const half *__restrict__ x, const half *__restrict__ w,
 
 __mlu_entry__ void kz(half *__restrict__ y) {
   __nram__ half z[ZT];
-  __bang_write_value(z, ZT, (half)0.0f);
+  __bang_write_zero(z, ZT);
   for (int p = taskId * ZT; p < ZO; p += taskDim * ZT) {
     int n = ZO - p;
     if (n > ZT)

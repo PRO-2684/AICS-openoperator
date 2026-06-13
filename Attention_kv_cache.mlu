@@ -75,7 +75,7 @@ __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ kc,
 
 __mlu_entry__ void kz(half *__restrict__ y) {
   __nram__ half z[ZT];
-  __bang_write_value(z, ZT, (half)0.0f);
+  __bang_write_zero(z, ZT);
   __memcpy(y, z, ZT * sizeof(half), NRAM2GDRAM);
 }
 
