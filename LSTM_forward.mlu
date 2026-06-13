@@ -22,9 +22,23 @@ torch::Tensor bang_func(torch::Tensor x, int input_size, int hidden_size,
   (void)input_size;
   (void)num_layers;
   auto y = torch::empty({x.size(0), x.size(1), hidden_size}, x.options());
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtDim3_t dim = {32, 1, 1};
-  k0<<<dim, cnrtFuncTypeBlock, torch_mlu::getCurMLUStream()>>>(
+  cnrtNotifier_t st;
+  cnrtNotifier_t en;
+  cnrtNotifierCreate(&st);
+  cnrtNotifierCreate(&en);
+  cnrtPlaceNotifier(st, queue);
+  k0<<<dim, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<half *>(y.data_ptr<at::Half>()),
       static_cast<int>(y.numel()));
+  cnrtPlaceNotifier(en, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(st, en, &us);
+  fprintf(stdout, "KERNEL_US op=137 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(st);
+  cnrtNotifierDestroy(en);
   return y;
 }
