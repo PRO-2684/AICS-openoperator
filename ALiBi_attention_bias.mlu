@@ -8,19 +8,17 @@
 #define E1 128
 
 __mlu_entry__ void k0(half *__restrict__ y) {
-  int p = taskId;
-  int h = p / E1;
-  int r = p - h * E1;
-  if (h >= E0) {
-    return;
-  }
   __nram__ half a[E1];
-  float slope = 0.5f / (float)(1 << h);
-  for (int c = 0; c < E1; ++c) {
-    int d = r > c ? r - c : c - r;
-    a[c] = (half)(-slope * (float)d);
+  for (int p = taskId; p < E0 * E1; p += taskDim) {
+    int h = p / E1;
+    int r = p - h * E1;
+    float slope = 0.5f / (float)(1 << h);
+    for (int c = 0; c < E1; ++c) {
+      int d = r > c ? r - c : c - r;
+      a[c] = (half)(-slope * (float)d);
+    }
+    __memcpy(y + p * E1, a, E1 * sizeof(half), NRAM2GDRAM);
   }
-  __memcpy(y + p * E1, a, E1 * sizeof(half), NRAM2GDRAM);
 }
 
 torch::Tensor bang_func(int seq_len, int num_heads) {
@@ -31,7 +29,7 @@ torch::Tensor bang_func(int seq_len, int num_heads) {
                             .device(c10::Device(c10::DeviceType::PrivateUse1, 0))
                             .dtype(torch::kHalf));
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t dim = {E0 * E1, 1, 1};
+  cnrtDim3_t dim = {32, 1, 1};
   cnrtNotifier_t s;
   cnrtNotifier_t e;
   cnrtNotifierCreate(&s);
