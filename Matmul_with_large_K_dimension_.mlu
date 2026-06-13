@@ -13,7 +13,7 @@
 #define TC 1
 #define TT (TR * TC)
 #define KS 16384
-#define ZT 32768
+#define ZT 131072
 #define ZO 65536
 
 __mlu_entry__ void kprep(const half *__restrict__ b, half *__restrict__ w) {
@@ -85,7 +85,7 @@ __mlu_entry__ void k1(const float *__restrict__ p, float *__restrict__ c) {
 
 __mlu_entry__ void kz(float *__restrict__ c) {
   __nram__ float z[ZT];
-  __bang_write_value(z, ZT, 0.0f);
+  __bang_write_zero(z, ZT);
   for (int p = taskId * ZT; p < ZO; p += taskDim * ZT) {
     int n = ZO - p;
     if (n > ZT)
