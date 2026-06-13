@@ -18,12 +18,6 @@
 #define W1 294912
 #define W2 36864
 
-__mlu_entry__ void kz(half *__restrict__ y) {
-  for (int i = taskId; i < W1; i += taskDim) {
-    y[i] = (half)0.0f;
-  }
-}
-
 __mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   for (int i = taskId; i < W1; i += taskDim) {
     y[i] = (half)0.0f;
