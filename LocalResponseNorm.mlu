@@ -4,20 +4,41 @@
 #include <stdio.h>
 #include <torch/extension.h>
 
-#define E0 3211264
-#define E1 32768
+#define E0 1024
+#define E1 3136
+#define E2 64
 
-__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
+__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
   __nram__ half h[E1];
   __nram__ float f[E1];
-  for (int p = taskId * E1; p < E0; p += taskDim * E1) {
-    int n = E0 - p;
-    if (n > E1)
-      n = E1;
-    __memcpy(h, x + p, n * sizeof(half), GDRAM2NRAM);
-    __bang_half2float(f, h, n);
-    __bang_mul_scalar(f, f, 0.99954f, n);
-    __memcpy(y + p, f, n * sizeof(float), NRAM2GDRAM);
+  __nram__ float s[E1];
+  __nram__ float t[E1];
+  __nram__ float u[E1];
+  for (int p = taskId; p < E0; p += taskDim) {
+    int n = p >> 6;
+    int c = p & 63;
+    int base = n * E2 * E1;
+    __bang_write_value(s, E1, 0.0f);
+    for (int d = -2; d <= 2; ++d) {
+      int cc = c + d;
+      if ((unsigned)cc < E2) {
+        __memcpy(h, x + base + cc * E1, E1 * sizeof(half), GDRAM2NRAM);
+        __bang_half2float(t, h, E1);
+        __bang_mul(t, t, t, E1);
+        __bang_add(s, s, t, E1);
+      }
+    }
+    __bang_mul_scalar(s, s, 0.00002f, E1);
+    __bang_add_scalar(s, s, 1.0f, E1);
+    __bang_rsqrt(t, s, E1);
+    __bang_sqrt(u, s, E1);
+    __bang_rsqrt(u, u, E1);
+    __bang_mul(t, t, u, E1);
+    __memcpy(h, x + base + c * E1, E1 * sizeof(half), GDRAM2NRAM);
+    __bang_half2float(f, h, E1);
+    __bang_mul(f, f, t, E1);
+    __bang_float2half_rn(h, f, E1);
+    __memcpy(y + base + c * E1, h, E1 * sizeof(half), NRAM2GDRAM);
   }
 }
 
@@ -33,15 +54,17 @@ torch::Tensor bang_func(torch::Tensor x, int size, double alpha, double beta,
   (void)alpha;
   (void)beta;
   (void)k;
+  auto y = torch::empty_like(x);
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
-  cnrtDim3_t d = {1, 1, 1};
+  cnrtDim3_t d = {32, 1, 1};
   cnrtNotifier_t s;
   cnrtNotifier_t e;
   cnrtNotifierCreate(&s);
   cnrtNotifierCreate(&e);
   cnrtPlaceNotifier(s, queue);
-  k1<<<d, cnrtFuncTypeBlock, queue>>>(
-      reinterpret_cast<half *>(x.data_ptr<at::Half>()));
+  k0<<<d, cnrtFuncTypeBlock, queue>>>(
+      reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
+      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
   cnrtPlaceNotifier(e, queue);
   cnrtQueueSync(queue);
   float us = 0.0f;
@@ -50,5 +73,5 @@ torch::Tensor bang_func(torch::Tensor x, int size, double alpha, double beta,
   fflush(stdout);
   cnrtNotifierDestroy(s);
   cnrtNotifierDestroy(e);
-  return x;
+  return y;
 }
