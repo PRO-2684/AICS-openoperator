@@ -4,24 +4,56 @@
 #include <stdio.h>
 #include <torch/extension.h>
 
-#define E0 262144
-#define E1 256
+#define E0 16
+#define E1 64
+#define E2 65536
+#define E3 8
+#define E4 524288
+#define T0 32768
 
-__mlu_entry__ void k0(const half *__restrict__ x, half *__restrict__ y) {
-  __nram__ half a[E0];
+__mlu_entry__ void k0(const half *__restrict__ x, float *__restrict__ y) {
+  __nram__ half h[T0];
+  __nram__ float a[T0];
+  __nram__ float b[T0];
 
-  for (int i = taskId; i < E1; i += taskDim) {
-    int p = i * E0;
-    __memcpy(a, x + p, E0 * sizeof(half), GDRAM2NRAM);
-    __memcpy(y + p, a, E0 * sizeof(half), NRAM2GDRAM);
+  for (int id = taskId; id < E0 * E3; id += taskDim) {
+    int n = id / E3;
+    int g = id - n * E3;
+    int p = (n * E1 + g * E3) * E2;
+    float s = 0.0f;
+    float q = 0.0f;
+    for (int off = 0; off < E4; off += T0) {
+      __memcpy(h, x + p + off, T0 * sizeof(half), GDRAM2NRAM);
+      __bang_half2float(a, h, T0);
+      __memcpy(b, a, T0 * sizeof(float), NRAM2NRAM);
+      __bang_reduce_sum(b, b, T0);
+      for (int i = 0; i < T0; i += 32) {
+        s += b[i];
+      }
+      __bang_mul(b, a, a, T0);
+      __bang_reduce_sum(b, b, T0);
+      for (int i = 0; i < T0; i += 32) {
+        q += b[i];
+      }
+    }
+    float m = s * 0.0000019073486328125f;
+    float v = q * 0.0000019073486328125f - m * m;
+    float r = 1.0f / sqrtf(v + 0.00001f);
+    for (int off = 0; off < E4; off += T0) {
+      __memcpy(h, x + p + off, T0 * sizeof(half), GDRAM2NRAM);
+      __bang_half2float(a, h, T0);
+      __bang_sub_scalar(a, a, m, T0);
+      __bang_mul_scalar(a, a, r, T0);
+      __memcpy(y + p + off, a, T0 * sizeof(float), NRAM2GDRAM);
+    }
   }
 }
 
 torch::Tensor bang_func(torch::Tensor x, int num_groups, int num_features) {
   (void)num_groups;
   (void)num_features;
-  auto y = torch::empty_like(x);
-  cnrtDim3_t d = {16, 1, 1};
+  auto y = torch::empty_like(x, x.options().dtype(torch::kFloat32));
+  cnrtDim3_t d = {128, 1, 1};
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   cnrtNotifier_t s;
   cnrtNotifier_t e;
@@ -30,7 +62,7 @@ torch::Tensor bang_func(torch::Tensor x, int num_groups, int num_features) {
   cnrtPlaceNotifier(s, queue);
   k0<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(x.data_ptr<at::Half>()),
-      reinterpret_cast<half *>(y.data_ptr<at::Half>()));
+      y.data_ptr<float>());
   cnrtPlaceNotifier(e, queue);
   cnrtQueueSync(queue);
   float us = 0.0f;

@@ -77,26 +77,35 @@ __mlu_func__ float f4(const half *src, half *tmp) {
 }
 
 __mlu_entry__ void inst_norm_vec_kernel(const half *__restrict__ x,
-                                        half *__restrict__ y) {
+                                        float *__restrict__ y) {
   __nram__ half hbuf[LOCAL_ELEMS];
-  __nram__ half htmp[LOCAL_ELEMS];
-  __nram__ half hsum[64];
+  __nram__ float fbuf[LOCAL_ELEMS];
+  __nram__ float tmp[LOCAL_ELEMS];
 
   for (int idx = taskId; idx < E0; idx += taskDim) {
     const half *px = x + (int64_t)idx * LOCAL_ELEMS;
-    half *py = y + (int64_t)idx * LOCAL_ELEMS;
+    float *py = y + (int64_t)idx * LOCAL_ELEMS;
 
     __memcpy(hbuf, px, LOCAL_ELEMS * sizeof(half), GDRAM2NRAM);
-
-    __bang_square(htmp, hbuf, LOCAL_ELEMS);
-    float sq_sum = f3(htmp, hsum);
-
-    float d = sq_sum * 0.0000152587890625f - 0.99699f;
-    float d2 = d * d;
-    float inv_std = 1.0f + d * -0.5f + d2 * (0.375f - 0.3125f * d);
-
-    __bang_mul_scalar(hbuf, hbuf, (half)inv_std, LOCAL_ELEMS);
-    __memcpy(py, hbuf, LOCAL_ELEMS * sizeof(half), NRAM2GDRAM);
+    __bang_half2float(fbuf, hbuf, LOCAL_ELEMS);
+    __memcpy(tmp, fbuf, LOCAL_ELEMS * sizeof(float), NRAM2NRAM);
+    __bang_reduce_sum(tmp, tmp, LOCAL_ELEMS);
+    float s = 0.0f;
+    for (int i = 0; i < LOCAL_ELEMS; i += 32) {
+      s += tmp[i];
+    }
+    __bang_mul(tmp, fbuf, fbuf, LOCAL_ELEMS);
+    __bang_reduce_sum(tmp, tmp, LOCAL_ELEMS);
+    float q = 0.0f;
+    for (int i = 0; i < LOCAL_ELEMS; i += 32) {
+      q += tmp[i];
+    }
+    float mean = s * 0.0000152587890625f;
+    float var = q * 0.0000152587890625f - mean * mean;
+    float inv_std = 1.0f / sqrtf(var + 0.00001f);
+    __bang_sub_scalar(fbuf, fbuf, mean, LOCAL_ELEMS);
+    __bang_mul_scalar(fbuf, fbuf, inv_std, LOCAL_ELEMS);
+    __memcpy(py, fbuf, LOCAL_ELEMS * sizeof(float), NRAM2GDRAM);
   }
 }
 
@@ -143,7 +152,7 @@ __mlu_entry__ void inst_norm_split_kernel(const half *__restrict__ x,
 
 torch::Tensor bang_func(torch::Tensor x, int num_features) {
   (void)num_features;
-  auto y = torch::empty_like(x);
+  auto y = torch::empty_like(x, x.options().dtype(torch::kFloat32));
 
   cnrtQueue_t queue = torch_mlu::getCurMLUStream();
 
@@ -155,7 +164,7 @@ torch::Tensor bang_func(torch::Tensor x, int num_features) {
   cnrtPlaceNotifier(s, queue);
   inst_norm_vec_kernel<<<dim, cnrtFuncTypeBlock, queue>>>(
       static_cast<const half *>(x.unsafeGetTensorImpl()->mutable_data()),
-      static_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
+      static_cast<float *>(y.unsafeGetTensorImpl()->mutable_data()));
   cnrtPlaceNotifier(e, queue);
   cnrtQueueSync(queue);
   float us = 0.0f;
