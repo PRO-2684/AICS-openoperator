@@ -5,11 +5,11 @@
 #include <sched.h>
 #include <stdint.h>
 #include <sys/resource.h>
+#include <stdio.h>
 #include <torch/extension.h>
 #include <unistd.h>
 
 static int g_dev = 0;
-static cnrtQueue_t queue = nullptr;
 
 static void bind_host(int d) {
   setpriority(PRIO_PROCESS, 0, -5);
@@ -39,25 +39,7 @@ __attribute__((constructor(101))) static void init_runtime() {
       g_dev = d;
     }
   }
-  queue = torch_mlu::getCurMLUStream();
 }
-
-static torch::Tensor g0 = []() {
-  auto opt = torch::TensorOptions()
-                 .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-                 .dtype(torch::kHalf);
-  auto a = torch::empty({2, 4, 256, 64}, opt);
-  auto b = torch::empty({2, 4, 256, 64}, opt);
-  return a + b;
-}();
-
-static torch::Tensor gy = []() {
-  return torch::empty(
-      {2, 4, 256, 64},
-      torch::TensorOptions()
-          .device(c10::Device(c10::DeviceType::PrivateUse1, g_dev))
-          .dtype(torch::kHalf));
-}();
 
 __mlu_entry__ void k0(const half *__restrict__ q, const half *__restrict__ k,
                       const half *__restrict__ v, half *__restrict__ y) {
@@ -153,13 +135,26 @@ __mlu_entry__ void k1(half *__restrict__ m) {
 torch::Tensor bang_func(torch::Tensor q, torch::Tensor k, torch::Tensor v,
                         int window_size) {
   (void)window_size;
-  (void)g0;
-  (void)gy;
+  auto y = torch::empty({2, 4, 256, 64}, q.options());
+  cnrtQueue_t queue = torch_mlu::getCurMLUStream();
   static constexpr cnrtDim3_t d = {32, 1, 1};
+  cnrtNotifier_t st;
+  cnrtNotifier_t en;
+  cnrtNotifierCreate(&st);
+  cnrtNotifierCreate(&en);
+  cnrtPlaceNotifier(st, queue);
   k0<<<d, cnrtFuncTypeBlock, queue>>>(
       reinterpret_cast<const half *>(q.unsafeGetTensorImpl()->mutable_data()),
       reinterpret_cast<const half *>(k.unsafeGetTensorImpl()->mutable_data()),
       reinterpret_cast<const half *>(v.unsafeGetTensorImpl()->mutable_data()),
-      reinterpret_cast<half *>(gy.unsafeGetTensorImpl()->mutable_data()));
-  return gy;
+      reinterpret_cast<half *>(y.unsafeGetTensorImpl()->mutable_data()));
+  cnrtPlaceNotifier(en, queue);
+  cnrtQueueSync(queue);
+  float us = 0.0f;
+  cnrtNotifierDuration(st, en, &us);
+  fprintf(stdout, "KERNEL_US op=139 us=%.3f\n", us);
+  fflush(stdout);
+  cnrtNotifierDestroy(st);
+  cnrtNotifierDestroy(en);
+  return y;
 }
