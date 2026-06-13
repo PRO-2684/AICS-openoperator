@@ -83,9 +83,9 @@ Observed rewrite pattern: team25 often keeps the BangC kernel constants, tiling,
 
 ## Current team25 HEAD vs earlier MosRat history
 
-The current team25 HEAD has 90 `.mlu` files. A fast same-name normalized-token scan found 24 current files with high similarity to this repository. For each of those 24 files, the best historical match below is constrained to a MosRat-authored version that predates the team25 file version.
+The current team25 HEAD has 90 `.mlu` files. The full same-name normalized-token scan found 39 current files with high similarity to this repository; the complete table is preserved in `head_similarity_matches.tsv`. For the representative high-confidence rows below, the best historical match is constrained to a MosRat-authored version that predates the team25 file version.
 
-All 24 current high-similarity team25 files trace to team25 commit `d58b818` at 2026-06-12 23:35:14 +08:00, `github-actions[bot]`, `Sample late reference-like package`.
+All rows listed below trace to team25 commit `d58b818` at 2026-06-12 23:35:14 +08:00, `github-actions[bot]`, `Sample late reference-like package`.
 
 | similarity | file | team25 blob | earlier MosRat match here |
 |---:|---|---|---|
@@ -134,10 +134,21 @@ c89bd0db5bafcbc0d164048ddd4a817c37f5dc9b
 c89bd0db5bafcbc0d164048ddd4a817c37f5dc9b
 ```
 
-## Next analysis steps
+## Attached evidence files
 
-1. Build a complete exact-blob match table with full commit times, authors, subjects, and file paths.
-2. Exclude shared initial/template files that predate MosRat/team implementation work.
-3. For every team25 `.mlu` history blob, find the best same-file match in this repository's history that predates the team25 blob.
-4. Preserve only matches where this repository has the earlier implementation and team25 later reproduces it exactly or with trivial rewrites.
-5. Add representative `diff --ignore-all-space` snippets for the strongest rewritten cases.
+The report directory also contains machine-readable and raw evidence files:
+
+| file | purpose |
+|---|---|
+| `exact_blob_matches.tsv` | Full exact git-blob intersection table. It has 19 rows total and marks the 17 suspicious MosRat-before-team25 exact matches. |
+| `head_similarity_matches.tsv` | Current team25 HEAD `.mlu` files matched to earlier MosRat history. It has 39 rows with similarity, blob, commit, author, and timestamp fields. |
+| `raw/team25_suspicious_commit_stats.txt` | Raw `git show --stat` output for suspicious batch-import commits. |
+| `raw/masked_softmax_blob_proof.txt` | Minimal exact-blob proof for `Masked_softmax.mlu`. |
+| `raw/team25_mlu_log.tsv` | Raw team25 `.mlu` git log. |
+| `raw/ours_mlu_log.tsv` | Raw source-repository `.mlu` git log. |
+| `diffs/Grid_sample_ours_5fe8d26e7_vs_team25_HEAD.diff` | Representative high-similarity rewrite diff. |
+| `diffs/Matmul_with_irregular_shapes_ours_af7f6074b_vs_team25_HEAD.diff` | Representative high-similarity rewrite diff. |
+| `diffs/Matmul_with_large_K_dimension_ours_af7f6074b_vs_team25_HEAD.diff` | Representative high-similarity rewrite diff. |
+| `diffs/Masked_softmax_ours_c1573f279_vs_team25_HEAD.diff` | Exact or near-exact comparison for `Masked_softmax.mlu`. |
+
+These files preserve the audit trail separately from this narrative report.
