@@ -1,5 +1,7 @@
 # AICS-OpenOperator
 
+> The OpenOperator match has ended.
+
 ## 🔗 Related Links
 
 - [OpenOperator](https://openoperator.cn) | [Monitor](http://43.143.241.66:13000)
