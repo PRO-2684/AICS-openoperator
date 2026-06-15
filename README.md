@@ -134,8 +134,8 @@ python scripts/update_problems.py
 | 081 | [Sum_2D_reduction](Sum_2D_reduction.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/3cd7500) |
 | 082 | [Scaled_Dot_Product_Attention](Scaled_Dot_Product_Attention.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/734357c) |
 | 083 | [Causal_Self_Attention](Causal_Self_Attention.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/e5d2b74) |
-| 084 | [Cross_Attention](Cross_Attention.mlu) | N/A | 🔴 |
-| 085 | [Linear](Linear.mlu) | N/A | 🔴 |
+| 084 | [Cross_Attention](Cross_Attention.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/9c12f7cf0baa92f42099ba1f88bc28dbbf6e6db6) |
+| 085 | [Linear](Linear.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/9c12f7cf0baa92f42099ba1f88bc28dbbf6e6db6) |
 | 086 | [Batch_outer_product](Batch_outer_product.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/924a94e) |
 | 087 | [Hadamard_product](Hadamard_product.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/741d372) |
 | 088 | [Matrix_trace](Matrix_trace.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/e2b6718) |
@@ -175,7 +175,7 @@ python scripts/update_problems.py
 | 122 | [Prefix_sum_2D](Prefix_sum_2D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/efc97b0) |
 | 123 | [Masked_cumsum](Masked_cumsum.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/a73b35f) |
 | 124 | [Weight_standardization](Weight_standardization.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/c07abcc) |
-| 125 | [Conditional_LayerNorm](Conditional_LayerNorm.mlu) | N/A | 🔴 |
+| 125 | [Conditional_LayerNorm](Conditional_LayerNorm.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/6992ba503848e5e0e14ac95b56e7411588b1fb1e) |
 | 126 | [QR_decomposition](QR_decomposition.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/15a23520) |
 | 127 | [Cholesky_decomposition](Cholesky_decomposition.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/924a94e) |
 | 128 | [Batch_norm_1D](Batch_norm_1D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/b2a842ba223a598a2cb088dec5010230e5e9ed90) |
@@ -187,6 +187,6 @@ python scripts/update_problems.py
 | 134 | [Depthwise_conv_2D](Depthwise_conv_2D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/d49d802) |
 | 135 | [Dilated_conv_2D](Dilated_conv_2D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/a7ad868) |
 | 136 | [Grouped_conv_2D](Grouped_conv_2D.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/016ebe2) |
-| 137 | [LSTM_forward](LSTM_forward.mlu) | N/A | 🔴 |
+| 137 | [LSTM_forward](LSTM_forward.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/98c4cf8670f079de4d69042cc88cb2b7f362ca43) |
 | 138 | [GRU_forward](GRU_forward.mlu) |  [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/238eb0d) |
 | 139 | [Sparse_attention_mask](Sparse_attention_mask.mlu) | [@MosRat](https://github.com/MosRat) | [🟢](https://github.com/PRO-2684/AICS-openoperator/commit/58ff14f) |
